@@ -12,6 +12,14 @@ const dirname =
 // More info at: https://storybook.js.org/docs/next/writing-tests/integrations/vitest-addon
 export default defineConfig({
 	plugins: [tailwindcss(), sveltekit()],
+	server: {
+		fs: {
+			allow: [
+				path.resolve(__dirname, '..'),
+				path.resolve(__dirname, '../../node_modules/.pnpm')
+			]
+		}
+	},
 	test: {
 		expect: {
 			requireAssertions: true

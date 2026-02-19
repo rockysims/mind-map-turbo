@@ -1,0 +1,37 @@
+[20:43:58.969] [INFO] storybook v10.2.8
+[20:44:00.768] [DEBUG] Getting package.json info for /Users/rockysims/Sites/mind-map-turbo/apps/mind-map-sv/package.json...
+[20:44:02.693] [DEBUG] Serving static files from [36mapps/mind-map-sv/node_modules/.pnpm/@chromatic-com+storybook@5.0.1_storybook@10.2.8_@testing-library+dom@10.4.1_prettier@3._652e3a12f88fdd308e10247a90c53c9c/node_modules/@chromatic-com/storybook/assets[39m at [36m/addon-visual-tests-assets[39m
+[20:44:02.693] [INFO] Starting...
+[20:44:03.173] [DEBUG] Starting preview..
+[20:44:03.480] [WARN] 🚨 Unable to index ./src/routes/page.stories.svelte:
+  SB_SVELTE_CSF_LEGACY_API_0002 (LegacyTemplateNotEnabledError): Stories file: /Users/rockysims/Sites/mind-map-turbo/apps/mind-map-sv/src/routes/page.stories.svelte
+is using legacy API.
+
+To enable support for it, enable 'legacyTemplate' in "@storybook/addon-svelte-csf" option.
+
+More info: https://github.com/storybookjs/addon-svelte-csf/blob/v5.0.11/ERRORS.md#SB_SVELTE_CSF_LEGACY_API_0002
+
+    at Object.createIndex (file:///Users/rockysims/Sites/mind-map-turbo/apps/mind-map-sv/node_modules/.pnpm/@storybook+addon-svelte-csf@5.0.11_@storybook+svelte@10.2.8_storybook@10.2.8_@testing-l_e82f2f8beeff3f002703ff127ff292b8/node_modules/@storybook/addon-svelte-csf/dist/indexer/index.js:38:23)
+    at async _StoryIndexGenerator.extractStories (file:///Users/rockysims/Sites/mind-map-turbo/apps/mind-map-sv/node_modules/.pnpm/storybook@10.2.8_@testing-library+dom@10.4.1_prettier@3.8.1_react-dom@19.2.4_react@19.2.4__react@19.2.4/node_modules/storybook/dist/core-server/index.js:5909:23)
+    at async file:///Users/rockysims/Sites/mind-map-turbo/apps/mind-map-sv/node_modules/.pnpm/storybook@10.2.8_@testing-library+dom@10.4.1_prettier@3.8.1_react-dom@19.2.4_react@19.2.4__react@19.2.4/node_modules/storybook/dist/core-server/index.js:5830:39
+    at async Promise.all (index 1)
+    at async Promise.all (index 1)
+    at async _StoryIndexGenerator.updateExtracted (file:///Users/rockysims/Sites/mind-map-turbo/apps/mind-map-sv/node_modules/.pnpm/storybook@10.2.8_@testing-library+dom@10.4.1_prettier@3.8.1_react-dom@19.2.4_react@19.2.4__react@19.2.4/node_modules/storybook/dist/core-server/index.js:5818:5)
+    at async _StoryIndexGenerator.ensureExtracted (file:///Users/rockysims/Sites/mind-map-turbo/apps/mind-map-sv/node_modules/.pnpm/storybook@10.2.8_@testing-library+dom@10.4.1_prettier@3.8.1_react-dom@19.2.4_react@19.2.4__react@19.2.4/node_modules/storybook/dist/core-server/index.js:5853:5)
+    at async _StoryIndexGenerator.initialize (file:///Users/rockysims/Sites/mind-map-turbo/apps/mind-map-sv/node_modules/.pnpm/storybook@10.2.8_@testing-library+dom@10.4.1_prettier@3.8.1_react-dom@19.2.4_react@19.2.4__react@19.2.4/node_modules/storybook/dist/core-server/index.js:5814:5)
+    at async file:///Users/rockysims/Sites/mind-map-turbo/apps/mind-map-sv/node_modules/.pnpm/storybook@10.2.8_@testing-library+dom@10.4.1_prettier@3.8.1_react-dom@19.2.4_react@19.2.4__react@19.2.4/node_modules/storybook/dist/core-server/presets/common-preset.js:1837:10
+[20:44:03.490] [ERROR] Failed to build the preview
+[20:44:03.491] [ERROR] Error: Unable to index ./src/routes/page.stories.svelte
+    at _StoryIndexGenerator.getIndexAndStats (file://./node_modules/.pnpm/storybook@10.2.8_@testing-library+dom@10.4.1_prettier@3.8.1_react-dom@19.2.4_react@19.2.4__react@19.2.4/node_modules/storybook/dist/core-server/index.js:6082:15)
+    at async _StoryIndexGenerator.getIndex (file://./node_modules/.pnpm/storybook@10.2.8_@testing-library+dom@10.4.1_prettier@3.8.1_react-dom@19.2.4_react@19.2.4__react@19.2.4/node_modules/storybook/dist/core-server/index.js:6071:13)
+    at async getOptimizeDeps (file://./node_modules/.pnpm/@storybook+builder-vite@10.2.8_esbuild@0.27.3_rollup@4.57.1_storybook@10.2.8_@testing-l_1cc3a64e6288e2bdd36b2adb0aaae805/node_modules/@storybook/builder-vite/dist/index.js:1862:15)
+    at async createViteServer (file://./node_modules/.pnpm/@storybook+builder-vite@10.2.8_esbuild@0.27.3_rollup@4.57.1_storybook@10.2.8_@testing-l_1cc3a64e6288e2bdd36b2adb0aaae805/node_modules/@storybook/builder-vite/dist/index.js:1888:19)
+    at async Module.start (file://./node_modules/.pnpm/@storybook+builder-vite@10.2.8_esbuild@0.27.3_rollup@4.57.1_storybook@10.2.8_@testing-l_1cc3a64e6288e2bdd36b2adb0aaae805/node_modules/@storybook/builder-vite/dist/index.js:1923:17)
+    at async storybookDevServer (file://./node_modules/.pnpm/storybook@10.2.8_@testing-library+dom@10.4.1_prettier@3.8.1_react-dom@19.2.4_react@19.2.4__react@19.2.4/node_modules/storybook/dist/core-server/index.js:7207:83)
+    at async buildOrThrow (file://./node_modules/.pnpm/storybook@10.2.8_@testing-library+dom@10.4.1_prettier@3.8.1_react-dom@19.2.4_react@19.2.4__react@19.2.4/node_modules/storybook/dist/core-server/index.js:4504:12)
+    at async buildDevStandalone (file://./node_modules/.pnpm/storybook@10.2.8_@testing-library+dom@10.4.1_prettier@3.8.1_react-dom@19.2.4_react@19.2.4__react@19.2.4/node_modules/storybook/dist/core-server/index.js:7577:66)
+    at async withTelemetry (file://./node_modules/.pnpm/storybook@10.2.8_@testing-library+dom@10.4.1_prettier@3.8.1_react-dom@19.2.4_react@19.2.4__react@19.2.4/node_modules/storybook/dist/_node-chunks/chunk-KIOKJLL5.js:218:12)
+    at async dev (file://./node_modules/.pnpm/storybook@10.2.8_@testing-library+dom@10.4.1_prettier@3.8.1_react-dom@19.2.4_react@19.2.4__react@19.2.4/node_modules/storybook/dist/bin/core.js:2734:3)
+[20:44:03.497] [WARN] Broken build, fix the error above.
+You may need to refresh the browser.
+[20:44:12.227] [PROMPT] Would you like to send anonymous crash reports to improve Storybook and fix bugs faster? {"choice":true}
