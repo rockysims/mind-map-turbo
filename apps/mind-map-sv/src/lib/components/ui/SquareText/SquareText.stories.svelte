@@ -1,12 +1,12 @@
 <script module>
 	import { defineMeta } from '@storybook/addon-svelte-csf';
-	import SquareText from './SquareText.svelte';
+	import SquareText from '$lib/components/ui/SquareText/SquareText.svelte';
 	import { expect } from 'storybook/test';
 
 	const { Story } = defineMeta({
 		title: 'Components/SquareText',
 		component: SquareText,
-		tags: ['autodocs'],
+		tags: [],
 		argTypes: {
 			text: { control: 'text' },
 			classList: { control: 'object' }
@@ -34,4 +34,5 @@
 				context.canvas.getByText(context.args.text)
 			).toBeInTheDocument();
 		}
-	} />
+	}
+/>

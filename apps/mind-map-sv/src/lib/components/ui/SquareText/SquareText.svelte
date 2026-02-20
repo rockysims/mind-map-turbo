@@ -80,8 +80,7 @@
 <div class="squareTextContainer">
 	<div
 		bind:this={squareTextRef}
-		class="squareText"
-		class:list={classList.join(' ')}
+		class={['squareText', ...classList]}
 	>
 		{text}
 	</div>
