@@ -7,7 +7,7 @@ services:
       - "3000:3000"
     environment:
       DB_HOST: db
-      APP_NAME: Mind_Map_SV
+      APP_NAME: APP_NAME from docker compose file
     depends_on:
       - db
 
