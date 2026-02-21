@@ -3,6 +3,8 @@
 	import type { NodeData } from '../types/node';
 	import type { MultigraphData } from '../types/multigraph';
 
+	const DRAG_DISTANCE_THRESHOLD = 5;
+
 	const {
 		multigraphData = { nodes: [], edges: [], posByNodeId: {} },
 		defaultPrimaryNodeId = ''
@@ -27,6 +29,7 @@
 
 	// Node-drag state (pointer down on node, waiting for pointer up to resolve drop target)
 	let dragNode = $state<NodeData | null>(null);
+	let dragStartPos = $state<{ x: number; y: number } | null>(null);
 
 	function getNodeAt(clientX: number, clientY: number): NodeData | null {
 		const el = document.elementFromPoint(clientX, clientY);
@@ -50,6 +53,7 @@
 		const clickedNode = getNodeAt(e.clientX, e.clientY);
 		if (clickedNode) {
 			dragNode = clickedNode;
+			dragStartPos = { x: e.clientX, y: e.clientY };
 			(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
 		} else {
 			panStart = { clientX: e.clientX, clientY: e.clientY, panX, panY };
@@ -70,7 +74,12 @@
 			const dropTarget = getNodeAt(e.clientX, e.clientY);
 			if (dropTarget) {
 				if (dropTarget.id === dragNode.id) {
-					console.log('[Multigraph] node drag: dropped node', dragNode.id, 'onto itself');					
+					const dragDistance = Math.sqrt((e.clientX - dragStartPos.x) ** 2 + (e.clientY - dragStartPos.y) ** 2);
+					if (dragDistance < DRAG_DISTANCE_THRESHOLD) {
+						console.log('[Multigraph] clicked and released node', dragNode.id, ' (drag distance:', dragDistance, 'px)');
+					} else {
+						console.log('[Multigraph] node drag: dropped node', dragNode.id, 'onto itself (drag distance:', dragDistance, 'px)');
+					}
 				} else {
 					console.log('[Multigraph] node drag: dropped node', dragNode.id, 'onto node', dropTarget.id);
 				}
