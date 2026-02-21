@@ -6,7 +6,7 @@
 	import type { NodeData } from '$lib/components/ui/types/node';
 	
 	const { Story } = defineMeta({
-		title: 'Node',
+		title: 'Components/Node',
 		component: Node,
 		tags: [],
 	argTypes: {
@@ -187,8 +187,7 @@
 		nodeData: {
 			id: 'node id short title',
 			title: 'Short node title goes here.',
-			description:
-				'Node description and of course the description is probably going to be fairly long. Certainly multiple sentences. Maybe more.'
+			description: 'Node description and of course the description is probably going to be fairly long. Certainly multiple sentences. Maybe more.'
 		},
 		isOpen: false
 	}}

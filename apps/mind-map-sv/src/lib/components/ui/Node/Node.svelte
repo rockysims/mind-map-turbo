@@ -18,8 +18,7 @@
 
 	function updateVerticalScrollClass() {
 		if (!descriptionRef) return;
-		const hasVerticalScrollbar =
-			descriptionRef.scrollHeight > descriptionRef.clientHeight;
+		const hasVerticalScrollbar = descriptionRef.scrollHeight > descriptionRef.clientHeight;
 		if (hasVerticalScrollbar) {
 			descriptionRef.classList.add('vScroll');
 		} else {
@@ -29,7 +28,7 @@
 
 	$effect(() => {
 		if (!isOpen) return;
-		if (descriptionRef) updateVerticalScrollClass();
+		updateVerticalScrollClass();
 	});
 </script>
 
@@ -48,7 +47,7 @@
 				<div class="title">
 					{nodeData.title}
 				</div>
-				<div class="description" bind:this={descriptionRef}>
+				<div class="description vScroll" bind:this={descriptionRef}>
 					{nodeData.description}
 				</div>
 			</div>
