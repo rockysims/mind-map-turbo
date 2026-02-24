@@ -8,10 +8,10 @@
 	const {
 		multigraphData = { nodes: [], edges: [], posByNodeId: {} },
 		defaultPrimaryNodeId = ''
-	} = $props<{
+	}: {
 		multigraphData: MultigraphData;
 		defaultPrimaryNodeId?: string;
-	}>();
+	} = $props();
 
 	const primaryNode = $derived.by(() => {
 		const nodes: NodeData[] = multigraphData.nodes;
@@ -32,10 +32,10 @@
 	let dragStartPos = $state<{ x: number; y: number } | null>(null);
 
 	function getNodeAt(clientX: number, clientY: number): NodeData | null {
-		const el = document.elementFromPoint(clientX, clientY);
-		const nodeEl = el?.closest?.('[data-node-id]');
-		if (!nodeEl) return null;
-		const circle = nodeEl.querySelector('.circle');
+		const elemsUnderClick = document.elementsFromPoint(clientX, clientY) as HTMLElement[];
+		const nodeElemUnderClick = elemsUnderClick.find(el => el.dataset.nodeId) || null;
+		if (!nodeElemUnderClick) return null;
+		const circle = nodeElemUnderClick.querySelector('.circle');
 		if (!circle) return null;
 		const rect = circle.getBoundingClientRect();
 		const centerX = rect.left + rect.width / 2;
@@ -44,9 +44,9 @@
 		const dx = clientX - centerX;
 		const dy = clientY - centerY;
 		if (dx * dx + dy * dy > radius * radius) return null;
-		const nodeId = nodeEl.dataset.nodeId;
+		const nodeId = nodeElemUnderClick.dataset.nodeId || null;
 		if (!nodeId) return null;
-		return multigraphData.nodes.find((n) => n.id === nodeId) ?? null;
+		return multigraphData.nodes.find(n => n.id === nodeId) ?? null;
 	}
 
 	function onStagePointerDown(e: PointerEvent) {
@@ -70,7 +70,7 @@
 
 	function onStagePointerUp(e: PointerEvent) {
 		const stage = e.currentTarget as HTMLElement;
-		if (dragNode) {
+		if (dragNode && dragStartPos) {
 			const dropTarget = getNodeAt(e.clientX, e.clientY);
 			if (dropTarget) {
 				if (dropTarget.id === dragNode.id) {
@@ -98,6 +98,7 @@
 </script>
 
 <div class="graph">
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		class="stage"
 		class:panning={panStart !== null}
@@ -108,9 +109,7 @@
 		onpointercancel={onStagePointerUp}
 	>
 		{#if primaryNode}
-			<div class="node" data-node-id={primaryNode.id}>
-				<Node nodeData={primaryNode} isOpen={false} />
-			</div>
+			<Node nodeData={primaryNode} isOpen={false} />
 		{/if}
 	</div>
 </div>
@@ -131,10 +130,5 @@
 	}
 	.stage.panning {
 		cursor: grabbing;
-	}
-
-	.node {
-		position: absolute;
-		/* position set inline from posByNodeId or fallback center */
 	}
 </style>

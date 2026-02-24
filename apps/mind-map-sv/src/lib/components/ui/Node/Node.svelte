@@ -32,7 +32,7 @@
 	});
 </script>
 
-<div class="node" class:open={isOpen}>
+<div class="node" class:open={isOpen} data-node-id={nodeData.id}>
 	<div class="circle">
 		<!-- closed -->
 		{#if !isOpen}
