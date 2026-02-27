@@ -1,9 +1,9 @@
 <script lang="ts">
 	import Node from '$lib/components/ui/Node/Node.svelte';
+	import Stage from './Stage.svelte';
 	import type { NodeData } from '../types/node';
 	import type { MultigraphData } from '../types/multigraph';
-
-	const DRAG_DISTANCE_THRESHOLD = 5;
+	import { isPointInCircle } from './lib/hitTest.js';
 
 	const {
 		multigraphData = { nodes: [], edges: [], posByNodeId: {} },
@@ -16,102 +16,66 @@
 	const primaryNode = $derived.by(() => {
 		const nodes: NodeData[] = multigraphData.nodes;
 		return (
-			nodes.find(n => n.id === defaultPrimaryNodeId) ??
-			nodes[0] ??
-			null
+			nodes.find((n) => n.id === defaultPrimaryNodeId) ?? nodes[0] ?? null
 		);
 	});
 
-	// Pan state
-	let panX = $state(0);
-	let panY = $state(0);
-	let panStart = $state<{ clientX: number; clientY: number; panX: number; panY: number } | null>(null);
+	const primaryPos = $derived.by(() => {
+		if (!primaryNode) return null;
+		return multigraphData.posByNodeId[primaryNode.id] ?? null;
+	});
 
-	// Node-drag state (pointer down on node, waiting for pointer up to resolve drop target)
-	let dragNode = $state<NodeData | null>(null);
-	let dragStartPos = $state<{ x: number; y: number } | null>(null);
-
+	/** Resolve node at client coordinates (circle hit-test). Testable by passing a custom getNodeAt from outside if needed. */
 	function getNodeAt(clientX: number, clientY: number): NodeData | null {
-		const elemsUnderClick = document.elementsFromPoint(clientX, clientY) as HTMLElement[];
-		const nodeElemUnderClick = elemsUnderClick.find(el => el.dataset.nodeId) || null;
-		if (!nodeElemUnderClick) return null;
-		const circle = nodeElemUnderClick.querySelector('.circle');
+		const elements = document.elementsFromPoint(clientX, clientY) as HTMLElement[];
+		const nodeEl = elements.find((el) => el.dataset.nodeId) ?? null;
+		if (!nodeEl) return null;
+		const circle = nodeEl.querySelector('.circle');
 		if (!circle) return null;
-		const rect = circle.getBoundingClientRect();
+		const rect = (circle as HTMLElement).getBoundingClientRect();
 		const centerX = rect.left + rect.width / 2;
 		const centerY = rect.top + rect.height / 2;
 		const radius = Math.min(rect.width, rect.height) / 2;
-		const dx = clientX - centerX;
-		const dy = clientY - centerY;
-		if (dx * dx + dy * dy > radius * radius) return null;
-		const nodeId = nodeElemUnderClick.dataset.nodeId || null;
+		if (!isPointInCircle(clientX, clientY, centerX, centerY, radius)) return null;
+		const nodeId = nodeEl.dataset.nodeId ?? null;
 		if (!nodeId) return null;
-		return multigraphData.nodes.find(n => n.id === nodeId) ?? null;
+		return multigraphData.nodes.find((n) => n.id === nodeId) ?? null;
 	}
 
-	function onStagePointerDown(e: PointerEvent) {
-		const clickedNode = getNodeAt(e.clientX, e.clientY);
-		if (clickedNode) {
-			dragNode = clickedNode;
-			dragStartPos = { x: e.clientX, y: e.clientY };
-			(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-		} else {
-			panStart = { clientX: e.clientX, clientY: e.clientY, panX, panY };
-			(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-		}
+	function handleNodeClick(node: NodeData) {
+		console.log('[Multigraph] node click:', node.id);
 	}
 
-	function onStagePointerMove(e: PointerEvent) {
-		if (panStart) {
-			panX = panStart.panX + (e.clientX - panStart.clientX);
-			panY = panStart.panY + (e.clientY - panStart.clientY);
-		}
+	function handleNodeDropOntoNode(source: NodeData, target: NodeData) {
+		console.log('[Multigraph] node drag: dropped', source.id, 'onto node', target.id);
 	}
 
-	function onStagePointerUp(e: PointerEvent) {
-		const stage = e.currentTarget as HTMLElement;
-		if (dragNode && dragStartPos) {
-			const dropTarget = getNodeAt(e.clientX, e.clientY);
-			if (dropTarget) {
-				if (dropTarget.id === dragNode.id) {
-					const dragDistance = Math.sqrt((e.clientX - dragStartPos.x) ** 2 + (e.clientY - dragStartPos.y) ** 2);
-					if (dragDistance < DRAG_DISTANCE_THRESHOLD) {
-						console.log('[Multigraph] clicked and released node', dragNode.id, ' (drag distance:', dragDistance, 'px)');
-					} else {
-						console.log('[Multigraph] node drag: dropped node', dragNode.id, 'onto itself (drag distance:', dragDistance, 'px)');
-					}
-				} else {
-					console.log('[Multigraph] node drag: dropped node', dragNode.id, 'onto node', dropTarget.id);
-				}
-			} else {
-				console.log('[Multigraph] node drag: dropped node', dragNode.id, 'onto background (no target node)');
-			}
-			dragNode = null;
-			stage.releasePointerCapture(e.pointerId);
-			return;
-		}
-		if (panStart) {
-			panStart = null;
-			stage.releasePointerCapture(e.pointerId);
-		}
+	function handleNodeDropOntoBackground(node: NodeData) {
+		console.log('[Multigraph] node drag: dropped', node.id, 'onto background');
 	}
 </script>
 
 <div class="graph">
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div
-		class="stage"
-		class:panning={panStart !== null}
-		style="transform: translate({panX}px, {panY}px)"
-		onpointerdown={onStagePointerDown}
-		onpointermove={onStagePointerMove}
-		onpointerup={onStagePointerUp}
-		onpointercancel={onStagePointerUp}
+	<Stage
+		{getNodeAt}
+		onNodeClick={handleNodeClick}
+		onNodeDropOntoNode={handleNodeDropOntoNode}
+		onNodeDropOntoBackground={handleNodeDropOntoBackground}
 	>
 		{#if primaryNode}
-			<Node nodeData={primaryNode} isOpen={false} />
+			<div
+				class="node-wrapper"
+				data-node-id={primaryNode.id}
+				style={
+					primaryPos
+						? `left: ${primaryPos.x}px; top: ${primaryPos.y}px; transform: translate(-50%, -50%);`
+						: 'left: 50%; top: 50%; transform: translate(-50%, -50%);'
+				}
+			>
+				<Node nodeData={primaryNode} isOpen={false} />
+			</div>
 		{/if}
-	</div>
+	</Stage>
 </div>
 
 <style>
@@ -123,12 +87,7 @@
 		touch-action: none;
 	}
 
-	.stage {
+	.node-wrapper {
 		position: absolute;
-		inset: 0;
-		cursor: grab;
-	}
-	.stage.panning {
-		cursor: grabbing;
 	}
 </style>

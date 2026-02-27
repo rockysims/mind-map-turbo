@@ -101,5 +101,7 @@
 		position: relative; /* changed to absolute during size & scale calculation then back again */
 		left: 0px;
 		top: 0;
+
+		padding: 5px
 	}
 </style>
