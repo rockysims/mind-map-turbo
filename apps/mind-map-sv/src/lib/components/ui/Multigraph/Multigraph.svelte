@@ -1,9 +1,11 @@
 <script lang="ts">
+	import { toast } from 'svelte-sonner';
 	import Node from '$lib/components/ui/Node/Node.svelte';
 	import Stage from './Stage.svelte';
 	import type { NodeData } from '../types/node';
 	import type { MultigraphData } from '../types/multigraph';
 	import { isPointInCircle } from './lib/hitTest.js';
+	import { Toaster } from '../sonner/index.js';
 
 	const {
 		multigraphData = { nodes: [], edges: [], posByNodeId: {} },
@@ -43,31 +45,36 @@
 	}
 
 	function handleNodeClick(node: NodeData) {
-		console.log('[Multigraph] node click:', node.id);
+		toast(`Clicked "${node.title}"`);
 	}
 
 	function handleNodeDropOntoNode(source: NodeData, target: NodeData) {
-		console.log('[Multigraph] node drag: dropped', source.id, 'onto node', target.id);
+		toast(`Moved "${source.title}" onto "${target.title}"`);
 	}
 
 	function handleNodeDropOntoBackground(node: NodeData) {
-		console.log('[Multigraph] node drag: dropped', node.id, 'onto background');
+		toast(`Moved "${node.title}" to background`);
 	}
 
 	function handleNodeMakePrimary(node: NodeData) {
-		console.log('[Multigraph] make primary:', node.id);
+		toast(`Set "${node.title}" as primary`);
 	}
 
 	function handleNodeDoubleClickDropOntoNode(source: NodeData, target: NodeData) {
-		console.log('TODO: add node/edge', { source: source.id, target: target.id });
+		toast.info('TODO: add node/edge', {
+			description: `${source.title} → ${target.title}`
+		});
 	}
 
 	function handleNodeDoubleClickDropOntoBackground(node: NodeData) {
-		console.log('TODO: add node/edge', { fromNode: node.id, toBackground: true });
+		toast.info('TODO: add node/edge', {
+			description: `From "${node.title}" to background`
+		});
 	}
 </script>
 
 <div class="graph">
+	<Toaster />
 	<Stage
 		{getNodeAt}
 		onNodeClick={handleNodeClick}

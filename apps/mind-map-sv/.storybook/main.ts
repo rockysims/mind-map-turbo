@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
 import type { StorybookConfig } from '@storybook/sveltekit';
 
 const config: StorybookConfig = {
@@ -6,12 +8,16 @@ const config: StorybookConfig = {
     "../src/**/*.stories.@(js|ts|svelte)"
   ],
   "addons": [
-    "@storybook/addon-svelte-csf",
-    "@chromatic-com/storybook",
-    "@storybook/addon-vitest",
-    "@storybook/addon-a11y",
-    "@storybook/addon-docs"
+    getAbsolutePath("@storybook/addon-svelte-csf"),
+    getAbsolutePath("@chromatic-com/storybook"),
+    getAbsolutePath("@storybook/addon-vitest"),
+    getAbsolutePath("@storybook/addon-a11y"),
+    getAbsolutePath("@storybook/addon-docs")
   ],
-  "framework": "@storybook/sveltekit"
+  "framework": getAbsolutePath("@storybook/sveltekit")
 };
 export default config;
+
+function getAbsolutePath(value: string): any {
+  return dirname(fileURLToPath(import.meta.resolve(`${value}/package.json`)));
+}

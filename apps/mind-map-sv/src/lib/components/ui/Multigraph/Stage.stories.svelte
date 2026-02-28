@@ -3,6 +3,7 @@
 	import { expect, within } from 'storybook/test';
 	import StageStoryWrapper from './StageStoryWrapper.svelte';
 	import type { NodeData } from '../types/node';
+	import { DBL_CLICK_MS, DRAG_THRESHOLD, NODE_RADIUS } from '$lib/constants';
 
 	const NODE_1: NodeData = {
 		id: 'node-1',
@@ -86,7 +87,7 @@
 	): Promise<void> {
 		dispatchPointer(target, 'pointerdown', x, y);
 		dispatchPointer(target, 'pointerup', x, y);
-		await sleep(50);
+		await sleep(DBL_CLICK_MS * 0.1);
 		dispatchPointer(target, 'pointerdown', x, y);
 		dispatchPointer(target, 'pointerup', x, y);
 	}
@@ -96,7 +97,7 @@
 		fromTarget: HTMLElement,
 		fromX: number,
 		fromY: number,
-		stage: HTMLElement,
+		toTarget: HTMLElement,
 		toX: number,
 		toY: number
 	): Promise<void> {
@@ -104,8 +105,8 @@
 		dispatchPointer(fromTarget, 'pointerup', fromX, fromY);
 		await sleep(50);
 		dispatchPointer(fromTarget, 'pointerdown', fromX, fromY);
-		dispatchPointer(stage, 'pointermove', toX, toY);
-		dispatchPointer(stage, 'pointerup', toX, toY);
+		dispatchPointer(toTarget, 'pointermove', toX, toY);
+		dispatchPointer(toTarget, 'pointerup', toX, toY);
 	}
 </script>
 
@@ -162,35 +163,47 @@
 
 		const nodeCenter = getCenter(circle);
 
-		// Single click: no drag
-		dispatchPointer(circle, 'pointerdown', nodeCenter.x, nodeCenter.y);
-		dispatchPointer(circle, 'pointerup', nodeCenter.x, nodeCenter.y);
-		await sleep();
-		expect(wrapper.dataset.lastNodeClick).toBe(NODE_1.id);
-
-		// Single-click drag to background (move node)
-		dispatchPointer(circle, 'pointerdown', nodeCenter.x, nodeCenter.y);
-		dispatchPointer(stage, 'pointermove', nodeCenter.x + (400/2 + 10), nodeCenter.y);
-		dispatchPointer(stage, 'pointerup', nodeCenter.x + (400/2 + 10), nodeCenter.y);
-		await sleep();
-		expect(wrapper.dataset.lastDoubleClickDropBg).toBe(NODE_1.id);
-
-		// Double-click to make primary
+		// Double-click to make primary node
 		await dispatchDoubleClick(circle, nodeCenter.x, nodeCenter.y);
 		await sleep();
 		expect(wrapper.dataset.lastMakePrimary).toBe(NODE_1.id);
 
-		// Double-click then drag to background (add node/edge placeholder)
+		// Double-click then drag to background (add node/edge)
 		await dispatchDoubleClickDrag(
 			circle,
 			nodeCenter.x,
 			nodeCenter.y,
 			stage,
-			nodeCenter.x - 100,
-			nodeCenter.y - 100
+			nodeCenter.x + (NODE_RADIUS + 10),
+			nodeCenter.y + (NODE_RADIUS + 10)
 		);
 		await sleep();
 		expect(wrapper.dataset.lastDoubleClickDropBg).toBe(NODE_1.id);
+
+		// Double-click then drag node 1 onto itself
+		await dispatchDoubleClickDrag(
+			circle,
+			nodeCenter.x,
+			nodeCenter.y,
+			circle,
+			nodeCenter.x + DRAG_THRESHOLD * 2,
+			nodeCenter.y + DRAG_THRESHOLD * 2
+		);
+		await sleep();
+		expect(wrapper.dataset.lastDoubleClickDropNode).toBe(`${NODE_1.id},${NODE_1.id}`);
+
+		// Single-click with no drag
+		dispatchPointer(circle, 'pointerdown', nodeCenter.x, nodeCenter.y);
+		dispatchPointer(circle, 'pointerup', nodeCenter.x, nodeCenter.y);
+		await sleep(DBL_CLICK_MS);
+		expect(wrapper.dataset.lastNodeClick).toBe(NODE_1.id);
+
+		// Single-click drag to background (move node)
+		dispatchPointer(circle, 'pointerdown', nodeCenter.x, nodeCenter.y);
+		dispatchPointer(circle, 'pointermove', nodeCenter.x + (NODE_RADIUS + 10), nodeCenter.y);
+		dispatchPointer(circle, 'pointerup', nodeCenter.x + (NODE_RADIUS + 10), nodeCenter.y);
+		await sleep();
+		expect(wrapper.dataset.lastDropBg).toBe(NODE_1.id);
 	}}
 />
 
@@ -232,7 +245,7 @@
 		await sleep();
 		expect(wrapper.dataset.lastMakePrimary).toBe(NODE_1.id);
 
-		// Double-click then drag node 1 onto node 2 (add edge placeholder)
+		// Double-click then drag node 1 onto node 2 (add edge)
 		await dispatchDoubleClickDrag(
 			firstCircle,
 			fromCenter.x,

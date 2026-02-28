@@ -8,8 +8,7 @@
 		DEFAULT_MAX_SCALE
 	} from './lib/graphMath.js';
 	import { pointerDistance } from './lib/hitTest.js';
-
-	const DBL_CLICK_MS = 400;
+	import { DRAG_THRESHOLD, DBL_CLICK_MS } from '$lib/constants.js';
 
 	interface Props {
 		/** Resolve node at (clientX, clientY); return null if none. Injected for testability. */
@@ -32,7 +31,7 @@
 
 	let {
 		getNodeAt,
-		dragThreshold = 5,
+		dragThreshold = DRAG_THRESHOLD,
 		onNodeClick,
 		onNodeDropOntoNode,
 		onNodeDropOntoBackground,
@@ -65,10 +64,19 @@
 	let lastClickTime = $state(0);
 	let isDoubleClickSession = $state(false);
 
+	// Delay single-click so we don't fire it if a second click makes it a double-click
+	let pendingClickTimeoutId: ReturnType<typeof setTimeout> | null = null;
+	let pendingClickNode: NodeData | null = null;
+
 	function onPointerDown(e: PointerEvent) {
-		console.log('onPointerDown', e.clientX, e.clientY);
 		const node = getNodeAt(e.clientX, e.clientY);
 		if (node) {
+			// If we were waiting to fire a single-click on this node, cancel it (user is double-clicking)
+			if (pendingClickNode?.id === node.id && pendingClickTimeoutId !== null) {
+				clearTimeout(pendingClickTimeoutId);
+				pendingClickTimeoutId = null;
+				pendingClickNode = null;
+			}
 			dragNode = node;
 			dragStartPos = { x: e.clientX, y: e.clientY };
 			isDoubleClickSession =
@@ -88,36 +96,27 @@
 	}
 
 	function onPointerUp(e: PointerEvent) {
-		console.log('onPointerUp', e.clientX, e.clientY);
 		const stage = e.currentTarget as HTMLElement;
 		if (dragNode && dragStartPos) {
 			const dropTarget = getNodeAt(e.clientX, e.clientY);
 			const dist = pointerDistance(dragStartPos.x, dragStartPos.y, e.clientX, e.clientY);
 			const didDrag = dist >= dragThreshold;
 
-			console.log('didDrag', didDrag);
 			if (didDrag) {
 				if (isDoubleClickSession) {
-					if (dropTarget && dropTarget.id !== dragNode.id) {
-						console.log('onNodeDoubleClickDropOntoNode', dragNode.id, dropTarget.id);
+					if (dropTarget) {
 						onNodeDoubleClickDropOntoNode?.(dragNode, dropTarget);
-					} else if (!dropTarget || dropTarget.id === dragNode.id) {
-						console.log('onNodeDoubleClickDropOntoBackground', dragNode.id);
+					} else {
 						onNodeDoubleClickDropOntoBackground?.(dragNode);
 					}
 				} else {
 					if (dropTarget) {
 						if (dropTarget.id === dragNode.id) {
-							if (dist >= dragThreshold) {
-								console.log('onNodeDropOntoNode', dragNode.id, dropTarget.id);
-								onNodeDropOntoNode?.(dragNode, dropTarget);
-							}
+							if (dist >= dragThreshold) onNodeDropOntoNode?.(dragNode, dropTarget);
 						} else {
-							console.log('onNodeDropOntoNode', dragNode.id, dropTarget.id);
 							onNodeDropOntoNode?.(dragNode, dropTarget);
 						}
 					} else {
-						console.log('onNodeDropOntoBackground', dragNode.id);
 						onNodeDropOntoBackground?.(dragNode);
 					}
 				}
@@ -125,15 +124,29 @@
 				// Click (no drag)
 				if (isDoubleClickSession) {
 					onNodeMakePrimary?.(dragNode);
-					lastClickNodeId = null;
-					lastClickTime = 0;
 				} else {
-					onNodeClick?.(dragNode);
-					lastClickNodeId = dragNode.id;
+					// Delay single-click: only fire after DBL_CLICK_MS so a second click is treated as double-click only
+					if (pendingClickTimeoutId !== null) {
+						clearTimeout(pendingClickTimeoutId);
+						pendingClickTimeoutId = null;
+					}
+					const node = dragNode;
+					pendingClickNode = node;
+					pendingClickTimeoutId = setTimeout(() => {
+						onNodeClick?.(node);
+						pendingClickNode = null;
+						pendingClickTimeoutId = null;
+					}, DBL_CLICK_MS);
+					lastClickNodeId = node.id;
 					lastClickTime = Date.now();
 				}
 			}
 
+			if (isDoubleClickSession) {
+				lastClickNodeId = null;
+				lastClickTime = 0;
+			}
+			
 			dragNode = null;
 			dragStartPos = null;
 			stage.releasePointerCapture(e.pointerId);

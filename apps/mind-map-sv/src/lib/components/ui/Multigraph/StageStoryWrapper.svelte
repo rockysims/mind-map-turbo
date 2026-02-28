@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { NODE_RADIUS } from '$lib/constants';
 	import Stage from './Stage.svelte';
 	import Node from '$lib/components/ui/Node/Node.svelte';
 	import { isPointInCircle } from './lib/hitTest.js';
@@ -48,6 +49,7 @@
 
 <div
 	class="stage-story-wrapper"
+	style="--stage-wrapper-height: {NODE_RADIUS * 2}px"
 	data-testid="stage-callbacks"
 	data-last-node-click={lastNodeClickId ?? ''}
 	data-last-drop-node={lastDropOntoNodeIds ?? ''}
@@ -60,18 +62,23 @@
 	<Stage
 		{getNodeAt}
 		onNodeClick={(n) => {
+			console.log('StageStoryWrapper: onNodeClick', n.id);
 			lastNodeClickId = n.id;
 		}}
 		onNodeDropOntoNode={(s, t) => {
+			console.log('StageStoryWrapper: onNodeDropOntoNode', s.id, t.id);
 			lastDropOntoNodeIds = `${s.id},${t.id}`;
 		}}
 		onNodeDropOntoBackground={(n) => {
+			console.log('StageStoryWrapper: onNodeDropOntoBackground', n.id);
 			lastDropOntoBgId = n.id;
 		}}
 		onNodeMakePrimary={(n) => {
+			console.log('StageStoryWrapper: onNodeMakePrimary', n.id);
 			lastMakePrimaryId = n.id;
 		}}
 		onNodeDoubleClickDropOntoNode={(s, t) => {
+			console.log('StageStoryWrapper: onNodeDoubleClickDropOntoNode', s.id, t.id);
 			lastDoubleClickDropNodeIds = `${s.id},${t.id}`;
 		}}
 		onNodeDoubleClickDropOntoBackground={(n) => {
@@ -96,7 +103,7 @@
 	.stage-story-wrapper {
 		position: relative;
 		width: 100%;
-		height: 400px;
+		height: var(--stage-wrapper-height);
 		overflow: hidden;
 		touch-action: none;
 	}

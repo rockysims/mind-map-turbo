@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { NODE_RADIUS } from '$lib/constants';
 	import SquareText from '$lib/components/ui/SquareText/SquareText.svelte';
 	import type { NodeData } from '$lib/components/ui/types/node';
 
@@ -32,7 +33,7 @@
 	});
 </script>
 
-<div class="node" class:open={isOpen} data-node-id={nodeData.id}>
+<div class="node" class:open={isOpen} data-node-id={nodeData.id} style="--node-diameter: {NODE_RADIUS * 2}px">
 	<div class="circle">
 		<!-- closed -->
 		{#if !isOpen}
@@ -60,9 +61,9 @@
 		display: flex;
 		justify-content: center;
 		align-items: center;
-		width: 400px;
-		height: 400px;
-		border-radius: 400px;
+		width: var(--node-diameter);
+		height: var(--node-diameter);
+		border-radius: var(--node-diameter);
 		border: 2px solid #aaaaaa;
 		background: #ccc;
 	}
@@ -73,8 +74,8 @@
 		justify-content: center;
 		align-items: center;
 		text-align: center;
-		width: calc(400px / sqrt(2));
-		height: calc(400px / sqrt(2));
+		width: calc(var(--node-diameter) / sqrt(2));
+		height: calc(var(--node-diameter) / sqrt(2));
 	}
 
 	.node .title {
@@ -113,5 +114,6 @@
 		text-align: left;
 		border-radius: 3px;
 		box-shadow: 0px 0px 2px 0px #aaaaaa;
+		background-color: #dddddd;
 	}
 </style>
