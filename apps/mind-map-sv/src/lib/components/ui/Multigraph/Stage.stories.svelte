@@ -71,6 +71,42 @@
 	function sleep(ms: number = 0) {
 		return new Promise((r) => setTimeout(r, ms));
 	}
+
+	function waitForLayout(): Promise<void> {
+		return new Promise((r) => {
+			requestAnimationFrame(() => requestAnimationFrame(() => r()));
+		});
+	}
+
+	/** Simulate double-click at (x, y) on target so Stage treats it as make-primary. */
+	async function dispatchDoubleClick(
+		target: HTMLElement,
+		x: number,
+		y: number
+	): Promise<void> {
+		dispatchPointer(target, 'pointerdown', x, y);
+		dispatchPointer(target, 'pointerup', x, y);
+		await sleep(50);
+		dispatchPointer(target, 'pointerdown', x, y);
+		dispatchPointer(target, 'pointerup', x, y);
+	}
+
+	/** Simulate double-click then drag to (toX, toY) for double-click-drop (e.g. add node/edge). */
+	async function dispatchDoubleClickDrag(
+		fromTarget: HTMLElement,
+		fromX: number,
+		fromY: number,
+		stage: HTMLElement,
+		toX: number,
+		toY: number
+	): Promise<void> {
+		dispatchPointer(fromTarget, 'pointerdown', fromX, fromY);
+		dispatchPointer(fromTarget, 'pointerup', fromX, fromY);
+		await sleep(50);
+		dispatchPointer(fromTarget, 'pointerdown', fromX, fromY);
+		dispatchPointer(stage, 'pointermove', toX, toY);
+		dispatchPointer(stage, 'pointerup', toX, toY);
+	}
 </script>
 
 <Story
@@ -81,6 +117,8 @@
 		expect(wrapper).toBeInTheDocument();
 		const stage = getStage(canvasElement);
 		expect(stage).toBeInTheDocument();
+
+		await waitForLayout();
 
 		const initialTransform = getStageTransform(canvasElement);
 		const center = getCenter(stage);
@@ -119,21 +157,40 @@
 		const stage = getStage(canvasElement);
 		const circle = canvasElement.querySelector('.circle') as HTMLElement;
 		expect(circle).toBeInTheDocument();
+
+		await waitForLayout();
+
 		const nodeCenter = getCenter(circle);
 
-		// Node click: dispatch from circle so hit-test sees the node; stage receives via bubble
+		// Single click: no drag
 		dispatchPointer(circle, 'pointerdown', nodeCenter.x, nodeCenter.y);
 		dispatchPointer(circle, 'pointerup', nodeCenter.x, nodeCenter.y);
 		await sleep();
 		expect(wrapper.dataset.lastNodeClick).toBe(NODE_1.id);
 
-		// Node drag to background: down on node, move away, up on empty area
-		const stageCenter = getCenter(stage);
+		// Single-click drag to background (move node)
 		dispatchPointer(circle, 'pointerdown', nodeCenter.x, nodeCenter.y);
-		dispatchPointer(stage, 'pointermove', stageCenter.x - 150, stageCenter.y - 150);
-		dispatchPointer(stage, 'pointerup', stageCenter.x - 150, stageCenter.y - 150);
+		dispatchPointer(stage, 'pointermove', nodeCenter.x + (400/2 + 10), nodeCenter.y);
+		dispatchPointer(stage, 'pointerup', nodeCenter.x + (400/2 + 10), nodeCenter.y);
 		await sleep();
-		expect(wrapper.dataset.lastDropBg).toBe(NODE_1.id);
+		expect(wrapper.dataset.lastDoubleClickDropBg).toBe(NODE_1.id);
+
+		// Double-click to make primary
+		await dispatchDoubleClick(circle, nodeCenter.x, nodeCenter.y);
+		await sleep();
+		expect(wrapper.dataset.lastMakePrimary).toBe(NODE_1.id);
+
+		// Double-click then drag to background (add node/edge placeholder)
+		await dispatchDoubleClickDrag(
+			circle,
+			nodeCenter.x,
+			nodeCenter.y,
+			stage,
+			nodeCenter.x - 100,
+			nodeCenter.y - 100
+		);
+		await sleep();
+		expect(wrapper.dataset.lastDoubleClickDropBg).toBe(NODE_1.id);
 	}}
 />
 
@@ -157,16 +214,35 @@
 		expect(circles.length).toBeGreaterThanOrEqual(2);
 		const firstCircle = circles[0] as HTMLElement;
 		const secondCircle = circles[1] as HTMLElement;
+
+		await waitForLayout();
+
 		const fromCenter = getCenter(firstCircle);
 		const toCenter = getCenter(secondCircle);
 
-		// Drag node 1 onto node 2: down on first, move to second, up
+		// Single-click drag node 1 onto node 2 (move node)
 		dispatchPointer(stage, 'pointerdown', fromCenter.x, fromCenter.y);
 		dispatchPointer(stage, 'pointermove', toCenter.x, toCenter.y);
 		dispatchPointer(stage, 'pointerup', toCenter.x, toCenter.y);
 		await sleep();
-
 		expect(wrapper.dataset.lastDropNode).toBe(`${NODE_1.id},${NODE_2.id}`);
+
+		// Double-click node 1 to make primary
+		await dispatchDoubleClick(firstCircle, fromCenter.x, fromCenter.y);
+		await sleep();
+		expect(wrapper.dataset.lastMakePrimary).toBe(NODE_1.id);
+
+		// Double-click then drag node 1 onto node 2 (add edge placeholder)
+		await dispatchDoubleClickDrag(
+			firstCircle,
+			fromCenter.x,
+			fromCenter.y,
+			stage,
+			toCenter.x,
+			toCenter.y
+		);
+		await sleep();
+		expect(wrapper.dataset.lastDoubleClickDropNode).toBe(`${NODE_1.id},${NODE_2.id}`);
 	}}
 />
 
@@ -175,6 +251,9 @@
 	args={{ nodes: [] }}
 	play={async ({ canvasElement }) => {
 		const stage = getStage(canvasElement);
+
+		await waitForLayout();
+
 		const center = getCenter(stage);
 
 		// Pan

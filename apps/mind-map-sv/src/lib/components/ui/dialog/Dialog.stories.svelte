@@ -9,10 +9,6 @@
 	});
 </script>
 
-<Story name="Closed">
-	<DialogDemo />
-</Story>
-
-<Story name="Open">
+<Story name="Example">
 	<DialogDemo initialOpen={true} />
 </Story>

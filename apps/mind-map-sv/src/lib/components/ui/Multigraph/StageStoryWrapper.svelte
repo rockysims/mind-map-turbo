@@ -41,6 +41,9 @@
 	let lastNodeClickId = $state<string | null>(null);
 	let lastDropOntoNodeIds = $state<string | null>(null);
 	let lastDropOntoBgId = $state<string | null>(null);
+	let lastMakePrimaryId = $state<string | null>(null);
+	let lastDoubleClickDropBgId = $state<string | null>(null);
+	let lastDoubleClickDropNodeIds = $state<string | null>(null);
 </script>
 
 <div
@@ -49,21 +52,31 @@
 	data-last-node-click={lastNodeClickId ?? ''}
 	data-last-drop-node={lastDropOntoNodeIds ?? ''}
 	data-last-drop-bg={lastDropOntoBgId ?? ''}
+	data-last-make-primary={lastMakePrimaryId ?? ''}
+	data-last-double-click-drop-bg={lastDoubleClickDropBgId ?? ''}
+	data-last-double-click-drop-node={lastDoubleClickDropNodeIds ?? ''}
 	{...rest}
 >
 	<Stage
 		{getNodeAt}
 		onNodeClick={(n) => {
 			lastNodeClickId = n.id;
-			console.log('[StageStoryWrapper] node click:', n.id);
 		}}
 		onNodeDropOntoNode={(s, t) => {
 			lastDropOntoNodeIds = `${s.id},${t.id}`;
-			console.log('[StageStoryWrapper] node drag: dropped', s.id, 'onto node', t.id);
 		}}
 		onNodeDropOntoBackground={(n) => {
 			lastDropOntoBgId = n.id;
-			console.log('[StageStoryWrapper] node drag: dropped', n.id, 'onto background');
+		}}
+		onNodeMakePrimary={(n) => {
+			lastMakePrimaryId = n.id;
+		}}
+		onNodeDoubleClickDropOntoNode={(s, t) => {
+			lastDoubleClickDropNodeIds = `${s.id},${t.id}`;
+		}}
+		onNodeDoubleClickDropOntoBackground={(n) => {
+			console.log('StageStoryWrapper: onNodeDoubleClickDropOntoBackground', n.id);
+			lastDoubleClickDropBgId = n.id;
 		}}
 	>
 		{#each nodes as node (node.id)}
@@ -84,7 +97,6 @@
 		position: relative;
 		width: 100%;
 		height: 400px;
-		background: #0f1115;
 		overflow: hidden;
 		touch-action: none;
 	}

@@ -9,17 +9,25 @@
 	} from './lib/graphMath.js';
 	import { pointerDistance } from './lib/hitTest.js';
 
+	const DBL_CLICK_MS = 400;
+
 	interface Props {
 		/** Resolve node at (clientX, clientY); return null if none. Injected for testability. */
 		getNodeAt: (clientX: number, clientY: number) => NodeData | null;
 		/** Pixels of movement below which we treat as click rather than drag. */
 		dragThreshold?: number;
-		/** Callback when user clicks a node (no drag). */
+		/** Callback when user single-clicks a node (no drag). */
 		onNodeClick?: (node: NodeData) => void;
-		/** Callback when user drops a node onto another node. */
+		/** Callback when user drops a node onto another node (single-click drag). */
 		onNodeDropOntoNode?: (sourceNode: NodeData, targetNode: NodeData) => void;
-		/** Callback when user drops a node onto background. */
+		/** Callback when user drops a node onto background (single-click drag). */
 		onNodeDropOntoBackground?: (node: NodeData) => void;
+		/** Callback when user double-clicks a node (make primary). */
+		onNodeMakePrimary?: (node: NodeData) => void;
+		/** Callback when user double-click-drags and drops onto another node (e.g. add edge). */
+		onNodeDoubleClickDropOntoNode?: (sourceNode: NodeData, targetNode: NodeData) => void;
+		/** Callback when user double-click-drags and drops onto background (e.g. add node). */
+		onNodeDoubleClickDropOntoBackground?: (node: NodeData) => void;
 	}
 
 	let {
@@ -28,6 +36,9 @@
 		onNodeClick,
 		onNodeDropOntoNode,
 		onNodeDropOntoBackground,
+		onNodeMakePrimary,
+		onNodeDoubleClickDropOntoNode,
+		onNodeDoubleClickDropOntoBackground,
 		children
 	}: Props & { children?: Snippet } = $props();
 
@@ -49,13 +60,22 @@
 	let dragNode = $state<NodeData | null>(null);
 	let dragStartPos = $state<{ x: number; y: number } | null>(null);
 
+	// Double-click: same node clicked twice within DBL_CLICK_MS
+	let lastClickNodeId = $state<string | null>(null);
+	let lastClickTime = $state(0);
+	let isDoubleClickSession = $state(false);
+
 	function onPointerDown(e: PointerEvent) {
+		console.log('onPointerDown', e.clientX, e.clientY);
 		const node = getNodeAt(e.clientX, e.clientY);
 		if (node) {
 			dragNode = node;
 			dragStartPos = { x: e.clientX, y: e.clientY };
+			isDoubleClickSession =
+				lastClickNodeId === node.id && Date.now() - lastClickTime < DBL_CLICK_MS;
 		} else {
 			panStart = { clientX: e.clientX, clientY: e.clientY, panX, panY };
+			isDoubleClickSession = false;
 		}
 		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
 	}
@@ -68,23 +88,52 @@
 	}
 
 	function onPointerUp(e: PointerEvent) {
+		console.log('onPointerUp', e.clientX, e.clientY);
 		const stage = e.currentTarget as HTMLElement;
 		if (dragNode && dragStartPos) {
 			const dropTarget = getNodeAt(e.clientX, e.clientY);
 			const dist = pointerDistance(dragStartPos.x, dragStartPos.y, e.clientX, e.clientY);
-			if (dropTarget) {
-				if (dropTarget.id === dragNode.id) {
-					if (dist < dragThreshold) {
-						onNodeClick?.(dragNode);
-					} else {
-						onNodeDropOntoNode?.(dragNode, dropTarget);
+			const didDrag = dist >= dragThreshold;
+
+			console.log('didDrag', didDrag);
+			if (didDrag) {
+				if (isDoubleClickSession) {
+					if (dropTarget && dropTarget.id !== dragNode.id) {
+						console.log('onNodeDoubleClickDropOntoNode', dragNode.id, dropTarget.id);
+						onNodeDoubleClickDropOntoNode?.(dragNode, dropTarget);
+					} else if (!dropTarget || dropTarget.id === dragNode.id) {
+						console.log('onNodeDoubleClickDropOntoBackground', dragNode.id);
+						onNodeDoubleClickDropOntoBackground?.(dragNode);
 					}
 				} else {
-					onNodeDropOntoNode?.(dragNode, dropTarget);
+					if (dropTarget) {
+						if (dropTarget.id === dragNode.id) {
+							if (dist >= dragThreshold) {
+								console.log('onNodeDropOntoNode', dragNode.id, dropTarget.id);
+								onNodeDropOntoNode?.(dragNode, dropTarget);
+							}
+						} else {
+							console.log('onNodeDropOntoNode', dragNode.id, dropTarget.id);
+							onNodeDropOntoNode?.(dragNode, dropTarget);
+						}
+					} else {
+						console.log('onNodeDropOntoBackground', dragNode.id);
+						onNodeDropOntoBackground?.(dragNode);
+					}
 				}
 			} else {
-				onNodeDropOntoBackground?.(dragNode);
+				// Click (no drag)
+				if (isDoubleClickSession) {
+					onNodeMakePrimary?.(dragNode);
+					lastClickNodeId = null;
+					lastClickTime = 0;
+				} else {
+					onNodeClick?.(dragNode);
+					lastClickNodeId = dragNode.id;
+					lastClickTime = Date.now();
+				}
 			}
+
 			dragNode = null;
 			dragStartPos = null;
 			stage.releasePointerCapture(e.pointerId);

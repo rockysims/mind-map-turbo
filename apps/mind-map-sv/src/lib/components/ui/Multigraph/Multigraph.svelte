@@ -53,6 +53,18 @@
 	function handleNodeDropOntoBackground(node: NodeData) {
 		console.log('[Multigraph] node drag: dropped', node.id, 'onto background');
 	}
+
+	function handleNodeMakePrimary(node: NodeData) {
+		console.log('[Multigraph] make primary:', node.id);
+	}
+
+	function handleNodeDoubleClickDropOntoNode(source: NodeData, target: NodeData) {
+		console.log('TODO: add node/edge', { source: source.id, target: target.id });
+	}
+
+	function handleNodeDoubleClickDropOntoBackground(node: NodeData) {
+		console.log('TODO: add node/edge', { fromNode: node.id, toBackground: true });
+	}
 </script>
 
 <div class="graph">
@@ -61,6 +73,9 @@
 		onNodeClick={handleNodeClick}
 		onNodeDropOntoNode={handleNodeDropOntoNode}
 		onNodeDropOntoBackground={handleNodeDropOntoBackground}
+		onNodeMakePrimary={handleNodeMakePrimary}
+		onNodeDoubleClickDropOntoNode={handleNodeDoubleClickDropOntoNode}
+		onNodeDoubleClickDropOntoBackground={handleNodeDoubleClickDropOntoBackground}
 	>
 		{#if primaryNode}
 			<div

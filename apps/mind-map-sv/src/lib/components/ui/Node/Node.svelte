@@ -64,6 +64,7 @@
 		height: 400px;
 		border-radius: 400px;
 		border: 2px solid #aaaaaa;
+		background: #ccc;
 	}
 
 	.node .square {
