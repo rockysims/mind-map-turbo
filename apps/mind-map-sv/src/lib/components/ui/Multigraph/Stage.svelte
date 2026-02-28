@@ -97,56 +97,61 @@
 
 	function onPointerUp(e: PointerEvent) {
 		const stage = e.currentTarget as HTMLElement;
-		if (dragNode && dragStartPos) {
-			const dropTarget = getNodeAt(e.clientX, e.clientY);
-			const dist = pointerDistance(dragStartPos.x, dragStartPos.y, e.clientX, e.clientY);
-			const didDrag = dist >= dragThreshold;
+		const isCancel = e.type === 'pointercancel';
 
-			if (didDrag) {
+		if (dragNode && dragStartPos) {
+			// Only fire drop/click callbacks on actual pointerup; cancel means the gesture was aborted (e.g. drag started)
+			if (!isCancel) {
+				const dropTarget = getNodeAt(e.clientX, e.clientY);
+				const dist = pointerDistance(dragStartPos.x, dragStartPos.y, e.clientX, e.clientY);
+				const didDrag = dist >= dragThreshold;
+
 				if (isDoubleClickSession) {
-					if (dropTarget) {
-						onNodeDoubleClickDropOntoNode?.(dragNode, dropTarget);
-					} else {
-						onNodeDoubleClickDropOntoBackground?.(dragNode);
-					}
-				} else {
-					if (dropTarget) {
-						if (dropTarget.id === dragNode.id) {
-							if (dist >= dragThreshold) onNodeDropOntoNode?.(dragNode, dropTarget);
-						} else {
-							onNodeDropOntoNode?.(dragNode, dropTarget);
+					lastClickNodeId = null;
+					lastClickTime = 0;
+				}
+
+				if (didDrag) {
+					if (isDoubleClickSession) {
+						if (dropTarget && dropTarget.id !== dragNode.id) {
+							onNodeDoubleClickDropOntoNode?.(dragNode, dropTarget);
+						} else if (!dropTarget || dropTarget.id === dragNode.id) {
+							onNodeDoubleClickDropOntoBackground?.(dragNode);
 						}
 					} else {
-						onNodeDropOntoBackground?.(dragNode);
+						if (dropTarget) {
+							if (dropTarget.id === dragNode.id) {
+								if (dist >= dragThreshold) onNodeDropOntoNode?.(dragNode, dropTarget);
+							} else {
+								onNodeDropOntoNode?.(dragNode, dropTarget);
+							}
+						} else {
+							onNodeDropOntoBackground?.(dragNode);
+						}
 					}
-				}
-			} else {
-				// Click (no drag)
-				if (isDoubleClickSession) {
-					onNodeMakePrimary?.(dragNode);
 				} else {
-					// Delay single-click: only fire after DBL_CLICK_MS so a second click is treated as double-click only
-					if (pendingClickTimeoutId !== null) {
-						clearTimeout(pendingClickTimeoutId);
-						pendingClickTimeoutId = null;
+					// Click (no drag)
+					if (isDoubleClickSession) {
+						onNodeMakePrimary?.(dragNode);
+					} else {
+						// Delay single-click: only fire after DBL_CLICK_MS so a second click is treated as double-click only
+						if (pendingClickTimeoutId !== null) {
+							clearTimeout(pendingClickTimeoutId);
+							pendingClickTimeoutId = null;
+						}
+						const node = dragNode;
+						pendingClickNode = node;
+						pendingClickTimeoutId = setTimeout(() => {
+							onNodeClick?.(node);
+							pendingClickNode = null;
+							pendingClickTimeoutId = null;
+						}, DBL_CLICK_MS);
+						lastClickNodeId = node.id;
+						lastClickTime = Date.now();
 					}
-					const node = dragNode;
-					pendingClickNode = node;
-					pendingClickTimeoutId = setTimeout(() => {
-						onNodeClick?.(node);
-						pendingClickNode = null;
-						pendingClickTimeoutId = null;
-					}, DBL_CLICK_MS);
-					lastClickNodeId = node.id;
-					lastClickTime = Date.now();
 				}
 			}
 
-			if (isDoubleClickSession) {
-				lastClickNodeId = null;
-				lastClickTime = 0;
-			}
-			
 			dragNode = null;
 			dragStartPos = null;
 			stage.releasePointerCapture(e.pointerId);
