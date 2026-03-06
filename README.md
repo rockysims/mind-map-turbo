@@ -9,8 +9,8 @@ This project aims to provide a way of constructing a mind map / knowledge web. T
 1. Infrastructure
 2. Add/edit/remove nodes/edges
 3. Persistence
-4. Searchability
-5. Multiplayer
+4. Multiplayer
+5. Searchability
 
 
 
