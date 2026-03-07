@@ -89,9 +89,8 @@
 <style>
 	.squareTextContainer {
 		position: relative;
-		width: 90%;
-		height: 90%;
-	
+		width: 100%;
+		height: 100%;
 		display: flex;
 		justify-content: center;
 		align-items: center;
@@ -101,7 +100,10 @@
 		position: relative; /* changed to absolute during size & scale calculation then back again */
 		left: 0px;
 		top: 0;
-
-		padding: 5px
+		display: flex;
+		justify-content: center;
+		align-items: center;
+		box-sizing: border-box;
+		padding: 10%;
 	}
 </style>
