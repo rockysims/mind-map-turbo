@@ -48,8 +48,10 @@
 				<div class="title">
 					{nodeData.title}
 				</div>
-				<div class="description vScroll" bind:this={descriptionRef}>
-					{nodeData.description}
+				<div class="descriptionContainer">
+					<div class="description vScroll" bind:this={descriptionRef}>
+						{nodeData.description}
+					</div>
 				</div>
 			</div>
 		{/if}
@@ -96,11 +98,16 @@
 		padding: 0 8px 8px 8px;
 	}
 
+	.node.open .descriptionContainer {
+		max-height: 80%;
+		border-radius: 5px;
+		overflow: hidden;
+	}
+
 	.node.open .description {
 		display: flex;
-		max-height: 80%;
+		max-height: 100%;
 		padding: 0 8px;
-		margin-right: -12px;
 		overflow-y: auto;
 		text-align: center;
 	}
