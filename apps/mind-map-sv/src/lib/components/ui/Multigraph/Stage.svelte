@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import { SvelteMap } from 'svelte/reactivity';
 	import type { NodeData } from '../types/node';
 	import {
 		scaleFromWheelDelta,
@@ -163,7 +164,7 @@
 	}
 
 	// Pinch: track two active pointers and update scale from distance ratio
-	const activePointers = new Map<number, { clientX: number; clientY: number }>();
+	const activePointers = new SvelteMap<number, { clientX: number; clientY: number }>();
 
 	function getTwoPointerDistance(): number | null {
 		const pts = [...activePointers.values()];
@@ -211,7 +212,6 @@
 	const transformStyle = $derived(`translate(${panX}px, ${panY}px) scale(${scale})`);
 </script>
 
-<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	class="stage"
 	class:panning={panStart !== null}

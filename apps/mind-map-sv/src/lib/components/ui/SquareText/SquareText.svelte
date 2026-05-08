@@ -13,8 +13,7 @@
 			el.style.overflow = 'hidden';
 		}
 
-		const isOverflowing =
-			false || el.clientWidth < el.scrollWidth || el.clientHeight < el.scrollHeight;
+		const isOverflowing = el.clientWidth < el.scrollWidth || el.clientHeight < el.scrollHeight;
 
 		el.style.overflow = oldOverflow;
 

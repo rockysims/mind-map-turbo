@@ -1,5 +1,8 @@
-// For more info, see https://github.com/storybookjs/eslint-plugin-storybook#configuration-flat-config-format
-import storybook from 'eslint-plugin-storybook';
+// To enable stricter lint rules for Storybook files, import
+// `eslint-plugin-storybook` and spread its flat config:
+//   import storybook from 'eslint-plugin-storybook';
+//   ...storybook.configs['flat/recommended']
+// Not enabled yet so we don't add unrelated lint failures during foundation work.
 
 import prettier from 'eslint-config-prettier';
 import path from 'node:path';
