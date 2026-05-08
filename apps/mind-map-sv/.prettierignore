@@ -7,3 +7,11 @@ bun.lockb
 
 # Miscellaneous
 /static/
+
+# Generated / build outputs (mirrors .gitignore)
+.svelte-kit/
+build/
+storybook-static/
+*storybook*.log
+playwright-report/
+test-results/
