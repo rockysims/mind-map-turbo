@@ -7,16 +7,16 @@
 
 ## How to run things
 
-| Goal | Command |
-|---|---|
-| Install | `pnpm install` |
-| Dev server | `pnpm -w dev` (or `turbo run dev`) |
-| Build | `pnpm -w build` |
-| Lint | `pnpm --filter mind-map-sv lint` |
-| Type check | `pnpm --filter mind-map-sv check` |
+| Goal                             | Command                                        |
+| -------------------------------- | ---------------------------------------------- |
+| Install                          | `pnpm install`                                 |
+| Dev server                       | `pnpm -w dev` (or `turbo run dev`)             |
+| Build                            | `pnpm -w build`                                |
+| Lint                             | `pnpm --filter mind-map-sv lint`               |
+| Type check                       | `pnpm --filter mind-map-sv check`              |
 | Unit + browser + storybook tests | `pnpm --filter mind-map-sv test:unit -- --run` |
-| E2E | `pnpm --filter mind-map-sv test:e2e` |
-| Storybook (interactive) | `pnpm --filter mind-map-sv storybook` |
+| E2E                              | `pnpm --filter mind-map-sv test:e2e`           |
+| Storybook (interactive)          | `pnpm --filter mind-map-sv storybook`          |
 
 Node ≥ 20 and pnpm 9 are required.
 
@@ -51,17 +51,18 @@ based on vibes.
 
 ## Where things live
 
-| Concern | Path |
-|---|---|
-| Pure graph/layout/physics | `apps/mind-map-sv/src/lib/components/ui/Multigraph/lib/*.ts` |
-| Components | `apps/mind-map-sv/src/lib/components/ui/<Name>/<Name>.svelte` |
-| Stories | `apps/mind-map-sv/src/lib/components/ui/<Name>/<Name>.stories.svelte` |
-| Unit specs | colocated next to the source as `*.spec.ts` |
-| Test fixtures | `apps/mind-map-sv/src/lib/components/ui/Multigraph/lib/testFixtures.ts` |
-| Shared types | `apps/mind-map-sv/src/lib/components/ui/types/*.ts` |
-| Constants | `apps/mind-map-sv/src/lib/constants.ts` |
-| E2E | `apps/mind-map-sv/e2e/*.test.ts` |
-| Roadmaps & plans | `docs/roadmaps/<YYYY-MM-DD> <name>/` |
+| Concern                   | Path                                                                    |
+| ------------------------- | ----------------------------------------------------------------------- |
+| Pure graph/layout/physics | `apps/mind-map-sv/src/lib/components/ui/Multigraph/lib/*.ts`            |
+| Components                | `apps/mind-map-sv/src/lib/components/ui/<Name>/<Name>.svelte`           |
+| Stories                   | `apps/mind-map-sv/src/lib/components/ui/<Name>/<Name>.stories.svelte`   |
+| Unit specs                | colocated next to the source as `*.spec.ts`                             |
+| Test fixtures             | `apps/mind-map-sv/src/lib/components/ui/Multigraph/lib/testFixtures.ts` |
+| Shared types              | `apps/mind-map-sv/src/lib/components/ui/types/*.ts`                     |
+| Constants                 | `apps/mind-map-sv/src/lib/constants.ts`                                 |
+| E2E                       | `apps/mind-map-sv/e2e/*.test.ts`                                        |
+| Roadmaps & plans          | `docs/roadmaps/<YYYY-MM-DD> <name>/`                                    |
+| Plan template             | `docs/roadmaps/PLAN_TEMPLATE.md`                                        |
 
 ## Coding conventions (highlights)
 
@@ -78,8 +79,8 @@ based on vibes.
 
 ## Commits
 
-Conventional Commits, one logical change per commit. Body explains *why*,
-diff shows *what*.
+Conventional Commits, one logical change per commit. Body explains _why_,
+diff shows _what_.
 
 ```
 feat(graph): add togglePinned mutation with hops recomputation
@@ -97,7 +98,10 @@ Full details: `.cursor/rules/commits.mdc`.
 1. Read the active roadmap in `docs/roadmaps/` and the relevant milestone
    doc to confirm scope.
 2. If the milestone doesn't have a current plan, write one in
-   `plans/<YYYY-MM-DD> <name>.md` before coding.
+   `plans/<YYYY-MM-DD> <name>.md` before coding. Use the structure in
+   `docs/roadmaps/PLAN_TEMPLATE.md` (resolves open questions, decomposes
+   into PR-sized tasks, lays out a parallel wave plan, and recommends an
+   agent class per task). Full spec: `.cursor/rules/plans.mdc`.
 3. Add the pure function + spec first; wire it into the component second.
 4. Add or update the relevant story.
 5. Run lint, check, and tests; fix any failures.

@@ -34,6 +34,20 @@ You must actually run the commands above and report results. Do not claim done f
 - Prefer extending the existing `StageHarness.svelte` pattern over adding component-level Vitest tests.
 - Read `docs/roadmaps/` for the active roadmap and current milestone before starting non-trivial work.
 
+## Roadmaps, milestones, plans
+
+Three layers, each smaller in scope:
+
+- **Roadmap** — the big picture. One per release/era.
+- **Milestone** — *what* and *why* a piece of the roadmap delivers, plus
+  acceptance criteria and open questions.
+- **Plan** — *how* to deliver a milestone: tasks (one PR each),
+  parallelization waves, and per-task agent recommendations.
+
+If a milestone doesn't have a current plan, write one before coding.
+Format and authoring checklist live in `.cursor/rules/plans.mdc` and
+`docs/roadmaps/PLAN_TEMPLATE.md`.
+
 ## Where things live
 
 | Concern | Location |
@@ -45,3 +59,4 @@ You must actually run the commands above and report results. Do not claim done f
 | E2E | `apps/mind-map-sv/e2e/*.test.ts` |
 | Test fixtures | `apps/mind-map-sv/src/lib/components/ui/Multigraph/lib/testFixtures.ts` |
 | Roadmaps & plans | `docs/roadmaps/<YYYY-MM-DD> <name>/` |
+| Plan template | `docs/roadmaps/PLAN_TEMPLATE.md` |
