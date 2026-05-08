@@ -82,6 +82,15 @@ persistence, multiplayer, search) consumes the API shaped here.
   Decision in the plan; likely "drop point in stage-local coordinates".
 - **Edge id collisions.** `addEdge` needs an id strategy. Likely
   `crypto.randomUUID()` or a monotonic counter — pick in the plan.
+- **Drop-onto-self semantics.** Today `Stage.svelte` routes a
+  double-tap-drag onto the source node to
+  `onNodeDoubleClickDropOntoBackground` (i.e. treats it the same as
+  drop-on-empty-space). The story test in
+  `Multigraph/Stage.stories.svelte` (SingleNode) carries a TODO
+  pointing at this milestone to finalize. Three options: (a) keep
+  current — drop-on-self = drop-on-background = add new connected
+  node; (b) make drop-on-self a no-op; (c) create a self-loop edge.
+  Decide in the plan.
 
 ## References
 
