@@ -14,10 +14,7 @@ export default defineConfig({
 	plugins: [tailwindcss(), sveltekit()],
 	server: {
 		fs: {
-			allow: [
-				path.resolve(__dirname, '..'),
-				path.resolve(__dirname, '../../node_modules/.pnpm')
-			]
+			allow: [path.resolve(__dirname, '..'), path.resolve(__dirname, '../../node_modules/.pnpm')]
 		}
 	},
 	test: {

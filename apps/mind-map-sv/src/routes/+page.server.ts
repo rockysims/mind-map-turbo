@@ -1,7 +1,7 @@
 import { env } from '$env/dynamic/private';
-import type { PageServerLoad } from './$types';	
+import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async () => {
 	const appName = env.APP_NAME || 'Fallback APP_NAME from server';
-	return {appName};
+	return { appName };
 };

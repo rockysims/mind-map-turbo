@@ -1,5 +1,5 @@
-import type { EdgeData } from "./edge";
-import type { NodeData } from "./node";
+import type { EdgeData } from './edge';
+import type { NodeData } from './node';
 
 export type Point = {
 	x: number;
@@ -7,7 +7,7 @@ export type Point = {
 };
 
 export interface MultigraphData {
-	nodes: NodeData[],
-	edges: EdgeData[],
-	posByNodeId: Record<string, Point>
-};
+	nodes: NodeData[];
+	edges: EdgeData[];
+	posByNodeId: Record<string, Point>;
+}

@@ -1,14 +1,11 @@
 <script lang="ts">
-	const {
-		text = 'SquareText fallback text.',
-		classList = []
-	} = $props<{
+	const { text = 'SquareText fallback text.', classList = [] } = $props<{
 		text: string;
 		classList: string[];
 	}>();
 
 	let squareTextRef = $state<HTMLElement | null>(null);
-	
+
 	function checkOverflow(el: HTMLElement) {
 		const oldOverflow = el.style.overflow;
 
@@ -16,24 +13,23 @@
 			el.style.overflow = 'hidden';
 		}
 
-		const isOverflowing = false
-			|| el.clientWidth < el.scrollWidth
-			|| el.clientHeight < el.scrollHeight;
+		const isOverflowing =
+			false || el.clientWidth < el.scrollWidth || el.clientHeight < el.scrollHeight;
 
 		el.style.overflow = oldOverflow;
-	
+
 		return isOverflowing;
 	}
-	
+
 	function setSize() {
 		if (!squareTextRef) return;
-	
+
 		// Step 1: find upper bound
 		let size = 10;
 		squareTextRef.style.position = 'absolute';
 		squareTextRef.style.width = `${size}px`;
 		squareTextRef.style.height = `${size}px`;
-	
+
 		let step = 50;
 		while (checkOverflow(squareTextRef)) {
 			size += step;
@@ -41,7 +37,7 @@
 			squareTextRef.style.height = `${size}px`;
 			step *= 2;
 		}
-	
+
 		// Step 2: binary search minimum fitting size
 		let lower = 10;
 		let upper = size;
@@ -78,10 +74,7 @@
 </script>
 
 <div class="squareTextContainer">
-	<div
-		bind:this={squareTextRef}
-		class={['squareText', ...classList]}
-	>
+	<div bind:this={squareTextRef} class={['squareText', ...classList]}>
 		{text}
 	</div>
 </div>
@@ -95,7 +88,7 @@
 		justify-content: center;
 		align-items: center;
 	}
-	
+
 	.squareText {
 		position: relative; /* changed to absolute during size & scale calculation then back again */
 		left: 0px;

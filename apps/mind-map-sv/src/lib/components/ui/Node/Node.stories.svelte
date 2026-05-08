@@ -1,49 +1,49 @@
 <script module lang="ts">
 	import { defineMeta } from '@storybook/addon-svelte-csf';
 	import { expect, within } from 'storybook/test';
-	
+
 	import Node from '$lib/components/ui/Node/Node.svelte';
 	import type { NodeData } from '$lib/components/ui/types/node';
-	
+
 	const { Story } = defineMeta({
 		title: 'Components/Node',
 		component: Node,
 		tags: [],
-	argTypes: {
-		nodeData: { control: 'object' },
-		isOpen: { control: 'boolean' }
+		argTypes: {
+			nodeData: { control: 'object' },
+			isOpen: { control: 'boolean' }
 		},
 		args: {
-		nodeData: {
-			id: 'node id',
-			title: 'Node title',
-			description: 'Node description'
-		},
-		isOpen: false
+			nodeData: {
+				id: 'node id',
+				title: 'Node title',
+				description: 'Node description'
+			},
+			isOpen: false
 		}
 	});
-	
+
 	type PlayArgs = {
 		canvasElement: HTMLElement;
 		args: { nodeData: NodeData; isOpen: boolean };
 	};
-	
+
 	async function playHandler(
 		{ canvasElement, args }: PlayArgs,
 		options: { short: boolean; open: boolean }
 	) {
 		const canvas = within(canvasElement);
-	
+
 		// Get the node element and its children
 		const node = canvasElement.querySelector('.node');
 		expect(node).toBeInTheDocument();
-	
+
 		const circle = canvasElement.querySelector('.node .circle');
 		expect(circle).toBeInTheDocument();
-	
+
 		const square = canvasElement.querySelector('.node .square');
 		expect(square).toBeInTheDocument();
-	
+
 		// Get title element - handle truncated titles for long content and closed state
 		const titleEl = canvasElement.querySelector('.node .title');
 		expect(titleEl).toBeInTheDocument();
@@ -54,7 +54,7 @@
 			const displayedTitle = titleElement.textContent || '';
 			expect(args.nodeData.title.startsWith(displayedTitle)).toBe(true);
 		}
-	
+
 		// Get description element (only for open nodes)
 		let descriptionElement: HTMLElement | null = null;
 		if (options.open) {
@@ -72,37 +72,37 @@
 			const descEl = canvasElement.querySelector('.node .description');
 			expect(descEl).toBeNull();
 		}
-	
+
 		// Test 1: Title is visible
 		expect(titleElement).toBeInTheDocument();
-	
+
 		if (options.open) {
 			expect(descriptionElement).toBeInTheDocument();
 		}
-	
+
 		// Check that title is within the square bounds
 		const squareRect = square!.getBoundingClientRect();
 		const titleRect = titleElement.getBoundingClientRect();
-	
+
 		// Title should be within square bounds
 		const tolerance = 1;
 		expect(titleRect.left).toBeGreaterThanOrEqual(squareRect.left - tolerance);
 		expect(titleRect.right).toBeLessThanOrEqual(squareRect.right + tolerance);
 		expect(titleRect.top).toBeGreaterThanOrEqual(squareRect.top - tolerance);
 		expect(titleRect.bottom).toBeLessThanOrEqual(squareRect.bottom + tolerance);
-	
+
 		// For closed nodes: title should be centered vertically and horizontally in the square
 		if (!options.open) {
 			const squareCenterX = squareRect.left + squareRect.width / 2;
 			const squareCenterY = squareRect.top + squareRect.height / 2;
 			const titleCenterX = titleRect.left + titleRect.width / 2;
 			const titleCenterY = titleRect.top + titleRect.height / 2;
-		
+
 			// Title center should be very close to square center (within 2px tolerance)
 			expect(Math.abs(titleCenterX - squareCenterX)).toBeLessThan(2);
 			expect(Math.abs(titleCenterY - squareCenterY)).toBeLessThan(2);
 		}
-	
+
 		// Description checks (only for open nodes)
 		if (options.open && descriptionElement) {
 			const descriptionRect = descriptionElement.getBoundingClientRect();
@@ -114,16 +114,16 @@
 			expect(descriptionRect.top).toBeGreaterThanOrEqual(squareRect.top);
 			expect(descriptionRect.bottom).toBeLessThanOrEqual(squareRect.bottom);
 		}
-	
+
 		// Test 2: Square is visibly centered in the circle
 		const circleRect = circle!.getBoundingClientRect();
-	
+
 		// Calculate centers
 		const circleCenterX = circleRect.left + circleRect.width / 2;
 		const circleCenterY = circleRect.top + circleRect.height / 2;
 		const squareCenterX = squareRect.left + squareRect.width / 2;
 		const squareCenterY = squareRect.top + squareRect.height / 2;
-	
+
 		// Square center should be very close to circle center (within 2px tolerance)
 		expect(Math.abs(squareCenterX - circleCenterX)).toBeLessThan(2);
 		expect(Math.abs(squareCenterY - circleCenterY)).toBeLessThan(2);
@@ -140,7 +140,7 @@
 			{ x: squareRect.left, y: squareRect.bottom },
 			{ x: squareRect.right, y: squareRect.bottom }
 		];
-		squareCorners.forEach(corner => {
+		squareCorners.forEach((corner) => {
 			const distanceFromCenter = Math.sqrt(
 				Math.pow(corner.x - circleCenterX, 2) + Math.pow(corner.y - circleCenterY, 2)
 			);
@@ -166,12 +166,7 @@
 				expect(hasVerticalScroll).toBe(true);
 			}
 			if (!options.short) {
-
-
-
-				console.log({descriptionStyles, '.borderRadius': descriptionStyles.borderRadius});
-
-
+				console.log({ descriptionStyles, '.borderRadius': descriptionStyles.borderRadius });
 
 				expect(descriptionStyles.boxShadow).not.toBe('');
 				expect(parseFloat(descriptionStyles.borderRadius)).toBeGreaterThan(0);
@@ -188,7 +183,8 @@
 		nodeData: {
 			id: 'node id short title',
 			title: 'Short node title goes here.',
-			description: 'Node description and of course the description is probably going to be fairly long. Certainly multiple sentences. Maybe more.'
+			description:
+				'Node description and of course the description is probably going to be fairly long. Certainly multiple sentences. Maybe more.'
 		},
 		isOpen: false
 	}}
@@ -217,7 +213,8 @@
 		nodeData: {
 			id: 'node id short open',
 			title: 'Node title short open',
-			description: 'Node description and of course the description is probably going to be fairly long. Likely multiple sentences long. Maybe even more.'
+			description:
+				'Node description and of course the description is probably going to be fairly long. Likely multiple sentences long. Maybe even more.'
 		},
 		isOpen: true
 	}}
@@ -230,7 +227,10 @@
 		nodeData: {
 			id: 'node id long open',
 			title: 'Node title long open. '.repeat(10),
-			description: 'Node description and of course the description is probably going to be fairly long. Likely multiple sentences long. Maybe even more. '.repeat(10)
+			description:
+				'Node description and of course the description is probably going to be fairly long. Likely multiple sentences long. Maybe even more. '.repeat(
+					10
+				)
 		},
 		isOpen: true
 	}}

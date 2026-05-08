@@ -11,9 +11,7 @@
 	<Dialog.Content>
 		<Dialog.Header>
 			<Dialog.Title>Dialog title</Dialog.Title>
-			<Dialog.Description>
-				Placeholder description for the dialog in Storybook.
-			</Dialog.Description>
+			<Dialog.Description>Placeholder description for the dialog in Storybook.</Dialog.Description>
 		</Dialog.Header>
 	</Dialog.Content>
 </Dialog.Root>

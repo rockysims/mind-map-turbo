@@ -14,22 +14,19 @@
 	});
 </script>
 
-<Story name="Single"
+<Story
+	name="Single"
 	args={{
 		multigraphData: {
-			nodes: [
-				{ id: '1', title: 'Node 1', description: 'Node 1 description' }
-			],
+			nodes: [{ id: '1', title: 'Node 1', description: 'Node 1 description' }],
 			edges: [],
 			posByNodeId: {}
 		},
 		defaultPrimaryNodeId: '1'
 	}}
-	play={
-		async (context) => {
-			await expect(
-				context.canvas.getByText(context.args.multigraphData.nodes[0].title)
-			).toBeInTheDocument();
-		}
-	}
+	play={async (context) => {
+		await expect(
+			context.canvas.getByText(context.args.multigraphData.nodes[0].title)
+		).toBeInTheDocument();
+	}}
 />

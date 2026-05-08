@@ -17,9 +17,7 @@
 
 	const primaryNode = $derived.by(() => {
 		const nodes: NodeData[] = multigraphData.nodes;
-		return (
-			nodes.find((n) => n.id === defaultPrimaryNodeId) ?? nodes[0] ?? null
-		);
+		return nodes.find((n) => n.id === defaultPrimaryNodeId) ?? nodes[0] ?? null;
 	});
 
 	const primaryPos = $derived.by(() => {
@@ -85,11 +83,9 @@
 			<div
 				class="node-wrapper"
 				data-node-id={primaryNode.id}
-				style={
-					primaryPos
-						? `left: calc(50% + ${primaryPos.x}px); top: calc(50% + ${primaryPos.y}px); transform: translate(-50%, -50%);`
-						: 'left: 50%; top: 50%; transform: translate(-50%, -50%);'
-				}
+				style={primaryPos
+					? `left: calc(50% + ${primaryPos.x}px); top: calc(50% + ${primaryPos.y}px); transform: translate(-50%, -50%);`
+					: 'left: 50%; top: 50%; transform: translate(-50%, -50%);'}
 			>
 				<Node nodeData={primaryNode} isOpen={false} />
 			</div>

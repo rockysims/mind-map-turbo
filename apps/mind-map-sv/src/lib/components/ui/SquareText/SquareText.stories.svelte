@@ -28,6 +28,45 @@
 	};
 </script>
 
+<Story name="Summary" args={defaultArgsSummary}>
+	{#snippet template(args)}
+		<div class="outerContainer">
+			<div class="innerContainer">
+				<SquareText {...args} text={defaultArgsShort.text} />
+			</div>
+			<br />
+		</div>
+		<div class="outerContainer">
+			<div class="innerContainer">
+				<SquareText {...args} text={defaultArgsLong.text} />
+			</div>
+			<br />
+		</div>
+		<div class="outerContainer">
+			<div class="innerContainer big">
+				<SquareText {...args} />
+			</div>
+			<br />
+		</div>
+	{/snippet}
+</Story>
+
+<Story
+	args={defaultArgsShort}
+	name="Test:Short"
+	play={async (context) => {
+		await expect(context.canvas.getByText(context.args.text)).toBeInTheDocument();
+	}}
+/>
+
+<Story
+	args={defaultArgsLong}
+	name="Test:Long"
+	play={async (context) => {
+		await expect(context.canvas.getByText(context.args.text)).toBeInTheDocument();
+	}}
+/>
+
 <style>
 	.innerContainer {
 		border: 1px solid red;
@@ -44,50 +83,3 @@
 		align-items: center;
 	}
 </style>
-
-<Story name="Summary" args={defaultArgsSummary}>
-	{#snippet template(args)}
-	<div class="outerContainer">
-		<div class="innerContainer">
-			<SquareText {...args} text={defaultArgsShort.text} />
-		</div>
-		<br/>
-	</div>
-	<div class="outerContainer">
-		<div class="innerContainer">
-			<SquareText {...args} text={defaultArgsLong.text} />
-		</div>
-		<br/>
-	</div>
-	<div class="outerContainer">
-		<div class="innerContainer big">
-			<SquareText {...args} />
-		</div>
-		<br/>
-	</div>
-   {/snippet}
-</Story>
-
-<Story
-	args={defaultArgsShort}
-	name="Test:Short"
-	play={
-		async (context) => {
-			await expect(
-				context.canvas.getByText(context.args.text)
-			).toBeInTheDocument();
-		}
-	}
-/>
-
-<Story
-	args={defaultArgsLong}
-	name="Test:Long"
-	play={
-		async (context) => {
-			await expect(
-				context.canvas.getByText(context.args.text)
-			).toBeInTheDocument();
-		}
-	}
-/>

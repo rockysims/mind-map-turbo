@@ -1,10 +1,10 @@
-version: "3.9"
+version: '3.9'
 
 services:
   app:
     build: .
     ports:
-      - "3000:3000"
+      - '3000:3000'
     environment:
       DB_HOST: db
       APP_NAME: APP_NAME from docker compose file

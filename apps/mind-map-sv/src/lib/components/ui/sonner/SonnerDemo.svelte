@@ -8,21 +8,11 @@
 <div class="demo">
 	<p class="demo-title">Click a button to show a toast</p>
 	<div class="demo-actions">
-		<button type="button" onclick={() => toast('Default toast')}>
-			Default
-		</button>
-		<button type="button" onclick={() => toast.success('Success!')}>
-			Success
-		</button>
-		<button type="button" onclick={() => toast.error('Something went wrong')}>
-			Error
-		</button>
-		<button type="button" onclick={() => toast.info('Here’s some info')}>
-			Info
-		</button>
-		<button type="button" onclick={() => toast.warning('Heads up')}>
-			Warning
-		</button>
+		<button type="button" onclick={() => toast('Default toast')}> Default </button>
+		<button type="button" onclick={() => toast.success('Success!')}> Success </button>
+		<button type="button" onclick={() => toast.error('Something went wrong')}> Error </button>
+		<button type="button" onclick={() => toast.info('Here’s some info')}> Info </button>
+		<button type="button" onclick={() => toast.warning('Heads up')}> Warning </button>
 	</div>
 </div>
 

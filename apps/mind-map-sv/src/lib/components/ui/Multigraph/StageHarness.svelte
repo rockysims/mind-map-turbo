@@ -19,11 +19,17 @@
 
 	function getNodeAt(clientX: number, clientY: number): NodeData | null {
 		const nodeElems = Array.from(document.querySelectorAll('div.node')) as HTMLElement[];
-		const clickedNodeElems = nodeElems.filter(nodeElem => {
+		const clickedNodeElems = nodeElems.filter((nodeElem) => {
 			const circle = nodeElem.querySelector('.circle');
 			if (!circle) return false;
 			const rect = circle.getBoundingClientRect();
-			const wasClicked = isPointInCircle(clientX, clientY, rect.left + rect.width / 2, rect.top + rect.height / 2, Math.min(rect.width, rect.height) / 2);
+			const wasClicked = isPointInCircle(
+				clientX,
+				clientY,
+				rect.left + rect.width / 2,
+				rect.top + rect.height / 2,
+				Math.min(rect.width, rect.height) / 2
+			);
 			return wasClicked ? nodeElem : null;
 		});
 
@@ -53,7 +59,9 @@
 	style="--stage-harness-height: {NODE_RADIUS * 2}px"
 	data-testid="stage-callbacks"
 	data-last-node-click={lastNodeClickId ?? ''}
-	data-last-node-moved={lastNodeMoved ? `${lastNodeMoved.nodeId},${lastNodeMoved.clientX},${lastNodeMoved.clientY}` : ''}
+	data-last-node-moved={lastNodeMoved
+		? `${lastNodeMoved.nodeId},${lastNodeMoved.clientX},${lastNodeMoved.clientY}`
+		: ''}
 	data-last-make-primary={lastMakePrimaryId ?? ''}
 	data-last-double-click-drop-bg={lastDoubleClickDropBgId ?? ''}
 	data-last-double-click-drop-node={lastDoubleClickDropNodeIds ?? ''}

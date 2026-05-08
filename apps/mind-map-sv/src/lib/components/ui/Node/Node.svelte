@@ -33,7 +33,12 @@
 	});
 </script>
 
-<div class="node" class:open={isOpen} data-node-id={nodeData.id} style="--node-diameter: {NODE_RADIUS * 2}px">
+<div
+	class="node"
+	class:open={isOpen}
+	data-node-id={nodeData.id}
+	style="--node-diameter: {NODE_RADIUS * 2}px"
+>
 	<div class="circle">
 		<!-- closed -->
 		{#if !isOpen}

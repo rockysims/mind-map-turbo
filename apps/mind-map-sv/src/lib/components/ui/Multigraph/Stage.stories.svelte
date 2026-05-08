@@ -78,11 +78,7 @@
 	}
 
 	/** Simulate double-click at (x, y) on target so Stage treats it as make-primary. */
-	async function dispatchDoubleClick(
-		target: HTMLElement,
-		x: number,
-		y: number
-	): Promise<void> {
+	async function dispatchDoubleClick(target: HTMLElement, x: number, y: number): Promise<void> {
 		dispatchPointer(target, 'pointerdown', x, y);
 		dispatchPointer(target, 'pointerup', x, y);
 		await sleep(DBL_CLICK_MS * 0.1);
@@ -108,11 +104,7 @@
 	}
 </script>
 
-
-<Story
-	name="Summary"
-	args={{ nodes: NODES.slice(0, 3) }}
-/>
+<Story name="Summary" args={{ nodes: NODES.slice(0, 3) }} />
 
 <Story
 	name="Empty"

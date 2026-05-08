@@ -34,7 +34,7 @@ export interface MakeGraphInput {
 export function makeGraph(input: MakeGraphInput = {}): MultigraphData {
 	const nodes = input.nodes ?? defaultNodes(input.nodeCount ?? 0);
 	const idAt = (idx: number | string): string =>
-		typeof idx === 'number' ? nodes[idx]?.id ?? `n${idx}` : idx;
+		typeof idx === 'number' ? (nodes[idx]?.id ?? `n${idx}`) : idx;
 
 	const edges: EdgeData[] = (input.edges ?? []).map(([s, t], i) => ({
 		id: `e${i}`,
@@ -43,9 +43,8 @@ export function makeGraph(input: MakeGraphInput = {}): MultigraphData {
 		color: '#888'
 	}));
 
-	const posByNodeId = input.posByNodeId ?? Object.fromEntries(
-		nodes.map((n) => [n.id, { x: 0, y: 0 }])
-	);
+	const posByNodeId =
+		input.posByNodeId ?? Object.fromEntries(nodes.map((n) => [n.id, { x: 0, y: 0 }]));
 
 	return { nodes, edges, posByNodeId };
 }

@@ -208,9 +208,7 @@
 		onPointerUp(e);
 	}
 
-	const transformStyle = $derived(
-		`translate(${panX}px, ${panY}px) scale(${scale})`
-	);
+	const transformStyle = $derived(`translate(${panX}px, ${panY}px) scale(${scale})`);
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -223,7 +221,7 @@
 	onpointerup={onPointerUpStage}
 	onpointercancel={onPointerUpStage}
 	onwheel={onWheel}
-		role="presentation"
+	role="presentation"
 >
 	{#if children}
 		{@render children()}
