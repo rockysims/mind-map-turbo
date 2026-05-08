@@ -14,6 +14,8 @@ node_modules
 
 # Testing
 coverage
+playwright-report
+test-results
 
 # Turbo
 .turbo
@@ -27,6 +29,12 @@ out/
 build
 dist
 
+# SvelteKit generated
+.svelte-kit/
+
+# Storybook
+storybook-static
+*storybook*.log
 
 # Debug
 npm-debug.log*
