@@ -1,0 +1,156 @@
+---
+description: How to write and execute milestone plans (the HOW after the milestone's WHAT)
+globs: docs/roadmaps/**/plans/**
+alwaysApply: false
+---
+
+# Plans
+
+A **plan** says *how* to deliver one milestone. Milestones say *what*
+and *why*; plans decompose the work into PR-sized tasks, resolve the
+milestone's open questions, annotate every task with the right kind of
+AI agent, and lay out which tasks can run in parallel.
+
+Canonical template: [`docs/roadmaps/PLAN_TEMPLATE.md`](../../docs/roadmaps/PLAN_TEMPLATE.md).
+Copy it; don't reinvent the structure.
+
+## Where plans live
+
+```
+docs/roadmaps/<YYYY-MM-DD> <roadmap-name>/plans/<YYYY-MM-DD> <plan-name>.md
+```
+
+Plans are **dated** so multiple plans against the same milestone (e.g.
+when an approach gets replaced mid-stream) coexist as historical
+record. Old plans stay; new plans link back.
+
+## Required sections
+
+In order, every plan has:
+
+1. **Header** — created date, author, milestone link, status, total effort.
+2. **Summary** — 1–2 sentences.
+3. **Open questions resolved** — every open question from the milestone,
+   with the decision in **bold** plus a one-sentence rationale.
+4. **Out of scope** — what this plan defers.
+5. **Tasks** — each one PR-sized.
+6. **Wave plan** — explicit parallelization.
+7. **Risks and rollback**.
+8. **Definition of Done (this plan)**.
+9. **Notes** — dated scratchpad.
+
+## Task fields (all required)
+
+| Field | Notes |
+|---|---|
+| **ID** | `T01`, `T02`, … unique within the plan |
+| **Title** | Imperative, fits in one line |
+| **Depends on** | Other task IDs, or `—` if none |
+| **Wave** | Integer; tasks in the same wave run in parallel |
+| **Agent** | See "Agent selection" below |
+| **Effort** | `XS` (~30 min), `S` (~2 h), `M` (~half day), `L` (~full day or split) |
+| **Files** | List the files the PR is expected to touch |
+| **PR title** | Drafted up front in Conventional Commits format |
+| **Acceptance** | Specific behaviors / tests that must pass |
+
+If a task feels bigger than `L`, **split it** before starting.
+
+## Parallelization
+
+The Wave plan is the actionable part. Tasks in the same wave have
+*no* shared dependencies and can be picked up by separate agents (or
+in separate worktrees) simultaneously.
+
+A simple invariant before starting a wave: **every task in the wave
+has all its `Depends on` items already merged to `main`**.
+
+```
+Wave 1   T01                 foundational, no parallel work
+Wave 2   T02                 unblocks the next wave
+Wave 3   T03  ‖  T04         both depend only on T02
+Wave 4   T05                 integration step
+```
+
+When two tasks in the same wave touch the same file, either move one
+to the next wave or split the file into independent pieces first.
+
+## Agent selection
+
+Pick the lowest-cost agent that can do the task reliably. The point
+isn't to minimize cost — it's to reserve high-reasoning capacity for
+work that actually needs it.
+
+| Agent class | Best for | Concrete examples (substitute what you have) |
+|---|---|---|
+| **Fast / cheap** | Mechanical edits, formatting, doc tweaks, find-and-replace, trivial type additions | `composer-2-fast`, `kimi-k2.5` |
+| **Default workhorse** | Typical feature implementation with tests, normal refactors | `claude-4.6-sonnet-medium-thinking` |
+| **High-reasoning** | Architectural decisions, hard debugging, layered refactors, novel algorithms | `claude-opus-4-7-thinking-xhigh`, `gpt-5.3-codex` |
+| **Read-only `explore` subagent** | "Survey how X is used", "find all places that mutate Y" — exploration that informs but doesn't write code | Spawn before writing the plan; results inform task decomposition |
+| **`generalPurpose` subagent** | Multi-step research that mixes exploration with edits | Use sparingly; usually a focused single-agent run is cleaner |
+| **`best-of-n-runner`** | When multiple algorithm choices are plausible and a small benchmark or comparison would settle it | Try 2–3 implementations of `relaxOverlaps` in parallel worktrees, compare outputs |
+| **`shell` subagent** | Long shell-heavy sessions: complex git ops, bulk renames, dependency upgrades | Branch surgery, `rg`-driven mass edits |
+
+Decision tree:
+
+```
+Is the task > 80% mechanical (rename, format, copy-paste a pattern)?
+  yes → fast/cheap
+Is the task an architectural decision or genuinely tricky?
+  yes → high-reasoning
+Are we trying to compare approaches?
+  yes → best-of-n-runner
+Otherwise → default workhorse
+```
+
+Annotate the model used in the **PR description** so future plans
+can recalibrate ("we said sonnet for T02, but it needed three
+revisions — bump to opus next time").
+
+## Authoring checklist
+
+When writing a plan from scratch:
+
+1. Read the milestone doc end-to-end. Copy its open-questions list.
+2. Resolve every open question. Decisions go in **bold**.
+3. List explicit out-of-scope items to head off scope creep.
+4. Decompose into tasks. One PR each. Use the table format.
+5. For each task, fill **all** fields. If you can't write the
+   acceptance criteria yet, the task isn't ready — split or research.
+6. Build the Wave plan. Verify no two same-wave tasks touch the same
+   file.
+7. Sanity check: the union of "Files" across tasks covers everything
+   the milestone needs to change.
+8. Add risks/rollback. At minimum: what happens if the foundational
+   task (T02-equivalent) ends up wrong?
+9. Set status to `draft`. Open a PR for the plan itself before
+   starting code work — that PR's diff is the plan content, and
+   reviewers can challenge decisions before any task starts.
+
+## Executing a plan
+
+1. Set status to `executing` when wave 1 starts.
+2. Open one PR per task. PR title = the task's `PR title` field. PR
+   body links the task ID and milestone.
+3. As tasks merge, update the plan's task list with a ✓ or strike-through
+   so anyone glancing at the plan sees progress at a glance.
+4. If a task discovers a missed dependency or design issue, update the
+   plan in the same PR (or a small follow-up commit). Don't let the
+   plan diverge from reality.
+5. When the last task lands, update milestone status in the roadmap and
+   set this plan's status to `done`.
+
+## When the model is asked to "write a plan"
+
+If the user says something like *"write a plan for milestone 01"* or
+*"plan the next milestone"*:
+
+1. Read the relevant milestone doc.
+2. Read this rule and `PLAN_TEMPLATE.md`.
+3. Copy the template to
+   `docs/roadmaps/<active roadmap>/plans/<today> <slug>.md`.
+4. Fill it in. Resolve open questions; if a question genuinely needs
+   user input, **leave it blank with a `❓ ASK USER:` marker** and
+   surface it in the chat reply rather than guessing.
+5. Run `pnpm --filter mind-map-sv lint` (markdown is in scope of
+   prettier on the root install) — the plan should pass formatting.
+6. Open the plan for review before starting any code work.
