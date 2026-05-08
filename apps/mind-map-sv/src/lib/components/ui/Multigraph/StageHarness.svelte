@@ -3,16 +3,18 @@
 	import Stage from './Stage.svelte';
 	import Node from '$lib/components/ui/Node/Node.svelte';
 	import { isPointInCircle } from './lib/hitTest.js';
-	import type { NodeData } from '../types/node';
+	import type { NodeData } from '../types/node.js';
 
 	let {
 		nodes = [],
 		/** Optional: nodeId -> { left, top } for positioning (default: 50%, 50%) */
 		positions = {},
+		onNodeMoved: onNodeMovedProp,
 		...rest
 	}: {
 		nodes: NodeData[];
 		positions?: Record<string, { left: string; top: string }>;
+		onNodeMoved?: (node: NodeData, clientX: number, clientY: number) => void;
 	} = $props();
 
 	function getNodeAt(clientX: number, clientY: number): NodeData | null {
@@ -40,20 +42,18 @@
 	}
 
 	let lastNodeClickId = $state<string | null>(null);
-	let lastDropOntoNodeIds = $state<string | null>(null);
-	let lastDropOntoBgId = $state<string | null>(null);
+	let lastNodeMoved = $state<{ nodeId: string; clientX: number; clientY: number } | null>(null);
 	let lastMakePrimaryId = $state<string | null>(null);
 	let lastDoubleClickDropBgId = $state<string | null>(null);
 	let lastDoubleClickDropNodeIds = $state<string | null>(null);
 </script>
 
 <div
-	class="stage-story-wrapper"
-	style="--stage-wrapper-height: {NODE_RADIUS * 2}px"
+	class="stage-harness"
+	style="--stage-harness-height: {NODE_RADIUS * 2}px"
 	data-testid="stage-callbacks"
 	data-last-node-click={lastNodeClickId ?? ''}
-	data-last-drop-node={lastDropOntoNodeIds ?? ''}
-	data-last-drop-bg={lastDropOntoBgId ?? ''}
+	data-last-node-moved={lastNodeMoved ? `${lastNodeMoved.nodeId},${lastNodeMoved.clientX},${lastNodeMoved.clientY}` : ''}
 	data-last-make-primary={lastMakePrimaryId ?? ''}
 	data-last-double-click-drop-bg={lastDoubleClickDropBgId ?? ''}
 	data-last-double-click-drop-node={lastDoubleClickDropNodeIds ?? ''}
@@ -62,34 +62,26 @@
 	<Stage
 		{getNodeAt}
 		onNodeClick={(n) => {
-			console.log('StageStoryWrapper: onNodeClick', n.id);
 			lastNodeClickId = n.id;
 		}}
-		onNodeDropOntoNode={(s, t) => {
-			console.log('StageStoryWrapper: onNodeDropOntoNode', s.id, t.id);
-			lastDropOntoNodeIds = `${s.id},${t.id}`;
-		}}
-		onNodeDropOntoBackground={(n) => {
-			console.log('StageStoryWrapper: onNodeDropOntoBackground', n.id);
-			lastDropOntoBgId = n.id;
+		onNodeMoved={(n, clientX, clientY) => {
+			lastNodeMoved = { nodeId: n.id, clientX, clientY };
+			onNodeMovedProp?.(n, clientX, clientY);
 		}}
 		onNodeMakePrimary={(n) => {
-			console.log('StageStoryWrapper: onNodeMakePrimary', n.id);
 			lastMakePrimaryId = n.id;
 		}}
 		onNodeDoubleClickDropOntoNode={(s, t) => {
-			console.log('StageStoryWrapper: onNodeDoubleClickDropOntoNode', s.id, t.id);
 			lastDoubleClickDropNodeIds = `${s.id},${t.id}`;
 		}}
 		onNodeDoubleClickDropOntoBackground={(n) => {
-			console.log('StageStoryWrapper: onNodeDoubleClickDropOntoBackground', n.id);
 			lastDoubleClickDropBgId = n.id;
 		}}
 	>
 		{#each nodes as node (node.id)}
 			{@const pos = positions[node.id] ?? { left: '50%', top: '50%' }}
 			<div
-				class="node-wrapper"
+				class="node-harness"
 				style="position: absolute; left: {pos.left}; top: {pos.top}; transform: translate(-50%, -50%);"
 				data-node-id={node.id}
 			>
@@ -100,10 +92,10 @@
 </div>
 
 <style>
-	.stage-story-wrapper {
+	.stage-harness {
 		position: relative;
 		width: 100%;
-		height: var(--stage-wrapper-height);
+		height: var(--stage-harness-height);
 		overflow: hidden;
 		touch-action: none;
 	}

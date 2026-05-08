@@ -17,10 +17,8 @@
 		dragThreshold?: number;
 		/** Callback when user single-clicks a node (no drag). */
 		onNodeClick?: (node: NodeData) => void;
-		/** Callback when user drops a node onto another node (single-click drag). */
-		onNodeDropOntoNode?: (sourceNode: NodeData, targetNode: NodeData) => void;
-		/** Callback when user drops a node onto background (single-click drag). */
-		onNodeDropOntoBackground?: (node: NodeData) => void;
+		/** Callback when user single-click-drags a node and releases (move node); (clientX, clientY) is the release position. */
+		onNodeMoved?: (node: NodeData, clientX: number, clientY: number) => void;
 		/** Callback when user double-clicks a node (make primary). */
 		onNodeMakePrimary?: (node: NodeData) => void;
 		/** Callback when user double-click-drags and drops onto another node (e.g. add edge). */
@@ -33,8 +31,7 @@
 		getNodeAt,
 		dragThreshold = DRAG_THRESHOLD,
 		onNodeClick,
-		onNodeDropOntoNode,
-		onNodeDropOntoBackground,
+		onNodeMoved,
 		onNodeMakePrimary,
 		onNodeDoubleClickDropOntoNode,
 		onNodeDoubleClickDropOntoBackground,
@@ -92,6 +89,11 @@
 		if (panStart) {
 			panX = panStart.panX + (e.clientX - panStart.clientX);
 			panY = panStart.panY + (e.clientY - panStart.clientY);
+		} else if (dragNode && dragStartPos && !isDoubleClickSession) {
+			const dist = pointerDistance(dragStartPos.x, dragStartPos.y, e.clientX, e.clientY);
+			if (dist >= dragThreshold) {
+				onNodeMoved?.(dragNode, e.clientX, e.clientY);
+			}
 		}
 	}
 
@@ -119,15 +121,7 @@
 							onNodeDoubleClickDropOntoBackground?.(dragNode);
 						}
 					} else {
-						if (dropTarget) {
-							if (dropTarget.id === dragNode.id) {
-								if (dist >= dragThreshold) onNodeDropOntoNode?.(dragNode, dropTarget);
-							} else {
-								onNodeDropOntoNode?.(dragNode, dropTarget);
-							}
-						} else {
-							onNodeDropOntoBackground?.(dragNode);
-						}
+						onNodeMoved?.(dragNode, e.clientX, e.clientY);
 					}
 				} else {
 					// Click (no drag)

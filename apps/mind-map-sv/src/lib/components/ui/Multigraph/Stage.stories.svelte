@@ -1,24 +1,22 @@
 <script module lang="ts">
 	import { defineMeta } from '@storybook/addon-svelte-csf';
 	import { expect, within } from 'storybook/test';
-	import StageStoryWrapper from './StageStoryWrapper.svelte';
+	import StageHarness from './StageHarness.svelte';
 	import type { NodeData } from '../types/node';
 	import { DBL_CLICK_MS, DRAG_THRESHOLD, NODE_RADIUS } from '$lib/constants';
 
-	const NODE_1: NodeData = {
-		id: 'node-1',
-		title: 'Node One',
-		description: 'First node'
-	};
-	const NODE_2: NodeData = {
-		id: 'node-2',
-		title: 'Node Two',
-		description: 'Second node'
-	};
+	const NODES: NodeData[] = [];
+	for (let i = 0; i < 10; i++) {
+		NODES.push({
+			id: `node-${i}`,
+			title: `Node ${i}`,
+			description: `Node ${i} description`
+		});
+	}
 
 	const { Story } = defineMeta({
 		title: 'Components/Multigraph/Stage',
-		component: StageStoryWrapper,
+		component: StageHarness,
 		tags: [],
 		argTypes: {
 			nodes: { control: 'object' },
@@ -110,6 +108,12 @@
 	}
 </script>
 
+
+<Story
+	name="Summary"
+	args={{ nodes: NODES.slice(0, 3) }}
+/>
+
 <Story
 	name="Empty"
 	args={{ nodes: [] }}
@@ -148,12 +152,12 @@
 <Story
 	name="SingleNode"
 	args={{
-		nodes: [NODE_1]
+		nodes: [NODES[0]]
 	}}
 	play={async ({ canvasElement }) => {
 		const wrapper = canvasElement.querySelector('[data-testid="stage-callbacks"]') as HTMLElement;
 		expect(wrapper).toBeInTheDocument();
-		await expect(within(canvasElement).getByText(NODE_1.title)).toBeInTheDocument();
+		await expect(within(canvasElement).getByText(NODES[0].title)).toBeInTheDocument();
 
 		const stage = getStage(canvasElement);
 		const circle = canvasElement.querySelector('.circle') as HTMLElement;
@@ -166,7 +170,7 @@
 		// Double-click to make primary node
 		await dispatchDoubleClick(circle, nodeCenter.x, nodeCenter.y);
 		await sleep();
-		expect(wrapper.dataset.lastMakePrimary).toBe(NODE_1.id);
+		expect(wrapper.dataset.lastMakePrimary).toBe(NODES[0].id);
 
 		// Double-click then drag to background (add node/edge)
 		await dispatchDoubleClickDrag(
@@ -178,7 +182,7 @@
 			nodeCenter.y + (NODE_RADIUS + 10)
 		);
 		await sleep();
-		expect(wrapper.dataset.lastDoubleClickDropBg).toBe(NODE_1.id);
+		expect(wrapper.dataset.lastDoubleClickDropBg).toBe(NODES[0].id);
 
 		// Double-click then drag node 1 onto itself
 		await dispatchDoubleClickDrag(
@@ -190,37 +194,42 @@
 			nodeCenter.y + DRAG_THRESHOLD * 2
 		);
 		await sleep();
-		expect(wrapper.dataset.lastDoubleClickDropNode).toBe(`${NODE_1.id},${NODE_1.id}`);
+		expect(wrapper.dataset.lastDoubleClickDropNode).toBe(`${NODES[0].id},${NODES[0].id}`);
 
 		// Single-click with no drag
 		dispatchPointer(circle, 'pointerdown', nodeCenter.x, nodeCenter.y);
 		dispatchPointer(circle, 'pointerup', nodeCenter.x, nodeCenter.y);
 		await sleep(DBL_CLICK_MS);
-		expect(wrapper.dataset.lastNodeClick).toBe(NODE_1.id);
+		expect(wrapper.dataset.lastNodeClick).toBe(NODES[0].id);
 
-		// Single-click drag to background (move node)
+		// Single-click drag to move node
+		const moveToX = nodeCenter.x + (NODE_RADIUS + 10);
+		const moveToY = nodeCenter.y;
 		dispatchPointer(circle, 'pointerdown', nodeCenter.x, nodeCenter.y);
-		dispatchPointer(circle, 'pointermove', nodeCenter.x + (NODE_RADIUS + 10), nodeCenter.y);
-		dispatchPointer(circle, 'pointerup', nodeCenter.x + (NODE_RADIUS + 10), nodeCenter.y);
+		dispatchPointer(stage, 'pointermove', moveToX, moveToY);
+		dispatchPointer(stage, 'pointerup', moveToX, moveToY);
 		await sleep();
-		expect(wrapper.dataset.lastDropBg).toBe(NODE_1.id);
+		const moved = wrapper.dataset.lastNodeMoved ?? '';
+		expect(moved.startsWith(NODES[0].id)).toBe(true);
+		expect(moved).toContain(String(Math.round(moveToX)));
+		expect(moved).toContain(String(Math.round(moveToY)));
 	}}
 />
 
 <Story
 	name="TwoNodes"
 	args={{
-		nodes: [NODE_1, NODE_2],
+		nodes: [NODES[0], NODES[1]],
 		positions: {
-			[NODE_1.id]: { left: '30%', top: '50%' },
-			[NODE_2.id]: { left: '70%', top: '50%' }
+			[NODES[0].id]: { left: '30%', top: '50%' },
+			[NODES[1].id]: { left: '70%', top: '50%' }
 		}
 	}}
 	play={async ({ canvasElement }) => {
 		const wrapper = canvasElement.querySelector('[data-testid="stage-callbacks"]') as HTMLElement;
 		expect(wrapper).toBeInTheDocument();
-		await expect(within(canvasElement).getByText(NODE_1.title)).toBeInTheDocument();
-		await expect(within(canvasElement).getByText(NODE_2.title)).toBeInTheDocument();
+		await expect(within(canvasElement).getByText(NODES[0].title)).toBeInTheDocument();
+		await expect(within(canvasElement).getByText(NODES[1].title)).toBeInTheDocument();
 
 		const stage = getStage(canvasElement);
 		const circles = canvasElement.querySelectorAll('.circle');
@@ -233,17 +242,20 @@
 		const fromCenter = getCenter(firstCircle);
 		const toCenter = getCenter(secondCircle);
 
-		// Single-click drag node 1 onto node 2 (move node)
+		// Single-click drag node 1 to move it (release at a new position)
+		const moveToX = fromCenter.x + 80;
+		const moveToY = fromCenter.y;
 		dispatchPointer(stage, 'pointerdown', fromCenter.x, fromCenter.y);
-		dispatchPointer(stage, 'pointermove', toCenter.x, toCenter.y);
-		dispatchPointer(stage, 'pointerup', toCenter.x, toCenter.y);
+		dispatchPointer(stage, 'pointermove', moveToX, moveToY);
+		dispatchPointer(stage, 'pointerup', moveToX, moveToY);
 		await sleep();
-		expect(wrapper.dataset.lastDropNode).toBe(`${NODE_1.id},${NODE_2.id}`);
+		const moved = wrapper.dataset.lastNodeMoved ?? '';
+		expect(moved.startsWith(NODES[0].id)).toBe(true);
 
 		// Double-click node 1 to make primary
 		await dispatchDoubleClick(firstCircle, fromCenter.x, fromCenter.y);
 		await sleep();
-		expect(wrapper.dataset.lastMakePrimary).toBe(NODE_1.id);
+		expect(wrapper.dataset.lastMakePrimary).toBe(NODES[0].id);
 
 		// Double-click then drag node 1 onto node 2 (add edge)
 		await dispatchDoubleClickDrag(
@@ -255,7 +267,7 @@
 			toCenter.y
 		);
 		await sleep();
-		expect(wrapper.dataset.lastDoubleClickDropNode).toBe(`${NODE_1.id},${NODE_2.id}`);
+		expect(wrapper.dataset.lastDoubleClickDropNode).toBe(`${NODES[0].id},${NODES[1].id}`);
 	}}
 />
 

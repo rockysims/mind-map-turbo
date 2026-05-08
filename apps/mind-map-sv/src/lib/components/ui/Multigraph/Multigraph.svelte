@@ -48,12 +48,10 @@
 		toast(`Clicked "${node.title}"`);
 	}
 
-	function handleNodeDropOntoNode(source: NodeData, target: NodeData) {
-		toast(`Moved "${source.title}" onto "${target.title}"`);
-	}
-
-	function handleNodeDropOntoBackground(node: NodeData) {
-		toast(`Moved "${node.title}" to background`);
+	function handleNodeMoved(node: NodeData, clientX: number, clientY: number) {
+		const nodePos = multigraphData.posByNodeId[node.id] ?? { x: 0, y: 0 };
+		const offset = { x: clientX - nodePos.x, y: clientY - nodePos.y };
+		multigraphData.posByNodeId[node.id] = { x: clientX - offset.x, y: clientY - offset.y };
 	}
 
 	function handleNodeMakePrimary(node: NodeData) {
@@ -78,8 +76,7 @@
 	<Stage
 		{getNodeAt}
 		onNodeClick={handleNodeClick}
-		onNodeDropOntoNode={handleNodeDropOntoNode}
-		onNodeDropOntoBackground={handleNodeDropOntoBackground}
+		onNodeMoved={handleNodeMoved}
 		onNodeMakePrimary={handleNodeMakePrimary}
 		onNodeDoubleClickDropOntoNode={handleNodeDoubleClickDropOntoNode}
 		onNodeDoubleClickDropOntoBackground={handleNodeDoubleClickDropOntoBackground}
@@ -90,7 +87,7 @@
 				data-node-id={primaryNode.id}
 				style={
 					primaryPos
-						? `left: ${primaryPos.x}px; top: ${primaryPos.y}px; transform: translate(-50%, -50%);`
+						? `left: calc(50% + ${primaryPos.x}px); top: calc(50% + ${primaryPos.y}px); transform: translate(-50%, -50%);`
 						: 'left: 50%; top: 50%; transform: translate(-50%, -50%);'
 				}
 			>

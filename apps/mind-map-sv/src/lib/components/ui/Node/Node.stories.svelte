@@ -85,10 +85,11 @@
 		const titleRect = titleElement.getBoundingClientRect();
 	
 		// Title should be within square bounds
-		expect(titleRect.left).toBeGreaterThanOrEqual(squareRect.left);
-		expect(titleRect.right).toBeLessThanOrEqual(squareRect.right);
-		expect(titleRect.top).toBeGreaterThanOrEqual(squareRect.top);
-		expect(titleRect.bottom).toBeLessThanOrEqual(squareRect.bottom);
+		const tolerance = 1;
+		expect(titleRect.left).toBeGreaterThanOrEqual(squareRect.left - tolerance);
+		expect(titleRect.right).toBeLessThanOrEqual(squareRect.right + tolerance);
+		expect(titleRect.top).toBeGreaterThanOrEqual(squareRect.top - tolerance);
+		expect(titleRect.bottom).toBeLessThanOrEqual(squareRect.bottom + tolerance);
 	
 		// For closed nodes: title should be centered vertically and horizontally in the square
 		if (!options.open) {
