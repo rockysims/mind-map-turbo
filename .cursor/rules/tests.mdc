@@ -1,0 +1,95 @@
+---
+description: Testing patterns — unit specs, story tests, e2e, and fixtures
+globs: **/*.{spec,test}.ts,**/*.stories.svelte
+alwaysApply: false
+---
+
+# Testing conventions
+
+This project has three Vitest projects (see `apps/mind-map-sv/vite.config.ts`):
+
+| Project | Env | Files | Use for |
+|---|---|---|---|
+| `server` | node | `**/*.spec.ts`, `**/*.test.ts` (non-svelte) | pure logic, no DOM |
+| `client` | browser (chromium) | `**/*.svelte.{spec,test}.ts` | component-level tests needing real DOM |
+| `storybook` | browser (chromium) | every `*.stories.svelte` `play` | scenario / behavior tests |
+
+Plus Playwright for E2E (`apps/mind-map-sv/e2e/*.test.ts`) — full app flow only.
+
+## Decision tree for "where does this test go?"
+
+1. Pure function (no DOM, no Svelte)? → unit spec colocated with the source.
+2. Component behavior, gesture, or visual scenario? → Storybook story with `play`.
+3. Persistence, routing, or multi-page flow? → Playwright e2e.
+4. CSS regression / visual diff? → already covered by Chromatic on every story.
+
+When in doubt, write the unit spec first; reach for Storybook only when the
+behavior genuinely involves the DOM (gestures, layout measurement, focus).
+
+## Unit spec template
+
+```ts
+import { describe, it, expect } from 'vitest';
+import { foo } from './foo';
+
+describe('foo', () => {
+  describe('when given empty input', () => {
+    it('returns the empty fallback', () => {
+      expect(foo([])).toEqual([]);
+    });
+  });
+  // ... more cases
+});
+```
+
+Pattern after `Multigraph/lib/graphMath.spec.ts`.
+
+## Story `play` template
+
+```svelte
+<Story
+  name="UserPinsANode"
+  args={{ nodes: NODES.slice(0, 3) }}
+  play={async ({ canvasElement }) => {
+    const wrapper = canvasElement.querySelector('[data-testid="stage-callbacks"]') as HTMLElement;
+    expect(wrapper).toBeInTheDocument();
+    // synthesize gesture, wait for layout, assert on data-* attribute
+  }}
+/>
+```
+
+Pattern after `Multigraph/Stage.stories.svelte`. Always:
+- Name stories like a sentence describing the user behavior tested
+- Assert on `data-*` attributes from the harness, not on internal component state
+- Use `await waitForLayout()` and `await sleep()` from the existing helpers
+
+## Use the harness, don't replace it
+
+`StageHarness.svelte` exposes Stage's callback firings as `data-last-*`
+attributes. New stage-related stories must assert via the harness. If you need
+a new callback exposed, add a `data-last-...` attribute to the harness — don't
+fork it.
+
+## Test fixtures
+
+Use `apps/mind-map-sv/src/lib/components/ui/Multigraph/lib/testFixtures.ts`
+to build graph data. Don't hand-roll inline node/edge arrays in every test —
+extend the fixtures helper instead.
+
+## Do not test implementation details
+
+- Don't assert on private state.
+- Don't snapshot whole DOM trees (Chromatic handles visual regression).
+- Do assert on the user-visible outcome and on the public callback contract.
+
+## Always run tests before claiming done
+
+```bash
+pnpm --filter mind-map-sv test:unit -- --run
+```
+
+If you touched anything visible, also confirm Storybook builds:
+
+```bash
+pnpm --filter mind-map-sv build-storybook
+```

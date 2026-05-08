@@ -1,0 +1,47 @@
+---
+description: Core workflow, test discipline, and definition-of-done for every change
+alwaysApply: true
+---
+
+# Core conventions
+
+This is a Turborepo with one SvelteKit 2 / Svelte 5 app at `apps/mind-map-sv`.
+Always work from the repo root unless a script explicitly says otherwise.
+
+## Architecture: pure logic first, components thin
+
+- Behavior goes into pure TypeScript modules under `apps/mind-map-sv/src/lib/components/<Component>/lib/*.ts` (or a sibling `lib/` for app-level logic).
+- Svelte components hold state and wire up pure functions; they should not contain non-trivial branching, math, or data transforms.
+- Every pure module has a colocated `*.spec.ts` next to it.
+- Example pattern that already exists: `Multigraph/lib/graphMath.ts` ↔ `Multigraph/lib/graphMath.spec.ts`.
+
+## Definition of Done (every change must satisfy these before claiming complete)
+
+1. New behavior has tests. New pure functions get unit specs; new component behavior gets a Storybook story with a `play` function.
+2. `pnpm --filter mind-map-sv lint` passes.
+3. `pnpm --filter mind-map-sv check` (svelte-check) passes.
+4. `pnpm --filter mind-map-sv test:unit -- --run` passes.
+5. If you touched gestures, layout, or anything visible: run the relevant story locally (or rely on the storybook Vitest project to run the `play`).
+6. Commit message follows Conventional Commits (see `commits.mdc`).
+7. No tracked changes to `.svelte-kit/`, build output, or log files (those are gitignored).
+
+You must actually run the commands above and report results. Do not claim done from "I think this is fine".
+
+## When in doubt
+
+- Prefer adding a pure function with a spec over inlining logic in a `.svelte` file.
+- Prefer adding a story over inventing a new test harness.
+- Prefer extending the existing `StageHarness.svelte` pattern over adding component-level Vitest tests.
+- Read `docs/roadmaps/` for the active roadmap and current milestone before starting non-trivial work.
+
+## Where things live
+
+| Concern | Location |
+|---|---|
+| Pure graph/layout/physics logic | `apps/mind-map-sv/src/lib/components/ui/Multigraph/lib/*.ts` |
+| Component | `apps/mind-map-sv/src/lib/components/ui/<Name>/<Name>.svelte` |
+| Story | `apps/mind-map-sv/src/lib/components/ui/<Name>/<Name>.stories.svelte` |
+| Unit spec | colocated next to the `.ts` file as `*.spec.ts` |
+| E2E | `apps/mind-map-sv/e2e/*.test.ts` |
+| Test fixtures | `apps/mind-map-sv/src/lib/components/ui/Multigraph/lib/testFixtures.ts` |
+| Roadmaps & plans | `docs/roadmaps/<YYYY-MM-DD> <name>/` |

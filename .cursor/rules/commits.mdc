@@ -1,0 +1,68 @@
+---
+description: Conventional Commits format and PR workflow
+alwaysApply: true
+---
+
+# Commits and PRs
+
+## Format: Conventional Commits
+
+```
+<type>(<scope>): <imperative subject in lowercase>
+
+<body explaining WHY, wrapped at ~80 chars, optional but encouraged>
+```
+
+### Allowed types
+
+| Type | Use for |
+|---|---|
+| `feat` | user-visible new behavior |
+| `fix` | user-visible bug fix |
+| `refactor` | internal restructure, no behavior change |
+| `perf` | performance improvement |
+| `test` | adding or improving tests only |
+| `docs` | docs, README, comments |
+| `chore` | tooling, deps, build, gitignore, configs |
+| `style` | formatting only (rare; usually rolled into another type) |
+| `build` | build system or external deps |
+| `ci` | CI configuration |
+
+### Scope
+
+Use the most specific name available, e.g. `stage`, `node`, `graph`,
+`layout`, `physics`, `multigraph`, `repo`, `storybook`, `deps`.
+
+### Examples
+
+```
+feat(graph): add togglePinned mutation with hops recomputation
+fix(stage): release pointer capture on pointercancel during pinch
+refactor(stage): unify single-click drag into onNodeMoved
+test(layout): cover scaleByHops floor and falloff edge cases
+chore(deps): bump @storybook/addon-vitest to ^10.3
+docs(roadmap): mark milestone 02 complete and link to plan
+```
+
+## One logical change per commit
+
+Don't mix a refactor with a feature. Don't mix gitignore changes with code
+changes. If you find yourself writing "and" in a commit subject, split it.
+
+## Body explains WHY, not WHAT
+
+The diff already shows what changed. The body should explain why this change
+exists, what alternatives you considered, and any non-obvious constraints.
+
+## Before committing
+
+- Generated files (`.svelte-kit/`, `*storybook*.log`, build outputs) must
+  not be in the staged diff. If they are, your `.gitignore` is broken.
+- Tests for the change must already pass locally (see `core.mdc` Definition of Done).
+
+## PRs
+
+- Title = lead commit subject (Conventional Commits format).
+- Description = the "Definition of Done" checklist from
+  `.github/PULL_REQUEST_TEMPLATE.md`, filled in.
+- Link the milestone doc the PR is delivering against.

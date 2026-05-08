@@ -1,0 +1,65 @@
+---
+description: Svelte 5 runes-mode conventions for this project
+globs: **/*.svelte
+alwaysApply: false
+---
+
+# Svelte 5 conventions
+
+This project uses Svelte 5 in **runes mode**. Do not use legacy reactive
+syntax (`$:`, `export let`, `<svelte:component>`'s old form, on:click, etc.).
+
+## Props
+
+```svelte
+<script lang="ts">
+  let { foo = 'default', onClick }: { foo?: string; onClick?: () => void } = $props();
+</script>
+```
+
+## Local state and derived values
+
+```svelte
+<script lang="ts">
+  let count = $state(0);
+  const doubled = $derived(count * 2);
+  const expensive = $derived.by(() => heavyCompute(count));
+</script>
+```
+
+## Events: callback props, not `on:event`
+
+```svelte
+<!-- BAD -->
+<button on:click={handle}>Click</button>
+
+<!-- GOOD -->
+<button onclick={handle}>Click</button>
+```
+
+For component "events", expose callback props (`onNodeClick`, `onNodeMoved`, etc.).
+See `Stage.svelte` for the canonical pattern.
+
+## Component should be thin
+
+If a component grows non-trivial logic (math, branching, data transforms),
+extract it to a pure `.ts` file in a sibling `lib/` folder and add a spec.
+The component's job is state, props, and DOM/events — not behavior.
+
+## Mutating state
+
+Prefer treating shared state (like `MultigraphData`) as immutable: call a pure
+function that returns a new value. Avoid in-place mutation of complex objects
+(e.g. `posByNodeId[id] = ...`) — wrap it in a tested function.
+
+## Pointer events, not mouse/touch
+
+Use Pointer Events for any drag/tap/pan/pinch UI. They unify mouse/touch/pen
+and avoid the iOS 300ms-tap pitfalls. `Stage.svelte` is the reference.
+
+## Mobile-first gotchas
+
+- Set `touch-action: none` on draggable surfaces.
+- Use `setPointerCapture` for ongoing drags.
+- Don't rely on `:hover` for required information.
+- Keep tap targets ≥ 32–44 px regardless of visual scale.

@@ -1,0 +1,71 @@
+---
+description: TypeScript conventions for pure-logic modules and shared types
+globs: **/*.ts
+alwaysApply: false
+---
+
+# TypeScript conventions
+
+## Pure modules first
+
+`lib/*.ts` files should be pure: no DOM access, no globals, no side effects.
+Take inputs, return outputs. This makes them trivially unit-testable and
+trivially reasoned about by AI tooling.
+
+```ts
+// BAD: reaches into the DOM, hard to test
+export function clampScaleFromElement(el: HTMLElement): number { ... }
+
+// GOOD: pure, easy to spec
+export function clampScale(scale: number, min = 0.25, max = 4): number {
+  return Math.min(Math.max(scale, min), max);
+}
+```
+
+## Immutable data flow
+
+Functions that operate on `MultigraphData` (or any shared state) must return
+a new object rather than mutating. This unlocks undo/redo, time-travel debugging,
+and Svelte 5 fine-grained reactivity.
+
+```ts
+// BAD
+export function moveNode(data: MultigraphData, id: string, p: Point) {
+  data.posByNodeId[id] = p;
+}
+
+// GOOD
+export function moveNode(data: MultigraphData, id: string, p: Point): MultigraphData {
+  return { ...data, posByNodeId: { ...data.posByNodeId, [id]: p } };
+}
+```
+
+## Configurable, not constant
+
+When a function depends on a tuning value (radius, falloff, threshold, etc.),
+make it a parameter with a default — never read a constant directly. This
+makes it pinnable in tests.
+
+```ts
+export function scaleByHops(hops: number, falloff = 0.7, min = 0.1): number {
+  return Math.max(min, falloff ** hops);
+}
+```
+
+## Types live in shared files
+
+- Shared types: `apps/mind-map-sv/src/lib/components/ui/types/*.ts`
+- Module-local types: defined inline at the top of the consuming `.ts` file
+- Don't re-define `NodeData` / `EdgeData` / `MultigraphData` / `Point` — import them.
+
+## No `any`, no `as` casts without a comment
+
+If you have to assert a type, leave a one-line comment explaining why the
+type system can't see it.
+
+## File naming
+
+- Pure modules: `camelCase.ts` (e.g. `graphMath.ts`, `hitTest.ts`)
+- Specs: same name + `.spec.ts` (e.g. `graphMath.spec.ts`)
+- Test fixtures: `testFixtures.ts`
+- Type-only files: `singularNoun.ts` in a `types/` folder
