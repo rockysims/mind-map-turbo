@@ -39,3 +39,24 @@ To run the app in docker:
 cd apps/mind-map-sv
 docker compose up
 ```
+
+---
+
+# TODO:
+```
+TODO: delete this todo section from the readme
+
+TODO: delete auto gen code I no longer use (so it doesn't distract)
+
+TODO: write story tests as stuff like "Test: Make node primary"
+	tests double as list of what software does
+
+Testability:
+Load data (test once)
+Logic on data (test each mutation function without needing to retest save/load)
+Save data to DB (test once)
+
+Remind myself what open badges is (or ask Nate)
+PostGresql (ask AI about this vs MySql)
+Redis (in memory cache. probably enough to know)
+```
