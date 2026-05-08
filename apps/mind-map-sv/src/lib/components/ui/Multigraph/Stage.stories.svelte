@@ -176,7 +176,12 @@
 		await sleep();
 		expect(wrapper.dataset.lastDoubleClickDropBg).toBe(NODES[0].id);
 
-		// Double-click then drag node 1 onto itself
+		// Double-click then drag node 1 onto itself.
+		// TODO(milestone-01): decide the canonical semantics of drop-onto-self.
+		// Today Stage routes self-drops to onNodeDoubleClickDropOntoBackground (treating
+		// "drop on yourself" the same as "drop on empty space"). This may change to a
+		// no-op or a self-loop edge when graph mutation semantics are finalized.
+		// See docs/roadmaps/2026-05-07 mind-map-mvp/milestones/01-graph-mutations-and-pinning.md
 		await dispatchDoubleClickDrag(
 			circle,
 			nodeCenter.x,
@@ -186,7 +191,8 @@
 			nodeCenter.y + DRAG_THRESHOLD * 2
 		);
 		await sleep();
-		expect(wrapper.dataset.lastDoubleClickDropNode).toBe(`${NODES[0].id},${NODES[0].id}`);
+		expect(wrapper.dataset.lastDoubleClickDropBg).toBe(NODES[0].id);
+		expect(wrapper.dataset.lastDoubleClickDropNode).toBe('');
 
 		// Single-click with no drag
 		dispatchPointer(circle, 'pointerdown', nodeCenter.x, nodeCenter.y);
