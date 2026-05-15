@@ -38,7 +38,7 @@ for a SvelteKit API + Postgres without touching any UI code.
 
 - Page mounts with a `graphId` (URL param or default). Loads on mount,
   saves on every state change with **debounced** flush (~500 ms).
-- Save errors surface via `svelte-sonner` toasts.
+- Save errors surface through a small non-blocking notice.
 - A small toolbar control to "New graph" / "Load graph" / "Delete" that
   uses `list()` and `delete()`.
 

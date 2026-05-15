@@ -18,8 +18,7 @@ without diving into a debug toast.
 
 - Single tap (or click) on a node opens an **edit sheet / dialog** with
   fields for title and description, and a "Pin / Unpin" toggle.
-  - On desktop: a side panel or modal (use the existing `dialog`
-    component under `src/lib/components/ui/dialog/`).
+  - On desktop: a side panel or modal.
   - On mobile: a bottom sheet (slide up from bottom, swipe-down to
     dismiss).
 - Save = persists to the in-memory `MultigraphData` via `graph.ts`
@@ -78,13 +77,12 @@ without diving into a debug toast.
 - **Keyboard shortcuts** beyond Esc-to-close. Full keyboard nav can
   come later.
 - **Internationalization.**
-- **Theming / dark mode** beyond what `mode-watcher` already provides
-  via Tailwind.
+- **Theming / dark mode** beyond the app's base Tailwind theme.
 
 ## Risks and open questions
 
 - **Long-press vs accidental-drag.** Long-press recognition must
-  *cancel* if pointer moves more than a few px (already similar to
+  _cancel_ if pointer moves more than a few px (already similar to
   `dragThreshold` logic). Distance threshold goes in `LONG_PRESS_DIST`.
 - **Sheet interaction with stage gestures.** When the sheet is open,
   stage pointer events should be paused. Decide via z-index + a
@@ -96,6 +94,6 @@ without diving into a debug toast.
 
 ## References
 
-- Existing `bits-ui` and `dialog/` component scaffold.
-- `mode-watcher` is already a dep — useful for sheet themes.
+- Add a focused modal/sheet primitive when this milestone starts; the
+  earlier unused dialog scaffold was removed before milestone 01.
 - `.cursor/rules/svelte.mdc` ("Mobile-first gotchas").

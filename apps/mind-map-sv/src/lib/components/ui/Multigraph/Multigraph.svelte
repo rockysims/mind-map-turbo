@@ -1,11 +1,9 @@
 <script lang="ts">
-	import { toast } from 'svelte-sonner';
 	import Node from '$lib/components/ui/Node/Node.svelte';
 	import Stage from './Stage.svelte';
 	import type { NodeData } from '../types/node';
 	import type { MultigraphData } from '../types/multigraph';
 	import { isPointInCircle } from './lib/hitTest.js';
-	import { Toaster } from '../sonner/index.js';
 
 	const {
 		multigraphData = { nodes: [], edges: [], posByNodeId: {} },
@@ -42,8 +40,8 @@
 		return multigraphData.nodes.find((n) => n.id === nodeId) ?? null;
 	}
 
-	function handleNodeClick(node: NodeData) {
-		toast(`Clicked "${node.title}"`);
+	function handleNodeClick() {
+		// Milestone 03 owns node editing/opening behavior.
 	}
 
 	function handleNodeMoved(node: NodeData, clientX: number, clientY: number) {
@@ -52,25 +50,20 @@
 		multigraphData.posByNodeId[node.id] = { x: clientX - offset.x, y: clientY - offset.y };
 	}
 
-	function handleNodeMakePrimary(node: NodeData) {
-		toast(`Set "${node.title}" as primary`);
+	function handleNodeMakePrimary() {
+		// Milestone 01 will route this gesture through togglePinned.
 	}
 
-	function handleNodeDoubleClickDropOntoNode(source: NodeData, target: NodeData) {
-		toast.info('TODO: add node/edge', {
-			description: `${source.title} → ${target.title}`
-		});
+	function handleNodeDoubleClickDropOntoNode() {
+		// Milestone 01 will route this gesture through addEdge.
 	}
 
-	function handleNodeDoubleClickDropOntoBackground(node: NodeData) {
-		toast.info('TODO: add node/edge', {
-			description: `From "${node.title}" to background`
-		});
+	function handleNodeDoubleClickDropOntoBackground() {
+		// Milestone 01 will route this gesture through addNode and addEdge.
 	}
 </script>
 
 <div class="graph">
-	<Toaster />
 	<Stage
 		{getNodeAt}
 		onNodeClick={handleNodeClick}

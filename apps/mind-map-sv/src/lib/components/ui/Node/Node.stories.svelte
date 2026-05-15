@@ -166,8 +166,6 @@
 				expect(hasVerticalScroll).toBe(true);
 			}
 			if (!options.short) {
-				console.log({ descriptionStyles, '.borderRadius': descriptionStyles.borderRadius });
-
 				expect(descriptionStyles.boxShadow).not.toBe('');
 				expect(parseFloat(descriptionStyles.borderRadius)).toBeGreaterThan(0);
 			}

@@ -1,9 +1,12 @@
 <script lang="ts">
-	import type { PageProps } from './$types';
+	import Multigraph from '$lib/components/ui/Multigraph/Multigraph.svelte';
+	import type { MultigraphData } from '$lib/components/ui/types/multigraph';
 
-	const { data }: PageProps = $props();
+	const graph: MultigraphData = {
+		nodes: [{ id: 'n0', title: 'Node 0', description: 'Description for node 0' }],
+		edges: [],
+		posByNodeId: { n0: { x: 0, y: 0 } }
+	};
 </script>
 
-<h1>Welcome to SvelteKit!</h1>
-<p>Visit <a href="https://svelte.dev/docs/kit">svelte.dev/docs/kit</a> to read the documentation</p>
-APP_NAME: {data.appName || 'Fallback APP_NAME from page'}<br />
+<Multigraph multigraphData={graph} defaultPrimaryNodeId="n0" />

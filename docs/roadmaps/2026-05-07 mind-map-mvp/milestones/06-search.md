@@ -19,7 +19,7 @@ pins (or focuses) the node so it scales up to full size.
   - `buildIndex(data: MultigraphData): SearchIndex` — flat array of
     `{ id, title, description }` with lowercased fields.
   - `query(index: SearchIndex, q: string, opts?: { limit?: number }):
-    SearchHit[]` — substring + fuzzy match (small custom scorer; no
+SearchHit[]` — substring + fuzzy match (small custom scorer; no
     external dep needed for MVP).
 - Index rebuilds on every state change (cheap for MVP; precompute and
   cache later).
@@ -79,5 +79,5 @@ pins (or focuses) the node so it scales up to full size.
 
 - `.cursor/rules/typescript.mdc` (configurable defaults — pass `limit`
   in, don't hardcode).
-- Cmd palette UI: `bits-ui` likely has a primitive; otherwise hand-roll
-  a small `<dialog>`-based one.
+- Cmd palette UI: choose a focused primitive during the milestone plan,
+  or hand-roll a small `<dialog>`-based one.
