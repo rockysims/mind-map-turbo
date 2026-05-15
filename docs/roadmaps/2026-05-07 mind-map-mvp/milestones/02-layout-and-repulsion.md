@@ -3,7 +3,7 @@
 **Status:** not started
 **Depends on:** milestone 01 (needs the pinned flag and immutable
 `moveNode`).
-**Plan:** _none yet._
+**Plan:** [2026-05-15 layout and repulsion](../plans/2026-05-15 layout-and-repulsion.md)
 
 ## Goal
 
@@ -31,19 +31,19 @@ nodes are small but still visible, and nothing visually overlaps.
     `baseRadius * scales[id]`.
 - New `lib/physics.ts`:
   - `relaxOverlaps(positions, radii, paddingPx, iterations = 1):
-    Record<string, Point>` — for each overlapping pair, push apart by
+Record<string, Point>` — for each overlapping pair, push apart by
     half the overlap each (anchored nodes stay put).
   - `relaxOverlapsStep(positions, radii, paddingPx, anchoredIds: Set<string>):
-    Record<string, Point>` — single iteration; `relaxOverlaps`
+Record<string, Point>` — single iteration; `relaxOverlaps`
     composes this.
 - New `lib/layoutSettings.ts` (or extend `constants.ts`):
 
   ```ts
   export interface LayoutSettings {
-    baseRadius: number;     // pixel radius at scale 1.0 (default 100)
-    scaleFalloff: number;   // 0–1 multiplier per hop  (default 0.7)
-    minScale: number;       // floor                   (default 0.1)
-    paddingPx: number;      // breathing room between circles (default 12)
+    baseRadius: number; // pixel radius at scale 1.0 (default 100)
+    scaleFalloff: number; // 0–1 multiplier per hop  (default 0.7)
+    minScale: number; // floor                   (default 0.1)
+    paddingPx: number; // breathing room between circles (default 12)
     relaxIterations: number; // physics passes per frame (default 2)
   }
   ```
