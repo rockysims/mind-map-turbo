@@ -152,7 +152,7 @@
 	args={{
 		multigraphData: makeGraph({
 			nodeCount: 2,
-			posByNodeId: { n0: { x: -120, y: 0 }, n1: { x: 120, y: 0 } }
+			posByNodeId: { n0: { x: -280, y: 0 }, n1: { x: 280, y: 0 } }
 		}),
 		defaultPrimaryNodeId: 'n0'
 	}}
@@ -178,13 +178,21 @@
 			'.edge[data-source-node-id="n0"][data-target-node-id="n1"]'
 		);
 		expect(edge).toBeInTheDocument();
+
+		const edgeRect = (edge as HTMLElement).getBoundingClientRect();
+		expect(edgeRect.left).toBeCloseTo(sourceCenter.x);
+		expect(edgeRect.right).toBeCloseTo(targetCenter.x);
+		expect(edgeRect.top + edgeRect.height / 2).toBeCloseTo(sourceCenter.y);
 	}}
 />
 
 <Story
 	name="UserAddsConnectedNodeOnBackgroundDrop"
 	args={{
-		multigraphData: makeGraph({ nodeCount: 1 }),
+		multigraphData: makeGraph({
+			nodeCount: 1,
+			posByNodeId: { n0: { x: -280, y: 0 } }
+		}),
 		defaultPrimaryNodeId: 'n0'
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
@@ -192,7 +200,7 @@
 		const stage = getStage(canvasElement);
 		const sourceCircle = getCircle(canvasElement, 'n0');
 		const sourceCenter = getCenter(sourceCircle);
-		const dropX = sourceCenter.x + NODE_RADIUS + 40;
+		const dropX = sourceCenter.x + 560;
 		const dropY = sourceCenter.y;
 
 		await dispatchDoubleClickDrag(

@@ -237,8 +237,7 @@
 		nodeData: {
 			id: 'node id short open',
 			title: 'Node title short open',
-			description:
-				'Node description and of course the description is probably going to be fairly long. Likely multiple sentences long. Maybe even more.'
+			description: 'Short description.'
 		},
 		isOpen: true
 	}}

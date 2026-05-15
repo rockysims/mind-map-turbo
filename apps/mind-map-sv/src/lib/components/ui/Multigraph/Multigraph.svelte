@@ -75,6 +75,15 @@
 
 		graph = newNode ? addEdge(graphWithNode, sourceNode.id, newNode.id) : graphWithNode;
 	}
+
+	function edgeStyle(sourcePos: Point, targetPos: Point): string {
+		const dx = targetPos.x - sourcePos.x;
+		const dy = targetPos.y - sourcePos.y;
+		const length = Math.sqrt(dx ** 2 + dy ** 2);
+		const angle = Math.atan2(dy, dx);
+
+		return `left: calc(50% + ${sourcePos.x}px); top: calc(50% + ${sourcePos.y}px); width: ${length}px; transform: translateY(-50%) rotate(${angle}rad);`;
+	}
 </script>
 
 <div class="graph">
@@ -86,23 +95,19 @@
 		onNodeDoubleClickDropOntoNode={handleNodeDoubleClickDropOntoNode}
 		onNodeDoubleClickDropOntoBackground={handleNodeDoubleClickDropOntoBackground}
 	>
-		<svg class="edges" aria-hidden="true">
+		<div class="edges" aria-hidden="true">
 			{#each graph.edges as edge (edge.id)}
 				{@const sourcePos = graph.posByNodeId[edge.sourceNodeId] ?? CENTERED_POSITION}
 				{@const targetPos = graph.posByNodeId[edge.targetNodeId] ?? CENTERED_POSITION}
-				<line
+				<div
 					class="edge"
 					data-edge-id={edge.id}
 					data-source-node-id={edge.sourceNodeId}
 					data-target-node-id={edge.targetNodeId}
-					x1={`calc(50% + ${sourcePos.x}px)`}
-					y1={`calc(50% + ${sourcePos.y}px)`}
-					x2={`calc(50% + ${targetPos.x}px)`}
-					y2={`calc(50% + ${targetPos.y}px)`}
-					stroke={edge.color}
-				/>
+					style={`${edgeStyle(sourcePos, targetPos)} background-color: ${edge.color};`}
+				></div>
 			{/each}
-		</svg>
+		</div>
 
 		{#each graph.nodes as node (node.id)}
 			{@const nodePos = graph.posByNodeId[node.id] ?? CENTERED_POSITION}
@@ -139,6 +144,8 @@
 	}
 
 	.edge {
-		stroke-width: 2;
+		position: absolute;
+		height: 2px;
+		transform-origin: left center;
 	}
 </style>
