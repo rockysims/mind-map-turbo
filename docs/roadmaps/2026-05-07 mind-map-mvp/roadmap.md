@@ -7,7 +7,7 @@
 
 A low-friction mind-map / knowledge web that can be used live during a
 conversation by one or more people. Critically: the graph remains
-*usable* even when very large, by **pinning** nodes of interest at full
+_usable_ even when very large, by **pinning** nodes of interest at full
 size while their neighbors scale down with hop distance. Users can pan,
 zoom, drag, add nodes/edges, and have the layout self-tidy via gentle
 overlap repulsion. Mobile-first input.
@@ -32,14 +32,14 @@ doc describing scope, acceptance criteria, and risks. When work on a
 milestone is about to start, we write a dated **plan** in `plans/` that
 breaks it into individual PR-sized tasks.
 
-| # | Milestone | Status | Doc |
-|---|---|---|---|
-| 01 | Graph mutations and pinning | not started | [milestones/01-graph-mutations-and-pinning.md](milestones/01-graph-mutations-and-pinning.md) |
-| 02 | Layout: hop-distance scaling and overlap repulsion | not started | [milestones/02-layout-and-repulsion.md](milestones/02-layout-and-repulsion.md) |
-| 03 | Mobile polish and node editing UX | not started | [milestones/03-mobile-polish-and-editing.md](milestones/03-mobile-polish-and-editing.md) |
-| 04 | Persistence (local-first → server) | not started | [milestones/04-persistence.md](milestones/04-persistence.md) |
-| 05 | Multiplayer | not started | [milestones/05-multiplayer.md](milestones/05-multiplayer.md) |
-| 06 | Search | not started | [milestones/06-search.md](milestones/06-search.md) |
+| #   | Milestone                                          | Status      | Doc                                                                                                                |
+| --- | -------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------ |
+| 01  | Graph mutations and pinning                        | complete    | [milestone](milestones/01-graph-mutations-and-pinning.md), [plan](plans/2026-05-15 graph-mutations-and-pinning.md) |
+| 02  | Layout: hop-distance scaling and overlap repulsion | not started | [milestones/02-layout-and-repulsion.md](milestones/02-layout-and-repulsion.md)                                     |
+| 03  | Mobile polish and node editing UX                  | not started | [milestones/03-mobile-polish-and-editing.md](milestones/03-mobile-polish-and-editing.md)                           |
+| 04  | Persistence (local-first → server)                 | not started | [milestones/04-persistence.md](milestones/04-persistence.md)                                                       |
+| 05  | Multiplayer                                        | not started | [milestones/05-multiplayer.md](milestones/05-multiplayer.md)                                                       |
+| 06  | Search                                             | not started | [milestones/06-search.md](milestones/06-search.md)                                                                 |
 
 ## How this directory is organized
 

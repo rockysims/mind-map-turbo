@@ -22,8 +22,10 @@ Always work from the repo root unless a script explicitly says otherwise.
 3. `pnpm --filter mind-map-sv check` (svelte-check) passes.
 4. `pnpm --filter mind-map-sv test:unit -- --run` passes.
 5. If you touched gestures, layout, or anything visible: run the relevant story locally (or rely on the storybook Vitest project to run the `play`).
-6. Commit message follows Conventional Commits (see `commits.mdc`).
-7. No tracked changes to `.svelte-kit/`, build output, or log files (those are gitignored).
+6. If the work executes a roadmap plan, update the plan, milestone, and roadmap status fields before closing out.
+7. Commit message follows Conventional Commits (see `commits.mdc`).
+8. No tracked changes to `.svelte-kit/`, build output, or log files (those are gitignored).
+9. After validation passes, commit the completed logical change unless the user has explicitly said not to commit yet.
 
 You must actually run the commands above and report results. Do not claim done from "I think this is fine".
 
@@ -36,13 +38,15 @@ You must actually run the commands above and report results. Do not claim done f
 
 ## Roadmaps, milestones, plans
 
-Three layers, each smaller in scope:
+Three layers, each smaller in scope and with minimal duplication:
 
 - **Roadmap** — the big picture. One per release/era.
 - **Milestone** — *what* and *why* a piece of the roadmap delivers, plus
   acceptance criteria and open questions.
 - **Plan** — *how* to deliver a milestone: tasks (one PR each),
-  parallelization waves, and per-task agent recommendations.
+  parallelization waves, and per-task agent recommendations. Link back to
+  milestone acceptance criteria instead of copying them unless a task needs a
+  narrower check.
 
 If a milestone doesn't have a current plan, write one before coding.
 Format and authoring checklist live in `.cursor/rules/plans.mdc` and

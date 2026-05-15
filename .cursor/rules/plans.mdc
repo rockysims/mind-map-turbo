@@ -9,7 +9,9 @@ alwaysApply: false
 A **plan** says *how* to deliver one milestone. Milestones say *what*
 and *why*; plans decompose the work into PR-sized tasks, resolve the
 milestone's open questions, annotate every task with the right kind of
-AI agent, and lay out which tasks can run in parallel.
+AI agent, and lay out which tasks can run in parallel. Avoid copying
+milestone scope or acceptance criteria into the plan; link to the
+milestone and only add task-specific checks where the plan needs more detail.
 
 Canonical template: [`docs/roadmaps/PLAN_TEMPLATE.md`](../../docs/roadmaps/PLAN_TEMPLATE.md).
 Copy it; don't reinvent the structure.
@@ -136,8 +138,13 @@ When writing a plan from scratch:
 4. If a task discovers a missed dependency or design issue, update the
    plan in the same PR (or a small follow-up commit). Don't let the
    plan diverge from reality.
-5. When the last task lands, update milestone status in the roadmap and
-   set this plan's status to `done`.
+5. When the last task lands and validation passes, close the loop in one
+   final docs/status update:
+   - set this plan's `**Status:**` to `done`;
+   - set the associated milestone's `**Status:**` to `complete`;
+   - set the milestone row in the roadmap to `complete` and keep the plan link;
+   - commit the completed logical change unless the user explicitly asked not
+     to commit yet.
 
 ## When the model is asked to "write a plan"
 

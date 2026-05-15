@@ -4,7 +4,9 @@ This is the canonical template for milestone plans. Copy it to
 and replace the placeholder content with your milestone's specifics.
 
 A plan answers HOW we deliver a milestone (the milestone doc says WHAT
-and WHY). It exists to:
+and WHY). Do not duplicate milestone scope or acceptance criteria; link
+back to the milestone and add only the task-level detail needed to execute.
+It exists to:
 - Resolve the milestone's open questions before code is written.
 - Decompose the work into PR-sized tasks.
 - Annotate every task with what kind of AI agent / model fits best.
@@ -200,8 +202,10 @@ The plan is done when:
 - All 5 tasks are merged to `main`.
 - The acceptance criteria from the milestone doc are satisfied (no need
   to copy them here — link, don't duplicate).
-- Roadmap status for milestone 01 updated to "complete" with a link
-  back to this plan in `docs/roadmaps/<roadmap>/roadmap.md`.
+- Plan status is `done`, milestone status is `complete`, and roadmap
+  status for the milestone is `complete` with a link back to this plan.
+- The finished work has been committed unless the user explicitly asked
+  not to commit yet.
 
 ## Notes
 

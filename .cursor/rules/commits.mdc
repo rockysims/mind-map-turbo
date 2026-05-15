@@ -59,6 +59,11 @@ exists, what alternatives you considered, and any non-obvious constraints.
 - Generated files (`.svelte-kit/`, `*storybook*.log`, build outputs) must
   not be in the staged diff. If they are, your `.gitignore` is broken.
 - Tests for the change must already pass locally (see `core.mdc` Definition of Done).
+- When validation passes, commit the completed logical change without waiting
+  for a separate prompt unless the user has said `no commit`, `no commits yet`,
+  `do not commit`, or equivalent.
+- If unrelated user changes are present, leave them out of the commit. If your
+  change cannot be separated cleanly, ask before committing.
 
 ## PRs
 
