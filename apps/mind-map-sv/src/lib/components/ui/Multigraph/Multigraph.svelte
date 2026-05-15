@@ -5,23 +5,39 @@
 	import type { MultigraphData, Point } from '../types/multigraph';
 	import { isPointInCircle } from './lib/hitTest.js';
 	import { addEdge, addNode, moveNode, togglePinned } from './lib/graph.js';
+	import { deriveGraphLayout, relaxGraphPositions } from './lib/graphLayout.js';
+	import type { LayoutSettings } from './lib/layoutSettings.js';
 
 	const CENTERED_POSITION: Point = { x: 0, y: 0 };
 
 	let {
 		multigraphData = { nodes: [], edges: [], posByNodeId: {} },
-		defaultPrimaryNodeId = ''
+		defaultPrimaryNodeId = '',
+		layoutSettings = {}
 	}: {
 		multigraphData: MultigraphData;
 		defaultPrimaryNodeId?: string;
+		layoutSettings?: Partial<LayoutSettings>;
 	} = $props();
 
 	let graph = $state<MultigraphData>({ nodes: [], edges: [], posByNodeId: {} });
 	let primaryNodeId = $state('');
+	let activeDragNodeId = $state<string | null>(null);
+	let relaxationFrameId: number | null = null;
+
+	const graphLayout = $derived(
+		deriveGraphLayout(graph, { settings: layoutSettings, activeDragNodeId, relaxIterations: 0 })
+	);
 
 	$effect(() => {
 		graph = multigraphData;
 		primaryNodeId = defaultPrimaryNodeId;
+	});
+
+	$effect(() => {
+		return () => {
+			if (relaxationFrameId !== null) cancelAnimationFrame(relaxationFrameId);
+		};
 	});
 
 	/** Resolve node at client coordinates (circle hit-test). Testable by passing a custom getNodeAt from outside if needed. */
@@ -46,12 +62,24 @@
 	}
 
 	function handleNodeMoved(node: NodeData, point: Point) {
-		graph = moveNode(graph, node.id, point);
+		const movedGraph = moveNode(graph, node.id, point);
+		graph = withRelaxedPositions(movedGraph, node.id, 1);
+	}
+
+	function handleNodeDragStart(node: NodeData) {
+		activeDragNodeId = node.id;
+		startRelaxationLoop();
+	}
+
+	function handleNodeDragEnd() {
+		activeDragNodeId = null;
+		stopRelaxationLoop();
+		graph = withRelaxedPositions(graph);
 	}
 
 	function handleNodeMakePrimary(node: NodeData) {
 		const wasPinned = node.pinned === true;
-		graph = togglePinned(graph, node.id);
+		graph = withRelaxedPositions(togglePinned(graph, node.id));
 
 		if (!wasPinned) {
 			primaryNodeId = node.id;
@@ -66,14 +94,16 @@
 	}
 
 	function handleNodeDoubleClickDropOntoNode(sourceNode: NodeData, targetNode: NodeData) {
-		graph = addEdge(graph, sourceNode.id, targetNode.id);
+		graph = withRelaxedPositions(addEdge(graph, sourceNode.id, targetNode.id));
 	}
 
 	function handleNodeDoubleClickDropOntoBackground(sourceNode: NodeData, point: Point) {
 		const graphWithNode = addNode(graph, { position: point });
 		const newNode = graphWithNode.nodes[graphWithNode.nodes.length - 1] ?? null;
 
-		graph = newNode ? addEdge(graphWithNode, sourceNode.id, newNode.id) : graphWithNode;
+		graph = withRelaxedPositions(
+			newNode ? addEdge(graphWithNode, sourceNode.id, newNode.id) : graphWithNode
+		);
 	}
 
 	function edgeStyle(sourcePos: Point, targetPos: Point): string {
@@ -84,6 +114,39 @@
 
 		return `left: calc(50% + ${sourcePos.x}px); top: calc(50% + ${sourcePos.y}px); width: ${length}px; transform: translateY(-50%) rotate(${angle}rad);`;
 	}
+
+	function withRelaxedPositions(
+		nextGraph: MultigraphData,
+		dragNodeId: string | null = activeDragNodeId,
+		relaxIterations = layoutSettings.relaxIterations
+	): MultigraphData {
+		return {
+			...nextGraph,
+			posByNodeId: relaxGraphPositions(nextGraph, {
+				settings: layoutSettings,
+				activeDragNodeId: dragNodeId,
+				relaxIterations
+			})
+		};
+	}
+
+	function startRelaxationLoop() {
+		if (relaxationFrameId !== null) return;
+		relaxationFrameId = requestAnimationFrame(relaxationStep);
+	}
+
+	function stopRelaxationLoop() {
+		if (relaxationFrameId === null) return;
+		cancelAnimationFrame(relaxationFrameId);
+		relaxationFrameId = null;
+	}
+
+	function relaxationStep() {
+		relaxationFrameId = null;
+		if (!activeDragNodeId) return;
+		graph = withRelaxedPositions(graph, activeDragNodeId, 1);
+		startRelaxationLoop();
+	}
 </script>
 
 <div class="graph">
@@ -91,14 +154,16 @@
 		{getNodeAt}
 		onNodeClick={handleNodeClick}
 		onNodeMoved={handleNodeMoved}
+		onNodeDragStart={handleNodeDragStart}
+		onNodeDragEnd={handleNodeDragEnd}
 		onNodeMakePrimary={handleNodeMakePrimary}
 		onNodeDoubleClickDropOntoNode={handleNodeDoubleClickDropOntoNode}
 		onNodeDoubleClickDropOntoBackground={handleNodeDoubleClickDropOntoBackground}
 	>
 		<div class="edges" aria-hidden="true">
 			{#each graph.edges as edge (edge.id)}
-				{@const sourcePos = graph.posByNodeId[edge.sourceNodeId] ?? CENTERED_POSITION}
-				{@const targetPos = graph.posByNodeId[edge.targetNodeId] ?? CENTERED_POSITION}
+				{@const sourcePos = graphLayout.posByNodeId[edge.sourceNodeId] ?? CENTERED_POSITION}
+				{@const targetPos = graphLayout.posByNodeId[edge.targetNodeId] ?? CENTERED_POSITION}
 				<div
 					class="edge"
 					data-edge-id={edge.id}
@@ -110,12 +175,14 @@
 		</div>
 
 		{#each graph.nodes as node (node.id)}
-			{@const nodePos = graph.posByNodeId[node.id] ?? CENTERED_POSITION}
+			{@const nodePos = graphLayout.posByNodeId[node.id] ?? CENTERED_POSITION}
+			{@const nodeScale = graphLayout.scaleByNodeId[node.id] ?? 1}
 			<div
 				class="node-wrapper"
 				class:primary={primaryNodeId === node.id}
 				data-node-id={node.id}
-				style={`left: calc(50% + ${nodePos.x}px); top: calc(50% + ${nodePos.y}px); transform: translate(-50%, -50%);`}
+				data-scale={nodeScale}
+				style={`left: calc(50% + ${nodePos.x}px); top: calc(50% + ${nodePos.y}px); transform: translate(-50%, -50%) scale(${nodeScale});`}
 			>
 				<Node nodeData={node} isOpen={false} />
 			</div>

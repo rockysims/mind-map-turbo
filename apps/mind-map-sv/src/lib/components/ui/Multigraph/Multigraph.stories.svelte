@@ -4,7 +4,7 @@
 	import { expect } from 'storybook/test';
 	import { DBL_CLICK_MS, NODE_RADIUS } from '$lib/constants';
 	import { makeGraph } from './lib/testFixtures';
-	import type { MultigraphData } from '../types/multigraph';
+	import type { MultigraphData, Point } from '../types/multigraph';
 
 	const { Story } = defineMeta({
 		title: 'Components/Multigraph',
@@ -12,7 +12,8 @@
 		tags: [],
 		argTypes: {
 			multigraphData: { control: 'object' },
-			defaultPrimaryNodeId: { control: 'text' }
+			defaultPrimaryNodeId: { control: 'text' },
+			layoutSettings: { control: 'object' }
 		}
 	});
 
@@ -32,6 +33,12 @@
 		const circle = el.querySelector(`[data-node-id="${nodeId}"] .circle`);
 		if (!circle) throw new Error(`Circle not found for ${nodeId}`);
 		return circle as HTMLElement;
+	}
+
+	function getNodeWrapper(el: HTMLElement, nodeId: string): HTMLElement {
+		const wrapper = el.querySelector(`[data-node-id="${nodeId}"].node-wrapper`);
+		if (!wrapper) throw new Error(`Node wrapper not found for ${nodeId}`);
+		return wrapper as HTMLElement;
 	}
 
 	function getCenter(el: HTMLElement): { x: number; y: number } {
@@ -65,6 +72,19 @@
 		return new Promise((resolve) => {
 			requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
 		});
+	}
+
+	function chainEdges(count: number): Array<[number, number]> {
+		return Array.from({ length: count - 1 }, (_, index) => [index, index + 1]);
+	}
+
+	function circlePositions(count: number, radius: number): Record<string, Point> {
+		return Object.fromEntries(
+			Array.from({ length: count }, (_, index) => {
+				const angle = (index / count) * Math.PI * 2;
+				return [`n${index}`, { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius }];
+			})
+		);
 	}
 
 	async function dispatchDoubleClick(target: HTMLElement, x: number, y: number): Promise<void> {
@@ -125,6 +145,40 @@
 
 		const node = canvasElement.querySelector('[data-node-id="n0"] .node');
 		expect(node).toHaveAttribute('data-pinned', 'true');
+	}}
+/>
+
+<Story
+	name="UserPinsNodeAndNeighborsScaleDownWithDistance"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 4,
+			edges: [
+				[0, 1],
+				[1, 2]
+			],
+			posByNodeId: {
+				n0: { x: -360, y: 0 },
+				n1: { x: -120, y: 0 },
+				n2: { x: 120, y: 0 },
+				n3: { x: 360, y: 0 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { scaleFalloff: 0.5, minScale: 0.2, relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+
+		await dispatchDoubleClick(circle, center.x, center.y);
+		await sleep();
+
+		expect(Number(getNodeWrapper(canvasElement, 'n0').dataset.scale)).toBe(1);
+		expect(Number(getNodeWrapper(canvasElement, 'n1').dataset.scale)).toBe(0.5);
+		expect(Number(getNodeWrapper(canvasElement, 'n2').dataset.scale)).toBe(0.25);
+		expect(Number(getNodeWrapper(canvasElement, 'n3').dataset.scale)).toBe(0.2);
 	}}
 />
 
@@ -244,5 +298,111 @@
 		const movedCenter = getCenter(getCircle(canvasElement, 'n0'));
 		expect(movedCenter.x).toBeCloseTo(moveToX);
 		expect(movedCenter.y).toBeCloseTo(moveToY);
+	}}
+/>
+
+<Story
+	name="UserDragsNodeIntoAnotherAndOverlapRelaxes"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 2,
+			posByNodeId: { n0: { x: -160, y: 0 }, n1: { x: 160, y: 0 } }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { baseRadius: 200, minScale: 1, paddingPx: 12, relaxIterations: 2 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const sourceCircle = getCircle(canvasElement, 'n0');
+		const targetCircle = getCircle(canvasElement, 'n1');
+		const sourceCenter = getCenter(sourceCircle);
+		const targetCenter = getCenter(targetCircle);
+
+		dispatchPointer(sourceCircle, 'pointerdown', sourceCenter.x, sourceCenter.y);
+		dispatchPointer(stage, 'pointermove', targetCenter.x, targetCenter.y);
+		dispatchPointer(stage, 'pointerup', targetCenter.x, targetCenter.y);
+		await waitForLayout();
+
+		const movedSourceCenter = getCenter(getCircle(canvasElement, 'n0'));
+		const movedTargetCenter = getCenter(getCircle(canvasElement, 'n1'));
+		expect(movedSourceCenter.x).toBeCloseTo(targetCenter.x);
+		expect(movedSourceCenter.y).toBeCloseTo(targetCenter.y);
+		expect(Number.isFinite(movedTargetCenter.x)).toBe(true);
+		expect(Math.abs(movedTargetCenter.x - movedSourceCenter.x)).toBeGreaterThan(0);
+		expect(Math.abs(movedTargetCenter.x)).toBeLessThan(stage.getBoundingClientRect().width);
+	}}
+/>
+
+<Story
+	name="PinnedNodesDoNotMoveWhenBumped"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 2,
+			pinned: [0],
+			posByNodeId: { n0: { x: -120, y: 0 }, n1: { x: 240, y: 0 } }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { baseRadius: 120, minScale: 1, paddingPx: 12, relaxIterations: 2 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const pinnedCenter = getCenter(getCircle(canvasElement, 'n0'));
+		const sourceCircle = getCircle(canvasElement, 'n1');
+		const sourceCenter = getCenter(sourceCircle);
+
+		dispatchPointer(sourceCircle, 'pointerdown', sourceCenter.x, sourceCenter.y);
+		dispatchPointer(stage, 'pointermove', pinnedCenter.x, pinnedCenter.y);
+		dispatchPointer(stage, 'pointerup', pinnedCenter.x, pinnedCenter.y);
+		await waitForLayout();
+
+		const movedPinnedCenter = getCenter(getCircle(canvasElement, 'n0'));
+		expect(movedPinnedCenter.x).toBeCloseTo(pinnedCenter.x);
+		expect(movedPinnedCenter.y).toBeCloseTo(pinnedCenter.y);
+	}}
+/>
+
+<Story
+	name="LargePinnedGraphScalesByDistance"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 20,
+			pinned: [0],
+			edges: chainEdges(12),
+			posByNodeId: circlePositions(20, 300)
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { scaleFalloff: 0.5, minScale: 0.2, relaxIterations: 2 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+
+		expect(Number(getNodeWrapper(canvasElement, 'n0').dataset.scale)).toBe(1);
+		expect(Number(getNodeWrapper(canvasElement, 'n1').dataset.scale)).toBe(0.5);
+		expect(Number(getNodeWrapper(canvasElement, 'n2').dataset.scale)).toBe(0.25);
+		expect(Number(getNodeWrapper(canvasElement, 'n12').dataset.scale)).toBe(0.2);
+		expect(Number(getNodeWrapper(canvasElement, 'n19').dataset.scale)).toBe(0.2);
+	}}
+/>
+
+<Story
+	name="HundredNodeGraphWithPinnedNodesStaysReadable"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 100,
+			pinned: [0, 33, 66],
+			edges: chainEdges(100),
+			posByNodeId: circlePositions(100, 480)
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { scaleFalloff: 0.7, minScale: 0.1, paddingPx: 12, relaxIterations: 4 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+
+		expect(canvasElement.querySelectorAll('.node-wrapper')).toHaveLength(100);
+		expect(Number(getNodeWrapper(canvasElement, 'n0').dataset.scale)).toBe(1);
+		expect(Number(getNodeWrapper(canvasElement, 'n50').dataset.scale)).toBeGreaterThanOrEqual(0.1);
 	}}
 />

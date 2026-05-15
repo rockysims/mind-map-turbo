@@ -50,6 +50,8 @@
 
 	let lastNodeClickId = $state<string | null>(null);
 	let lastNodeMoved = $state<{ nodeId: string; point: Point } | null>(null);
+	let lastNodeDragStartId = $state<string | null>(null);
+	let lastNodeDragEndId = $state<string | null>(null);
 	let lastMakePrimaryId = $state<string | null>(null);
 	let lastDoubleClickDropBg = $state<{ nodeId: string; point: Point } | null>(null);
 	let lastDoubleClickDropNodeIds = $state<string | null>(null);
@@ -63,6 +65,8 @@
 	data-last-node-moved={lastNodeMoved
 		? `${lastNodeMoved.nodeId},${lastNodeMoved.point.x},${lastNodeMoved.point.y}`
 		: ''}
+	data-last-node-drag-start={lastNodeDragStartId ?? ''}
+	data-last-node-drag-end={lastNodeDragEndId ?? ''}
 	data-last-make-primary={lastMakePrimaryId ?? ''}
 	data-last-double-click-drop-bg={lastDoubleClickDropBg
 		? `${lastDoubleClickDropBg.nodeId},${lastDoubleClickDropBg.point.x},${lastDoubleClickDropBg.point.y}`
@@ -78,6 +82,12 @@
 		onNodeMoved={(n, point) => {
 			lastNodeMoved = { nodeId: n.id, point };
 			onNodeMovedProp?.(n, point);
+		}}
+		onNodeDragStart={(n) => {
+			lastNodeDragStartId = n.id;
+		}}
+		onNodeDragEnd={(n) => {
+			lastNodeDragEndId = n.id;
 		}}
 		onNodeMakePrimary={(n) => {
 			lastMakePrimaryId = n.id;

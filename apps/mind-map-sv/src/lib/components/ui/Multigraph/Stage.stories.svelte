@@ -238,6 +238,8 @@
 		expect(movedPoint.nodeId).toBe(NODES[0].id);
 		expect(movedPoint.x).toBeCloseTo(expectedMovedPoint.x);
 		expect(movedPoint.y).toBeCloseTo(expectedMovedPoint.y);
+		expect(wrapper.dataset.lastNodeDragStart).toBe(NODES[0].id);
+		expect(wrapper.dataset.lastNodeDragEnd).toBe(NODES[0].id);
 	}}
 />
 

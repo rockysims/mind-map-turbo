@@ -3,7 +3,7 @@
 **Created:** 2026-05-15
 **Author:** Cursor agent
 **Milestone:** [milestones/02-layout-and-repulsion.md](../milestones/02-layout-and-repulsion.md)
-**Status:** draft
+**Status:** done
 **Total estimated effort:** L
 
 ## Summary
@@ -46,7 +46,7 @@ those tested contracts.
 > logical commit, split it. The PR title is drafted up front so reviewers and
 > implementing agents start aligned.
 
-### T01 - Add layout settings and hop-distance scaling
+### T01 - Add layout settings and hop-distance scaling ✓
 
 |                |                                                                                            |
 | -------------- | ------------------------------------------------------------------------------------------ |
@@ -71,7 +71,7 @@ all nodes should be treated as unreachable and therefore use `minScale`.
 - `radiusOf` derives from `baseRadius` and falls back predictably for missing
   node ids.
 
-### T02 - Add pure overlap physics
+### T02 - Add pure overlap physics ✓
 
 |                |                                                                      |
 | -------------- | -------------------------------------------------------------------- |
@@ -97,7 +97,7 @@ where each overlapping pair is separated by the minimum needed push.
   overlap below padding tolerance.
 - Inputs are not mutated.
 
-### T03 - Add graph layout orchestration helpers
+### T03 - Add graph layout orchestration helpers ✓
 
 |                |                                                                         |
 | -------------- | ----------------------------------------------------------------------- |
@@ -123,7 +123,7 @@ BFS, radius, or physics decisions.
 - Specs cover a pinned chain, a disconnected node, and an overlapping pinned
   plus unpinned pair.
 
-### T04 - Render scaled nodes and expose tuning controls
+### T04 - Render scaled nodes and expose tuning controls ✓
 
 |                |                                                                                        |
 | -------------- | -------------------------------------------------------------------------------------- |
@@ -148,7 +148,7 @@ radius, padding, and iteration counts can be tuned.
 - Node hit targets remain compatible with the scaled visual radius.
 - Storybook controls can tune layout settings without recompilation.
 
-### T05 - Relax overlaps after mutations and during drags
+### T05 - Relax overlaps after mutations and during drags ✓
 
 |                |                                                                                                                 |
 | -------------- | --------------------------------------------------------------------------------------------------------------- |
@@ -176,7 +176,7 @@ the active drag node.
 - Positions stay finite and within the visible Storybook stage for the covered
   scenarios.
 
-### T06 - Add large-graph coverage and tune defaults
+### T06 - Add large-graph coverage and tune defaults ✓
 
 |                |                                                                                |
 | -------------- | ------------------------------------------------------------------------------ |
@@ -257,3 +257,5 @@ The plan is done when:
 - 2026-05-15: The existing `NODE_RADIUS` constant is the current rendered
   circle radius source. T01 should decide whether `LayoutSettings.baseRadius`
   defaults from that constant or replaces it as the node sizing source.
+- 2026-05-15: Executed as one local change set rather than six separate PRs
+  because the milestone was requested directly from this branch.

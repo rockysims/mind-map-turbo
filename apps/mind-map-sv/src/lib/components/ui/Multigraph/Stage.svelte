@@ -22,6 +22,10 @@
 		onNodeClick?: (node: NodeData) => void;
 		/** Callback when user single-click-drags a node and releases with a graph-local point. */
 		onNodeMoved?: (node: NodeData, point: Point) => void;
+		/** Callback when user starts dragging a node after crossing the drag threshold. */
+		onNodeDragStart?: (node: NodeData) => void;
+		/** Callback when user releases or cancels an active node drag. */
+		onNodeDragEnd?: (node: NodeData) => void;
 		/** Callback when user double-clicks a node (make primary). */
 		onNodeMakePrimary?: (node: NodeData) => void;
 		/** Callback when user double-click-drags and drops onto another node (e.g. add edge). */
@@ -35,6 +39,8 @@
 		dragThreshold = DRAG_THRESHOLD,
 		onNodeClick,
 		onNodeMoved,
+		onNodeDragStart,
+		onNodeDragEnd,
 		onNodeMakePrimary,
 		onNodeDoubleClickDropOntoNode,
 		onNodeDoubleClickDropOntoBackground,
@@ -58,6 +64,7 @@
 	// Node drag
 	let dragNode = $state<NodeData | null>(null);
 	let dragStartPos = $state<{ x: number; y: number } | null>(null);
+	let isNodeDragActive = $state(false);
 
 	// Double-click: same node clicked twice within DBL_CLICK_MS
 	let lastClickNodeId = $state<string | null>(null);
@@ -107,6 +114,10 @@
 		} else if (dragNode && dragStartPos && !isDoubleClickSession) {
 			const dist = pointerDistance(dragStartPos.x, dragStartPos.y, e.clientX, e.clientY);
 			if (dist >= dragThreshold) {
+				if (!isNodeDragActive) {
+					isNodeDragActive = true;
+					onNodeDragStart?.(dragNode);
+				}
 				onNodeMoved?.(dragNode, graphPointForEvent(e));
 			}
 		}
@@ -161,6 +172,10 @@
 				}
 			}
 
+			if (isNodeDragActive) {
+				onNodeDragEnd?.(dragNode);
+			}
+			isNodeDragActive = false;
 			dragNode = null;
 			dragStartPos = null;
 			stage.releasePointerCapture(e.pointerId);

@@ -35,7 +35,7 @@ breaks it into individual PR-sized tasks.
 | #   | Milestone                                          | Status      | Doc                                                                                                                |
 | --- | -------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------ |
 | 01  | Graph mutations and pinning                        | complete    | [milestone](milestones/01-graph-mutations-and-pinning.md), [plan](plans/2026-05-15 graph-mutations-and-pinning.md) |
-| 02  | Layout: hop-distance scaling and overlap repulsion | not started | [milestone](milestones/02-layout-and-repulsion.md), [plan](plans/2026-05-15 layout-and-repulsion.md)               |
+| 02  | Layout: hop-distance scaling and overlap repulsion | complete    | [milestone](milestones/02-layout-and-repulsion.md), [plan](plans/2026-05-15 layout-and-repulsion.md)               |
 | 03  | Mobile polish and node editing UX                  | not started | [milestones/03-mobile-polish-and-editing.md](milestones/03-mobile-polish-and-editing.md)                           |
 | 04  | Persistence (local-first → server)                 | not started | [milestones/04-persistence.md](milestones/04-persistence.md)                                                       |
 | 05  | Multiplayer                                        | not started | [milestones/05-multiplayer.md](milestones/05-multiplayer.md)                                                       |
