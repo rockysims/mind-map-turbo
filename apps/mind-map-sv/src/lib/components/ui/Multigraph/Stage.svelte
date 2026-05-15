@@ -2,6 +2,7 @@
 	import type { Snippet } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import type { NodeData } from '../types/node';
+	import type { Point } from '../types/multigraph';
 	import {
 		scaleFromWheelDelta,
 		clampScale,
@@ -9,6 +10,7 @@
 		DEFAULT_MAX_SCALE
 	} from './lib/graphMath.js';
 	import { pointerDistance } from './lib/hitTest.js';
+	import { clientPointToGraphPoint } from './lib/stageCoordinates.js';
 	import { DRAG_THRESHOLD, DBL_CLICK_MS } from '$lib/constants.js';
 
 	interface Props {
@@ -18,14 +20,14 @@
 		dragThreshold?: number;
 		/** Callback when user single-clicks a node (no drag). */
 		onNodeClick?: (node: NodeData) => void;
-		/** Callback when user single-click-drags a node and releases (move node); (clientX, clientY) is the release position. */
-		onNodeMoved?: (node: NodeData, clientX: number, clientY: number) => void;
+		/** Callback when user single-click-drags a node and releases with a graph-local point. */
+		onNodeMoved?: (node: NodeData, point: Point) => void;
 		/** Callback when user double-clicks a node (make primary). */
 		onNodeMakePrimary?: (node: NodeData) => void;
 		/** Callback when user double-click-drags and drops onto another node (e.g. add edge). */
 		onNodeDoubleClickDropOntoNode?: (sourceNode: NodeData, targetNode: NodeData) => void;
-		/** Callback when user double-click-drags and drops onto background (e.g. add node). */
-		onNodeDoubleClickDropOntoBackground?: (node: NodeData) => void;
+		/** Callback when user double-click-drags and drops onto background with a graph-local point. */
+		onNodeDoubleClickDropOntoBackground?: (node: NodeData, point: Point) => void;
 	}
 
 	let {
@@ -86,6 +88,18 @@
 		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
 	}
 
+	function graphPointForEvent(e: PointerEvent): Point {
+		const stage = e.currentTarget as HTMLElement;
+		const frame = stage.parentElement ?? stage;
+
+		return clientPointToGraphPoint(
+			{ x: e.clientX, y: e.clientY },
+			frame.getBoundingClientRect(),
+			{ x: panX, y: panY },
+			scale
+		);
+	}
+
 	function onPointerMove(e: PointerEvent) {
 		if (panStart) {
 			panX = panStart.panX + (e.clientX - panStart.clientX);
@@ -93,7 +107,7 @@
 		} else if (dragNode && dragStartPos && !isDoubleClickSession) {
 			const dist = pointerDistance(dragStartPos.x, dragStartPos.y, e.clientX, e.clientY);
 			if (dist >= dragThreshold) {
-				onNodeMoved?.(dragNode, e.clientX, e.clientY);
+				onNodeMoved?.(dragNode, graphPointForEvent(e));
 			}
 		}
 	}
@@ -119,10 +133,10 @@
 						if (dropTarget && dropTarget.id !== dragNode.id) {
 							onNodeDoubleClickDropOntoNode?.(dragNode, dropTarget);
 						} else if (!dropTarget || dropTarget.id === dragNode.id) {
-							onNodeDoubleClickDropOntoBackground?.(dragNode);
+							onNodeDoubleClickDropOntoBackground?.(dragNode, graphPointForEvent(e));
 						}
 					} else {
-						onNodeMoved?.(dragNode, e.clientX, e.clientY);
+						onNodeMoved?.(dragNode, graphPointForEvent(e));
 					}
 				} else {
 					// Click (no drag)

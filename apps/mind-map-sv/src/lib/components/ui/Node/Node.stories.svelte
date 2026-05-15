@@ -173,6 +173,18 @@
 			expect(titleRect.bottom).toBeLessThanOrEqual(descriptionRect.top);
 		}
 	}
+
+	async function pinnedClosedPlayHandler(ctx: PlayArgs) {
+		await playHandler(ctx, { short: true, open: false });
+
+		const node = ctx.canvasElement.querySelector('.node');
+		expect(node).toHaveAttribute('data-pinned', 'true');
+
+		const circle = ctx.canvasElement.querySelector('.node .circle');
+		expect(circle).toBeInTheDocument();
+		const circleStyles = window.getComputedStyle(circle as HTMLElement);
+		expect(parseFloat(circleStyles.borderWidth)).toBeGreaterThanOrEqual(4);
+	}
 </script>
 
 <Story
@@ -203,6 +215,20 @@
 		isOpen: false
 	}}
 	play={(ctx) => playHandler(ctx, { short: false, open: false })}
+/>
+
+<Story
+	name="PinnedClosed"
+	args={{
+		nodeData: {
+			id: 'node id pinned closed',
+			title: 'Pinned node title',
+			description: 'Pinned node description',
+			pinned: true
+		},
+		isOpen: false
+	}}
+	play={pinnedClosedPlayHandler}
 />
 
 <Story

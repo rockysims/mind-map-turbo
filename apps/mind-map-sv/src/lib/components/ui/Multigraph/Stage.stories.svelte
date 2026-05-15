@@ -67,6 +67,20 @@
 		return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
 	}
 
+	function getGraphPoint(
+		stage: HTMLElement,
+		clientX: number,
+		clientY: number
+	): { x: number; y: number } {
+		const center = getCenter(stage);
+		return { x: clientX - center.x, y: clientY - center.y };
+	}
+
+	function parsePointCallback(value: string): { nodeId: string; x: number; y: number } {
+		const [nodeId, x, y] = value.split(',');
+		return { nodeId, x: Number(x), y: Number(y) };
+	}
+
 	function sleep(ms: number = 0) {
 		return new Promise((r) => setTimeout(r, ms));
 	}
@@ -174,14 +188,17 @@
 			nodeCenter.y + (NODE_RADIUS + 10)
 		);
 		await sleep();
-		expect(wrapper.dataset.lastDoubleClickDropBg).toBe(NODES[0].id);
+		const backgroundDrop = parsePointCallback(wrapper.dataset.lastDoubleClickDropBg ?? '');
+		const expectedBackgroundPoint = getGraphPoint(
+			stage,
+			nodeCenter.x + (NODE_RADIUS + 10),
+			nodeCenter.y + (NODE_RADIUS + 10)
+		);
+		expect(backgroundDrop.nodeId).toBe(NODES[0].id);
+		expect(backgroundDrop.x).toBeCloseTo(expectedBackgroundPoint.x);
+		expect(backgroundDrop.y).toBeCloseTo(expectedBackgroundPoint.y);
 
-		// Double-click then drag node 1 onto itself.
-		// TODO(milestone-01): decide the canonical semantics of drop-onto-self.
-		// Today Stage routes self-drops to onNodeDoubleClickDropOntoBackground (treating
-		// "drop on yourself" the same as "drop on empty space"). This may change to a
-		// no-op or a self-loop edge when graph mutation semantics are finalized.
-		// See docs/roadmaps/2026-05-07 mind-map-mvp/milestones/01-graph-mutations-and-pinning.md
+		// Self-drops intentionally follow the background-drop path.
 		await dispatchDoubleClickDrag(
 			circle,
 			nodeCenter.x,
@@ -191,7 +208,15 @@
 			nodeCenter.y + DRAG_THRESHOLD * 2
 		);
 		await sleep();
-		expect(wrapper.dataset.lastDoubleClickDropBg).toBe(NODES[0].id);
+		const selfDrop = parsePointCallback(wrapper.dataset.lastDoubleClickDropBg ?? '');
+		const expectedSelfDropPoint = getGraphPoint(
+			stage,
+			nodeCenter.x + DRAG_THRESHOLD * 2,
+			nodeCenter.y + DRAG_THRESHOLD * 2
+		);
+		expect(selfDrop.nodeId).toBe(NODES[0].id);
+		expect(selfDrop.x).toBeCloseTo(expectedSelfDropPoint.x);
+		expect(selfDrop.y).toBeCloseTo(expectedSelfDropPoint.y);
 		expect(wrapper.dataset.lastDoubleClickDropNode).toBe('');
 
 		// Single-click with no drag
@@ -208,9 +233,11 @@
 		dispatchPointer(stage, 'pointerup', moveToX, moveToY);
 		await sleep();
 		const moved = wrapper.dataset.lastNodeMoved ?? '';
-		expect(moved.startsWith(NODES[0].id)).toBe(true);
-		expect(moved).toContain(String(Math.round(moveToX)));
-		expect(moved).toContain(String(Math.round(moveToY)));
+		const movedPoint = parsePointCallback(moved);
+		const expectedMovedPoint = getGraphPoint(stage, moveToX, moveToY);
+		expect(movedPoint.nodeId).toBe(NODES[0].id);
+		expect(movedPoint.x).toBeCloseTo(expectedMovedPoint.x);
+		expect(movedPoint.y).toBeCloseTo(expectedMovedPoint.y);
 	}}
 />
 
@@ -247,8 +274,11 @@
 		dispatchPointer(stage, 'pointermove', moveToX, moveToY);
 		dispatchPointer(stage, 'pointerup', moveToX, moveToY);
 		await sleep();
-		const moved = wrapper.dataset.lastNodeMoved ?? '';
-		expect(moved.startsWith(NODES[0].id)).toBe(true);
+		const moved = parsePointCallback(wrapper.dataset.lastNodeMoved ?? '');
+		const expectedMovedPoint = getGraphPoint(stage, moveToX, moveToY);
+		expect(moved.nodeId).toBe(NODES[0].id);
+		expect(moved.x).toBeCloseTo(expectedMovedPoint.x);
+		expect(moved.y).toBeCloseTo(expectedMovedPoint.y);
 
 		// Double-click node 1 to make primary
 		await dispatchDoubleClick(firstCircle, fromCenter.x, fromCenter.y);

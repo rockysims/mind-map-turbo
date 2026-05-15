@@ -46,4 +46,14 @@ describe('makeGraph', () => {
 		});
 		expect(g.posByNodeId).toEqual({ n0: { x: 10, y: 20 } });
 	});
+
+	it('marks generated nodes pinned by index', () => {
+		const g = makeGraph({ nodeCount: 2, pinned: [0] });
+		expect(g.nodes.map((node) => node.pinned)).toEqual([true, undefined]);
+	});
+
+	it('marks generated nodes pinned by id', () => {
+		const g = makeGraph({ nodeCount: 2, pinned: ['n1'] });
+		expect(g.nodes.map((node) => node.pinned)).toEqual([undefined, true]);
+	});
 });

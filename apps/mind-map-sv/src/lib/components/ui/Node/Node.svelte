@@ -37,6 +37,7 @@
 	class="node"
 	class:open={isOpen}
 	data-node-id={nodeData.id}
+	data-pinned={nodeData.pinned ? 'true' : undefined}
 	style="--node-diameter: {NODE_RADIUS * 2}px"
 >
 	<div class="circle">
@@ -73,6 +74,12 @@
 		border-radius: var(--node-diameter);
 		border: 2px solid #aaaaaa;
 		background: #ccc;
+	}
+
+	.node[data-pinned='true'] .circle {
+		border-width: 4px;
+		border-color: #555555;
+		box-shadow: 0 0 0 2px #ffffff;
 	}
 
 	.node .square {

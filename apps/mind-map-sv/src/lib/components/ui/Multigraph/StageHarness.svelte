@@ -4,6 +4,7 @@
 	import Node from '$lib/components/ui/Node/Node.svelte';
 	import { isPointInCircle } from './lib/hitTest.js';
 	import type { NodeData } from '../types/node.js';
+	import type { Point } from '../types/multigraph.js';
 
 	let {
 		nodes = [],
@@ -14,7 +15,7 @@
 	}: {
 		nodes: NodeData[];
 		positions?: Record<string, { left: string; top: string }>;
-		onNodeMoved?: (node: NodeData, clientX: number, clientY: number) => void;
+		onNodeMoved?: (node: NodeData, point: Point) => void;
 	} = $props();
 
 	function getNodeAt(clientX: number, clientY: number): NodeData | null {
@@ -48,9 +49,9 @@
 	}
 
 	let lastNodeClickId = $state<string | null>(null);
-	let lastNodeMoved = $state<{ nodeId: string; clientX: number; clientY: number } | null>(null);
+	let lastNodeMoved = $state<{ nodeId: string; point: Point } | null>(null);
 	let lastMakePrimaryId = $state<string | null>(null);
-	let lastDoubleClickDropBgId = $state<string | null>(null);
+	let lastDoubleClickDropBg = $state<{ nodeId: string; point: Point } | null>(null);
 	let lastDoubleClickDropNodeIds = $state<string | null>(null);
 </script>
 
@@ -60,10 +61,12 @@
 	data-testid="stage-callbacks"
 	data-last-node-click={lastNodeClickId ?? ''}
 	data-last-node-moved={lastNodeMoved
-		? `${lastNodeMoved.nodeId},${lastNodeMoved.clientX},${lastNodeMoved.clientY}`
+		? `${lastNodeMoved.nodeId},${lastNodeMoved.point.x},${lastNodeMoved.point.y}`
 		: ''}
 	data-last-make-primary={lastMakePrimaryId ?? ''}
-	data-last-double-click-drop-bg={lastDoubleClickDropBgId ?? ''}
+	data-last-double-click-drop-bg={lastDoubleClickDropBg
+		? `${lastDoubleClickDropBg.nodeId},${lastDoubleClickDropBg.point.x},${lastDoubleClickDropBg.point.y}`
+		: ''}
 	data-last-double-click-drop-node={lastDoubleClickDropNodeIds ?? ''}
 	{...rest}
 >
@@ -72,9 +75,9 @@
 		onNodeClick={(n) => {
 			lastNodeClickId = n.id;
 		}}
-		onNodeMoved={(n, clientX, clientY) => {
-			lastNodeMoved = { nodeId: n.id, clientX, clientY };
-			onNodeMovedProp?.(n, clientX, clientY);
+		onNodeMoved={(n, point) => {
+			lastNodeMoved = { nodeId: n.id, point };
+			onNodeMovedProp?.(n, point);
 		}}
 		onNodeMakePrimary={(n) => {
 			lastMakePrimaryId = n.id;
@@ -82,8 +85,8 @@
 		onNodeDoubleClickDropOntoNode={(s, t) => {
 			lastDoubleClickDropNodeIds = `${s.id},${t.id}`;
 		}}
-		onNodeDoubleClickDropOntoBackground={(n) => {
-			lastDoubleClickDropBgId = n.id;
+		onNodeDoubleClickDropOntoBackground={(n, point) => {
+			lastDoubleClickDropBg = { nodeId: n.id, point };
 		}}
 	>
 		{#each nodes as node (node.id)}

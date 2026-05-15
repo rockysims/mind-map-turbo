@@ -3,7 +3,7 @@
 **Created:** 2026-05-15
 **Author:** Cursor agent
 **Milestone:** [milestones/01-graph-mutations-and-pinning.md](../milestones/01-graph-mutations-and-pinning.md)
-**Status:** draft
+**Status:** executing
 **Total estimated effort:** L
 
 ## Summary

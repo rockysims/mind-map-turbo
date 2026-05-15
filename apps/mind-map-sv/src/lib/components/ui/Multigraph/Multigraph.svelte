@@ -2,10 +2,13 @@
 	import Node from '$lib/components/ui/Node/Node.svelte';
 	import Stage from './Stage.svelte';
 	import type { NodeData } from '../types/node';
-	import type { MultigraphData } from '../types/multigraph';
+	import type { MultigraphData, Point } from '../types/multigraph';
 	import { isPointInCircle } from './lib/hitTest.js';
+	import { addEdge, addNode, moveNode, togglePinned } from './lib/graph.js';
 
-	const {
+	const CENTERED_POSITION: Point = { x: 0, y: 0 };
+
+	let {
 		multigraphData = { nodes: [], edges: [], posByNodeId: {} },
 		defaultPrimaryNodeId = ''
 	}: {
@@ -13,14 +16,12 @@
 		defaultPrimaryNodeId?: string;
 	} = $props();
 
-	const primaryNode = $derived.by(() => {
-		const nodes: NodeData[] = multigraphData.nodes;
-		return nodes.find((n) => n.id === defaultPrimaryNodeId) ?? nodes[0] ?? null;
-	});
+	let graph = $state<MultigraphData>({ nodes: [], edges: [], posByNodeId: {} });
+	let primaryNodeId = $state('');
 
-	const primaryPos = $derived.by(() => {
-		if (!primaryNode) return null;
-		return multigraphData.posByNodeId[primaryNode.id] ?? null;
+	$effect(() => {
+		graph = multigraphData;
+		primaryNodeId = defaultPrimaryNodeId;
 	});
 
 	/** Resolve node at client coordinates (circle hit-test). Testable by passing a custom getNodeAt from outside if needed. */
@@ -37,29 +38,42 @@
 		if (!isPointInCircle(clientX, clientY, centerX, centerY, radius)) return null;
 		const nodeId = nodeEl.dataset.nodeId ?? null;
 		if (!nodeId) return null;
-		return multigraphData.nodes.find((n) => n.id === nodeId) ?? null;
+		return graph.nodes.find((n) => n.id === nodeId) ?? null;
 	}
 
 	function handleNodeClick() {
 		// Milestone 03 owns node editing/opening behavior.
 	}
 
-	function handleNodeMoved(node: NodeData, clientX: number, clientY: number) {
-		const nodePos = multigraphData.posByNodeId[node.id] ?? { x: 0, y: 0 };
-		const offset = { x: clientX - nodePos.x, y: clientY - nodePos.y };
-		multigraphData.posByNodeId[node.id] = { x: clientX - offset.x, y: clientY - offset.y };
+	function handleNodeMoved(node: NodeData, point: Point) {
+		graph = moveNode(graph, node.id, point);
 	}
 
-	function handleNodeMakePrimary() {
-		// Milestone 01 will route this gesture through togglePinned.
+	function handleNodeMakePrimary(node: NodeData) {
+		const wasPinned = node.pinned === true;
+		graph = togglePinned(graph, node.id);
+
+		if (!wasPinned) {
+			primaryNodeId = node.id;
+			return;
+		}
+
+		primaryNodeId =
+			graph.nodes.find((candidate) => candidate.pinned)?.id ??
+			graph.nodes.find((candidate) => candidate.id === defaultPrimaryNodeId)?.id ??
+			graph.nodes[0]?.id ??
+			'';
 	}
 
-	function handleNodeDoubleClickDropOntoNode() {
-		// Milestone 01 will route this gesture through addEdge.
+	function handleNodeDoubleClickDropOntoNode(sourceNode: NodeData, targetNode: NodeData) {
+		graph = addEdge(graph, sourceNode.id, targetNode.id);
 	}
 
-	function handleNodeDoubleClickDropOntoBackground() {
-		// Milestone 01 will route this gesture through addNode and addEdge.
+	function handleNodeDoubleClickDropOntoBackground(sourceNode: NodeData, point: Point) {
+		const graphWithNode = addNode(graph, { position: point });
+		const newNode = graphWithNode.nodes[graphWithNode.nodes.length - 1] ?? null;
+
+		graph = newNode ? addEdge(graphWithNode, sourceNode.id, newNode.id) : graphWithNode;
 	}
 </script>
 
@@ -72,17 +86,35 @@
 		onNodeDoubleClickDropOntoNode={handleNodeDoubleClickDropOntoNode}
 		onNodeDoubleClickDropOntoBackground={handleNodeDoubleClickDropOntoBackground}
 	>
-		{#if primaryNode}
+		<svg class="edges" aria-hidden="true">
+			{#each graph.edges as edge (edge.id)}
+				{@const sourcePos = graph.posByNodeId[edge.sourceNodeId] ?? CENTERED_POSITION}
+				{@const targetPos = graph.posByNodeId[edge.targetNodeId] ?? CENTERED_POSITION}
+				<line
+					class="edge"
+					data-edge-id={edge.id}
+					data-source-node-id={edge.sourceNodeId}
+					data-target-node-id={edge.targetNodeId}
+					x1={`calc(50% + ${sourcePos.x}px)`}
+					y1={`calc(50% + ${sourcePos.y}px)`}
+					x2={`calc(50% + ${targetPos.x}px)`}
+					y2={`calc(50% + ${targetPos.y}px)`}
+					stroke={edge.color}
+				/>
+			{/each}
+		</svg>
+
+		{#each graph.nodes as node (node.id)}
+			{@const nodePos = graph.posByNodeId[node.id] ?? CENTERED_POSITION}
 			<div
 				class="node-wrapper"
-				data-node-id={primaryNode.id}
-				style={primaryPos
-					? `left: calc(50% + ${primaryPos.x}px); top: calc(50% + ${primaryPos.y}px); transform: translate(-50%, -50%);`
-					: 'left: 50%; top: 50%; transform: translate(-50%, -50%);'}
+				class:primary={primaryNodeId === node.id}
+				data-node-id={node.id}
+				style={`left: calc(50% + ${nodePos.x}px); top: calc(50% + ${nodePos.y}px); transform: translate(-50%, -50%);`}
 			>
-				<Node nodeData={primaryNode} isOpen={false} />
+				<Node nodeData={node} isOpen={false} />
 			</div>
-		{/if}
+		{/each}
 	</Stage>
 </div>
 
@@ -97,5 +129,16 @@
 
 	.node-wrapper {
 		position: absolute;
+	}
+
+	.edges {
+		position: absolute;
+		inset: 0;
+		overflow: visible;
+		pointer-events: none;
+	}
+
+	.edge {
+		stroke-width: 2;
 	}
 </style>
