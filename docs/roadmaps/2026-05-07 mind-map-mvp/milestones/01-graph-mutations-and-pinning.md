@@ -1,7 +1,7 @@
 # Milestone 01: Graph mutations and pinning
 
 **Status:** not started
-**Plan:** _none yet — write one in `plans/` before starting._
+**Plan:** [2026-05-15 graph-mutations-and-pinning](../plans/2026-05-15 graph-mutations-and-pinning.md)
 
 ## Goal
 
@@ -64,7 +64,7 @@ persistence, multiplayer, search) consumes the API shaped here.
   nodes look pinned, but neighbors don't yet shrink. The graph still
   shows only the primary node.
 - **Editing node title/description from the UI.** Milestone 03.
-- **Undo/redo UI.** The immutable mutations *enable* it but the UI is
+- **Undo/redo UI.** The immutable mutations _enable_ it but the UI is
   out of scope.
 - **Persistence.** Mutations live only in memory.
 
@@ -76,7 +76,7 @@ persistence, multiplayer, search) consumes the API shaped here.
   to make in the plan: do we render all nodes now (with naive layout)
   or wait until milestone 02 wires up real layout? Recommendation: render
   all nodes with placeholder positions in milestone 01 so milestone 02
-  is purely about *how* they're laid out.
+  is purely about _how_ they're laid out.
 - **Position generation for new nodes.** When `addNode` is called from
   a double-tap-drag-to-background gesture, what's the initial position?
   Decision in the plan; likely "drop point in stage-local coordinates".
