@@ -52,6 +52,27 @@ export function scaleByHops(hops: number, falloff = 0.7, min = 0.1): number {
 }
 ```
 
+### Pin new fields when extending a config interface
+
+When you add a field to a settings interface like `LayoutSettings` and
+give it a default in the central `withDefault…` helper, every existing
+test that builds a `Partial<…>` settings literal silently picks up the
+new default. If that default changes layout/physics/render behavior,
+those tests can break in ways that have nothing to do with the field
+itself.
+
+In the same commit that adds the field:
+
+- Grep for the interface (`rg LayoutSettings -t ts`) and for partial
+  literals passed as `settings: { … }` in spec/story files.
+- For each call site, decide whether the new default is right for that
+  test and either keep it (no change) or **pin** the field to the value
+  the test previously relied on (often `0` for a strength/iterations
+  knob, or the pre-existing baked-in constant).
+
+This keeps the new behavior opt-in for existing tests and isolates the
+new field's effects to the specs you wrote for it.
+
 ## Types live in shared files
 
 - Shared types: `apps/mind-map-sv/src/lib/components/ui/types/*.ts`

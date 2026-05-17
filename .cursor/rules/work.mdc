@@ -29,23 +29,25 @@ sentence — only the literal `/work` directive.
 | `/work --from <branch> …` | Base the worktree off `<branch>` instead of the current branch |
 | `/work --no-merge …` | Skip the final merge offer (just leave the worktree in place) |
 
-## What `/work` does, at a glance
+## Shell environment
 
-1. Pick a `<type>` and `<slug>` from the prompt (or use the override).
-2. Create a sibling worktree at `../mind-map-turbo-<slug>/` on a new branch
-   `<type>/work--<slug>` based on the latest local tip of the current branch.
-3. `cd` into the worktree, install deps if needed, and do the actual work
-   (including the usual validation + commits per `core.mdc` and `commits.mdc`).
-4. Before reporting done: dry-run-merge against the base branch to surface
-   any conflicts.
-5. End with a structured report and an explicit merge offer.
-6. If the user accepts the merge offer, fast-forward (or `--no-ff` merge),
-   then clean up the worktree and the local branch.
+Wrap every command in `/bin/zsh -f -c '…'`. This skips the user's `zshrc`
+(which may have broken hooks like `add-zsh-hook`/nvm-lazy-load) while
+still inheriting the parent process's PATH (so nvm-installed Node 20+ is
+on PATH).
+
+Do **not** use `bash -lc` — it sources `~/.bash_profile`, which may have
+syntax errors, and may put an older Node (e.g. v16) on PATH that fails
+pnpm's `engines` check with `pnpm requires Node ≥ 20`. If you see that
+error, or `command not found: add-zsh-hook`, or `_comps: assignment to
+invalid subscript range`, switch to `/bin/zsh -f -c` and retry.
+
+Prefer setting the tool's `working_directory` parameter over chaining
+`cd …` — many agent tool runners drop chained `cd` commands.
 
 ## Step 1 — derive `<type>` and `<slug>`
 
-`<type>` follows Conventional Commits (see `commits.mdc`). Pick the most
-specific type the prompt supports:
+`<type>` follows Conventional Commits (see `commits.mdc`):
 
 | Prompt cues | `<type>` |
 |---|---|
@@ -58,27 +60,22 @@ specific type the prompt supports:
 | "deps", "tooling", "config", "ci", "lint" config | `chore` |
 | anything else | `feat` |
 
-`<slug>` rules:
+`<slug>`: 2–5 words, lowercase, kebab-case, no leading type prefix. Drop
+English filler and code/path noise; keep it human-readable.
 
-- 2–5 words, lowercase, kebab-case, no leading type prefix.
-- Strip filler words (`the`, `a`, `an`, `is`, `of`, `on`, `in`, `to`, `with`,
-  `when`, `please`, `make`, `that`).
-- Strip code/file noise (paths, function names) — the slug is for humans.
-
-Example: `/work fix the pinch zoom jitter on iOS Safari` →
+E.g. `/work fix the pinch zoom jitter on iOS Safari` →
 `<type>=fix`, `<slug>=pinch-zoom-jitter-ios-safari`.
 
 If `../mind-map-turbo-<slug>/` already exists, append `-2`, `-3`, … until
-free. Don't reuse a stale worktree by accident.
+free, and use the suffixed slug **everywhere downstream** (branch name,
+merge commit message, summary report). Don't reuse a stale worktree by
+accident.
 
 ## Step 2 — create the worktree
 
-Run from the repo root, in this order:
+Run from the repo root:
 
 ```bash
-# pick up any new commits on the base branch first
-git fetch --quiet origin
-
 # capture the base branch (the one the user is currently on,
 # unless --from <branch> was supplied)
 BASE="$(git rev-parse --abbrev-ref HEAD)"
@@ -87,7 +84,8 @@ BASE="$(git rev-parse --abbrev-ref HEAD)"
 git worktree add -b "<type>/work--<slug>" "../mind-map-turbo-<slug>" "$BASE"
 ```
 
-Then `cd ../mind-map-turbo-<slug>` for the rest of the session.
+Then operate inside `../mind-map-turbo-<slug>` (via `working_directory`)
+for the rest of the session.
 
 **Announce the worktree up front.** Your first reply after creating it
 should state: the worktree path, the new branch name, and the base branch.
@@ -96,20 +94,18 @@ watch.
 
 ## Step 3 — install deps if needed
 
-Compare `package.json` and `pnpm-lock.yaml` against the source worktree.
-If either file differs, or `node_modules` is missing in the new worktree,
-run `pnpm install` from the worktree root. Otherwise skip — pnpm's
-content-addressed store usually means the existing `node_modules` symlinks
-work fine in a fresh worktree.
+Derive the source worktree path so the check isn't user-specific, then
+install only when needed:
 
 ```bash
-# from inside the new worktree
-if [ ! -d node_modules ] \
-  || ! cmp -s package.json /Users/rockysims/dev/mind-map-turbo/package.json \
-  || ! cmp -s pnpm-lock.yaml /Users/rockysims/dev/mind-map-turbo/pnpm-lock.yaml; then
-  pnpm install
-fi
+SRC="$(git worktree list --porcelain | awk 'NR==2{print $2}')"
+[ -d node_modules ] && cmp -s pnpm-lock.yaml "$SRC/pnpm-lock.yaml" || pnpm install
 ```
+
+After `git worktree add`, `package.json` and `pnpm-lock.yaml` are
+byte-identical to the source by construction, so the lockfile-drift check
+only matters if the source worktree has uncommitted lockfile changes —
+but it's cheap and catches a real footgun, so keep it.
 
 ## Step 4 — do the work
 
@@ -121,14 +117,23 @@ Inside the worktree, follow the normal repo conventions:
   logical change per commit.
 - Svelte / TypeScript / test conventions from the other rules.
 
+**Roadmap check.** Before editing, confirm the task maps to an active
+milestone in `docs/roadmaps/`. If it doesn't, ask whether to write or
+extend a milestone before coding (per `core.mdc`).
+
+**Formatting.** To format edited files, run `pnpm exec prettier --write
+<paths>` from the **repo root** (not from inside the workspace package,
+or pnpm will complain about missing workspace config). The repo's
+`lint-staged` re-runs prettier and eslint on staged files at commit time
+as a safety net — no need to re-verify formatting after the commit.
+
 The user said `/work`, not "skip the rules". `/work` is purely about
 *where* the work happens, not *how*.
 
 ## Step 5 — pre-merge dry run
 
-After the Definition of Done is satisfied (lint, check, tests, story plays,
-all green), do a dry-run merge against the base branch to surface conflicts
-before bothering the user:
+After the Definition of Done is satisfied, dry-run-merge against the base
+branch to surface conflicts before bothering the user:
 
 ```bash
 git fetch --quiet origin
@@ -141,47 +146,40 @@ MERGE_STATUS=$?
 git merge --abort 2>/dev/null || git reset --merge
 ```
 
-Capture the result for the final report:
+Interpret:
 
-- `MERGE_STATUS=0` and no conflict markers → **clean**.
+- `MERGE_STATUS=0` + `Already up to date.` → **clean** (base hasn't moved
+  since the branch was cut; the most common case).
+- `MERGE_STATUS=0` + real merge happened → **clean**.
 - otherwise → **conflicts in <files>**; do not auto-resolve, just report.
 
 ## Step 6 — final report and merge offer
 
-End the task with a report in this exact shape (fill in the blanks):
+End the task with a report in this shape:
 
 ```
 ### /work summary
 
-- **Task:** <one-sentence restatement of the prompt>
+- **Task:** <one-sentence restatement>
 - **Worktree:** ../mind-map-turbo-<slug>/
 - **Branch:** <type>/work--<slug>  ←  <BASE>
-- **Commits on this branch:**
-  - <commit subject 1>
-  - <commit subject 2>
-- **Validation:**
-  - lint: pass | fail
-  - check: pass | fail
-  - test:unit: pass | fail (N tests)
+- **Commits:** <subject 1>; <subject 2>
+- **Validation:** lint pass; check pass; test:unit pass (N tests)
 - **Merges cleanly into <BASE>:** yes | no (conflicts in: <files>)
 
-Want me to merge this into <BASE> and clean up?
-- "yes" / "merge" → I'll fast-forward (or --no-ff if needed),
-  then `git worktree remove` and delete the local branch.
-- "no" / "leave it" → I'll stop here; the worktree stays put.
+Merge into <BASE> and clean up? (yes / no)
 ```
 
 If validation failed or the dry-run found conflicts, **do not phrase the
-question as a yes-default merge offer**. Instead, surface the failures
-first and ask how to proceed.
+question as a yes-default merge offer**. Surface the failures first and
+ask how to proceed.
 
 ## Step 7 — handle the user's reply
 
-If the user replies with `yes`, `merge`, `lgtm`, `ship it`, or similar
-unconditional approval, run:
+On `yes`, `merge`, `lgtm`, `ship it`, or similar unconditional approval,
+run from the source worktree's root (use `working_directory`, not `cd`):
 
 ```bash
-cd /Users/rockysims/dev/mind-map-turbo   # back to the source worktree
 git checkout "$BASE"
 git merge --ff-only "<type>/work--<slug>" \
   || git merge --no-ff "<type>/work--<slug>" \
@@ -204,30 +202,19 @@ clean up. The worktree and branch stay live for them to revisit.
 
 ## Edge cases
 
-- **Already inside a `/work` worktree.** If the current cwd is already a
-  worktree dir matching `../mind-map-turbo-*`, do **not** nest a new one.
-  Tell the user: "you're already in `<path>` on `<branch>`; run `/work`
-  from the source worktree, or finish/abandon this one first." Wait for
-  guidance.
+- **Already inside a `/work` worktree.** If the current cwd matches
+  `../mind-map-turbo-*`, do **not** nest a new one. Tell the user:
+  "you're already in `<path>` on `<branch>`; run `/work` from the source
+  worktree, or finish/abandon this one first." Wait for guidance.
 - **Uncommitted changes in the source worktree.** Creating a new worktree
   is safe even with dirty changes in the source — the new worktree starts
   from `HEAD`, not the working tree. Proceed without stashing, and mention
   in the announcement that the source worktree's uncommitted changes were
   left alone.
 - **Trivial tasks.** If the user explicitly typed `/work`, run the **full**
-  procedure (worktree, branch, validation, merge offer) regardless of how
-  small the task is. Don't shortcut. Don't second-guess the directive.
+  procedure regardless of how small the task is. Don't shortcut.
 - **Base branch unknown / detached HEAD.** Bail and ask the user which
   branch to base off of. Don't guess.
 - **`--no-merge` was supplied.** Skip Step 6's merge offer. Still produce
-  the summary, but end with: "Worktree left at `<path>` on
-  `<branch>`. Merge it manually when you're ready."
-
-## Why this exists
-
-The repo's normal flow is one branch at a time on a single worktree. When
-two tasks need to run in parallel (e.g. a slow-running refactor plus a
-quick bug fix), they collide. `/work` is the lightweight escape hatch:
-each invocation gets its own worktree, its own branch, its own
-`node_modules`, and its own merge ceremony — without the user having to
-remember the git plumbing.
+  the summary, but end with: "Worktree left at `<path>` on `<branch>`.
+  Merge it manually when you're ready."
