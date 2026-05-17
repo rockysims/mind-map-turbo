@@ -97,6 +97,32 @@ describe('graphLayout', () => {
 		expect(layout.posByNodeId.n1.x).not.toBe(80);
 	});
 
+	it('pulls connected nodes toward an active drag node when the edge gap is too large', () => {
+		const graph = makeGraph({
+			nodeCount: 2,
+			edges: [[0, 1]],
+			posByNodeId: {
+				n0: { x: 0, y: 0 },
+				n1: { x: 500, y: 0 }
+			}
+		});
+
+		const layout = deriveGraphLayout(graph, {
+			activeDragNodeId: 'n0',
+			settings: {
+				baseRadius: 20,
+				minScale: 1,
+				edgeGapMinPx: 40,
+				edgeGapMaxPx: 100,
+				edgeSpringStrength: 1
+			},
+			relaxIterations: 1
+		});
+
+		expect(layout.posByNodeId.n0).toEqual({ x: 0, y: 0 });
+		expect(layout.posByNodeId.n1).toEqual({ x: 140, y: 0 });
+	});
+
 	it('returns a new positions map without mutating the original graph', () => {
 		const graph = makeGraph({
 			nodeCount: 2,
@@ -153,7 +179,13 @@ describe('graphLayout', () => {
 				})
 			)
 		});
-		const settings = { baseRadius: 200, scaleFalloff: 0.7, minScale: 0.1, paddingPx: 12 };
+		const settings = {
+			baseRadius: 200,
+			scaleFalloff: 0.7,
+			minScale: 0.1,
+			paddingPx: 12,
+			edgeSpringStrength: 0
+		};
 		const lightlyRelaxed = deriveGraphLayout(graph, { settings, relaxIterations: 4 });
 		const settled = deriveGraphLayout(withSettledGraphPositions(graph, { settings }), {
 			settings,

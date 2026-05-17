@@ -237,7 +237,8 @@
 			nodeCount: 2,
 			posByNodeId: { n0: { x: -280, y: 0 }, n1: { x: 280, y: 0 } }
 		}),
-		defaultPrimaryNodeId: 'n0'
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { relaxIterations: 0 }
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
@@ -276,7 +277,8 @@
 			nodeCount: 1,
 			posByNodeId: { n0: { x: -280, y: 0 } }
 		}),
-		defaultPrimaryNodeId: 'n0'
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { relaxIterations: 0 }
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
@@ -360,6 +362,47 @@
 		expect(Number.isFinite(movedTargetCenter.x)).toBe(true);
 		expect(distanceBetween(targetCenter, movedTargetCenter)).toBeGreaterThan(0);
 		expect(distanceBetween(movedSourceCenter, movedTargetCenter)).toBeGreaterThan(NODE_RADIUS);
+	}}
+/>
+
+<Story
+	name="ConnectedNodeFollowsDraggedEndpoint"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 2,
+			edges: [[0, 1]],
+			posByNodeId: { n0: { x: -100, y: 0 }, n1: { x: 40, y: 0 } }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: {
+			baseRadius: 40,
+			minScale: 1,
+			paddingPx: 0,
+			relaxIterations: 1,
+			edgeGapMinPx: 40,
+			edgeGapMaxPx: 80,
+			edgeSpringStrength: 1
+		}
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const sourceCircle = getCircle(canvasElement, 'n0');
+		const sourceCenter = getCenter(sourceCircle);
+		const targetCenter = getCenter(getCircle(canvasElement, 'n1'));
+		const dragX = sourceCenter.x + 500;
+
+		dispatchPointer(sourceCircle, 'pointerdown', sourceCenter.x, sourceCenter.y);
+		dispatchPointer(stage, 'pointermove', dragX, sourceCenter.y);
+		await waitForLayout();
+
+		const targetDuringDrag = getCenter(getCircle(canvasElement, 'n1'));
+		expect(targetDuringDrag.x).toBeGreaterThan(targetCenter.x + 100);
+		expect(distanceBetween({ x: dragX, y: sourceCenter.y }, targetDuringDrag)).toBeLessThan(
+			distanceBetween({ x: dragX, y: sourceCenter.y }, targetCenter)
+		);
+
+		dispatchPointer(stage, 'pointerup', dragX, sourceCenter.y);
 	}}
 />
 

@@ -4,6 +4,9 @@ export interface LayoutSettings {
 	minScale: number;
 	paddingPx: number;
 	relaxIterations: number;
+	edgeGapMinPx: number;
+	edgeGapMaxPx: number;
+	edgeSpringStrength: number;
 }
 
 export const DEFAULT_LAYOUT_SETTINGS: LayoutSettings = {
@@ -11,7 +14,10 @@ export const DEFAULT_LAYOUT_SETTINGS: LayoutSettings = {
 	scaleFalloff: 0.7,
 	minScale: 0.1,
 	paddingPx: 12,
-	relaxIterations: 2
+	relaxIterations: 2,
+	edgeGapMinPx: 80,
+	edgeGapMaxPx: 320,
+	edgeSpringStrength: 0.25
 };
 
 export function withDefaultLayoutSettings(settings: Partial<LayoutSettings> = {}): LayoutSettings {

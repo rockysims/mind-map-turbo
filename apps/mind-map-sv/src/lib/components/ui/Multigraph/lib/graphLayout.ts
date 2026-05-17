@@ -2,7 +2,7 @@ import type { MultigraphData, Point } from '../../types/multigraph';
 import { hopsFromPinned, radiusOf, scaleByHops } from './layout';
 import type { LayoutSettings } from './layoutSettings';
 import { withDefaultLayoutSettings } from './layoutSettings';
-import { relaxOverlaps } from './physics';
+import { relaxGraphPhysics } from './physics';
 
 const CENTERED_POSITION: Point = { x: 0, y: 0 };
 const MAX_SETTLE_RELAX_ITERATIONS = 100;
@@ -45,7 +45,15 @@ export function deriveGraphLayout(
 	const iterations = options.relaxIterations ?? settings.relaxIterations;
 	const posByNodeId =
 		iterations > 0
-			? relaxOverlaps(basePositions, radiusByNodeId, settings.paddingPx, iterations, anchoredIds)
+			? relaxGraphPhysics(
+					basePositions,
+					radiusByNodeId,
+					data.edges,
+					settings.paddingPx,
+					settings,
+					iterations,
+					anchoredIds
+				)
 			: basePositions;
 
 	return {
