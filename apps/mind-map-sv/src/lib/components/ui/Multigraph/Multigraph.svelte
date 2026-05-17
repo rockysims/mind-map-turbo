@@ -5,7 +5,11 @@
 	import type { MultigraphData, Point } from '../types/multigraph';
 	import { isPointInCircle } from './lib/hitTest.js';
 	import { addEdge, addNode, moveNode, togglePinned } from './lib/graph.js';
-	import { deriveGraphLayout, relaxGraphPositions } from './lib/graphLayout.js';
+	import {
+		deriveGraphLayout,
+		withRelaxedGraphPositions,
+		withSettledGraphPositions
+	} from './lib/graphLayout.js';
 	import type { LayoutSettings } from './lib/layoutSettings.js';
 
 	const CENTERED_POSITION: Point = { x: 0, y: 0 };
@@ -30,7 +34,7 @@
 	);
 
 	$effect(() => {
-		graph = multigraphData;
+		graph = withSettledGraphPositions(multigraphData, { settings: layoutSettings });
 		primaryNodeId = defaultPrimaryNodeId;
 	});
 
@@ -120,14 +124,11 @@
 		dragNodeId: string | null = activeDragNodeId,
 		relaxIterations = layoutSettings.relaxIterations
 	): MultigraphData {
-		return {
-			...nextGraph,
-			posByNodeId: relaxGraphPositions(nextGraph, {
-				settings: layoutSettings,
-				activeDragNodeId: dragNodeId,
-				relaxIterations
-			})
-		};
+		return withRelaxedGraphPositions(nextGraph, {
+			settings: layoutSettings,
+			activeDragNodeId: dragNodeId,
+			relaxIterations
+		});
 	}
 
 	function startRelaxationLoop() {

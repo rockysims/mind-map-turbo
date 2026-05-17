@@ -5,6 +5,7 @@ import { withDefaultLayoutSettings } from './layoutSettings';
 import { relaxOverlaps } from './physics';
 
 const CENTERED_POSITION: Point = { x: 0, y: 0 };
+const MAX_SETTLE_RELAX_ITERATIONS = 100;
 
 export interface NodeLayout {
 	nodeId: string;
@@ -68,6 +69,31 @@ export function relaxGraphPositions(
 	options: GraphLayoutOptions = {}
 ): Record<string, Point> {
 	return deriveGraphLayout(data, options).posByNodeId;
+}
+
+export function withRelaxedGraphPositions(
+	data: MultigraphData,
+	options: GraphLayoutOptions = {}
+): MultigraphData {
+	return {
+		...data,
+		posByNodeId: relaxGraphPositions(data, options)
+	};
+}
+
+export function withSettledGraphPositions(
+	data: MultigraphData,
+	options: GraphLayoutOptions = {}
+): MultigraphData {
+	const settings = withDefaultLayoutSettings(options.settings);
+
+	return withRelaxedGraphPositions(data, {
+		...options,
+		relaxIterations: Math.min(
+			MAX_SETTLE_RELAX_ITERATIONS,
+			Math.max(options.relaxIterations ?? settings.relaxIterations, data.nodes.length)
+		)
+	});
 }
 
 function positionsForNodes(data: MultigraphData): Record<string, Point> {

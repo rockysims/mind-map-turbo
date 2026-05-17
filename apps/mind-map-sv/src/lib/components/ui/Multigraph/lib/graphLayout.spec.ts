@@ -1,6 +1,38 @@
 import { describe, expect, it } from 'vitest';
-import { deriveGraphLayout, relaxGraphPositions } from './graphLayout';
+import {
+	deriveGraphLayout,
+	relaxGraphPositions,
+	withRelaxedGraphPositions,
+	withSettledGraphPositions
+} from './graphLayout';
 import { makeGraph } from './testFixtures';
+
+function maxOverlapAmount(
+	positions: Record<string, { x: number; y: number }>,
+	radii: Record<string, number>,
+	paddingPx: number
+): number {
+	let maxOverlap = 0;
+	const nodeIds = Object.keys(positions);
+
+	for (let sourceIndex = 0; sourceIndex < nodeIds.length; sourceIndex += 1) {
+		for (let targetIndex = sourceIndex + 1; targetIndex < nodeIds.length; targetIndex += 1) {
+			const sourceId = nodeIds[sourceIndex];
+			const targetId = nodeIds[targetIndex];
+			const source = positions[sourceId];
+			const target = positions[targetId];
+			const overlap =
+				radii[sourceId] +
+				radii[targetId] +
+				paddingPx -
+				Math.hypot(target.x - source.x, target.y - source.y);
+
+			maxOverlap = Math.max(maxOverlap, overlap);
+		}
+	}
+
+	return maxOverlap;
+}
 
 describe('graphLayout', () => {
 	it('returns presentation data for every graph node', () => {
@@ -83,5 +115,60 @@ describe('graphLayout', () => {
 		expect(positions).not.toBe(graph.posByNodeId);
 		expect(positions.n1).toEqual({ x: 100, y: 0 });
 		expect(graph.posByNodeId.n1).toEqual({ x: 80, y: 0 });
+	});
+
+	it('returns graph data with relaxed positions for initial render', () => {
+		const graph = makeGraph({
+			nodeCount: 2,
+			pinned: [0],
+			posByNodeId: {
+				n0: { x: 0, y: 0 },
+				n1: { x: 80, y: 0 }
+			}
+		});
+
+		const relaxed = withRelaxedGraphPositions(graph, {
+			settings: { baseRadius: 50, minScale: 1, paddingPx: 0 },
+			relaxIterations: 1
+		});
+
+		expect(relaxed).not.toBe(graph);
+		expect(relaxed.nodes).toBe(graph.nodes);
+		expect(relaxed.edges).toBe(graph.edges);
+		expect(relaxed.posByNodeId.n0).toEqual({ x: 0, y: 0 });
+		expect(relaxed.posByNodeId.n1).toEqual({ x: 100, y: 0 });
+		expect(graph.posByNodeId.n1).toEqual({ x: 80, y: 0 });
+	});
+
+	it('settles larger graphs beyond the per-frame relaxation budget', () => {
+		const nodeCount = 100;
+		const graph = makeGraph({
+			nodeCount,
+			pinned: [0, 33, 66],
+			edges: Array.from({ length: nodeCount - 1 }, (_, index) => [index, index + 1]),
+			posByNodeId: Object.fromEntries(
+				Array.from({ length: nodeCount }, (_, index) => {
+					const angle = (index / nodeCount) * Math.PI * 2;
+					return [`n${index}`, { x: Math.cos(angle) * 480, y: Math.sin(angle) * 480 }];
+				})
+			)
+		});
+		const settings = { baseRadius: 200, scaleFalloff: 0.7, minScale: 0.1, paddingPx: 12 };
+		const lightlyRelaxed = deriveGraphLayout(graph, { settings, relaxIterations: 4 });
+		const settled = deriveGraphLayout(withSettledGraphPositions(graph, { settings }), {
+			settings,
+			relaxIterations: 0
+		});
+
+		expect(
+			maxOverlapAmount(
+				lightlyRelaxed.posByNodeId,
+				lightlyRelaxed.radiusByNodeId,
+				settings.paddingPx
+			)
+		).toBeGreaterThan(20);
+		expect(
+			maxOverlapAmount(settled.posByNodeId, settled.radiusByNodeId, settings.paddingPx)
+		).toBeLessThan(0.01);
 	});
 });

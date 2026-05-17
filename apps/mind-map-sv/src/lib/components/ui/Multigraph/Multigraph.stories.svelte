@@ -46,6 +46,33 @@
 		return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
 	}
 
+	function distanceBetween(source: Point, target: Point): number {
+		return Math.hypot(target.x - source.x, target.y - source.y);
+	}
+
+	function maxCircleOverlap(el: HTMLElement): number {
+		const circles = Array.from(el.querySelectorAll('.node-wrapper .circle')).map((circle) => {
+			const rect = circle.getBoundingClientRect();
+			return {
+				center: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
+				radius: Math.min(rect.width, rect.height) / 2
+			};
+		});
+		let maxOverlap = 0;
+
+		for (let sourceIndex = 0; sourceIndex < circles.length; sourceIndex += 1) {
+			for (let targetIndex = sourceIndex + 1; targetIndex < circles.length; targetIndex += 1) {
+				const source = circles[sourceIndex];
+				const target = circles[targetIndex];
+				const overlap =
+					source.radius + target.radius - distanceBetween(source.center, target.center);
+				maxOverlap = Math.max(maxOverlap, overlap);
+			}
+		}
+
+		return maxOverlap;
+	}
+
 	function dispatchPointer(
 		target: HTMLElement,
 		type: 'pointerdown' | 'pointermove' | 'pointerup',
@@ -110,6 +137,8 @@
 		dispatchPointer(toTarget, 'pointermove', toX, toY);
 		dispatchPointer(toTarget, 'pointerup', toX, toY);
 	}
+
+	const HUNDRED_NODE_POSITIONS = circlePositions(100, 480);
 </script>
 
 <Story
@@ -329,8 +358,8 @@
 		expect(movedSourceCenter.x).toBeCloseTo(targetCenter.x);
 		expect(movedSourceCenter.y).toBeCloseTo(targetCenter.y);
 		expect(Number.isFinite(movedTargetCenter.x)).toBe(true);
-		expect(Math.abs(movedTargetCenter.x - movedSourceCenter.x)).toBeGreaterThan(0);
-		expect(Math.abs(movedTargetCenter.x)).toBeLessThan(stage.getBoundingClientRect().width);
+		expect(distanceBetween(targetCenter, movedTargetCenter)).toBeGreaterThan(0);
+		expect(distanceBetween(movedSourceCenter, movedTargetCenter)).toBeGreaterThan(NODE_RADIUS);
 	}}
 />
 
@@ -393,16 +422,27 @@
 			nodeCount: 100,
 			pinned: [0, 33, 66],
 			edges: chainEdges(100),
-			posByNodeId: circlePositions(100, 480)
+			posByNodeId: HUNDRED_NODE_POSITIONS
 		}),
 		defaultPrimaryNodeId: 'n0',
 		layoutSettings: { scaleFalloff: 0.7, minScale: 0.1, paddingPx: 12, relaxIterations: 4 }
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const pinnedCenter = getCenter(getCircle(stage, 'n0'));
+		const neighborCenter = getCenter(getCircle(stage, 'n1'));
+		const rawNeighborDistance = distanceBetween(
+			HUNDRED_NODE_POSITIONS.n0,
+			HUNDRED_NODE_POSITIONS.n1
+		);
 
 		expect(canvasElement.querySelectorAll('.node-wrapper')).toHaveLength(100);
 		expect(Number(getNodeWrapper(canvasElement, 'n0').dataset.scale)).toBe(1);
 		expect(Number(getNodeWrapper(canvasElement, 'n50').dataset.scale)).toBeGreaterThanOrEqual(0.1);
+		expect(distanceBetween(pinnedCenter, neighborCenter)).toBeGreaterThan(
+			rawNeighborDistance + NODE_RADIUS
+		);
+		expect(maxCircleOverlap(stage)).toBeLessThan(1);
 	}}
 />
