@@ -33,12 +33,11 @@ readable distance, and nothing visually overlaps.
   - `radiusOf(scales, settings, nodeId): number` —
     `baseRadius * scales[id]`.
 - New `lib/physics.ts`:
-  - `relaxOverlaps(positions, radii, paddingPx, iterations = 1):
-Record<string, Point>` — for each overlapping pair, push apart by
-    half the overlap each (anchored nodes stay put).
-  - `relaxOverlapsStep(positions, radii, paddingPx, anchoredIds: Set<string>):
-Record<string, Point>` — single iteration; `relaxOverlaps`
-    composes this.
+  - `relaxOverlaps(positions, radii, iterations = 1): Record<string, Point>` —
+    for each overlapping pair, push apart by half the overlap each (anchored
+    nodes stay put).
+  - `relaxOverlapsStep(positions, radii, anchoredIds: Set<string>):
+Record<string, Point>` — single iteration; `relaxOverlaps` composes this.
   - `relaxEdgeDistancesStep(positions, radii, edges, settings, anchoredIds):
 Record<string, Point>` — nudges connected endpoints toward a readable
     minimum/maximum gap band without moving anchored nodes.
@@ -51,10 +50,9 @@ Record<string, Point>` — nudges connected endpoints toward a readable
     baseRadius: number; // pixel radius at scale 1.0 (default 200)
     scaleFalloff: number; // 0–1 multiplier per hop  (default 0.7)
     minScale: number; // floor                   (default 0.1)
-    paddingPx: number; // breathing room between circles (default 12)
     relaxIterations: number; // physics passes per frame (default 2)
-    edgeGapMinPx: number; // minimum gap between connected nodes (default 80)
-    edgeGapMaxPx: number; // maximum gap between connected nodes (default 320)
+    edgeGapMinRadiusFactor: number; // minimum visible gap as a fraction of r1 + r2 (default 0.2)
+    edgeGapMaxRadiusFactor: number; // maximum visible gap as a fraction of r1 + r2 (default 0.6)
     edgeSpringStrength: number; // per-pass edge-gap correction (default 0.25)
   }
   ```
@@ -84,8 +82,8 @@ Record<string, Point>` — nudges connected endpoints toward a readable
     the overlap).
   - Anchored nodes don't move; non-anchored absorbs the full push.
   - No-op when no overlap.
-  - Convergence: after N iterations of randomly-placed circles, all
-    pairwise overlaps are below `paddingPx` tolerance.
+  - Convergence: after N iterations of randomly-placed circles, all pairwise
+    overlaps are below tolerance.
   - Connected endpoints outside the configured edge-gap band move toward
     the band, while endpoints already in range are unchanged.
   - Edge-distance relaxation respects anchored endpoints and clamps spring
@@ -128,9 +126,9 @@ Record<string, Point>` — nudges connected endpoints toward a readable
 - **When to run physics?** Decision: run a bounded settling pass on initial
   graph load, one-shot passes after graph mutations, and a single-pass rAF
   loop while any drag is active.
-- **Sub-pixel jitter.** If iterations push nodes back and forth across
-  the padding boundary, motion can shimmer. Use a small tolerance
-  (`>` instead of `>=` overlap test, plus `paddingPx` slack).
+- **Sub-pixel jitter.** If iterations push nodes back and forth across the
+  overlap boundary, motion can shimmer. Use a small tolerance (`>` instead of
+  `>=` overlap test).
 - **Edge rendering.** Decision: keep minimal DOM edge lines under the node
   layer and let their endpoints follow the settled/scaled node positions.
   Rich routing, labels, and collision-aware edges remain out of scope.

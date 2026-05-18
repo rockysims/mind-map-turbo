@@ -8,8 +8,8 @@ import {
 import type { Point } from '../../types/multigraph';
 
 const EDGE_DISTANCE_SETTINGS = {
-	edgeGapMinPx: 40,
-	edgeGapMaxPx: 120,
+	edgeGapMinRadiusFactor: 1,
+	edgeGapMaxRadiusFactor: 3,
 	edgeSpringStrength: 0.25
 };
 
@@ -17,17 +17,11 @@ function overlapAmount(
 	positions: Record<string, Point>,
 	radii: Record<string, number>,
 	sourceId: string,
-	targetId: string,
-	paddingPx: number
+	targetId: string
 ): number {
 	const source = positions[sourceId];
 	const target = positions[targetId];
-	return (
-		radii[sourceId] +
-		radii[targetId] +
-		paddingPx -
-		Math.hypot(target.x - source.x, target.y - source.y)
-	);
+	return radii[sourceId] + radii[targetId] - Math.hypot(target.x - source.x, target.y - source.y);
 }
 
 function gapAmount(
@@ -80,6 +74,21 @@ describe('physics', () => {
 			expect(far.n0.x).toBe(30);
 		});
 
+		it('scales the visible edge gap range by connected node radii', () => {
+			const positions = { n0: { x: 0, y: 0 }, n1: { x: 400, y: 0 } };
+			const radii = { n0: 20, n1: 60 };
+
+			const next = relaxEdgeDistancesStep(
+				positions,
+				radii,
+				[{ sourceNodeId: 'n0', targetNodeId: 'n1' }],
+				EDGE_DISTANCE_SETTINGS
+			);
+
+			expect(next.n0).toEqual({ x: 10, y: 0 });
+			expect(next.n1).toEqual({ x: 390, y: 0 });
+		});
+
 		it('pushes connected nodes apart when their visible edge gap is below the min', () => {
 			const positions = { n0: { x: 0, y: 0 }, n1: { x: 60, y: 0 } };
 			const radii = { n0: 20, n1: 20 };
@@ -130,7 +139,7 @@ describe('physics', () => {
 		it('separates two overlapping circles symmetrically', () => {
 			const positions = { n0: { x: 0, y: 0 }, n1: { x: 100, y: 0 } };
 
-			const next = relaxOverlapsStep(positions, { n0: 100, n1: 100 }, 0);
+			const next = relaxOverlapsStep(positions, { n0: 100, n1: 100 });
 
 			expect(next.n0).toEqual({ x: -50, y: 0 });
 			expect(next.n1).toEqual({ x: 150, y: 0 });
@@ -139,7 +148,7 @@ describe('physics', () => {
 		it('keeps anchored nodes still while the unanchored node absorbs the push', () => {
 			const positions = { n0: { x: 0, y: 0 }, n1: { x: 100, y: 0 } };
 
-			const next = relaxOverlapsStep(positions, { n0: 100, n1: 100 }, 0, new Set(['n0']));
+			const next = relaxOverlapsStep(positions, { n0: 100, n1: 100 }, new Set(['n0']));
 
 			expect(next.n0).toEqual({ x: 0, y: 0 });
 			expect(next.n1).toEqual({ x: 200, y: 0 });
@@ -148,13 +157,13 @@ describe('physics', () => {
 		it('returns the original positions when nothing overlaps', () => {
 			const positions = { n0: { x: 0, y: 0 }, n1: { x: 300, y: 0 } };
 
-			expect(relaxOverlapsStep(positions, { n0: 100, n1: 100 }, 0)).toBe(positions);
+			expect(relaxOverlapsStep(positions, { n0: 100, n1: 100 })).toBe(positions);
 		});
 
 		it('uses a deterministic direction when circles have identical centers', () => {
 			const positions = { n0: { x: 0, y: 0 }, n1: { x: 0, y: 0 } };
 
-			const next = relaxOverlapsStep(positions, { n0: 10, n1: 10 }, 0);
+			const next = relaxOverlapsStep(positions, { n0: 10, n1: 10 });
 
 			expect(next.n0).toEqual({ x: -10, y: 0 });
 			expect(next.n1).toEqual({ x: 10, y: 0 });
@@ -163,14 +172,14 @@ describe('physics', () => {
 		it('does not mutate input positions', () => {
 			const positions = { n0: { x: 0, y: 0 }, n1: { x: 100, y: 0 } };
 
-			relaxOverlapsStep(positions, { n0: 100, n1: 100 }, 0);
+			relaxOverlapsStep(positions, { n0: 100, n1: 100 });
 
 			expect(positions).toEqual({ n0: { x: 0, y: 0 }, n1: { x: 100, y: 0 } });
 		});
 	});
 
 	describe('relaxOverlaps', () => {
-		it('converges a deterministic cluster below padding tolerance', () => {
+		it('converges a deterministic cluster below overlap tolerance', () => {
 			const positions = {
 				n0: { x: 0, y: 0 },
 				n1: { x: 30, y: 0 },
@@ -178,11 +187,11 @@ describe('physics', () => {
 			};
 			const radii = { n0: 20, n1: 20, n2: 20 };
 
-			const next = relaxOverlaps(positions, radii, 4, 25);
+			const next = relaxOverlaps(positions, radii, 25);
 
-			expect(overlapAmount(next, radii, 'n0', 'n1', 4)).toBeLessThan(0.01);
-			expect(overlapAmount(next, radii, 'n0', 'n2', 4)).toBeLessThan(0.01);
-			expect(overlapAmount(next, radii, 'n1', 'n2', 4)).toBeLessThan(0.01);
+			expect(overlapAmount(next, radii, 'n0', 'n1')).toBeLessThan(0.01);
+			expect(overlapAmount(next, radii, 'n0', 'n2')).toBeLessThan(0.01);
+			expect(overlapAmount(next, radii, 'n1', 'n2')).toBeLessThan(0.01);
 		});
 	});
 
@@ -202,7 +211,6 @@ describe('physics', () => {
 					{ sourceNodeId: 'n0', targetNodeId: 'n1' },
 					{ sourceNodeId: 'n1', targetNodeId: 'n2' }
 				],
-				12,
 				EDGE_DISTANCE_SETTINGS,
 				4,
 				new Set(['n0'])

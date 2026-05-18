@@ -3,8 +3,8 @@ import type { Point } from '../../types/multigraph';
 const OVERLAP_EPSILON = 0.001;
 
 export interface EdgeDistanceSettings {
-	edgeGapMinPx: number;
-	edgeGapMaxPx: number;
+	edgeGapMinRadiusFactor: number;
+	edgeGapMaxRadiusFactor: number;
 	edgeSpringStrength: number;
 }
 
@@ -17,7 +17,6 @@ export function relaxGraphPhysics(
 	positions: Record<string, Point>,
 	radii: Record<string, number>,
 	edges: EdgeEndpointIds[],
-	paddingPx: number,
 	edgeDistanceSettings: EdgeDistanceSettings,
 	iterations = 1,
 	anchoredIds: Set<string> = new Set()
@@ -32,12 +31,12 @@ export function relaxGraphPhysics(
 			edgeDistanceSettings,
 			anchoredIds
 		);
-		const next = relaxOverlapsStep(withRelaxedEdges, radii, paddingPx, anchoredIds);
+		const next = relaxOverlapsStep(withRelaxedEdges, radii, anchoredIds);
 		if (next === relaxed) return relaxed;
 		relaxed = next;
 	}
 
-	return relaxed;
+	return relaxOverlaps(relaxed, radii, iterations, anchoredIds);
 }
 
 export function relaxEdgeDistancesStep(
@@ -47,8 +46,8 @@ export function relaxEdgeDistancesStep(
 	settings: EdgeDistanceSettings,
 	anchoredIds: Set<string> = new Set()
 ): Record<string, Point> {
-	const minGap = Math.min(settings.edgeGapMinPx, settings.edgeGapMaxPx);
-	const maxGap = Math.max(settings.edgeGapMinPx, settings.edgeGapMaxPx);
+	const minGapFactor = Math.min(settings.edgeGapMinRadiusFactor, settings.edgeGapMaxRadiusFactor);
+	const maxGapFactor = Math.max(settings.edgeGapMinRadiusFactor, settings.edgeGapMaxRadiusFactor);
 	const springStrength = clamp(settings.edgeSpringStrength, 0, 1);
 	if (springStrength === 0) return positions;
 
@@ -64,6 +63,9 @@ export function relaxEdgeDistancesStep(
 		const targetRadius = radii[targetId];
 		if (!source || !target || sourceRadius === undefined || targetRadius === undefined) continue;
 
+		const radiusSum = sourceRadius + targetRadius;
+		const minGap = radiusSum * minGapFactor;
+		const maxGap = radiusSum * maxGapFactor;
 		const sourceAnchored = anchoredIds.has(sourceId);
 		const targetAnchored = anchoredIds.has(targetId);
 		if (sourceAnchored && targetAnchored) continue;
@@ -104,14 +106,13 @@ export function relaxEdgeDistancesStep(
 export function relaxOverlaps(
 	positions: Record<string, Point>,
 	radii: Record<string, number>,
-	paddingPx: number,
 	iterations = 1,
 	anchoredIds: Set<string> = new Set()
 ): Record<string, Point> {
 	let relaxed = positions;
 
 	for (let index = 0; index < iterations; index += 1) {
-		const next = relaxOverlapsStep(relaxed, radii, paddingPx, anchoredIds);
+		const next = relaxOverlapsStep(relaxed, radii, anchoredIds);
 		if (next === relaxed) return relaxed;
 		relaxed = next;
 	}
@@ -122,7 +123,6 @@ export function relaxOverlaps(
 export function relaxOverlapsStep(
 	positions: Record<string, Point>,
 	radii: Record<string, number>,
-	paddingPx: number,
 	anchoredIds: Set<string> = new Set()
 ): Record<string, Point> {
 	const nextPositions = clonePositions(positions);
@@ -135,7 +135,7 @@ export function relaxOverlapsStep(
 			const targetId = nodeIds[targetIndex];
 			const source = nextPositions[sourceId];
 			const target = nextPositions[targetId];
-			const minDistance = radii[sourceId] + radii[targetId] + paddingPx;
+			const minDistance = radii[sourceId] + radii[targetId];
 			const dx = target.x - source.x;
 			const dy = target.y - source.y;
 			const distance = Math.hypot(dx, dy);

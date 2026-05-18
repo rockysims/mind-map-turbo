@@ -5,7 +5,8 @@ import { withDefaultLayoutSettings } from './layoutSettings';
 import { relaxGraphPhysics } from './physics';
 
 const CENTERED_POSITION: Point = { x: 0, y: 0 };
-const MAX_SETTLE_RELAX_ITERATIONS = 100;
+const MAX_SETTLE_RELAX_ITERATIONS = 500;
+const SETTLE_ITERATIONS_PER_NODE = 5;
 
 export interface NodeLayout {
 	nodeId: string;
@@ -49,7 +50,6 @@ export function deriveGraphLayout(
 					basePositions,
 					radiusByNodeId,
 					data.edges,
-					settings.paddingPx,
 					settings,
 					iterations,
 					anchoredIds
@@ -99,7 +99,10 @@ export function withSettledGraphPositions(
 		...options,
 		relaxIterations: Math.min(
 			MAX_SETTLE_RELAX_ITERATIONS,
-			Math.max(options.relaxIterations ?? settings.relaxIterations, data.nodes.length)
+			Math.max(
+				options.relaxIterations ?? settings.relaxIterations,
+				data.nodes.length * SETTLE_ITERATIONS_PER_NODE
+			)
 		)
 	});
 }

@@ -102,7 +102,7 @@ runs.
 - N iterations converge for a small deterministic fixture, with remaining
   overlap below padding tolerance.
 - Connected endpoints that are too close or too far move toward the configured
-  `edgeGapMinPx` / `edgeGapMaxPx` band.
+  `edgeGapMinRadiusFactor` / `edgeGapMaxRadiusFactor` visible-gap band.
 - Edge-distance relaxation respects anchored endpoints and clamps
   `edgeSpringStrength` into a bounded range.
 - `relaxGraphPhysics` composes edge-distance relaxation and overlap relaxation
@@ -273,6 +273,8 @@ The plan is done when:
 - 2026-05-15: The existing `NODE_RADIUS` constant is the current rendered
   circle radius source. T01 should decide whether `LayoutSettings.baseRadius`
   defaults from that constant or replaces it as the node sizing source.
+- 2026-05-17: Runtime interaction, node sizing, and layout defaults now derive
+  from `src/lib/appConfig.ts`; `constants.ts` remains a compatibility export.
 - 2026-05-15: Executed as one local change set rather than six separate PRs
   because the milestone was requested directly from this branch.
 - 2026-05-17: Requirement sync after `fd11b80` and `f30a543`: dense graphs now

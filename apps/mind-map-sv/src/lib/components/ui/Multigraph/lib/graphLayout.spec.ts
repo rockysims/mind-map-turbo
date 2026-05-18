@@ -9,8 +9,7 @@ import { makeGraph } from './testFixtures';
 
 function maxOverlapAmount(
 	positions: Record<string, { x: number; y: number }>,
-	radii: Record<string, number>,
-	paddingPx: number
+	radii: Record<string, number>
 ): number {
 	let maxOverlap = 0;
 	const nodeIds = Object.keys(positions);
@@ -22,10 +21,7 @@ function maxOverlapAmount(
 			const source = positions[sourceId];
 			const target = positions[targetId];
 			const overlap =
-				radii[sourceId] +
-				radii[targetId] +
-				paddingPx -
-				Math.hypot(target.x - source.x, target.y - source.y);
+				radii[sourceId] + radii[targetId] - Math.hypot(target.x - source.x, target.y - source.y);
 
 			maxOverlap = Math.max(maxOverlap, overlap);
 		}
@@ -86,7 +82,7 @@ describe('graphLayout', () => {
 
 		const layout = deriveGraphLayout(graph, {
 			activeDragNodeId: 'n2',
-			settings: { baseRadius: 50, minScale: 1, paddingPx: 0 },
+			settings: { baseRadius: 50, minScale: 1 },
 			relaxIterations: 1
 		});
 
@@ -112,8 +108,8 @@ describe('graphLayout', () => {
 			settings: {
 				baseRadius: 20,
 				minScale: 1,
-				edgeGapMinPx: 40,
-				edgeGapMaxPx: 100,
+				edgeGapMinRadiusFactor: 1,
+				edgeGapMaxRadiusFactor: 2.5,
 				edgeSpringStrength: 1
 			},
 			relaxIterations: 1
@@ -134,7 +130,7 @@ describe('graphLayout', () => {
 		});
 
 		const positions = relaxGraphPositions(graph, {
-			settings: { baseRadius: 50, minScale: 1, paddingPx: 0 },
+			settings: { baseRadius: 50, minScale: 1 },
 			relaxIterations: 1
 		});
 
@@ -154,7 +150,7 @@ describe('graphLayout', () => {
 		});
 
 		const relaxed = withRelaxedGraphPositions(graph, {
-			settings: { baseRadius: 50, minScale: 1, paddingPx: 0 },
+			settings: { baseRadius: 50, minScale: 1 },
 			relaxIterations: 1
 		});
 
@@ -183,7 +179,6 @@ describe('graphLayout', () => {
 			baseRadius: 200,
 			scaleFalloff: 0.7,
 			minScale: 0.1,
-			paddingPx: 12,
 			edgeSpringStrength: 0
 		};
 		const lightlyRelaxed = deriveGraphLayout(graph, { settings, relaxIterations: 4 });
@@ -193,14 +188,8 @@ describe('graphLayout', () => {
 		});
 
 		expect(
-			maxOverlapAmount(
-				lightlyRelaxed.posByNodeId,
-				lightlyRelaxed.radiusByNodeId,
-				settings.paddingPx
-			)
-		).toBeGreaterThan(20);
-		expect(
-			maxOverlapAmount(settled.posByNodeId, settled.radiusByNodeId, settings.paddingPx)
-		).toBeLessThan(0.01);
+			maxOverlapAmount(lightlyRelaxed.posByNodeId, lightlyRelaxed.radiusByNodeId)
+		).toBeGreaterThan(5);
+		expect(maxOverlapAmount(settled.posByNodeId, settled.radiusByNodeId)).toBeLessThan(0.01);
 	});
 });

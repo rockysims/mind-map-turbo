@@ -2,6 +2,7 @@
 	import { defineMeta } from '@storybook/addon-svelte-csf';
 	import Multigraph from '$lib/components/ui/Multigraph/Multigraph.svelte';
 	import { expect, within } from 'storybook/test';
+	import { APP_CONFIG } from '$lib/appConfig';
 	import { DBL_CLICK_MS, LONG_PRESS_MS, MIN_NODE_HIT_RADIUS, NODE_RADIUS } from '$lib/constants';
 	import { makeGraph } from './lib/testFixtures';
 	import type { MultigraphData, Point } from '../types/multigraph';
@@ -261,7 +262,7 @@
 			posByNodeId: { n0: { x: -160, y: 0 }, n1: { x: 160, y: 0 } }
 		}),
 		defaultPrimaryNodeId: 'n0',
-		layoutSettings: { scaleFalloff: 0.1, minScale: 0.1, relaxIterations: 0 }
+		layoutSettings: { scaleFalloff: 0.1, minScale: 0.1 }
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
@@ -300,7 +301,7 @@
 			}
 		}),
 		defaultPrimaryNodeId: 'n0',
-		layoutSettings: { scaleFalloff: 0.5, minScale: 0.2, relaxIterations: 0 }
+		layoutSettings: { scaleFalloff: 0.5, minScale: 0.2 }
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
@@ -344,7 +345,7 @@
 			posByNodeId: { n0: { x: -280, y: 0 }, n1: { x: 280, y: 0 } }
 		}),
 		defaultPrimaryNodeId: 'n0',
-		layoutSettings: { relaxIterations: 0 }
+		layoutSettings: { relaxIterations: 1, edgeSpringStrength: 1 }
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
@@ -369,10 +370,23 @@
 		);
 		expect(edge).toBeInTheDocument();
 
-		const edgeRect = (edge as HTMLElement).getBoundingClientRect();
-		expect(edgeRect.left).toBeCloseTo(sourceCenter.x);
-		expect(edgeRect.right).toBeCloseTo(targetCenter.x);
-		expect(edgeRect.top + edgeRect.height / 2).toBeCloseTo(sourceCenter.y);
+		const movedSourceCircle = getCircle(canvasElement, 'n0');
+		const movedTargetCircle = getCircle(canvasElement, 'n1');
+		const movedSourceCenter = getCenter(movedSourceCircle);
+		const movedTargetCenter = getCenter(movedTargetCircle);
+		const visibleGap =
+			distanceBetween(movedSourceCenter, movedTargetCenter) -
+			movedSourceCircle.getBoundingClientRect().width / 2 -
+			movedTargetCircle.getBoundingClientRect().width / 2;
+
+		expect(distanceBetween(movedSourceCenter, movedTargetCenter)).toBeLessThan(
+			distanceBetween(sourceCenter, targetCenter)
+		);
+		expect(visibleGap).toBeCloseTo(
+			(movedSourceCircle.getBoundingClientRect().width / 2 +
+				movedTargetCircle.getBoundingClientRect().width / 2) *
+				APP_CONFIG.multigraph.layout.edgeGapMaxRadiusFactor
+		);
 	}}
 />
 
@@ -384,7 +398,7 @@
 			posByNodeId: { n0: { x: -280, y: 0 } }
 		}),
 		defaultPrimaryNodeId: 'n0',
-		layoutSettings: { relaxIterations: 0 }
+		layoutSettings: { edgeSpringStrength: 1 }
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
@@ -406,8 +420,11 @@
 
 		const newCircle = getCircle(canvasElement, 'n1');
 		const newCenter = getCenter(newCircle);
-		expect(newCenter.x).toBeCloseTo(dropX);
+		expect(Number.isFinite(newCenter.x)).toBe(true);
 		expect(newCenter.y).toBeCloseTo(dropY);
+		expect(distanceBetween(sourceCenter, newCenter)).toBeLessThan(
+			distanceBetween(sourceCenter, { x: dropX, y: dropY })
+		);
 		expect(canvasElement.querySelector('[data-edge-id="e0"]')).toBeInTheDocument();
 	}}
 />
@@ -446,7 +463,7 @@
 			posByNodeId: { n0: { x: -160, y: 0 }, n1: { x: 160, y: 0 } }
 		}),
 		defaultPrimaryNodeId: 'n0',
-		layoutSettings: { baseRadius: 200, minScale: 1, paddingPx: 12, relaxIterations: 2 }
+		layoutSettings: { baseRadius: 200, minScale: 1, relaxIterations: 2 }
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
@@ -483,10 +500,9 @@
 		layoutSettings: {
 			baseRadius: 40,
 			minScale: 1,
-			paddingPx: 0,
 			relaxIterations: 1,
-			edgeGapMinPx: 40,
-			edgeGapMaxPx: 80,
+			edgeGapMinRadiusFactor: 0.5,
+			edgeGapMaxRadiusFactor: 1,
 			edgeSpringStrength: 1
 		}
 	}}
@@ -521,7 +537,7 @@
 			posByNodeId: { n0: { x: -120, y: 0 }, n1: { x: 240, y: 0 } }
 		}),
 		defaultPrimaryNodeId: 'n0',
-		layoutSettings: { baseRadius: 120, minScale: 1, paddingPx: 12, relaxIterations: 2 }
+		layoutSettings: { baseRadius: 120, minScale: 1, relaxIterations: 2 }
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
@@ -574,7 +590,7 @@
 			posByNodeId: HUNDRED_NODE_POSITIONS
 		}),
 		defaultPrimaryNodeId: 'n0',
-		layoutSettings: { scaleFalloff: 0.7, minScale: 0.1, paddingPx: 12, relaxIterations: 4 }
+		layoutSettings: { scaleFalloff: 0.7, minScale: 0.1, relaxIterations: 4 }
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
