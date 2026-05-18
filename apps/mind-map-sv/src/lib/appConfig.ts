@@ -4,7 +4,7 @@ export const APP_CONFIG = {
 	interaction: {
 		doubleClickMs: 250,
 		dragThresholdPx: 5,
-		longPressMs: 500,
+		longPressMs: 1000,
 		longPressDistancePx: 8
 	},
 	multigraph: {
