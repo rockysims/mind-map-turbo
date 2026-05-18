@@ -328,6 +328,8 @@
 		position: absolute;
 		inset: 0;
 		cursor: grab;
+		-webkit-user-select: none;
+		user-select: none;
 	}
 	.stage.panning {
 		cursor: grabbing;

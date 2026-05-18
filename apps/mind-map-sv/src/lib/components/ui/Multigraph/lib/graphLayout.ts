@@ -29,6 +29,12 @@ export interface GraphLayoutOptions {
 	settings?: Partial<LayoutSettings>;
 	activeDragNodeId?: string | null;
 	relaxIterations?: number;
+	scaleByNodeId?: Record<string, number>;
+}
+
+export interface GraphRelaxationStep {
+	data: MultigraphData;
+	maxPositionDelta: number;
 }
 
 export function deriveGraphLayout(
@@ -37,7 +43,11 @@ export function deriveGraphLayout(
 ): GraphLayout {
 	const settings = withDefaultLayoutSettings(options.settings);
 	const hopsByNodeId = hopsFromPinned(data);
-	const scaleByNodeId = scaleByHops(hopsByNodeId, settings);
+	const targetScaleByNodeId = scaleByHops(hopsByNodeId, settings);
+	const scaleByNodeId = {
+		...targetScaleByNodeId,
+		...options.scaleByNodeId
+	};
 	const radiusByNodeId = Object.fromEntries(
 		data.nodes.map((node) => [node.id, radiusOf(scaleByNodeId, settings, node.id)])
 	);
@@ -91,6 +101,21 @@ export function withRelaxedGraphPositions(
 	};
 }
 
+export function relaxGraphPositionsStep(
+	data: MultigraphData,
+	options: GraphLayoutOptions = {}
+): GraphRelaxationStep {
+	const nextPositions = relaxGraphPositions(data, options);
+
+	return {
+		data: {
+			...data,
+			posByNodeId: nextPositions
+		},
+		maxPositionDelta: maxPositionDelta(data.posByNodeId, nextPositions)
+	};
+}
+
 export function withSettledGraphPositions(
 	data: MultigraphData,
 	options: GraphLayoutOptions = {}
@@ -119,4 +144,18 @@ function anchoredNodeIds(data: MultigraphData, activeDragNodeId?: string | null)
 	const anchoredIds = new Set(data.nodes.filter((node) => node.pinned).map((node) => node.id));
 	if (activeDragNodeId) anchoredIds.add(activeDragNodeId);
 	return anchoredIds;
+}
+
+function maxPositionDelta(
+	previousPositions: Record<string, Point>,
+	nextPositions: Record<string, Point>
+): number {
+	return Object.entries(nextPositions).reduce((maxDelta, [nodeId, nextPosition]) => {
+		const previousPosition = previousPositions[nodeId] ?? CENTERED_POSITION;
+		const delta = Math.hypot(
+			nextPosition.x - previousPosition.x,
+			nextPosition.y - previousPosition.y
+		);
+		return Math.max(maxDelta, delta);
+	}, 0);
 }

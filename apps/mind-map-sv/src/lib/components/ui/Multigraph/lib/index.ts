@@ -6,4 +6,5 @@ export * from './layout.js';
 export * from './layoutSettings.js';
 export * from './longPress.js';
 export * from './physics.js';
+export * from './scaleAnimation.js';
 export * from './stageCoordinates.js';

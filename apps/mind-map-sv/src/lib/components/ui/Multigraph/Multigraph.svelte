@@ -16,10 +16,19 @@
 	} from './lib/graph.js';
 	import {
 		deriveGraphLayout,
+		relaxGraphPositionsStep,
 		withRelaxedGraphPositions,
 		withSettledGraphPositions
 	} from './lib/graphLayout.js';
 	import type { LayoutSettings } from './lib/layoutSettings.js';
+	import { withDefaultLayoutSettings } from './lib/layoutSettings.js';
+	import {
+		animatedScalesAt,
+		createScaleAnimations,
+		hasActiveScaleAnimations,
+		pruneFinishedScaleAnimations,
+		type NodeScaleAnimation
+	} from './lib/scaleAnimation.js';
 	import { MIN_NODE_HIT_RADIUS } from '$lib/constants.js';
 
 	const CENTERED_POSITION: Point = { x: 0, y: 0 };
@@ -41,9 +50,19 @@
 	let actionMenu = $state<{ nodeId: string; position: Point } | null>(null);
 	let graphRef = $state<HTMLElement | null>(null);
 	let relaxationFrameId: number | null = null;
+	let scaleAnimations = $state<Record<string, NodeScaleAnimation>>({});
+	let animationNowMs = $state(0);
+	let settleFramesRemaining = $state(0);
 
+	const resolvedLayoutSettings = $derived(withDefaultLayoutSettings(layoutSettings));
+	const animatedScaleByNodeId = $derived(animatedScalesAt(scaleAnimations, animationNowMs));
 	const graphLayout = $derived(
-		deriveGraphLayout(graph, { settings: layoutSettings, activeDragNodeId, relaxIterations: 0 })
+		deriveGraphLayout(graph, {
+			settings: layoutSettings,
+			activeDragNodeId,
+			relaxIterations: 0,
+			scaleByNodeId: animatedScaleByNodeId
+		})
 	);
 	const editNode = $derived(graph.nodes.find((node) => node.id === editNodeId) ?? null);
 	const actionMenuNode = $derived.by(() => {
@@ -52,6 +71,10 @@
 	});
 
 	$effect(() => {
+		stopRelaxationLoop();
+		scaleAnimations = {};
+		animationNowMs = 0;
+		settleFramesRemaining = 0;
 		graph = withSettledGraphPositions(multigraphData, { settings: layoutSettings });
 		primaryNodeId = defaultPrimaryNodeId;
 	});
@@ -104,19 +127,21 @@
 
 	function handleNodeDragStart(node: NodeData) {
 		activeDragNodeId = node.id;
+		settleFramesRemaining = 0;
 		startRelaxationLoop();
 	}
 
 	function handleNodeDragEnd() {
 		activeDragNodeId = null;
-		stopRelaxationLoop();
-		graph = withRelaxedPositions(graph);
+		graph = withRelaxedPositions(graph, null, 1);
+		settleFramesRemaining = resolvedLayoutSettings.postDragSettleMaxFrames;
+		startRelaxationLoop();
 	}
 
 	function handleNodeMakePrimary(node: NodeData) {
 		closeOverlays();
 		const wasPinned = node.pinned === true;
-		graph = withRelaxedPositions(togglePinned(graph, node.id));
+		graph = withScaleAnimation(togglePinned(graph, node.id));
 
 		if (!wasPinned) {
 			primaryNodeId = node.id;
@@ -161,7 +186,7 @@
 	}
 
 	function toggleNodePinned(nodeId: string) {
-		graph = withRelaxedPositions(togglePinned(graph, nodeId));
+		graph = withScaleAnimation(togglePinned(graph, nodeId));
 	}
 
 	function deleteNode(nodeId: string) {
@@ -198,7 +223,40 @@
 		return withRelaxedGraphPositions(nextGraph, {
 			settings: layoutSettings,
 			activeDragNodeId: dragNodeId,
-			relaxIterations
+			relaxIterations,
+			scaleByNodeId: animatedScaleByNodeId
+		});
+	}
+
+	function withScaleAnimation(nextGraph: MultigraphData): MultigraphData {
+		const targetLayout = deriveGraphLayout(nextGraph, {
+			settings: layoutSettings,
+			relaxIterations: 0
+		});
+		const nowMs = performance.now();
+		const nextAnimations =
+			resolvedLayoutSettings.scaleAnimationDurationMs > 0
+				? createScaleAnimations(
+						graphLayout.scaleByNodeId,
+						targetLayout.scaleByNodeId,
+						nowMs,
+						resolvedLayoutSettings.scaleAnimationDurationMs
+					)
+				: {};
+
+		scaleAnimations = nextAnimations;
+		animationNowMs = nowMs;
+		settleFramesRemaining = resolvedLayoutSettings.postDragSettleMaxFrames;
+
+		if (Object.keys(nextAnimations).length > 0 || settleFramesRemaining > 0) {
+			startRelaxationLoop();
+		}
+
+		return withRelaxedGraphPositions(nextGraph, {
+			settings: layoutSettings,
+			activeDragNodeId,
+			relaxIterations: layoutSettings.relaxIterations,
+			scaleByNodeId: animatedScalesAt(nextAnimations, nowMs)
 		});
 	}
 
@@ -213,15 +271,53 @@
 		relaxationFrameId = null;
 	}
 
-	function relaxationStep() {
+	function relaxationStep(nowMs: number) {
 		relaxationFrameId = null;
-		if (!activeDragNodeId) return;
-		graph = withRelaxedPositions(graph, activeDragNodeId, 1);
-		startRelaxationLoop();
+		animationNowMs = nowMs;
+
+		const nextScaleByNodeId = animatedScalesAt(scaleAnimations, nowMs);
+		const shouldRelax =
+			activeDragNodeId !== null ||
+			settleFramesRemaining > 0 ||
+			Object.keys(nextScaleByNodeId).length > 0;
+
+		if (shouldRelax) {
+			const step = relaxGraphPositionsStep(graph, {
+				settings: layoutSettings,
+				activeDragNodeId,
+				relaxIterations: 1,
+				scaleByNodeId: nextScaleByNodeId
+			});
+			graph = step.data;
+
+			if (activeDragNodeId === null && settleFramesRemaining > 0) {
+				settleFramesRemaining -= 1;
+				if (step.maxPositionDelta <= resolvedLayoutSettings.postDragSettleEpsilonPx) {
+					settleFramesRemaining = 0;
+				}
+			}
+		}
+
+		scaleAnimations = pruneFinishedScaleAnimations(scaleAnimations, nowMs);
+
+		if (
+			activeDragNodeId !== null ||
+			settleFramesRemaining > 0 ||
+			hasActiveScaleAnimations(scaleAnimations, nowMs)
+		) {
+			startRelaxationLoop();
+		}
 	}
 </script>
 
-<div class="graph" bind:this={graphRef}>
+<div
+	class="graph"
+	bind:this={graphRef}
+	data-settling={settleFramesRemaining > 0 ? 'true' : undefined}
+	data-scale-animation-active={hasActiveScaleAnimations(scaleAnimations, animationNowMs)
+		? 'true'
+		: undefined}
+>
 	<Stage
 		{getNodeAt}
 		onNodeClick={handleNodeClick}
@@ -255,6 +351,8 @@
 				class:primary={primaryNodeId === node.id}
 				data-node-id={node.id}
 				data-scale={nodeScale}
+				data-x={nodePos.x}
+				data-y={nodePos.y}
 				style={`left: calc(50% + ${nodePos.x}px); top: calc(50% + ${nodePos.y}px); transform: translate(-50%, -50%) scale(${nodeScale});`}
 			>
 				<Node nodeData={node} isOpen={false} />

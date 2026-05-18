@@ -107,6 +107,21 @@
 		});
 	}
 
+	function waitForFrames(count: number): Promise<void> {
+		return new Promise((resolve) => {
+			let remaining = count;
+			const wait = () => {
+				remaining -= 1;
+				if (remaining <= 0) {
+					resolve();
+					return;
+				}
+				requestAnimationFrame(wait);
+			};
+			requestAnimationFrame(wait);
+		});
+	}
+
 	function chainEdges(count: number): Array<[number, number]> {
 		return Array.from({ length: count - 1 }, (_, index) => [index, index + 1]);
 	}
@@ -309,12 +324,59 @@
 		const center = getCenter(circle);
 
 		await dispatchDoubleClick(circle, center.x, center.y);
-		await sleep();
+		await sleep(APP_CONFIG.multigraph.layout.scaleAnimationDurationMs + 20);
 
 		expect(Number(getNodeWrapper(canvasElement, 'n0').dataset.scale)).toBe(1);
 		expect(Number(getNodeWrapper(canvasElement, 'n1').dataset.scale)).toBe(0.5);
 		expect(Number(getNodeWrapper(canvasElement, 'n2').dataset.scale)).toBe(0.25);
 		expect(Number(getNodeWrapper(canvasElement, 'n3').dataset.scale)).toBe(0.2);
+	}}
+/>
+
+<Story
+	name="PinningNodeAnimatesNeighborScaleChanges"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 3,
+			edges: [
+				[0, 1],
+				[1, 2]
+			],
+			posByNodeId: {
+				n0: { x: -280, y: 0 },
+				n1: { x: 0, y: 0 },
+				n2: { x: 280, y: 0 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: {
+			scaleFalloff: 0.5,
+			minScale: 0.2,
+			scaleAnimationDurationMs: 120,
+			relaxIterations: 1
+		}
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+
+		await dispatchDoubleClick(circle, center.x, center.y);
+		await waitForFrames(2);
+
+		const animatedPinnedScale = Number(getNodeWrapper(canvasElement, 'n0').dataset.scale);
+		const animatedNeighborScale = Number(getNodeWrapper(canvasElement, 'n1').dataset.scale);
+		expect(animatedPinnedScale).toBeGreaterThan(0.2);
+		expect(animatedPinnedScale).toBeLessThan(1);
+		expect(animatedNeighborScale).toBeGreaterThan(0.2);
+		expect(animatedNeighborScale).toBeLessThan(0.5);
+
+		await sleep(140);
+		await waitForLayout();
+
+		expect(Number(getNodeWrapper(canvasElement, 'n0').dataset.scale)).toBe(1);
+		expect(Number(getNodeWrapper(canvasElement, 'n1').dataset.scale)).toBe(0.5);
+		expect(Number(getNodeWrapper(canvasElement, 'n2').dataset.scale)).toBe(0.25);
 	}}
 />
 
@@ -476,15 +538,51 @@
 		dispatchPointer(sourceCircle, 'pointerdown', sourceCenter.x, sourceCenter.y);
 		dispatchPointer(stage, 'pointermove', targetCenter.x, targetCenter.y);
 		dispatchPointer(stage, 'pointerup', targetCenter.x, targetCenter.y);
-		await waitForLayout();
+		await waitForFrames(12);
 
 		const movedSourceCenter = getCenter(getCircle(canvasElement, 'n0'));
 		const movedTargetCenter = getCenter(getCircle(canvasElement, 'n1'));
-		expect(movedSourceCenter.x).toBeCloseTo(targetCenter.x);
-		expect(movedSourceCenter.y).toBeCloseTo(targetCenter.y);
 		expect(Number.isFinite(movedTargetCenter.x)).toBe(true);
+		expect(Number.isFinite(movedSourceCenter.x)).toBe(true);
 		expect(distanceBetween(targetCenter, movedTargetCenter)).toBeGreaterThan(0);
 		expect(distanceBetween(movedSourceCenter, movedTargetCenter)).toBeGreaterThan(NODE_RADIUS);
+	}}
+/>
+
+<Story
+	name="ReleasedDragContinuesSettlingUntilNodesSeparate"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 2,
+			posByNodeId: { n0: { x: -180, y: 0 }, n1: { x: 180, y: 0 } }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: {
+			baseRadius: 180,
+			minScale: 1,
+			relaxIterations: 1,
+			hopRepulsionStrength: 0,
+			postDragSettleEpsilonPx: 0,
+			postDragSettleMaxFrames: 6
+		}
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const sourceCircle = getCircle(canvasElement, 'n0');
+		const targetCircle = getCircle(canvasElement, 'n1');
+		const sourceCenter = getCenter(sourceCircle);
+		const targetCenter = getCenter(targetCircle);
+
+		dispatchPointer(sourceCircle, 'pointerdown', sourceCenter.x, sourceCenter.y);
+		dispatchPointer(stage, 'pointermove', targetCenter.x, targetCenter.y);
+		dispatchPointer(stage, 'pointerup', targetCenter.x, targetCenter.y);
+		await sleep();
+
+		expect(canvasElement.querySelector('.graph')).toHaveAttribute('data-settling', 'true');
+		await waitForFrames(8);
+
+		expect(canvasElement.querySelector('.graph')).not.toHaveAttribute('data-settling');
 	}}
 />
 

@@ -21,7 +21,10 @@ export const APP_CONFIG = {
 			hopRepulsionStrength: 0.3,
 			hopRepulsionMinHops: 2,
 			hopRepulsionMaxHops: 8,
-			hopRepulsionMaxExtraGapRadiusFactor: 2
+			hopRepulsionMaxExtraGapRadiusFactor: 2,
+			postDragSettleEpsilonPx: 0.25,
+			postDragSettleMaxFrames: 90,
+			scaleAnimationDurationMs: 500
 		}
 	}
 } as const;

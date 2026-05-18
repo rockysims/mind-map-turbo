@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	deriveGraphLayout,
+	relaxGraphPositionsStep,
 	relaxGraphPositions,
 	withRelaxedGraphPositions,
 	withSettledGraphPositions
@@ -67,6 +68,27 @@ describe('graphLayout', () => {
 		expect(layout.hopsByNodeId.n2).toBe(Infinity);
 		expect(layout.scaleByNodeId.n2).toBe(0.2);
 		expect(layout.radiusByNodeId.n2).toBe(20);
+	});
+
+	it('uses animated scale overrides for radii and physics', () => {
+		const graph = makeGraph({
+			nodeCount: 2,
+			pinned: [0],
+			posByNodeId: {
+				n0: { x: 0, y: 0 },
+				n1: { x: 80, y: 0 }
+			}
+		});
+
+		const layout = deriveGraphLayout(graph, {
+			settings: { baseRadius: 100, minScale: 0.2, hopRepulsionStrength: 0 },
+			scaleByNodeId: { n1: 0.6 },
+			relaxIterations: 1
+		});
+
+		expect(layout.scaleByNodeId.n1).toBe(0.6);
+		expect(layout.radiusByNodeId.n1).toBe(60);
+		expect(layout.posByNodeId.n1.x).toBe(160);
 	});
 
 	it('anchors pinned nodes and the active drag node while relaxing positions', () => {
@@ -160,6 +182,25 @@ describe('graphLayout', () => {
 		expect(relaxed.posByNodeId.n0).toEqual({ x: 0, y: 0 });
 		expect(relaxed.posByNodeId.n1).toEqual({ x: 100, y: 0 });
 		expect(graph.posByNodeId.n1).toEqual({ x: 80, y: 0 });
+	});
+
+	it('returns a relaxation step with the largest position delta', () => {
+		const graph = makeGraph({
+			nodeCount: 2,
+			pinned: [0],
+			posByNodeId: {
+				n0: { x: 0, y: 0 },
+				n1: { x: 80, y: 0 }
+			}
+		});
+
+		const step = relaxGraphPositionsStep(graph, {
+			settings: { baseRadius: 50, minScale: 1, hopRepulsionStrength: 0 },
+			relaxIterations: 1
+		});
+
+		expect(step.data.posByNodeId.n1).toEqual({ x: 100, y: 0 });
+		expect(step.maxPositionDelta).toBe(20);
 	});
 
 	it('settles larger graphs beyond the per-frame relaxation budget', () => {

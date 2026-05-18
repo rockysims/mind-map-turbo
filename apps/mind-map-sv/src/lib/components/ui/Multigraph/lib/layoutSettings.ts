@@ -12,6 +12,9 @@ export interface LayoutSettings {
 	hopRepulsionMinHops: number;
 	hopRepulsionMaxHops: number;
 	hopRepulsionMaxExtraGapRadiusFactor: number;
+	postDragSettleEpsilonPx: number;
+	postDragSettleMaxFrames: number;
+	scaleAnimationDurationMs: number;
 }
 
 export const DEFAULT_LAYOUT_SETTINGS: LayoutSettings = {
