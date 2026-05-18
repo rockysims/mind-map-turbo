@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { NODE_RADIUS } from '$lib/constants';
+	import { MIN_NODE_HIT_RADIUS, NODE_RADIUS } from '$lib/constants';
 	import Stage from './Stage.svelte';
 	import Node from '$lib/components/ui/Node/Node.svelte';
-	import { isPointInCircle } from './lib/hitTest.js';
+	import { effectiveHitRadius, isPointInCircle } from './lib/hitTest.js';
 	import type { NodeData } from '../types/node.js';
 	import type { Point } from '../types/multigraph.js';
 
@@ -18,8 +18,12 @@
 		onNodeMoved?: (node: NodeData, point: Point) => void;
 	} = $props();
 
+	let harnessRef = $state<HTMLElement | null>(null);
+
 	function getNodeAt(clientX: number, clientY: number): NodeData | null {
-		const nodeElems = Array.from(document.querySelectorAll('div.node')) as HTMLElement[];
+		const nodeElems = Array.from(
+			harnessRef?.querySelectorAll('div.node') ?? []
+		).reverse() as HTMLElement[];
 		const clickedNodeElems = nodeElems.filter((nodeElem) => {
 			const circle = nodeElem.querySelector('.circle');
 			if (!circle) return false;
@@ -29,7 +33,7 @@
 				clientY,
 				rect.left + rect.width / 2,
 				rect.top + rect.height / 2,
-				Math.min(rect.width, rect.height) / 2
+				effectiveHitRadius(Math.min(rect.width, rect.height) / 2, MIN_NODE_HIT_RADIUS)
 			);
 			return wasClicked ? nodeElem : null;
 		});
@@ -41,7 +45,7 @@
 		const rect = (circle as HTMLElement).getBoundingClientRect();
 		const centerX = rect.left + rect.width / 2;
 		const centerY = rect.top + rect.height / 2;
-		const radius = Math.min(rect.width, rect.height) / 2;
+		const radius = effectiveHitRadius(Math.min(rect.width, rect.height) / 2, MIN_NODE_HIT_RADIUS);
 		if (!isPointInCircle(clientX, clientY, centerX, centerY, radius)) return null;
 		const nodeId = nodeEl.dataset.nodeId ?? null;
 		if (!nodeId) return null;
@@ -55,10 +59,12 @@
 	let lastMakePrimaryId = $state<string | null>(null);
 	let lastDoubleClickDropBg = $state<{ nodeId: string; point: Point } | null>(null);
 	let lastDoubleClickDropNodeIds = $state<string | null>(null);
+	let lastNodeLongPress = $state<{ nodeId: string; point: Point } | null>(null);
 </script>
 
 <div
 	class="stage-harness"
+	bind:this={harnessRef}
 	style="--stage-harness-height: {NODE_RADIUS * 2}px"
 	data-testid="stage-callbacks"
 	data-last-node-click={lastNodeClickId ?? ''}
@@ -72,6 +78,9 @@
 		? `${lastDoubleClickDropBg.nodeId},${lastDoubleClickDropBg.point.x},${lastDoubleClickDropBg.point.y}`
 		: ''}
 	data-last-double-click-drop-node={lastDoubleClickDropNodeIds ?? ''}
+	data-last-node-long-press={lastNodeLongPress
+		? `${lastNodeLongPress.nodeId},${lastNodeLongPress.point.x},${lastNodeLongPress.point.y}`
+		: ''}
 	{...rest}
 >
 	<Stage
@@ -97,6 +106,9 @@
 		}}
 		onNodeDoubleClickDropOntoBackground={(n, point) => {
 			lastDoubleClickDropBg = { nodeId: n.id, point };
+		}}
+		onNodeLongPress={(n, point) => {
+			lastNodeLongPress = { nodeId: n.id, point };
 		}}
 	>
 		{#each nodes as node (node.id)}

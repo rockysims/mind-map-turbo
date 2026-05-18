@@ -101,6 +101,19 @@ export function togglePinned(data: MultigraphData, nodeId: string): MultigraphDa
 	};
 }
 
+export function updateNodeContent(
+	data: MultigraphData,
+	nodeId: string,
+	content: Pick<NodeData, 'title' | 'description'>
+): MultigraphData {
+	if (!hasNode(data, nodeId)) return data;
+
+	return {
+		...data,
+		nodes: data.nodes.map((node) => (node.id === nodeId ? { ...node, ...content } : node))
+	};
+}
+
 export function moveNode(data: MultigraphData, nodeId: string, point: Point): MultigraphData {
 	if (!hasNode(data, nodeId)) return data;
 

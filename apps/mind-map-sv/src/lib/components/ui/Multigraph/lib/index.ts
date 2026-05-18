@@ -4,5 +4,6 @@ export * from './graphLayout.js';
 export * from './hitTest.js';
 export * from './layout.js';
 export * from './layoutSettings.js';
+export * from './longPress.js';
 export * from './physics.js';
 export * from './stageCoordinates.js';

@@ -3,7 +3,7 @@
 **Created:** 2026-05-17
 **Author:** Cursor agent
 **Milestone:** [milestones/03-mobile-polish-and-editing.md](../milestones/03-mobile-polish-and-editing.md)
-**Status:** draft
+**Status:** in progress
 **Total estimated effort:** L
 
 ## Summary
@@ -250,3 +250,8 @@ The plan is done when:
   rendering. Missing pieces are content update mutation, long-press recognition,
   minimum effective hit radius, edit sheet/menu UI, viewport tightening, and
   Storybook viewport defaults.
+- 2026-05-17: Implemented the six planned tasks in one `/work` branch because
+  their story coverage crosses the same Stage and Multigraph surfaces. Local
+  automated validation is the closure gate for this branch; real iOS Safari and
+  Android Chrome smoke tests are still unavailable and remain a milestone
+  closure gap.

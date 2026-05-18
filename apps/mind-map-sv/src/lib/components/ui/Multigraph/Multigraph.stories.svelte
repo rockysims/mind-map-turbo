@@ -1,8 +1,8 @@
 <script module lang="ts">
 	import { defineMeta } from '@storybook/addon-svelte-csf';
 	import Multigraph from '$lib/components/ui/Multigraph/Multigraph.svelte';
-	import { expect } from 'storybook/test';
-	import { DBL_CLICK_MS, NODE_RADIUS } from '$lib/constants';
+	import { expect, within } from 'storybook/test';
+	import { DBL_CLICK_MS, LONG_PRESS_MS, MIN_NODE_HIT_RADIUS, NODE_RADIUS } from '$lib/constants';
 	import { makeGraph } from './lib/testFixtures';
 	import type { MultigraphData, Point } from '../types/multigraph';
 
@@ -14,6 +14,11 @@
 			multigraphData: { control: 'object' },
 			defaultPrimaryNodeId: { control: 'text' },
 			layoutSettings: { control: 'object' }
+		},
+		parameters: {
+			viewport: {
+				defaultViewport: 'phone'
+			}
 		}
 	});
 
@@ -174,6 +179,107 @@
 
 		const node = canvasElement.querySelector('[data-node-id="n0"] .node');
 		expect(node).toHaveAttribute('data-pinned', 'true');
+	}}
+/>
+
+<Story
+	name="UserTapsNodeAndEditSheetAppears"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1 }),
+		defaultPrimaryNodeId: 'n0'
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+
+		dispatchPointer(circle, 'pointerdown', center.x, center.y);
+		dispatchPointer(circle, 'pointerup', center.x, center.y);
+		await sleep(DBL_CLICK_MS + 20);
+
+		const canvas = within(canvasElement);
+		expect(canvas.getByLabelText('Title')).toHaveValue('Node 0');
+		expect(canvas.getByLabelText('Description')).toHaveValue('Description for node 0');
+	}}
+/>
+
+<Story
+	name="UserEditsTitleInSheet"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1 }),
+		defaultPrimaryNodeId: 'n0'
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+
+		dispatchPointer(circle, 'pointerdown', center.x, center.y);
+		dispatchPointer(circle, 'pointerup', center.x, center.y);
+		await sleep(DBL_CLICK_MS + 20);
+
+		const canvas = within(canvasElement);
+		const titleInput = canvas.getByLabelText('Title') as HTMLInputElement;
+		titleInput.value = 'Updated mobile title';
+		titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+		canvas.getByRole('button', { name: 'Save' }).click();
+		await sleep();
+
+		expect(canvas.getByText('Updated mobile title')).toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="UserLongPressesNodeForActions"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1 }),
+		defaultPrimaryNodeId: 'n0'
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+
+		dispatchPointer(circle, 'pointerdown', center.x, center.y);
+		await sleep(LONG_PRESS_MS + 20);
+
+		const canvas = within(canvasElement);
+		expect(canvas.getByRole('menuitem', { name: 'Pin' })).toBeInTheDocument();
+		expect(canvas.getByRole('menuitem', { name: 'Edit' })).toBeInTheDocument();
+		expect(canvas.getByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
+		dispatchPointer(circle, 'pointerup', center.x, center.y);
+	}}
+/>
+
+<Story
+	name="UserLongPressesTinyDistantNode"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 2,
+			pinned: [0],
+			edges: [[0, 1]],
+			posByNodeId: { n0: { x: -160, y: 0 }, n1: { x: 160, y: 0 } }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { scaleFalloff: 0.1, minScale: 0.1, relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const tinyCircle = getCircle(canvasElement, 'n1');
+		const tinyCenter = getCenter(tinyCircle);
+		const tinyRadius =
+			Math.min(
+				tinyCircle.getBoundingClientRect().width,
+				tinyCircle.getBoundingClientRect().height
+			) / 2;
+		expect(tinyRadius).toBeLessThan(MIN_NODE_HIT_RADIUS);
+
+		dispatchPointer(stage, 'pointerdown', tinyCenter.x + tinyRadius + 4, tinyCenter.y);
+		await sleep(LONG_PRESS_MS + 20);
+
+		expect(within(canvasElement).getByRole('menuitem', { name: 'Pin' })).toBeInTheDocument();
+		dispatchPointer(stage, 'pointerup', tinyCenter.x + tinyRadius + 4, tinyCenter.y);
 	}}
 />
 

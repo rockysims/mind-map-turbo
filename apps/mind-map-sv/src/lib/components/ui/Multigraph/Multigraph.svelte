@@ -1,16 +1,26 @@
 <script lang="ts">
 	import Node from '$lib/components/ui/Node/Node.svelte';
+	import NodeActionMenu from './NodeActionMenu.svelte';
+	import NodeEditSheet from './NodeEditSheet.svelte';
 	import Stage from './Stage.svelte';
 	import type { NodeData } from '../types/node';
 	import type { MultigraphData, Point } from '../types/multigraph';
-	import { isPointInCircle } from './lib/hitTest.js';
-	import { addEdge, addNode, moveNode, togglePinned } from './lib/graph.js';
+	import { effectiveHitRadius, isPointInCircle } from './lib/hitTest.js';
+	import {
+		addEdge,
+		addNode,
+		moveNode,
+		removeNode,
+		togglePinned,
+		updateNodeContent
+	} from './lib/graph.js';
 	import {
 		deriveGraphLayout,
 		withRelaxedGraphPositions,
 		withSettledGraphPositions
 	} from './lib/graphLayout.js';
 	import type { LayoutSettings } from './lib/layoutSettings.js';
+	import { MIN_NODE_HIT_RADIUS } from '$lib/constants.js';
 
 	const CENTERED_POSITION: Point = { x: 0, y: 0 };
 
@@ -27,11 +37,19 @@
 	let graph = $state<MultigraphData>({ nodes: [], edges: [], posByNodeId: {} });
 	let primaryNodeId = $state('');
 	let activeDragNodeId = $state<string | null>(null);
+	let editNodeId = $state<string | null>(null);
+	let actionMenu = $state<{ nodeId: string; position: Point } | null>(null);
+	let graphRef = $state<HTMLElement | null>(null);
 	let relaxationFrameId: number | null = null;
 
 	const graphLayout = $derived(
 		deriveGraphLayout(graph, { settings: layoutSettings, activeDragNodeId, relaxIterations: 0 })
 	);
+	const editNode = $derived(graph.nodes.find((node) => node.id === editNodeId) ?? null);
+	const actionMenuNode = $derived.by(() => {
+		const menu = actionMenu;
+		return menu ? (graph.nodes.find((node) => node.id === menu.nodeId) ?? null) : null;
+	});
 
 	$effect(() => {
 		graph = withSettledGraphPositions(multigraphData, { settings: layoutSettings });
@@ -46,23 +64,37 @@
 
 	/** Resolve node at client coordinates (circle hit-test). Testable by passing a custom getNodeAt from outside if needed. */
 	function getNodeAt(clientX: number, clientY: number): NodeData | null {
-		const elements = document.elementsFromPoint(clientX, clientY) as HTMLElement[];
-		const nodeEl = elements.find((el) => el.dataset.nodeId) ?? null;
+		const nodeElements = Array.from(
+			graphRef?.querySelectorAll('.node-wrapper') ?? []
+		).reverse() as HTMLElement[];
+		const nodeEl =
+			nodeElements.find((el) => {
+				const circle = el.querySelector('.circle');
+				if (!circle) return false;
+				const rect = (circle as HTMLElement).getBoundingClientRect();
+				return isPointInCircle(
+					clientX,
+					clientY,
+					rect.left + rect.width / 2,
+					rect.top + rect.height / 2,
+					effectiveHitRadius(Math.min(rect.width, rect.height) / 2, MIN_NODE_HIT_RADIUS)
+				);
+			}) ?? null;
 		if (!nodeEl) return null;
 		const circle = nodeEl.querySelector('.circle');
 		if (!circle) return null;
 		const rect = (circle as HTMLElement).getBoundingClientRect();
 		const centerX = rect.left + rect.width / 2;
 		const centerY = rect.top + rect.height / 2;
-		const radius = Math.min(rect.width, rect.height) / 2;
+		const radius = effectiveHitRadius(Math.min(rect.width, rect.height) / 2, MIN_NODE_HIT_RADIUS);
 		if (!isPointInCircle(clientX, clientY, centerX, centerY, radius)) return null;
 		const nodeId = nodeEl.dataset.nodeId ?? null;
 		if (!nodeId) return null;
 		return graph.nodes.find((n) => n.id === nodeId) ?? null;
 	}
 
-	function handleNodeClick() {
-		// Milestone 03 owns node editing/opening behavior.
+	function handleNodeClick(node: NodeData) {
+		openEditSheet(node.id);
 	}
 
 	function handleNodeMoved(node: NodeData, point: Point) {
@@ -82,6 +114,7 @@
 	}
 
 	function handleNodeMakePrimary(node: NodeData) {
+		closeOverlays();
 		const wasPinned = node.pinned === true;
 		graph = withRelaxedPositions(togglePinned(graph, node.id));
 
@@ -98,16 +131,54 @@
 	}
 
 	function handleNodeDoubleClickDropOntoNode(sourceNode: NodeData, targetNode: NodeData) {
+		closeOverlays();
 		graph = withRelaxedPositions(addEdge(graph, sourceNode.id, targetNode.id));
 	}
 
 	function handleNodeDoubleClickDropOntoBackground(sourceNode: NodeData, point: Point) {
+		closeOverlays();
 		const graphWithNode = addNode(graph, { position: point });
 		const newNode = graphWithNode.nodes[graphWithNode.nodes.length - 1] ?? null;
 
 		graph = withRelaxedPositions(
 			newNode ? addEdge(graphWithNode, sourceNode.id, newNode.id) : graphWithNode
 		);
+	}
+
+	function handleNodeLongPress(node: NodeData, point: Point) {
+		editNodeId = null;
+		actionMenu = { nodeId: node.id, position: point };
+	}
+
+	function openEditSheet(nodeId: string) {
+		actionMenu = null;
+		editNodeId = nodeId;
+	}
+
+	function closeOverlays() {
+		actionMenu = null;
+		editNodeId = null;
+	}
+
+	function toggleNodePinned(nodeId: string) {
+		graph = withRelaxedPositions(togglePinned(graph, nodeId));
+	}
+
+	function deleteNode(nodeId: string) {
+		graph = withRelaxedPositions(removeNode(graph, nodeId));
+		if (primaryNodeId === nodeId) {
+			primaryNodeId =
+				graph.nodes.find((candidate) => candidate.pinned)?.id ??
+				graph.nodes.find((candidate) => candidate.id === defaultPrimaryNodeId)?.id ??
+				graph.nodes[0]?.id ??
+				'';
+		}
+		closeOverlays();
+	}
+
+	function saveNodeContent(nodeId: string, content: { title: string; description: string }) {
+		graph = updateNodeContent(graph, nodeId, content);
+		closeOverlays();
 	}
 
 	function edgeStyle(sourcePos: Point, targetPos: Point): string {
@@ -150,7 +221,7 @@
 	}
 </script>
 
-<div class="graph">
+<div class="graph" bind:this={graphRef}>
 	<Stage
 		{getNodeAt}
 		onNodeClick={handleNodeClick}
@@ -160,6 +231,7 @@
 		onNodeMakePrimary={handleNodeMakePrimary}
 		onNodeDoubleClickDropOntoNode={handleNodeDoubleClickDropOntoNode}
 		onNodeDoubleClickDropOntoBackground={handleNodeDoubleClickDropOntoBackground}
+		onNodeLongPress={handleNodeLongPress}
 	>
 		<div class="edges" aria-hidden="true">
 			{#each graph.edges as edge (edge.id)}
@@ -189,6 +261,30 @@
 			</div>
 		{/each}
 	</Stage>
+
+	{#if actionMenu && actionMenuNode}
+		<NodeActionMenu
+			node={actionMenuNode}
+			position={actionMenu.position}
+			onTogglePinned={() => {
+				toggleNodePinned(actionMenuNode.id);
+				closeOverlays();
+			}}
+			onEdit={() => openEditSheet(actionMenuNode.id)}
+			onDelete={() => deleteNode(actionMenuNode.id)}
+			onClose={() => (actionMenu = null)}
+		/>
+	{/if}
+
+	{#if editNode}
+		<NodeEditSheet
+			node={editNode}
+			onSave={(content) => saveNodeContent(editNode.id, content)}
+			onCancel={() => (editNodeId = null)}
+			onTogglePinned={() => toggleNodePinned(editNode.id)}
+			onDelete={() => deleteNode(editNode.id)}
+		/>
+	{/if}
 </div>
 
 <style>

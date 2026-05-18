@@ -10,8 +10,9 @@
 		DEFAULT_MAX_SCALE
 	} from './lib/graphMath.js';
 	import { pointerDistance } from './lib/hitTest.js';
+	import { recognizeLongPress } from './lib/longPress.js';
 	import { clientPointToGraphPoint } from './lib/stageCoordinates.js';
-	import { DRAG_THRESHOLD, DBL_CLICK_MS } from '$lib/constants.js';
+	import { DRAG_THRESHOLD, DBL_CLICK_MS, LONG_PRESS_DIST, LONG_PRESS_MS } from '$lib/constants.js';
 
 	interface Props {
 		/** Resolve node at (clientX, clientY); return null if none. Injected for testability. */
@@ -32,6 +33,8 @@
 		onNodeDoubleClickDropOntoNode?: (sourceNode: NodeData, targetNode: NodeData) => void;
 		/** Callback when user double-click-drags and drops onto background with a graph-local point. */
 		onNodeDoubleClickDropOntoBackground?: (node: NodeData, point: Point) => void;
+		/** Callback when user holds a node without dragging. */
+		onNodeLongPress?: (node: NodeData, point: Point) => void;
 	}
 
 	let {
@@ -44,6 +47,7 @@
 		onNodeMakePrimary,
 		onNodeDoubleClickDropOntoNode,
 		onNodeDoubleClickDropOntoBackground,
+		onNodeLongPress,
 		children
 	}: Props & { children?: Snippet } = $props();
 
@@ -64,6 +68,7 @@
 	// Node drag
 	let dragNode = $state<NodeData | null>(null);
 	let dragStartPos = $state<{ x: number; y: number } | null>(null);
+	let dragCurrentPos = $state<{ x: number; y: number } | null>(null);
 	let isNodeDragActive = $state(false);
 
 	// Double-click: same node clicked twice within DBL_CLICK_MS
@@ -74,6 +79,9 @@
 	// Delay single-click so we don't fire it if a second click makes it a double-click
 	let pendingClickTimeoutId: ReturnType<typeof setTimeout> | null = null;
 	let pendingClickNode: NodeData | null = null;
+	let longPressTimeoutId: ReturnType<typeof setTimeout> | null = null;
+	let longPressStartTime = 0;
+	let longPressFired = false;
 
 	function onPointerDown(e: PointerEvent) {
 		const node = getNodeAt(e.clientX, e.clientY);
@@ -86,13 +94,62 @@
 			}
 			dragNode = node;
 			dragStartPos = { x: e.clientX, y: e.clientY };
+			dragCurrentPos = dragStartPos;
+			longPressFired = false;
 			isDoubleClickSession =
 				lastClickNodeId === node.id && Date.now() - lastClickTime < DBL_CLICK_MS;
+			startLongPressTimer(node);
 		} else {
 			panStart = { clientX: e.clientX, clientY: e.clientY, panX, panY };
 			isDoubleClickSession = false;
 		}
 		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+	}
+
+	function startLongPressTimer(node: NodeData) {
+		cancelLongPressTimer();
+		longPressStartTime = Date.now();
+		longPressTimeoutId = setTimeout(() => {
+			if (!dragNode || dragNode.id !== node.id || !dragStartPos || !dragCurrentPos) return;
+			if (activePointers.size !== 1 || isNodeDragActive || isDoubleClickSession) return;
+			const distance = pointerDistance(
+				dragStartPos.x,
+				dragStartPos.y,
+				dragCurrentPos.x,
+				dragCurrentPos.y
+			);
+			if (
+				recognizeLongPress({
+					duration: Date.now() - longPressStartTime,
+					distance,
+					minDuration: LONG_PRESS_MS,
+					maxDistance: LONG_PRESS_DIST
+				})
+			) {
+				longPressFired = true;
+				onNodeLongPress?.(node, { x: dragCurrentPos.x, y: dragCurrentPos.y });
+			}
+			longPressTimeoutId = null;
+		}, LONG_PRESS_MS);
+	}
+
+	function cancelLongPressTimer() {
+		if (longPressTimeoutId === null) return;
+		clearTimeout(longPressTimeoutId);
+		longPressTimeoutId = null;
+	}
+
+	function cancelActiveNodeGesture() {
+		cancelLongPressTimer();
+		if (dragNode && isNodeDragActive) {
+			onNodeDragEnd?.(dragNode);
+		}
+		dragNode = null;
+		dragStartPos = null;
+		dragCurrentPos = null;
+		isNodeDragActive = false;
+		longPressFired = false;
+		isDoubleClickSession = false;
 	}
 
 	function graphPointForEvent(e: PointerEvent): Point {
@@ -113,7 +170,12 @@
 			panY = panStart.panY + (e.clientY - panStart.clientY);
 		} else if (dragNode && dragStartPos && !isDoubleClickSession) {
 			const dist = pointerDistance(dragStartPos.x, dragStartPos.y, e.clientX, e.clientY);
+			dragCurrentPos = { x: e.clientX, y: e.clientY };
+			if (dist > LONG_PRESS_DIST || getNodeAt(e.clientX, e.clientY)?.id !== dragNode.id) {
+				cancelLongPressTimer();
+			}
 			if (dist >= dragThreshold) {
+				cancelLongPressTimer();
 				if (!isNodeDragActive) {
 					isNodeDragActive = true;
 					onNodeDragStart?.(dragNode);
@@ -129,7 +191,8 @@
 
 		if (dragNode && dragStartPos) {
 			// Only fire drop/click callbacks on actual pointerup; cancel means the gesture was aborted (e.g. drag started)
-			if (!isCancel) {
+			cancelLongPressTimer();
+			if (!isCancel && !longPressFired) {
 				const dropTarget = getNodeAt(e.clientX, e.clientY);
 				const dist = pointerDistance(dragStartPos.x, dragStartPos.y, e.clientX, e.clientY);
 				const didDrag = dist >= dragThreshold;
@@ -178,6 +241,8 @@
 			isNodeDragActive = false;
 			dragNode = null;
 			dragStartPos = null;
+			dragCurrentPos = null;
+			longPressFired = false;
 			stage.releasePointerCapture(e.pointerId);
 			return;
 		}
@@ -205,8 +270,9 @@
 		activePointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
 		if (activePointers.size === 1) {
 			onPointerDown(e);
-		} else if (activePointers.size === 2 && panStart) {
+		} else if (activePointers.size === 2) {
 			panStart = null;
+			cancelActiveNodeGesture();
 			const dist = getTwoPointerDistance();
 			if (dist !== null) pinchStart = { distance: dist, scale };
 		}

@@ -3,7 +3,7 @@
 	import { expect, within } from 'storybook/test';
 	import StageHarness from './StageHarness.svelte';
 	import type { NodeData } from '../types/node';
-	import { DBL_CLICK_MS, DRAG_THRESHOLD, NODE_RADIUS } from '$lib/constants';
+	import { DBL_CLICK_MS, DRAG_THRESHOLD, LONG_PRESS_MS, NODE_RADIUS } from '$lib/constants';
 
 	const NODES: NodeData[] = [];
 	for (let i = 0; i < 10; i++) {
@@ -21,6 +21,11 @@
 		argTypes: {
 			nodes: { control: 'object' },
 			positions: { control: 'object' }
+		},
+		parameters: {
+			viewport: {
+				defaultViewport: 'phone'
+			}
 		}
 	});
 
@@ -36,7 +41,7 @@
 
 	function dispatchPointer(
 		target: HTMLElement,
-		type: 'pointerdown' | 'pointermove' | 'pointerup',
+		type: 'pointerdown' | 'pointermove' | 'pointerup' | 'pointercancel',
 		clientX: number,
 		clientY: number,
 		pointerId = 1
@@ -225,6 +230,14 @@
 		await sleep(DBL_CLICK_MS);
 		expect(wrapper.dataset.lastNodeClick).toBe(NODES[0].id);
 
+		// Long-press fires once and does not become a click on release.
+		dispatchPointer(circle, 'pointerdown', nodeCenter.x, nodeCenter.y);
+		await sleep(LONG_PRESS_MS + 20);
+		expect(wrapper.dataset.lastNodeLongPress?.startsWith(NODES[0].id)).toBe(true);
+		dispatchPointer(circle, 'pointerup', nodeCenter.x, nodeCenter.y);
+		await sleep(DBL_CLICK_MS);
+		expect(wrapper.dataset.lastNodeClick).toBe(NODES[0].id);
+
 		// Single-click drag to move node
 		const moveToX = nodeCenter.x + (NODE_RADIUS + 10);
 		const moveToY = nodeCenter.y;
@@ -248,8 +261,8 @@
 	args={{
 		nodes: [NODES[0], NODES[1]],
 		positions: {
-			[NODES[0].id]: { left: '30%', top: '50%' },
-			[NODES[1].id]: { left: '70%', top: '50%' }
+			[NODES[0].id]: { left: '5%', top: '50%' },
+			[NODES[1].id]: { left: '95%', top: '50%' }
 		}
 	}}
 	play={async ({ canvasElement }) => {

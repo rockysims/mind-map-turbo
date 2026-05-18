@@ -6,7 +6,8 @@ import {
 	neighborsOf,
 	removeEdge,
 	removeNode,
-	togglePinned
+	togglePinned,
+	updateNodeContent
 } from './graph';
 import { makeGraph } from './testFixtures';
 
@@ -165,6 +166,38 @@ describe('graph mutations', () => {
 			const graph = makeGraph({ nodeCount: 1 });
 
 			expect(togglePinned(graph, 'missing')).toBe(graph);
+		});
+	});
+
+	describe('updateNodeContent', () => {
+		it('updates title and description without mutating the original graph', () => {
+			const graph = makeGraph({ nodeCount: 2 });
+
+			const next = updateNodeContent(graph, 'n1', {
+				title: 'Edited title',
+				description: 'Edited description'
+			});
+
+			expect(next).not.toBe(graph);
+			expect(next.nodes).not.toBe(graph.nodes);
+			expect(next.nodes[1]).toEqual({
+				id: 'n1',
+				title: 'Edited title',
+				description: 'Edited description'
+			});
+			expect(graph.nodes[1]).toEqual({
+				id: 'n1',
+				title: 'Node 1',
+				description: 'Description for node 1'
+			});
+		});
+
+		it('is a no-op for missing node ids', () => {
+			const graph = makeGraph({ nodeCount: 1 });
+
+			expect(updateNodeContent(graph, 'missing', { title: 'Nope', description: 'Nope' })).toBe(
+				graph
+			);
 		});
 	});
 
