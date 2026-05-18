@@ -8,10 +8,10 @@
 
 ## Summary
 
-This plan adds hop-distance node scaling and gentle overlap repulsion on top
-of the milestone 01 immutable graph state. It keeps layout math in pure
-modules first, then wires Multigraph rendering and drag-time relaxation through
-those tested contracts.
+This plan adds hop-distance node scaling, gentle overlap repulsion, bounded
+edge-gap relaxation, and initial position settling on top of the milestone 01
+immutable graph state. It keeps layout math in pure modules first, then wires
+Multigraph rendering and drag-time relaxation through those tested contracts.
 
 ## Open questions resolved
 
@@ -21,7 +21,9 @@ those tested contracts.
 - **When to run physics?** **Run one bounded relaxation pass after graph
   mutations and run a requestAnimationFrame loop while a node drag is active.**
   This keeps static changes tidy while preserving smooth feedback during
-  direct manipulation.
+  direct manipulation. Initial graph loads also run a larger bounded settling
+  pass so dense graphs do not depend on the first user interaction to become
+  readable.
 - **Sub-pixel jitter.** **Use a small epsilon in overlap detection and stop
   applying pushes once overlap is within tolerance.** The physics module owns
   this invariant so component code does not need defensive jitter checks.
@@ -32,7 +34,8 @@ those tested contracts.
 
 ## Out of scope (for this plan)
 
-- Force-directed layout with springs, gravity, or link-length constraints.
+- Full force-directed layout with global springs, gravity, velocity, cooldowns,
+  or d3-force. A bounded edge-gap pass for connected endpoints is in scope.
 - Spatial indexing such as quadtrees; the initial pairwise pass is acceptable
   for MVP graph sizes.
 - Animated scale transitions; nodes may snap to their new scale for now.
@@ -71,7 +74,7 @@ all nodes should be treated as unreachable and therefore use `minScale`.
 - `radiusOf` derives from `baseRadius` and falls back predictably for missing
   node ids.
 
-### T02 - Add pure overlap physics ✓
+### T02 - Add pure graph physics ✓
 
 |                |                                                                      |
 | -------------- | -------------------------------------------------------------------- |
@@ -80,11 +83,14 @@ all nodes should be treated as unreachable and therefore use `minScale`.
 | **Agent**      | high-reasoning (`claude-opus-4-7-thinking-xhigh` or `gpt-5.3-codex`) |
 | **Effort**     | M                                                                    |
 | **Files**      | new `lib/physics.ts`, new `lib/physics.spec.ts`, `lib/index.ts`      |
-| **PR title**   | `feat(physics): add overlap relaxation`                              |
+| **PR title**   | `feat(physics): add graph relaxation`                                |
 
-Implement `relaxOverlapsStep` and `relaxOverlaps`. The step function accepts
-positions, radii, padding, and anchored ids, then returns a new positions map
-where each overlapping pair is separated by the minimum needed push.
+Implement `relaxOverlapsStep`, `relaxOverlaps`, `relaxEdgeDistancesStep`, and
+`relaxGraphPhysics`. The overlap step accepts positions, radii, padding, and
+anchored ids, then returns a new positions map where each overlapping pair is
+separated by the minimum needed push. The edge-distance step keeps connected
+endpoints within a configurable readable gap band before overlap relaxation
+runs.
 
 **Acceptance**
 
@@ -95,6 +101,12 @@ where each overlapping pair is separated by the minimum needed push.
 - Identical centers use a deterministic push direction so results are stable.
 - N iterations converge for a small deterministic fixture, with remaining
   overlap below padding tolerance.
+- Connected endpoints that are too close or too far move toward the configured
+  `edgeGapMinPx` / `edgeGapMaxPx` band.
+- Edge-distance relaxation respects anchored endpoints and clamps
+  `edgeSpringStrength` into a bounded range.
+- `relaxGraphPhysics` composes edge-distance relaxation and overlap relaxation
+  through one pure API.
 - Inputs are not mutated.
 
 ### T03 - Add graph layout orchestration helpers ✓
@@ -111,7 +123,7 @@ where each overlapping pair is separated by the minimum needed push.
 Add a pure helper that derives per-node presentation data from
 `MultigraphData`: hop counts, scales, radii, and relaxed positions. Keep this
 as the single boundary Multigraph consumes so the component does not duplicate
-BFS, radius, or physics decisions.
+BFS, radius, edge-gap, or overlap physics decisions.
 
 **Acceptance**
 
@@ -120,6 +132,8 @@ BFS, radius, or physics decisions.
 - A supplied active drag node id is added to the anchored set.
 - Position relaxation returns a new `posByNodeId` map without mutating the
   original graph.
+- Initial settling uses a larger bounded relaxation budget than drag-time
+  frames, capped to avoid unbounded work.
 - Specs cover a pinned chain, a disconnected node, and an overlapping pinned
   plus unpinned pair.
 
@@ -148,7 +162,7 @@ radius, padding, and iteration counts can be tuned.
 - Node hit targets remain compatible with the scaled visual radius.
 - Storybook controls can tune layout settings without recompilation.
 
-### T05 - Relax overlaps after mutations and during drags ✓
+### T05 - Relax graph positions after mutations and during drags ✓
 
 |                |                                                                                                                 |
 | -------------- | --------------------------------------------------------------------------------------------------------------- |
@@ -157,9 +171,9 @@ radius, padding, and iteration counts can be tuned.
 | **Agent**      | default workhorse (`claude-4.6-sonnet-medium-thinking`)                                                         |
 | **Effort**     | L                                                                                                               |
 | **Files**      | `Multigraph.svelte`, `Stage.svelte`, `StageHarness.svelte`, `Stage.stories.svelte`, `Multigraph.stories.svelte` |
-| **PR title**   | `feat(multigraph): relax overlapping nodes during drag`                                                         |
+| **PR title**   | `feat(multigraph): relax graph positions during drag`                                                           |
 
-After add, remove, pin, unpin, and drop operations, run a bounded relaxation
+After add, remove, pin, unpin, and drop operations, run a bounded graph-physics
 pass and commit the returned positions through immutable graph state. Add the
 minimal Stage drag lifecycle callback needed for Multigraph to know when a drag
 is active, then run a requestAnimationFrame loop that anchors pinned nodes and
@@ -198,6 +212,8 @@ for drag smoothness.
   distant, and disconnected nodes.
 - A 100-node story renders with 1-3 pinned nodes and no obvious overlap after
   the configured relaxation passes.
+- The 100-node story asserts the settled initial render has negligible overlap
+  and that connected neighbors are separated beyond their raw crowded distance.
 - Fixture helpers remain deterministic and do not break existing specs.
 - Story names read like user-facing behavior, not implementation details.
 
@@ -243,8 +259,8 @@ The plan is done when:
 - `pnpm --filter mind-map-sv lint` passes.
 - `pnpm --filter mind-map-sv check` passes.
 - `pnpm --filter mind-map-sv test:unit -- --run` passes.
-- Relevant Storybook `play` tests cover hop scaling, drag-time repulsion, and
-  pinned-node anchoring.
+- Relevant Storybook `play` tests cover hop scaling, drag-time repulsion,
+  edge-gap behavior, initial settling, and pinned-node anchoring.
 - The 100-node story has been visually checked for drag jank.
 - Plan status is `done`, milestone status is `complete`, and roadmap status
   for the milestone is `complete` with a link back to this plan.
@@ -259,3 +275,8 @@ The plan is done when:
   defaults from that constant or replaces it as the node sizing source.
 - 2026-05-15: Executed as one local change set rather than six separate PRs
   because the milestone was requested directly from this branch.
+- 2026-05-17: Requirement sync after `fd11b80` and `f30a543`: dense graphs now
+  settle on initial render with a larger bounded relaxation budget, and graph
+  physics includes a bounded connected-edge gap pass. The milestone allows this
+  targeted edge-distance behavior while still excluding a full force-directed
+  simulation.
