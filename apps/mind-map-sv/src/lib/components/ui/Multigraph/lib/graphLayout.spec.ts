@@ -130,7 +130,7 @@ describe('graphLayout', () => {
 		});
 
 		const positions = relaxGraphPositions(graph, {
-			settings: { baseRadius: 50, minScale: 1 },
+			settings: { baseRadius: 50, minScale: 1, hopRepulsionStrength: 0 },
 			relaxIterations: 1
 		});
 
@@ -150,7 +150,7 @@ describe('graphLayout', () => {
 		});
 
 		const relaxed = withRelaxedGraphPositions(graph, {
-			settings: { baseRadius: 50, minScale: 1 },
+			settings: { baseRadius: 50, minScale: 1, hopRepulsionStrength: 0 },
 			relaxIterations: 1
 		});
 
