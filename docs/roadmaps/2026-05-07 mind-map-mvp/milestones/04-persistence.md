@@ -3,7 +3,7 @@
 **Status:** not started
 **Depends on:** milestone 01 (canonical mutation API to persist
 against).
-**Plan:** _none yet._
+**Plan:** [plans/2026-05-17 persistence.md](../plans/2026-05-17%20persistence.md)
 
 ## Goal
 
