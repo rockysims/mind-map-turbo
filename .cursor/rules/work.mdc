@@ -182,9 +182,18 @@ git checkout "$BASE"
 git merge --ff-only "<type>/work--<slug>" \
   || git merge --no-ff "<type>/work--<slug>" \
        -m "merge(<type>/work--<slug>): integrate <slug>"
+git -C "../mind-map-turbo-<slug>" clean -fdx
 git worktree remove "../mind-map-turbo-<slug>"
 git branch -d "<type>/work--<slug>"
 ```
+
+The `git clean -fdx` step removes the worktree's `node_modules/`,
+`.svelte-kit/`, `.turbo/`, and other gitignored build/test artifacts that
+Step 3's `pnpm install` and later validation produced. Without it, the
+worktree directory still has content and `git worktree remove` fails with
+`Directory not empty`. Both commands stay narrow: `clean` only deletes
+files git already considers untracked or ignored, and `worktree remove`
+keeps its default safety net for tracked or modified files.
 
 Then report the new tip of `<BASE>` and confirm the worktree is gone.
 
