@@ -1,7 +1,7 @@
 <script module lang="ts">
 	import { defineMeta } from '@storybook/addon-svelte-csf';
 	import Multigraph from '$lib/components/ui/Multigraph/Multigraph.svelte';
-	import { expect, within } from 'storybook/test';
+	import { expect, fn, within } from 'storybook/test';
 	import { APP_CONFIG } from '$lib/appConfig';
 	import { DBL_CLICK_MS, LONG_PRESS_MS, MIN_NODE_HIT_RADIUS, NODE_RADIUS } from '$lib/constants';
 	import { makeGraph } from './lib/testFixtures';
@@ -14,7 +14,8 @@
 		argTypes: {
 			multigraphData: { control: 'object' },
 			defaultPrimaryNodeId: { control: 'text' },
-			layoutSettings: { control: 'object' }
+			layoutSettings: { control: 'object' },
+			onMultigraphChange: { control: false }
 		},
 		parameters: {
 			viewport: {
@@ -26,7 +27,15 @@
 	type PlayContext = {
 		canvasElement: HTMLElement;
 		canvas: { getByText: (text: string) => HTMLElement };
-		args: { multigraphData: MultigraphData; defaultPrimaryNodeId?: string };
+		args: {
+			multigraphData: MultigraphData;
+			defaultPrimaryNodeId?: string;
+			onMultigraphChange?: (data: MultigraphData) => void;
+		};
+	};
+
+	type ChangeSpy = {
+		mock: { calls: Array<[MultigraphData]> };
 	};
 
 	function getStage(el: HTMLElement): HTMLElement {
@@ -126,6 +135,13 @@
 		return Array.from({ length: count - 1 }, (_, index) => [index, index + 1]);
 	}
 
+	function lastChangedGraph(args: PlayContext['args']): MultigraphData {
+		const spy = args.onMultigraphChange as ChangeSpy | undefined;
+		const graph = spy?.mock.calls.at(-1)?.[0];
+		if (!graph) throw new Error('Expected onMultigraphChange to be called with graph data');
+		return graph;
+	}
+
 	function circlePositions(count: number, radius: number): Record<string, Point> {
 		return Object.fromEntries(
 			Array.from({ length: count }, (_, index) => {
@@ -183,10 +199,12 @@
 	name="UserPinsANode"
 	args={{
 		multigraphData: makeGraph({ nodeCount: 1 }),
-		defaultPrimaryNodeId: 'n0'
+		defaultPrimaryNodeId: 'n0',
+		onMultigraphChange: fn()
 	}}
-	play={async ({ canvasElement }: PlayContext) => {
+	play={async ({ canvasElement, args }: PlayContext) => {
 		await waitForLayout();
+		expect(args.onMultigraphChange).not.toHaveBeenCalled();
 		const circle = getCircle(canvasElement, 'n0');
 		const center = getCenter(circle);
 
@@ -195,6 +213,7 @@
 
 		const node = canvasElement.querySelector('[data-node-id="n0"] .node');
 		expect(node).toHaveAttribute('data-pinned', 'true');
+		expect(lastChangedGraph(args).nodes[0].pinned).toBe(true);
 	}}
 />
 
@@ -223,9 +242,10 @@
 	name="UserEditsTitleInSheet"
 	args={{
 		multigraphData: makeGraph({ nodeCount: 1 }),
-		defaultPrimaryNodeId: 'n0'
+		defaultPrimaryNodeId: 'n0',
+		onMultigraphChange: fn()
 	}}
-	play={async ({ canvasElement }: PlayContext) => {
+	play={async ({ canvasElement, args }: PlayContext) => {
 		await waitForLayout();
 		const circle = getCircle(canvasElement, 'n0');
 		const center = getCenter(circle);
@@ -242,6 +262,7 @@
 		await sleep();
 
 		expect(canvas.getByText('Updated mobile title')).toBeInTheDocument();
+		expect(lastChangedGraph(args).nodes[0].title).toBe('Updated mobile title');
 	}}
 />
 
@@ -264,6 +285,29 @@
 		expect(canvas.getByRole('menuitem', { name: 'Edit' })).toBeInTheDocument();
 		expect(canvas.getByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
 		dispatchPointer(circle, 'pointerup', center.x, center.y);
+	}}
+/>
+
+<Story
+	name="UserDeletesNodeFromActionMenu"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 2, edges: [[0, 1]] }),
+		defaultPrimaryNodeId: 'n0',
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+
+		dispatchPointer(circle, 'pointerdown', center.x, center.y);
+		await sleep(LONG_PRESS_MS + 20);
+		within(canvasElement).getByRole('menuitem', { name: 'Delete' }).click();
+		await sleep();
+
+		expect(canvasElement.querySelector('[data-node-id="n0"].node-wrapper')).not.toBeInTheDocument();
+		expect(lastChangedGraph(args).nodes.map((node) => node.id)).toEqual(['n1']);
+		expect(lastChangedGraph(args).edges).toEqual([]);
 	}}
 />
 
@@ -407,9 +451,10 @@
 			posByNodeId: { n0: { x: -280, y: 0 }, n1: { x: 280, y: 0 } }
 		}),
 		defaultPrimaryNodeId: 'n0',
-		layoutSettings: { relaxIterations: 1, edgeSpringStrength: 1 }
+		layoutSettings: { relaxIterations: 1, edgeSpringStrength: 1 },
+		onMultigraphChange: fn()
 	}}
-	play={async ({ canvasElement }: PlayContext) => {
+	play={async ({ canvasElement, args }: PlayContext) => {
 		await waitForLayout();
 		const stage = getStage(canvasElement);
 		const sourceCircle = getCircle(canvasElement, 'n0');
@@ -431,6 +476,9 @@
 			'.edge[data-source-node-id="n0"][data-target-node-id="n1"]'
 		);
 		expect(edge).toBeInTheDocument();
+		expect(lastChangedGraph(args).edges).toEqual([
+			{ id: 'e0', sourceNodeId: 'n0', targetNodeId: 'n1', color: '#888' }
+		]);
 
 		const movedSourceCircle = getCircle(canvasElement, 'n0');
 		const movedTargetCircle = getCircle(canvasElement, 'n1');
@@ -460,9 +508,10 @@
 			posByNodeId: { n0: { x: -280, y: 0 } }
 		}),
 		defaultPrimaryNodeId: 'n0',
-		layoutSettings: { edgeSpringStrength: 1 }
+		layoutSettings: { edgeSpringStrength: 1 },
+		onMultigraphChange: fn()
 	}}
-	play={async ({ canvasElement }: PlayContext) => {
+	play={async ({ canvasElement, args }: PlayContext) => {
 		await waitForLayout();
 		const stage = getStage(canvasElement);
 		const sourceCircle = getCircle(canvasElement, 'n0');
@@ -488,6 +537,7 @@
 			distanceBetween(sourceCenter, { x: dropX, y: dropY })
 		);
 		expect(canvasElement.querySelector('[data-edge-id="e0"]')).toBeInTheDocument();
+		expect(lastChangedGraph(args).nodes.map((node) => node.id)).toEqual(['n0', 'n1']);
 	}}
 />
 
@@ -495,7 +545,8 @@
 	name="MovingNodeDoesNotMutateStoryArgs"
 	args={{
 		multigraphData: makeGraph({ nodeCount: 1 }),
-		defaultPrimaryNodeId: 'n0'
+		defaultPrimaryNodeId: 'n0',
+		onMultigraphChange: fn()
 	}}
 	play={async ({ canvasElement, args }: PlayContext) => {
 		await waitForLayout();
@@ -511,6 +562,7 @@
 		await sleep();
 
 		expect(args.multigraphData.posByNodeId.n0).toEqual({ x: 0, y: 0 });
+		expect(lastChangedGraph(args).posByNodeId.n0.x).toBeGreaterThan(0);
 		const movedCenter = getCenter(getCircle(canvasElement, 'n0'));
 		expect(movedCenter.x).toBeCloseTo(moveToX);
 		expect(movedCenter.y).toBeCloseTo(moveToY);

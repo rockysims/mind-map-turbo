@@ -36,11 +36,13 @@
 	let {
 		multigraphData = { nodes: [], edges: [], posByNodeId: {} },
 		defaultPrimaryNodeId = '',
-		layoutSettings = {}
+		layoutSettings = {},
+		onMultigraphChange
 	}: {
 		multigraphData: MultigraphData;
 		defaultPrimaryNodeId?: string;
 		layoutSettings?: Partial<LayoutSettings>;
+		onMultigraphChange?: (data: MultigraphData) => void;
 	} = $props();
 
 	let graph = $state<MultigraphData>({ nodes: [], edges: [], posByNodeId: {} });
@@ -122,7 +124,7 @@
 
 	function handleNodeMoved(node: NodeData, point: Point) {
 		const movedGraph = moveNode(graph, node.id, point);
-		graph = withRelaxedPositions(movedGraph, node.id, 1);
+		commitUserGraph(withRelaxedPositions(movedGraph, node.id, 1));
 	}
 
 	function handleNodeDragStart(node: NodeData) {
@@ -133,7 +135,7 @@
 
 	function handleNodeDragEnd() {
 		activeDragNodeId = null;
-		graph = withRelaxedPositions(graph, null, 1);
+		commitUserGraph(withRelaxedPositions(graph, null, 1));
 		settleFramesRemaining = resolvedLayoutSettings.postDragSettleMaxFrames;
 		startRelaxationLoop();
 	}
@@ -141,7 +143,7 @@
 	function handleNodeMakePrimary(node: NodeData) {
 		closeOverlays();
 		const wasPinned = node.pinned === true;
-		graph = withScaleAnimation(togglePinned(graph, node.id));
+		commitUserGraph(withScaleAnimation(togglePinned(graph, node.id)));
 
 		if (!wasPinned) {
 			primaryNodeId = node.id;
@@ -157,7 +159,7 @@
 
 	function handleNodeDoubleClickDropOntoNode(sourceNode: NodeData, targetNode: NodeData) {
 		closeOverlays();
-		graph = withRelaxedPositions(addEdge(graph, sourceNode.id, targetNode.id));
+		commitUserGraph(withRelaxedPositions(addEdge(graph, sourceNode.id, targetNode.id)));
 	}
 
 	function handleNodeDoubleClickDropOntoBackground(sourceNode: NodeData, point: Point) {
@@ -165,8 +167,10 @@
 		const graphWithNode = addNode(graph, { position: point });
 		const newNode = graphWithNode.nodes[graphWithNode.nodes.length - 1] ?? null;
 
-		graph = withRelaxedPositions(
-			newNode ? addEdge(graphWithNode, sourceNode.id, newNode.id) : graphWithNode
+		commitUserGraph(
+			withRelaxedPositions(
+				newNode ? addEdge(graphWithNode, sourceNode.id, newNode.id) : graphWithNode
+			)
 		);
 	}
 
@@ -186,11 +190,11 @@
 	}
 
 	function toggleNodePinned(nodeId: string) {
-		graph = withScaleAnimation(togglePinned(graph, nodeId));
+		commitUserGraph(withScaleAnimation(togglePinned(graph, nodeId)));
 	}
 
 	function deleteNode(nodeId: string) {
-		graph = withRelaxedPositions(removeNode(graph, nodeId));
+		commitUserGraph(withRelaxedPositions(removeNode(graph, nodeId)));
 		if (primaryNodeId === nodeId) {
 			primaryNodeId =
 				graph.nodes.find((candidate) => candidate.pinned)?.id ??
@@ -202,8 +206,13 @@
 	}
 
 	function saveNodeContent(nodeId: string, content: { title: string; description: string }) {
-		graph = updateNodeContent(graph, nodeId, content);
+		commitUserGraph(updateNodeContent(graph, nodeId, content));
 		closeOverlays();
+	}
+
+	function commitUserGraph(nextGraph: MultigraphData) {
+		graph = nextGraph;
+		onMultigraphChange?.(nextGraph);
 	}
 
 	function edgeStyle(sourcePos: Point, targetPos: Point): string {

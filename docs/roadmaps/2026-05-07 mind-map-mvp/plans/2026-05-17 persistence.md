@@ -3,7 +3,7 @@
 **Created:** 2026-05-17
 **Author:** Cursor agent
 **Milestone:** [milestones/04-persistence.md](../milestones/04-persistence.md)
-**Status:** draft
+**Status:** done
 **Total estimated effort:** L
 
 ## Summary
@@ -47,7 +47,7 @@ implementation without rewriting the graph UI.
 > one logical commit, split it. The PR title is drafted up front so
 > reviewers (and the model writing the commit) start aligned.
 
-### T01 - Add schema envelope and migration helpers
+### ✓ T01 - Add schema envelope and migration helpers
 
 |                |                                                               |
 | -------------- | ------------------------------------------------------------- |
@@ -70,7 +70,7 @@ helpers to wrap, unwrap, and migrate persisted payloads into
 - Migration helpers do not read browser globals and remain unit-testable in
   the server Vitest project.
 
-### T02 - Implement the persistence interface and storage backends
+### ✓ T02 - Implement the persistence interface and storage backends
 
 |                |                                                                                         |
 | -------------- | --------------------------------------------------------------------------------------- |
@@ -95,7 +95,7 @@ adapter, and expose a factory keyed by the server-provided persistence kind.
 - Config pins the storage namespace, debounce duration, and quota warning
   budget in `APP_CONFIG.persistence`.
 
-### T03 - Add debounced save scheduling and status modeling
+### ✓ T03 - Add debounced save scheduling and status modeling
 
 |                |                                                                                               |
 | -------------- | --------------------------------------------------------------------------------------------- |
@@ -118,7 +118,7 @@ supports an explicit flush, and reports `idle`, `saving`, `saved`,
 - Quota warning calculation is deterministic and testable without
   `localStorage`.
 
-### T04 - Expose Multigraph change notifications without storage coupling
+### ✓ T04 - Expose Multigraph change notifications without storage coupling
 
 |                |                                                            |
 | -------------- | ---------------------------------------------------------- |
@@ -141,7 +141,7 @@ Keep `Multigraph` unaware of `Persistence`, `localStorage`, or save status.
   `localStorage`.
 - The prop-reset effect does not echo initial props as a user save.
 
-### T05 - Wire page-level persistence and graph management UI
+### ✓ T05 - Wire page-level persistence and graph management UI
 
 |                |                                                                                     |
 | -------------- | ----------------------------------------------------------------------------------- |
@@ -167,7 +167,7 @@ a compact toolbar for new/load/delete graph operations.
 - `+page.server.ts` returns only serializable config and defaults to local
   persistence when env is unset.
 
-### T06 - Cover persistence with Playwright e2e flows
+### ✓ T06 - Cover persistence with Playwright e2e flows
 
 |                |                                                         |
 | -------------- | ------------------------------------------------------- |
@@ -190,7 +190,7 @@ and switching between multiple local graphs.
   graph keeps its own persisted data.
 - The test asserts the stored payload has `schemaVersion: 1`.
 
-### T07 - Close documentation and status loop
+### ✓ T07 - Close documentation and status loop
 
 |                |                                                                                                                 |
 | -------------- | --------------------------------------------------------------------------------------------------------------- |
@@ -267,3 +267,8 @@ The plan is done when:
   callback. The persistence work should keep graph mutation logic in
   `Multigraph` and add a narrow change-notification prop rather than
   duplicating mutations in the page.
+- 2026-05-17: Implementation completed with local-first persistence,
+  versioned payloads, debounced page saves, graph management controls,
+  storage-event reloads, Storybook callback coverage, and Playwright
+  reload/multi-graph coverage. Multiplayer can keep treating
+  `ServerPersistence` as the later API boundary.

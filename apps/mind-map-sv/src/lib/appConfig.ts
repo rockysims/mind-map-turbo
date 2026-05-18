@@ -7,6 +7,12 @@ export const APP_CONFIG = {
 		longPressMs: 1000,
 		longPressDistancePx: 8
 	},
+	persistence: {
+		storageNamespace: 'mind-map',
+		saveDebounceMs: 500,
+		quotaBudgetBytes: 5 * 1024 * 1024,
+		quotaWarningRatio: 0.8
+	},
 	multigraph: {
 		nodeRadiusPx: NODE_RADIUS_PX,
 		minNodeHitRadiusPx: 32,
