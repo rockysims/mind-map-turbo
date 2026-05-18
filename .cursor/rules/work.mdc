@@ -21,13 +21,12 @@ Activates when the user prompt:
 Do **not** activate on incidental matches like the word "work" inside a
 sentence — only the literal `/work` directive.
 
-### Optional inline overrides
+## Plan the run with a TodoWrite list
 
-| Syntax | Effect |
-|---|---|
-| `/work[my-slug] …` | Use `my-slug` instead of auto-deriving from the prompt |
-| `/work --from <branch> …` | Base the worktree off `<branch>` instead of the current branch |
-| `/work --no-merge …` | Skip the final merge offer (just leave the worktree in place) |
+Before Step 1, create a TodoWrite list with the seven steps (worktree,
+install, work, validate, dry-run merge, report, handle reply). Mark each
+as in-progress when you start it and completed when you finish, so the
+user can follow progress in the IDE without scanning prose.
 
 ## Shell environment
 
@@ -76,8 +75,7 @@ accident.
 Run from the repo root:
 
 ```bash
-# capture the base branch (the one the user is currently on,
-# unless --from <branch> was supplied)
+# capture the base branch (the one the user is currently on)
 BASE="$(git rev-parse --abbrev-ref HEAD)"
 
 # create the worktree + branch in one shot
@@ -215,6 +213,3 @@ clean up. The worktree and branch stay live for them to revisit.
   procedure regardless of how small the task is. Don't shortcut.
 - **Base branch unknown / detached HEAD.** Bail and ask the user which
   branch to base off of. Don't guess.
-- **`--no-merge` was supplied.** Skip Step 6's merge offer. Still produce
-  the summary, but end with: "Worktree left at `<path>` on `<branch>`.
-  Merge it manually when you're ready."
