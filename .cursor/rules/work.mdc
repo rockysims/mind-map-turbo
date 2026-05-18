@@ -28,22 +28,6 @@ install, work, validate, dry-run merge, report, handle reply). Mark each
 as in-progress when you start it and completed when you finish, so the
 user can follow progress in the IDE without scanning prose.
 
-## Shell environment
-
-Wrap every command in `/bin/zsh -f -c '…'`. This skips the user's `zshrc`
-(which may have broken hooks like `add-zsh-hook`/nvm-lazy-load) while
-still inheriting the parent process's PATH (so nvm-installed Node 20+ is
-on PATH).
-
-Do **not** use `bash -lc` — it sources `~/.bash_profile`, which may have
-syntax errors, and may put an older Node (e.g. v16) on PATH that fails
-pnpm's `engines` check with `pnpm requires Node ≥ 20`. If you see that
-error, or `command not found: add-zsh-hook`, or `_comps: assignment to
-invalid subscript range`, switch to `/bin/zsh -f -c` and retry.
-
-Prefer setting the tool's `working_directory` parameter over chaining
-`cd …` — many agent tool runners drop chained `cd` commands.
-
 ## Step 1 — derive `<type>` and `<slug>`
 
 `<type>` follows Conventional Commits (see `commits.mdc`):
