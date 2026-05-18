@@ -463,7 +463,7 @@
 			posByNodeId: { n0: { x: -160, y: 0 }, n1: { x: 160, y: 0 } }
 		}),
 		defaultPrimaryNodeId: 'n0',
-		layoutSettings: { baseRadius: 200, minScale: 1, relaxIterations: 2 }
+		layoutSettings: { baseRadius: 200, minScale: 1, relaxIterations: 2, hopRepulsionStrength: 0 }
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();

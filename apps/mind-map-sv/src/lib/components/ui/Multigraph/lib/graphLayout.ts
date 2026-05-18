@@ -1,5 +1,5 @@
 import type { MultigraphData, Point } from '../../types/multigraph';
-import { hopsFromPinned, radiusOf, scaleByHops } from './layout';
+import { hopsFromPinned, radiusOf, scaleByHops, shortestPathHopsByNodeId } from './layout';
 import type { LayoutSettings } from './layoutSettings';
 import { withDefaultLayoutSettings } from './layoutSettings';
 import { relaxGraphPhysics } from './physics';
@@ -44,6 +44,7 @@ export function deriveGraphLayout(
 	const basePositions = positionsForNodes(data);
 	const anchoredIds = anchoredNodeIds(data, options.activeDragNodeId);
 	const iterations = options.relaxIterations ?? settings.relaxIterations;
+	const shortestPathHops = shortestPathHopsByNodeId(data);
 	const posByNodeId =
 		iterations > 0
 			? relaxGraphPhysics(
@@ -52,7 +53,8 @@ export function deriveGraphLayout(
 					data.edges,
 					settings,
 					iterations,
-					anchoredIds
+					anchoredIds,
+					shortestPathHops
 				)
 			: basePositions;
 

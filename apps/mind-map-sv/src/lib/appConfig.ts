@@ -17,7 +17,11 @@ export const APP_CONFIG = {
 			relaxIterations: 2,
 			edgeGapMinRadiusFactor: 0.2,
 			edgeGapMaxRadiusFactor: 0.6,
-			edgeSpringStrength: 0.25
+			edgeSpringStrength: 0.25,
+			hopRepulsionStrength: 0.3,
+			hopRepulsionMinHops: 2,
+			hopRepulsionMaxHops: 8,
+			hopRepulsionMaxExtraGapRadiusFactor: 2
 		}
 	}
 } as const;

@@ -8,6 +8,10 @@ export interface LayoutSettings {
 	edgeGapMinRadiusFactor: number;
 	edgeGapMaxRadiusFactor: number;
 	edgeSpringStrength: number;
+	hopRepulsionStrength: number;
+	hopRepulsionMinHops: number;
+	hopRepulsionMaxHops: number;
+	hopRepulsionMaxExtraGapRadiusFactor: number;
 }
 
 export const DEFAULT_LAYOUT_SETTINGS: LayoutSettings = {

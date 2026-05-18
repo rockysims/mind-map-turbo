@@ -8,6 +8,15 @@ export interface EdgeDistanceSettings {
 	edgeSpringStrength: number;
 }
 
+export interface HopRepulsionSettings {
+	hopRepulsionStrength: number;
+	hopRepulsionMinHops: number;
+	hopRepulsionMaxHops: number;
+	hopRepulsionMaxExtraGapRadiusFactor: number;
+}
+
+export type GraphPhysicsSettings = EdgeDistanceSettings & HopRepulsionSettings;
+
 export interface EdgeEndpointIds {
 	sourceNodeId: string;
 	targetNodeId: string;
@@ -17,26 +26,92 @@ export function relaxGraphPhysics(
 	positions: Record<string, Point>,
 	radii: Record<string, number>,
 	edges: EdgeEndpointIds[],
-	edgeDistanceSettings: EdgeDistanceSettings,
+	settings: GraphPhysicsSettings,
 	iterations = 1,
-	anchoredIds: Set<string> = new Set()
+	anchoredIds: Set<string> = new Set(),
+	shortestPathHops: Record<string, Record<string, number>> = {}
 ): Record<string, Point> {
 	let relaxed = positions;
 
 	for (let index = 0; index < iterations; index += 1) {
-		const withRelaxedEdges = relaxEdgeDistancesStep(
-			relaxed,
+		const withRelaxedEdges = relaxEdgeDistancesStep(relaxed, radii, edges, settings, anchoredIds);
+		const withRepelledHops = relaxHopRepulsionStep(
+			withRelaxedEdges,
 			radii,
-			edges,
-			edgeDistanceSettings,
+			shortestPathHops,
+			settings,
 			anchoredIds
 		);
-		const next = relaxOverlapsStep(withRelaxedEdges, radii, anchoredIds);
+		const next = relaxOverlapsStep(withRepelledHops, radii, anchoredIds);
 		if (next === relaxed) return relaxed;
 		relaxed = next;
 	}
 
 	return relaxOverlaps(relaxed, radii, iterations, anchoredIds);
+}
+
+export function relaxHopRepulsionStep(
+	positions: Record<string, Point>,
+	radii: Record<string, number>,
+	shortestPathHops: Record<string, Record<string, number>>,
+	settings: HopRepulsionSettings,
+	anchoredIds: Set<string> = new Set()
+): Record<string, Point> {
+	const strength = clamp(settings.hopRepulsionStrength, 0, 1);
+	const maxExtraGapFactor = Math.max(0, settings.hopRepulsionMaxExtraGapRadiusFactor);
+	if (strength === 0 || maxExtraGapFactor === 0) return positions;
+
+	const minHops = Math.max(1, Math.floor(settings.hopRepulsionMinHops));
+	const maxHops = Math.max(minHops, Math.floor(settings.hopRepulsionMaxHops));
+	const nextPositions = clonePositions(positions);
+	const nodeIds = Object.keys(positions).filter((nodeId) => radii[nodeId] !== undefined);
+	let moved = false;
+
+	for (let sourceIndex = 0; sourceIndex < nodeIds.length; sourceIndex += 1) {
+		for (let targetIndex = sourceIndex + 1; targetIndex < nodeIds.length; targetIndex += 1) {
+			const sourceId = nodeIds[sourceIndex];
+			const targetId = nodeIds[targetIndex];
+			const hops = shortestPathHops[sourceId]?.[targetId] ?? shortestPathHops[targetId]?.[sourceId];
+			const progress = hopRepulsionProgress(hops, minHops, maxHops);
+			if (progress === 0) continue;
+
+			const source = nextPositions[sourceId];
+			const target = nextPositions[targetId];
+			const sourceRadius = radii[sourceId];
+			const targetRadius = radii[targetId];
+			const radiusSum = sourceRadius + targetRadius;
+			const preferredDistance = radiusSum + radiusSum * maxExtraGapFactor * progress;
+			const sourceAnchored = anchoredIds.has(sourceId);
+			const targetAnchored = anchoredIds.has(targetId);
+			if (sourceAnchored && targetAnchored) continue;
+
+			const dx = target.x - source.x;
+			const dy = target.y - source.y;
+			const distance = Math.hypot(dx, dy);
+			const deficit = preferredDistance - distance;
+			if (deficit <= OVERLAP_EPSILON) continue;
+
+			const direction =
+				distance > 0
+					? { x: dx / distance, y: dy / distance }
+					: zeroDistanceDirection(sourceId, targetId);
+			const sourceShare = sourceAnchored ? 0 : targetAnchored ? 1 : 0.5;
+			const targetShare = targetAnchored ? 0 : sourceAnchored ? 1 : 0.5;
+			const adjustment = deficit * strength;
+
+			nextPositions[sourceId] = {
+				x: source.x - direction.x * adjustment * sourceShare,
+				y: source.y - direction.y * adjustment * sourceShare
+			};
+			nextPositions[targetId] = {
+				x: target.x + direction.x * adjustment * targetShare,
+				y: target.y + direction.y * adjustment * targetShare
+			};
+			moved = true;
+		}
+	}
+
+	return moved ? nextPositions : positions;
 }
 
 export function relaxEdgeDistancesStep(
@@ -177,6 +252,12 @@ function clonePositions(positions: Record<string, Point>): Record<string, Point>
 
 function clamp(value: number, min: number, max: number): number {
 	return Math.min(max, Math.max(min, value));
+}
+
+function hopRepulsionProgress(hops: number | undefined, minHops: number, maxHops: number): number {
+	if (hops === undefined || hops < minHops) return 0;
+	const clampedHops = Number.isFinite(hops) ? Math.min(hops, maxHops) : maxHops;
+	return (clampedHops - minHops + 1) / (maxHops - minHops + 1);
 }
 
 function zeroDistanceDirection(sourceId: string, targetId: string): Point {

@@ -29,6 +29,17 @@ export function hopsFromPinned(data: MultigraphData): Record<string, number> {
 	return hops;
 }
 
+export function shortestPathHopsByNodeId(
+	data: MultigraphData
+): Record<string, Record<string, number>> {
+	const adjacency = buildAdjacency(data);
+	const nodeIds = data.nodes.map(({ id }) => id);
+
+	return Object.fromEntries(
+		nodeIds.map((nodeId) => [nodeId, hopsFromSource(nodeId, adjacency, nodeIds)])
+	);
+}
+
 export function scaleByHops(
 	hops: Record<string, number>,
 	settings: Partial<LayoutSettings> = {}
@@ -52,6 +63,30 @@ export function radiusOf(
 ): number {
 	const resolvedSettings = withDefaultLayoutSettings(settings);
 	return resolvedSettings.baseRadius * (scales[nodeId] ?? resolvedSettings.minScale);
+}
+
+function hopsFromSource(
+	sourceId: string,
+	adjacency: Record<string, string[]>,
+	nodeIds: string[]
+): Record<string, number> {
+	const hops = Object.fromEntries(nodeIds.map((nodeId) => [nodeId, Infinity]));
+	const queue = [sourceId];
+	hops[sourceId] = 0;
+
+	for (let index = 0; index < queue.length; index += 1) {
+		const nodeId = queue[index];
+		const nextHop = hops[nodeId] + 1;
+
+		for (const neighborId of adjacency[nodeId] ?? []) {
+			if (nextHop < hops[neighborId]) {
+				hops[neighborId] = nextHop;
+				queue.push(neighborId);
+			}
+		}
+	}
+
+	return hops;
 }
 
 function buildAdjacency(data: MultigraphData): Record<string, string[]> {

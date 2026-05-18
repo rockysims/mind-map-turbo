@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hopsFromPinned, radiusOf, scaleByHops } from './layout';
+import { hopsFromPinned, radiusOf, scaleByHops, shortestPathHopsByNodeId } from './layout';
 import { makeGraph } from './testFixtures';
 
 describe('layout', () => {
@@ -84,6 +84,28 @@ describe('layout', () => {
 
 		it('resolves unreachable nodes to the minimum scale', () => {
 			expect(scaleByHops({ n0: Infinity }, { minScale: 0.15 })).toEqual({ n0: 0.15 });
+		});
+	});
+
+	describe('shortestPathHopsByNodeId', () => {
+		it('computes pairwise shortest paths across the graph', () => {
+			const graph = makeGraph({
+				nodeCount: 5,
+				edges: [
+					[0, 1],
+					[1, 2],
+					[0, 3],
+					[3, 2]
+				]
+			});
+
+			expect(shortestPathHopsByNodeId(graph)).toEqual({
+				n0: { n0: 0, n1: 1, n2: 2, n3: 1, n4: Infinity },
+				n1: { n0: 1, n1: 0, n2: 1, n3: 2, n4: Infinity },
+				n2: { n0: 2, n1: 1, n2: 0, n3: 1, n4: Infinity },
+				n3: { n0: 1, n1: 2, n2: 1, n3: 0, n4: Infinity },
+				n4: { n0: Infinity, n1: Infinity, n2: Infinity, n3: Infinity, n4: 0 }
+			});
 		});
 	});
 

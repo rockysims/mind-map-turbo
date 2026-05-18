@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	relaxEdgeDistancesStep,
 	relaxGraphPhysics,
+	relaxHopRepulsionStep,
 	relaxOverlaps,
 	relaxOverlapsStep
 } from './physics';
@@ -11,6 +12,19 @@ const EDGE_DISTANCE_SETTINGS = {
 	edgeGapMinRadiusFactor: 1,
 	edgeGapMaxRadiusFactor: 3,
 	edgeSpringStrength: 0.25
+};
+
+const HOP_REPULSION_SETTINGS = {
+	hopRepulsionStrength: 1,
+	hopRepulsionMinHops: 2,
+	hopRepulsionMaxHops: 4,
+	hopRepulsionMaxExtraGapRadiusFactor: 1
+};
+
+const GRAPH_PHYSICS_SETTINGS = {
+	...EDGE_DISTANCE_SETTINGS,
+	...HOP_REPULSION_SETTINGS,
+	hopRepulsionStrength: 0
 };
 
 function overlapAmount(
@@ -135,6 +149,74 @@ describe('physics', () => {
 		});
 	});
 
+	describe('relaxHopRepulsionStep', () => {
+		it('pushes nodes apart when shortest-path hops meet the minimum', () => {
+			const positions = { n0: { x: 0, y: 0 }, n2: { x: 40, y: 0 } };
+			const radii = { n0: 20, n2: 20 };
+
+			const next = relaxHopRepulsionStep(
+				positions,
+				radii,
+				{ n0: { n2: 2 }, n2: { n0: 2 } },
+				HOP_REPULSION_SETTINGS
+			);
+
+			expect(next.n0.x).toBeCloseTo(-6.666666666666666);
+			expect(next.n0.y).toBe(0);
+			expect(next.n2.x).toBeCloseTo(46.666666666666664);
+			expect(next.n2.y).toBe(0);
+		});
+
+		it('does not repel directly connected neighbors', () => {
+			const positions = { n0: { x: 0, y: 0 }, n1: { x: 40, y: 0 } };
+			const radii = { n0: 20, n1: 20 };
+
+			expect(
+				relaxHopRepulsionStep(
+					positions,
+					radii,
+					{ n0: { n1: 1 }, n1: { n0: 1 } },
+					HOP_REPULSION_SETTINGS
+				)
+			).toBe(positions);
+		});
+
+		it('normalizes maximum repulsion so larger hop caps keep the same final force', () => {
+			const positions = { n0: { x: 0, y: 0 }, n40: { x: 40, y: 0 } };
+			const radii = { n0: 20, n40: 20 };
+			const shortCap = relaxHopRepulsionStep(
+				positions,
+				radii,
+				{ n0: { n40: 40 }, n40: { n0: 40 } },
+				{ ...HOP_REPULSION_SETTINGS, hopRepulsionMaxHops: 4 }
+			);
+			const longCap = relaxHopRepulsionStep(
+				positions,
+				radii,
+				{ n0: { n40: 40 }, n40: { n0: 40 } },
+				{ ...HOP_REPULSION_SETTINGS, hopRepulsionMaxHops: 40 }
+			);
+
+			expect(shortCap).toEqual(longCap);
+		});
+
+		it('keeps anchored nodes still while the unanchored node absorbs hop repulsion', () => {
+			const positions = { n0: { x: 0, y: 0 }, n2: { x: 40, y: 0 } };
+			const radii = { n0: 20, n2: 20 };
+
+			const next = relaxHopRepulsionStep(
+				positions,
+				radii,
+				{ n0: { n2: 2 }, n2: { n0: 2 } },
+				HOP_REPULSION_SETTINGS,
+				new Set(['n0'])
+			);
+
+			expect(next.n0).toEqual({ x: 0, y: 0 });
+			expect(next.n2).toEqual({ x: 53.33333333333333, y: 0 });
+		});
+	});
+
 	describe('relaxOverlapsStep', () => {
 		it('separates two overlapping circles symmetrically', () => {
 			const positions = { n0: { x: 0, y: 0 }, n1: { x: 100, y: 0 } };
@@ -211,7 +293,7 @@ describe('physics', () => {
 					{ sourceNodeId: 'n0', targetNodeId: 'n1' },
 					{ sourceNodeId: 'n1', targetNodeId: 'n2' }
 				],
-				EDGE_DISTANCE_SETTINGS,
+				GRAPH_PHYSICS_SETTINGS,
 				4,
 				new Set(['n0'])
 			);

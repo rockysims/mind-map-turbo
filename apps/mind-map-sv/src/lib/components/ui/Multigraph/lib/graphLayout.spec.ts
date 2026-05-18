@@ -179,7 +179,8 @@ describe('graphLayout', () => {
 			baseRadius: 200,
 			scaleFalloff: 0.7,
 			minScale: 0.1,
-			edgeSpringStrength: 0
+			edgeSpringStrength: 0,
+			hopRepulsionStrength: 0
 		};
 		const lightlyRelaxed = deriveGraphLayout(graph, { settings, relaxIterations: 4 });
 		const settled = deriveGraphLayout(withSettledGraphPositions(graph, { settings }), {
