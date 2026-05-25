@@ -218,7 +218,7 @@
 />
 
 <Story
-	name="UserTapsNodeAndEditSheetAppears"
+	name="UserTapOnNodeDoesNothing"
 	args={{
 		multigraphData: makeGraph({ nodeCount: 1 }),
 		defaultPrimaryNodeId: 'n0'
@@ -233,8 +233,8 @@
 		await sleep(DBL_CLICK_MS + 20);
 
 		const canvas = within(canvasElement);
-		expect(canvas.getByLabelText('Title')).toHaveValue('Node 0');
-		expect(canvas.getByLabelText('Description')).toHaveValue('Description for node 0');
+		expect(canvas.queryByLabelText('Title')).not.toBeInTheDocument();
+		expect(canvas.queryByRole('menu')).not.toBeInTheDocument();
 	}}
 />
 
@@ -251,10 +251,12 @@
 		const center = getCenter(circle);
 
 		dispatchPointer(circle, 'pointerdown', center.x, center.y);
-		dispatchPointer(circle, 'pointerup', center.x, center.y);
-		await sleep(DBL_CLICK_MS + 20);
+		await sleep(LONG_PRESS_MS + 20);
 
 		const canvas = within(canvasElement);
+		canvas.getByRole('menuitem', { name: 'Edit' }).click();
+		await sleep();
+
 		const titleInput = canvas.getByLabelText('Title') as HTMLInputElement;
 		titleInput.value = 'Updated mobile title';
 		titleInput.dispatchEvent(new Event('input', { bubbles: true }));

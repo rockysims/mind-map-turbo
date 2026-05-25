@@ -52,7 +52,6 @@
 		return nodes.find((n) => n.id === nodeId) ?? null;
 	}
 
-	let lastNodeClickId = $state<string | null>(null);
 	let lastNodeMoved = $state<{ nodeId: string; point: Point } | null>(null);
 	let lastNodeDragStartId = $state<string | null>(null);
 	let lastNodeDragEndId = $state<string | null>(null);
@@ -67,7 +66,6 @@
 	bind:this={harnessRef}
 	style="--stage-harness-height: {NODE_RADIUS * 2}px"
 	data-testid="stage-callbacks"
-	data-last-node-click={lastNodeClickId ?? ''}
 	data-last-node-moved={lastNodeMoved
 		? `${lastNodeMoved.nodeId},${lastNodeMoved.point.x},${lastNodeMoved.point.y}`
 		: ''}
@@ -85,9 +83,6 @@
 >
 	<Stage
 		{getNodeAt}
-		onNodeClick={(n) => {
-			lastNodeClickId = n.id;
-		}}
 		onNodeMoved={(n, point) => {
 			lastNodeMoved = { nodeId: n.id, point };
 			onNodeMovedProp?.(n, point);

@@ -118,10 +118,6 @@
 		return graph.nodes.find((n) => n.id === nodeId) ?? null;
 	}
 
-	function handleNodeClick(node: NodeData) {
-		openEditSheet(node.id);
-	}
-
 	function handleNodeMoved(node: NodeData, point: Point) {
 		const movedGraph = moveNode(graph, node.id, point);
 		commitUserGraph(withRelaxedPositions(movedGraph, node.id, 1));
@@ -329,7 +325,6 @@
 >
 	<Stage
 		{getNodeAt}
-		onNodeClick={handleNodeClick}
 		onNodeMoved={handleNodeMoved}
 		onNodeDragStart={handleNodeDragStart}
 		onNodeDragEnd={handleNodeDragEnd}

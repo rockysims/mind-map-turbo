@@ -224,19 +224,11 @@
 		expect(selfDrop.y).toBeCloseTo(expectedSelfDropPoint.y);
 		expect(wrapper.dataset.lastDoubleClickDropNode).toBe('');
 
-		// Single-click with no drag
-		dispatchPointer(circle, 'pointerdown', nodeCenter.x, nodeCenter.y);
-		dispatchPointer(circle, 'pointerup', nodeCenter.x, nodeCenter.y);
-		await sleep(DBL_CLICK_MS);
-		expect(wrapper.dataset.lastNodeClick).toBe(NODES[0].id);
-
-		// Long-press fires once and does not become a click on release.
+		// Long-press fires once without interfering with later gestures.
 		dispatchPointer(circle, 'pointerdown', nodeCenter.x, nodeCenter.y);
 		await sleep(LONG_PRESS_MS + 20);
 		expect(wrapper.dataset.lastNodeLongPress?.startsWith(NODES[0].id)).toBe(true);
 		dispatchPointer(circle, 'pointerup', nodeCenter.x, nodeCenter.y);
-		await sleep(DBL_CLICK_MS);
-		expect(wrapper.dataset.lastNodeClick).toBe(NODES[0].id);
 
 		// Single-click drag to move node
 		const moveToX = nodeCenter.x + (NODE_RADIUS + 10);

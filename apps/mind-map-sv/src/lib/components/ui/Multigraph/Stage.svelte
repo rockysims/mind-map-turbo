@@ -19,8 +19,6 @@
 		getNodeAt: (clientX: number, clientY: number) => NodeData | null;
 		/** Pixels of movement below which we treat as click rather than drag. */
 		dragThreshold?: number;
-		/** Callback when user single-clicks a node (no drag). */
-		onNodeClick?: (node: NodeData) => void;
 		/** Callback when user single-click-drags a node and releases with a graph-local point. */
 		onNodeMoved?: (node: NodeData, point: Point) => void;
 		/** Callback when user starts dragging a node after crossing the drag threshold. */
@@ -40,7 +38,6 @@
 	let {
 		getNodeAt,
 		dragThreshold = DRAG_THRESHOLD,
-		onNodeClick,
 		onNodeMoved,
 		onNodeDragStart,
 		onNodeDragEnd,
@@ -76,9 +73,6 @@
 	let lastClickTime = $state(0);
 	let isDoubleClickSession = $state(false);
 
-	// Delay single-click so we don't fire it if a second click makes it a double-click
-	let pendingClickTimeoutId: ReturnType<typeof setTimeout> | null = null;
-	let pendingClickNode: NodeData | null = null;
 	let longPressTimeoutId: ReturnType<typeof setTimeout> | null = null;
 	let longPressStartTime = 0;
 	let longPressFired = false;
@@ -86,12 +80,6 @@
 	function onPointerDown(e: PointerEvent) {
 		const node = getNodeAt(e.clientX, e.clientY);
 		if (node) {
-			// If we were waiting to fire a single-click on this node, cancel it (user is double-clicking)
-			if (pendingClickNode?.id === node.id && pendingClickTimeoutId !== null) {
-				clearTimeout(pendingClickTimeoutId);
-				pendingClickTimeoutId = null;
-				pendingClickNode = null;
-			}
 			dragNode = node;
 			dragStartPos = { x: e.clientX, y: e.clientY };
 			dragCurrentPos = dragStartPos;
@@ -212,26 +200,11 @@
 					} else {
 						onNodeMoved?.(dragNode, graphPointForEvent(e));
 					}
+				} else if (isDoubleClickSession) {
+					onNodeMakePrimary?.(dragNode);
 				} else {
-					// Click (no drag)
-					if (isDoubleClickSession) {
-						onNodeMakePrimary?.(dragNode);
-					} else {
-						// Delay single-click: only fire after DBL_CLICK_MS so a second click is treated as double-click only
-						if (pendingClickTimeoutId !== null) {
-							clearTimeout(pendingClickTimeoutId);
-							pendingClickTimeoutId = null;
-						}
-						const node = dragNode;
-						pendingClickNode = node;
-						pendingClickTimeoutId = setTimeout(() => {
-							onNodeClick?.(node);
-							pendingClickNode = null;
-							pendingClickTimeoutId = null;
-						}, DBL_CLICK_MS);
-						lastClickNodeId = node.id;
-						lastClickTime = Date.now();
-					}
+					lastClickNodeId = dragNode.id;
+					lastClickTime = Date.now();
 				}
 			}
 
