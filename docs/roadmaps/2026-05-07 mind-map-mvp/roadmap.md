@@ -40,6 +40,7 @@ breaks it into individual PR-sized tasks.
 | 04  | Persistence (local-first → server)                 | complete    | [milestone](milestones/04-persistence.md), [plan](plans/2026-05-17%20persistence.md)                               |
 | 05  | Multiplayer                                        | not started | [milestones/05-multiplayer.md](milestones/05-multiplayer.md)                                                       |
 | 06  | Search                                             | not started | [milestones/06-search.md](milestones/06-search.md)                                                                 |
+| 07  | Layered pin relayout                               | not started | [milestone](milestones/07-layered-pin-relayout.md), [plan](plans/2026-05-25%20layered-pin-relayout.md)             |
 
 ## How this directory is organized
 
