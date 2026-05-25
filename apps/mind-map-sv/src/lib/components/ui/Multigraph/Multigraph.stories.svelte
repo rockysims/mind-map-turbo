@@ -1,7 +1,7 @@
 <script module lang="ts">
 	import { defineMeta } from '@storybook/addon-svelte-csf';
 	import Multigraph from '$lib/components/ui/Multigraph/Multigraph.svelte';
-	import { expect, fn, within } from 'storybook/test';
+	import { expect, fn, waitFor, within } from 'storybook/test';
 	import { APP_CONFIG } from '$lib/appConfig';
 	import { DBL_CLICK_MS, LONG_PRESS_MS, MIN_NODE_HIT_RADIUS, NODE_RADIUS } from '$lib/constants';
 	import { makeGraph } from './lib/testFixtures';
@@ -429,19 +429,42 @@
 <Story
 	name="UserUnpinsAPinnedNode"
 	args={{
-		multigraphData: makeGraph({ nodeCount: 1, pinned: [0] }),
-		defaultPrimaryNodeId: 'n0'
+		multigraphData: makeGraph({
+			nodeCount: 2,
+			pinned: [0],
+			edges: [[0, 1]],
+			posByNodeId: { n0: { x: -120, y: 0 }, n1: { x: 240, y: 0 } }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: {
+			scaleFalloff: 0.5,
+			minScale: 0.2,
+			scaleAnimationDurationMs: 120,
+			relaxIterations: 2
+		}
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
 		const circle = getCircle(canvasElement, 'n0');
-		const center = getCenter(circle);
+		const pinnedCenter = getCenter(circle);
 
-		await dispatchDoubleClick(circle, center.x, center.y);
-		await sleep();
+		await dispatchDoubleClick(circle, pinnedCenter.x, pinnedCenter.y);
 
 		const node = canvasElement.querySelector('[data-node-id="n0"] .node');
 		expect(node).not.toHaveAttribute('data-pinned');
+		expect(canvasElement.querySelector('.graph')).toHaveAttribute(
+			'data-scale-animation-active',
+			'true'
+		);
+
+		await waitFor(() => {
+			const unpinnedScale = Number(getNodeWrapper(canvasElement, 'n0').dataset.scale);
+			expect(unpinnedScale).toBeGreaterThan(0.2);
+			expect(unpinnedScale).toBeLessThan(1);
+			const centerDuringAnimation = getCenter(getCircle(canvasElement, 'n0'));
+			expect(centerDuringAnimation.x).toBeCloseTo(pinnedCenter.x);
+			expect(centerDuringAnimation.y).toBeCloseTo(pinnedCenter.y);
+		});
 	}}
 />
 

@@ -44,7 +44,16 @@ export function hasActiveScaleAnimations(
 	animations: Record<string, NodeScaleAnimation>,
 	nowMs: number
 ): boolean {
-	return Object.values(animations).some((animation) => animationProgress(animation, nowMs) < 1);
+	return activeScaleAnimationNodeIds(animations, nowMs).length > 0;
+}
+
+export function activeScaleAnimationNodeIds(
+	animations: Record<string, NodeScaleAnimation>,
+	nowMs: number
+): string[] {
+	return Object.entries(animations)
+		.filter(([, animation]) => animationProgress(animation, nowMs) < 1)
+		.map(([nodeId]) => nodeId);
 }
 
 export function pruneFinishedScaleAnimations(

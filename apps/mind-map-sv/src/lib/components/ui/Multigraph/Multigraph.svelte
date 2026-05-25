@@ -24,6 +24,7 @@
 	import type { LayoutSettings } from './lib/layoutSettings.js';
 	import { withDefaultLayoutSettings } from './lib/layoutSettings.js';
 	import {
+		activeScaleAnimationNodeIds,
 		animatedScalesAt,
 		createScaleAnimations,
 		hasActiveScaleAnimations,
@@ -63,13 +64,11 @@
 
 	const resolvedLayoutSettings = $derived(withDefaultLayoutSettings(layoutSettings));
 	const animatedScaleByNodeId = $derived(animatedScalesAt(scaleAnimations, animationNowMs));
+	const scaleAnchoredNodeIds = $derived(
+		activeScaleAnimationNodeIds(scaleAnimations, animationNowMs)
+	);
 	const graphLayout = $derived(
-		deriveGraphLayout(graph, {
-			settings: layoutSettings,
-			activeDragNodeId,
-			relaxIterations: 0,
-			scaleByNodeId: animatedScaleByNodeId
-		})
+		deriveGraphLayout(graph, graphLayoutOptions({ relaxIterations: 0 }))
 	);
 	const editNode = $derived(graph.nodes.find((node) => node.id === editNodeId) ?? null);
 	const actionMenuNode = $derived.by(() => {
@@ -223,6 +222,23 @@
 		onMultigraphChange?.(nextGraph);
 	}
 
+	function graphLayoutOptions(
+		overrides: {
+			activeDragNodeId?: string | null;
+			relaxIterations?: number;
+			scaleByNodeId?: Record<string, number>;
+			scaleAnchoredNodeIds?: readonly string[];
+		} = {}
+	) {
+		return {
+			settings: layoutSettings,
+			activeDragNodeId: overrides.activeDragNodeId ?? activeDragNodeId,
+			scaleAnchoredNodeIds: overrides.scaleAnchoredNodeIds ?? scaleAnchoredNodeIds,
+			relaxIterations: overrides.relaxIterations,
+			scaleByNodeId: overrides.scaleByNodeId ?? animatedScaleByNodeId
+		};
+	}
+
 	function edgeStyle(sourcePos: Point, targetPos: Point): string {
 		const dx = targetPos.x - sourcePos.x;
 		const dy = targetPos.y - sourcePos.y;
@@ -237,23 +253,18 @@
 		dragNodeId: string | null = activeDragNodeId,
 		relaxIterations = layoutSettings.relaxIterations
 	): MultigraphData {
-		return withRelaxedGraphPositions(nextGraph, {
-			settings: layoutSettings,
-			activeDragNodeId: dragNodeId,
-			relaxIterations,
-			scaleByNodeId: animatedScaleByNodeId
-		});
+		return withRelaxedGraphPositions(
+			nextGraph,
+			graphLayoutOptions({
+				activeDragNodeId: dragNodeId,
+				relaxIterations
+			})
+		);
 	}
 
 	function withScaleAnimation(nextGraph: MultigraphData): MultigraphData {
-		const fromLayout = deriveGraphLayout(graph, {
-			settings: layoutSettings,
-			relaxIterations: 0
-		});
-		const targetLayout = deriveGraphLayout(nextGraph, {
-			settings: layoutSettings,
-			relaxIterations: 0
-		});
+		const fromLayout = deriveGraphLayout(graph, graphLayoutOptions({ relaxIterations: 0 }));
+		const targetLayout = deriveGraphLayout(nextGraph, graphLayoutOptions({ relaxIterations: 0 }));
 		const nowMs = performance.now();
 		const nextAnimations =
 			resolvedLayoutSettings.scaleAnimationDurationMs > 0
@@ -273,12 +284,14 @@
 			startRelaxationLoop();
 		}
 
-		return withRelaxedGraphPositions(nextGraph, {
-			settings: layoutSettings,
-			activeDragNodeId,
-			relaxIterations: layoutSettings.relaxIterations,
-			scaleByNodeId: animatedScalesAt(nextAnimations, nowMs)
-		});
+		return withRelaxedGraphPositions(
+			nextGraph,
+			graphLayoutOptions({
+				relaxIterations: layoutSettings.relaxIterations,
+				scaleByNodeId: animatedScalesAt(nextAnimations, nowMs),
+				scaleAnchoredNodeIds: Object.keys(nextAnimations)
+			})
+		);
 	}
 
 	function startRelaxationLoop() {
@@ -303,12 +316,14 @@
 			Object.keys(nextScaleByNodeId).length > 0;
 
 		if (shouldRelax) {
-			const step = relaxGraphPositionsStep(graph, {
-				settings: layoutSettings,
-				activeDragNodeId,
-				relaxIterations: 1,
-				scaleByNodeId: nextScaleByNodeId
-			});
+			const step = relaxGraphPositionsStep(
+				graph,
+				graphLayoutOptions({
+					relaxIterations: 1,
+					scaleByNodeId: nextScaleByNodeId,
+					scaleAnchoredNodeIds: activeScaleAnimationNodeIds(scaleAnimations, nowMs)
+				})
+			);
 			graph = step.data;
 
 			if (activeDragNodeId === null && settleFramesRemaining > 0) {

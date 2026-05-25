@@ -91,6 +91,26 @@ describe('graphLayout', () => {
 		expect(layout.posByNodeId.n1.x).toBe(160);
 	});
 
+	it('anchors nodes listed in scaleAnchoredNodeIds during relaxation', () => {
+		const graph = makeGraph({
+			nodeCount: 2,
+			edges: [[0, 1]],
+			posByNodeId: {
+				n0: { x: 0, y: 0 },
+				n1: { x: 80, y: 0 }
+			}
+		});
+
+		const layout = deriveGraphLayout(graph, {
+			settings: { baseRadius: 50, minScale: 1, relaxIterations: 1 },
+			scaleAnchoredNodeIds: ['n0']
+		});
+
+		expect(layout.nodes.find((node) => node.nodeId === 'n0')?.anchored).toBe(true);
+		expect(layout.posByNodeId.n0).toEqual({ x: 0, y: 0 });
+		expect(layout.posByNodeId.n1.x).not.toBe(80);
+	});
+
 	it('anchors pinned nodes and the active drag node while relaxing positions', () => {
 		const graph = makeGraph({
 			nodeCount: 3,

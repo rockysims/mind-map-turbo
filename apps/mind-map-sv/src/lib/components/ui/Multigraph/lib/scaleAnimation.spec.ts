@@ -3,6 +3,7 @@ import { togglePinned } from './graph';
 import { deriveGraphLayout } from './graphLayout';
 import { makeGraph } from './testFixtures';
 import {
+	activeScaleAnimationNodeIds,
 	animatedScalesAt,
 	createScaleAnimations,
 	hasActiveScaleAnimations,
@@ -60,6 +61,17 @@ describe('scaleAnimation', () => {
 		expect(
 			animatedScalesAt({ n0: { fromScale: 0.2, toScale: 1, startedAtMs: 100, durationMs: 0 } }, 100)
 		).toEqual({ n0: 1 });
+	});
+
+	it('lists node ids whose scale animation is still in progress', () => {
+		const animations = {
+			n0: { fromScale: 1, toScale: 0.2, startedAtMs: 100, durationMs: 200 },
+			n1: { fromScale: 0.2, toScale: 0.5, startedAtMs: 100, durationMs: 400 }
+		};
+
+		expect(activeScaleAnimationNodeIds(animations, 150)).toEqual(['n0', 'n1']);
+		expect(activeScaleAnimationNodeIds(animations, 350)).toEqual(['n1']);
+		expect(activeScaleAnimationNodeIds(animations, 500)).toEqual([]);
 	});
 
 	it('reports and prunes finished animations', () => {

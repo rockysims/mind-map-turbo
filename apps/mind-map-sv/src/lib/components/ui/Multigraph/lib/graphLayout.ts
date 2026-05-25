@@ -28,6 +28,8 @@ export interface GraphLayout {
 export interface GraphLayoutOptions {
 	settings?: Partial<LayoutSettings>;
 	activeDragNodeId?: string | null;
+	/** Keep these nodes fixed during relaxation while their scale animates (e.g. after unpin). */
+	scaleAnchoredNodeIds?: readonly string[];
 	relaxIterations?: number;
 	scaleByNodeId?: Record<string, number>;
 }
@@ -52,7 +54,7 @@ export function deriveGraphLayout(
 		data.nodes.map((node) => [node.id, radiusOf(scaleByNodeId, settings, node.id)])
 	);
 	const basePositions = positionsForNodes(data);
-	const anchoredIds = anchoredNodeIds(data, options.activeDragNodeId);
+	const anchoredIds = anchoredNodeIds(data, options);
 	const iterations = options.relaxIterations ?? settings.relaxIterations;
 	const shortestPathHops = shortestPathHopsByNodeId(data);
 	const posByNodeId =
@@ -140,9 +142,12 @@ function positionsForNodes(data: MultigraphData): Record<string, Point> {
 	);
 }
 
-function anchoredNodeIds(data: MultigraphData, activeDragNodeId?: string | null): Set<string> {
+function anchoredNodeIds(data: MultigraphData, options: GraphLayoutOptions): Set<string> {
 	const anchoredIds = new Set(data.nodes.filter((node) => node.pinned).map((node) => node.id));
-	if (activeDragNodeId) anchoredIds.add(activeDragNodeId);
+	if (options.activeDragNodeId) anchoredIds.add(options.activeDragNodeId);
+	for (const nodeId of options.scaleAnchoredNodeIds ?? []) {
+		anchoredIds.add(nodeId);
+	}
 	return anchoredIds;
 }
 
