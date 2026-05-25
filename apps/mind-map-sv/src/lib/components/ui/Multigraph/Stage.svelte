@@ -142,11 +142,10 @@
 
 	function graphPointForEvent(e: PointerEvent): Point {
 		const stage = e.currentTarget as HTMLElement;
-		const frame = stage.parentElement ?? stage;
 
 		return clientPointToGraphPoint(
 			{ x: e.clientX, y: e.clientY },
-			frame.getBoundingClientRect(),
+			stage.getBoundingClientRect(),
 			{ x: panX, y: panY },
 			scale
 		);
@@ -283,7 +282,6 @@
 <div
 	class="stage"
 	class:panning={panStart !== null}
-	style="transform: {transformStyle}; transform-origin: 50% 50%;"
 	onpointerdown={onPointerDownStage}
 	onpointermove={onPointerMoveStage}
 	onpointerup={onPointerUpStage}
@@ -291,9 +289,15 @@
 	onwheel={onWheel}
 	role="presentation"
 >
-	{#if children}
-		{@render children()}
-	{/if}
+	<div
+		class="stage-content"
+		style="transform: {transformStyle}; transform-origin: 50% 50%;"
+		aria-hidden="true"
+	>
+		{#if children}
+			{@render children()}
+		{/if}
+	</div>
 </div>
 
 <style>
@@ -301,10 +305,16 @@
 		position: absolute;
 		inset: 0;
 		cursor: grab;
+		touch-action: none;
 		-webkit-user-select: none;
 		user-select: none;
 	}
 	.stage.panning {
 		cursor: grabbing;
+	}
+	.stage-content {
+		position: absolute;
+		inset: 0;
+		pointer-events: none;
 	}
 </style>

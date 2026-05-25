@@ -35,8 +35,14 @@
 		return stage as HTMLElement;
 	}
 
+	function getStageContent(el: HTMLElement): HTMLElement {
+		const content = el.querySelector('.stage-content');
+		if (!content) throw new Error('Stage content not found');
+		return content as HTMLElement;
+	}
+
 	function getStageTransform(el: HTMLElement): string {
-		return getStage(el).style.transform || '';
+		return getStageContent(el).style.transform || '';
 	}
 
 	function dispatchPointer(
@@ -328,5 +334,31 @@
 		dispatchWheel(stage, -200);
 		const afterZoom = getStageTransform(canvasElement);
 		expect(afterZoom).toMatch(/scale\([1-9]/);
+	}}
+/>
+
+<Story
+	name="PanAfterZoomOutAtViewportEdge"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const stage = getStage(canvasElement);
+
+		await waitForLayout();
+
+		const rect = stage.getBoundingClientRect();
+		const edge = { x: rect.left + rect.width * 0.1, y: rect.top + rect.height * 0.1 };
+
+		dispatchWheel(stage, 400);
+		await sleep();
+		const afterZoomOut = getStageTransform(canvasElement);
+		expect(afterZoomOut).toMatch(/scale\(0\./);
+
+		dispatchPointer(stage, 'pointerdown', edge.x, edge.y);
+		dispatchPointer(stage, 'pointermove', edge.x + 30, edge.y + 20);
+		dispatchPointer(stage, 'pointerup', edge.x + 30, edge.y + 20);
+		await sleep();
+
+		const afterPan = getStageTransform(canvasElement);
+		expect(afterPan).toContain('translate(30px, 20px)');
 	}}
 />
