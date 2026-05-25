@@ -28,3 +28,39 @@ export function settleStateAfterScaleAnimationsEnd(
 		settleFramesRemaining: postScaleChangeSettleMaxFrames
 	};
 }
+
+/** Keep only the toggled node fixed while pin/unpin scale and post-scale settle run. */
+export function scaleChangeLayoutAnchoredNodeIds(
+	focalNodeId: string | null,
+	options: {
+		pendingPostScaleSettle: boolean;
+		settleFramesRemaining: number;
+		hasActiveScaleAnimations: boolean;
+	}
+): readonly string[] {
+	if (focalNodeId === null) return [];
+	if (
+		options.hasActiveScaleAnimations ||
+		options.pendingPostScaleSettle ||
+		options.settleFramesRemaining > 0
+	) {
+		return [focalNodeId];
+	}
+	return [];
+}
+
+export function shouldClearScaleChangeFocalNode(
+	focalNodeId: string | null,
+	options: {
+		pendingPostScaleSettle: boolean;
+		settleFramesRemaining: number;
+		hasActiveScaleAnimations: boolean;
+	}
+): boolean {
+	return (
+		focalNodeId !== null &&
+		!options.pendingPostScaleSettle &&
+		options.settleFramesRemaining === 0 &&
+		!options.hasActiveScaleAnimations
+	);
+}

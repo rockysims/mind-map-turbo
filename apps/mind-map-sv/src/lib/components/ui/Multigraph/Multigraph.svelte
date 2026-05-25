@@ -24,7 +24,6 @@
 	import type { LayoutSettings } from './lib/layoutSettings.js';
 	import { withDefaultLayoutSettings } from './lib/layoutSettings.js';
 	import {
-		activeScaleAnimationNodeIds,
 		animatedScalesAt,
 		createScaleAnimations,
 		hasActiveScaleAnimations,
@@ -32,8 +31,10 @@
 		type NodeScaleAnimation
 	} from './lib/scaleAnimation.js';
 	import {
+		scaleChangeLayoutAnchoredNodeIds,
 		settleStateAfterScaleAnimationsEnd,
-		settleStateForScaleChange
+		settleStateForScaleChange,
+		shouldClearScaleChangeFocalNode
 	} from './lib/scaleChangeSettle.js';
 	import { externalGraphSyncToken } from './lib/graphSync.js';
 	import { MIN_NODE_HIT_RADIUS } from '$lib/constants.js';
@@ -65,12 +66,18 @@
 	let animationNowMs = $state(0);
 	let settleFramesRemaining = $state(0);
 	let pendingPostScaleSettle = $state(false);
+	let scaleChangeFocalNodeId = $state<string | null>(null);
 	let lastSyncedGeneration = $state(-1);
 
 	const resolvedLayoutSettings = $derived(withDefaultLayoutSettings(layoutSettings));
 	const animatedScaleByNodeId = $derived(animatedScalesAt(scaleAnimations, animationNowMs));
+	const scaleChangeSettleState = $derived({
+		pendingPostScaleSettle,
+		settleFramesRemaining,
+		hasActiveScaleAnimations: hasActiveScaleAnimations(scaleAnimations, animationNowMs)
+	});
 	const scaleAnchoredNodeIds = $derived(
-		activeScaleAnimationNodeIds(scaleAnimations, animationNowMs)
+		scaleChangeLayoutAnchoredNodeIds(scaleChangeFocalNodeId, scaleChangeSettleState)
 	);
 	const graphLayout = $derived(
 		deriveGraphLayout(graph, graphLayoutOptions({ relaxIterations: 0 }))
@@ -94,6 +101,7 @@
 		animationNowMs = 0;
 		settleFramesRemaining = 0;
 		pendingPostScaleSettle = false;
+		scaleChangeFocalNodeId = null;
 		graph = withSettledGraphPositions(incoming, { settings });
 		primaryNodeId = primary;
 	});
@@ -156,7 +164,7 @@
 	function handleNodeMakePrimary(node: NodeData) {
 		closeOverlays();
 		const wasPinned = node.pinned === true;
-		commitUserGraph(withScaleAnimation(togglePinned(graph, node.id)));
+		commitUserGraph(withScaleAnimation(togglePinned(graph, node.id), node.id));
 
 		if (!wasPinned) {
 			primaryNodeId = node.id;
@@ -203,7 +211,7 @@
 	}
 
 	function toggleNodePinned(nodeId: string) {
-		commitUserGraph(withScaleAnimation(togglePinned(graph, nodeId)));
+		commitUserGraph(withScaleAnimation(togglePinned(graph, nodeId), nodeId));
 	}
 
 	function deleteNode(nodeId: string) {
@@ -268,7 +276,8 @@
 		);
 	}
 
-	function withScaleAnimation(nextGraph: MultigraphData): MultigraphData {
+	function withScaleAnimation(nextGraph: MultigraphData, focalNodeId: string): MultigraphData {
+		scaleChangeFocalNodeId = focalNodeId;
 		const fromLayout = deriveGraphLayout(graph, graphLayoutOptions({ relaxIterations: 0 }));
 		const targetLayout = deriveGraphLayout(nextGraph, graphLayoutOptions({ relaxIterations: 0 }));
 		const nowMs = performance.now();
@@ -300,7 +309,7 @@
 			graphLayoutOptions({
 				relaxIterations: layoutSettings.relaxIterations,
 				scaleByNodeId: animatedScalesAt(nextAnimations, nowMs),
-				scaleAnchoredNodeIds: Object.keys(nextAnimations)
+				scaleAnchoredNodeIds: [focalNodeId]
 			})
 		);
 	}
@@ -331,8 +340,7 @@
 				graph,
 				graphLayoutOptions({
 					relaxIterations: 1,
-					scaleByNodeId: nextScaleByNodeId,
-					scaleAnchoredNodeIds: activeScaleAnimationNodeIds(scaleAnimations, nowMs)
+					scaleByNodeId: nextScaleByNodeId
 				})
 			);
 			graph = step.data;
@@ -357,6 +365,16 @@
 		}
 
 		if (
+			shouldClearScaleChangeFocalNode(scaleChangeFocalNodeId, {
+				pendingPostScaleSettle,
+				settleFramesRemaining,
+				hasActiveScaleAnimations: hasActiveScaleAnimations(scaleAnimations, nowMs)
+			})
+		) {
+			scaleChangeFocalNodeId = null;
+		}
+
+		if (
 			activeDragNodeId !== null ||
 			settleFramesRemaining > 0 ||
 			hasActiveScaleAnimations(scaleAnimations, nowMs)
@@ -370,6 +388,7 @@
 	class="graph"
 	bind:this={graphRef}
 	data-settling={settleFramesRemaining > 0 ? 'true' : undefined}
+	data-scale-change-focal={scaleAnchoredNodeIds[0]}
 	data-scale-animation-active={hasActiveScaleAnimations(scaleAnimations, animationNowMs)
 		? 'true'
 		: undefined}

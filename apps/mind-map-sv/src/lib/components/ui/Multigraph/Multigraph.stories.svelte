@@ -441,14 +441,18 @@
 			scaleFalloff: 0.5,
 			minScale: 0.2,
 			scaleAnimationDurationMs: 120,
-			postScaleChangeSettleMaxFrames: 8,
+			postScaleChangeSettleMaxFrames: 12,
+			postDragSettleEpsilonPx: 0,
+			edgeSpringStrength: 1,
 			relaxIterations: 2
 		}
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
 		const circle = getCircle(canvasElement, 'n0');
+		const neighborCircle = getCircle(canvasElement, 'n1');
 		const pinnedCenter = getCenter(circle);
+		const neighborCenterAtStart = getCenter(neighborCircle);
 
 		await dispatchDoubleClick(circle, pinnedCenter.x, pinnedCenter.y);
 
@@ -466,6 +470,19 @@
 			const centerDuringAnimation = getCenter(getCircle(canvasElement, 'n0'));
 			expect(centerDuringAnimation.x).toBeCloseTo(pinnedCenter.x);
 			expect(centerDuringAnimation.y).toBeCloseTo(pinnedCenter.y);
+		});
+
+		await waitFor(() => {
+			expect(canvasElement.querySelector('.graph')).toHaveAttribute(
+				'data-scale-change-focal',
+				'n0'
+			);
+			const neighborWhileFocalAnchored = getCenter(getCircle(canvasElement, 'n1'));
+			expect(distanceBetween(neighborWhileFocalAnchored, neighborCenterAtStart)).toBeGreaterThan(1);
+		});
+
+		await waitFor(() => {
+			expect(canvasElement.querySelector('.graph')).not.toHaveAttribute('data-scale-change-focal');
 		});
 	}}
 />
