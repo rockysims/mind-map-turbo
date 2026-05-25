@@ -320,7 +320,7 @@
 		const hopsByNodeId = hopsFromPinned(nextGraph);
 		const pinnedIds = pinnedNodeIds(nextGraph);
 		const nodeIds = nextGraph.nodes.map((node) => node.id);
-		const settleMaxFrames = resolvedLayoutSettings.postScaleChangeSettleMaxFrames;
+		const settleMaxFrames = resolvedLayoutSettings.layeredRelayoutSettleMaxFrames;
 
 		layeredRelayoutState = shouldUseLayeredRelayout(pinnedIds.size > 0)
 			? initialLayeredRelayoutState(hopsByNodeId, pinnedIds, settleMaxFrames)
@@ -513,8 +513,8 @@
 				const previousBatchKey = lastRelayoutBatchKey;
 				layeredRelayoutState = advanceLayeredRelayout(layeredRelayoutState, {
 					maxPositionDelta: step.maxPositionDelta,
-					settleEpsilonPx: resolvedLayoutSettings.postDragSettleEpsilonPx,
-					settleMaxFrames: resolvedLayoutSettings.postScaleChangeSettleMaxFrames
+					settleEpsilonPx: resolvedLayoutSettings.layeredRelayoutSettleEpsilonPx,
+					settleMaxFrames: resolvedLayoutSettings.layeredRelayoutSettleMaxFrames
 				});
 				const nextBatchKey = relayoutBatchKey(layeredRelayoutState);
 				if (nextBatchKey !== previousBatchKey) {

@@ -37,7 +37,9 @@ export const APP_CONFIG = {
 			postScaleChangeSettleMaxFrames: 24,
 			scaleAnimationDurationMs: 500,
 			layeredRelayoutDimOpacity: 0.5,
-			layeredRelayoutOpacityAnimationDurationMs: 500
+			layeredRelayoutOpacityAnimationDurationMs: 500,
+			layeredRelayoutSettleMaxFrames: 24,
+			layeredRelayoutSettleEpsilonPx: 0.25
 		}
 	}
 } as const;

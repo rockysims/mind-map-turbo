@@ -867,8 +867,8 @@
 			minScale: 0.2,
 			scaleAnimationDurationMs: 120,
 			layeredRelayoutOpacityAnimationDurationMs: 120,
-			postScaleChangeSettleMaxFrames: 8,
-			postDragSettleEpsilonPx: 0,
+			layeredRelayoutSettleMaxFrames: 8,
+			layeredRelayoutSettleEpsilonPx: 0,
 			relaxIterations: 1
 		}
 	}}
@@ -910,8 +910,8 @@
 			minScale: 0.2,
 			scaleAnimationDurationMs: 120,
 			layeredRelayoutOpacityAnimationDurationMs: 120,
-			postScaleChangeSettleMaxFrames: 8,
-			postDragSettleEpsilonPx: 0,
+			layeredRelayoutSettleMaxFrames: 8,
+			layeredRelayoutSettleEpsilonPx: 0,
 			relaxIterations: 1
 		}
 	}}

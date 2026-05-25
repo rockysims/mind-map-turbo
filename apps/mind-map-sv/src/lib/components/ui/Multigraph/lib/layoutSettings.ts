@@ -18,6 +18,8 @@ export interface LayoutSettings {
 	scaleAnimationDurationMs: number;
 	layeredRelayoutDimOpacity: number;
 	layeredRelayoutOpacityAnimationDurationMs: number;
+	layeredRelayoutSettleMaxFrames: number;
+	layeredRelayoutSettleEpsilonPx: number;
 }
 
 export const DEFAULT_LAYOUT_SETTINGS: LayoutSettings = {
