@@ -4,6 +4,7 @@
 	import { makeGraph } from '$lib/components/ui/Multigraph/lib/testFixtures';
 	import Multigraph from '$lib/components/ui/Multigraph/Multigraph.svelte';
 	import GraphToolbar from '$lib/components/ui/GraphToolbar/GraphToolbar.svelte';
+	import type { LayoutSettings } from '$lib/components/ui/Multigraph/lib/layoutSettings';
 	import type { MultigraphData } from '$lib/components/ui/types/multigraph';
 	import { DEFAULT_GRAPH_ID } from '$lib/graphRoute';
 	import { graphStorageKey } from '$lib/persistence';
@@ -13,10 +14,12 @@
 
 	let {
 		initialGraphId = DEFAULT_GRAPH_ID,
-		graphs = {}
+		graphs = {},
+		layoutSettings = {}
 	}: {
 		initialGraphId?: string;
 		graphs?: Record<string, MultigraphData>;
+		layoutSettings?: Partial<LayoutSettings>;
 	} = $props();
 
 	let now = 0;
@@ -100,6 +103,8 @@
 	data-graph-ids={graphIds}
 	data-node-count={persisted.graph.nodes.length}
 	data-primary-title={primaryTitle}
+	data-graph-generation={persisted.graphGeneration}
+	data-scale-animation-duration-ms={layoutSettings.scaleAnimationDurationMs ?? ''}
 >
 	<GraphToolbar
 		selectedGraphId={routedGraphId}
@@ -117,10 +122,12 @@
 		</button>
 	</div>
 
-	{#key persisted.loadedGraphId}
+	{#key `${persisted.loadedGraphId}:${persisted.graphGeneration}`}
 		<Multigraph
 			multigraphData={persisted.graph}
+			graphGeneration={persisted.graphGeneration}
 			{defaultPrimaryNodeId}
+			{layoutSettings}
 			onMultigraphChange={persisted.notifyGraphChanged}
 		/>
 	{/key}

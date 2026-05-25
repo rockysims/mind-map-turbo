@@ -1,6 +1,7 @@
 <script module lang="ts">
 	import { defineMeta } from '@storybook/addon-svelte-csf';
 	import { expect, userEvent, waitFor, within } from 'storybook/test';
+	import { DBL_CLICK_MS } from '$lib/constants';
 	import { makeGraph } from '$lib/components/ui/Multigraph/lib/testFixtures';
 	import type { MultigraphData } from '$lib/components/ui/types/multigraph';
 	import PersistedGraphHarness from './PersistedGraphHarness.svelte';
@@ -11,7 +12,8 @@
 		tags: [],
 		argTypes: {
 			initialGraphId: { control: 'text' },
-			graphs: { control: 'object' }
+			graphs: { control: 'object' },
+			layoutSettings: { control: 'object' }
 		},
 		parameters: {
 			viewport: {
@@ -45,6 +47,59 @@
 	): Promise<void> {
 		const harness = getHarness(canvasElement);
 		await waitFor(() => expect(harness.dataset[name]).toBe(value));
+	}
+
+	function getCircle(el: HTMLElement, nodeId: string): HTMLElement {
+		const circle = el.querySelector(`[data-node-id="${nodeId}"] .circle`);
+		if (!circle) throw new Error(`Circle not found for ${nodeId}`);
+		return circle as HTMLElement;
+	}
+
+	function getNodeWrapper(el: HTMLElement, nodeId: string): HTMLElement {
+		const wrapper = el.querySelector(`[data-node-id="${nodeId}"].node-wrapper`);
+		if (!wrapper) throw new Error(`Node wrapper not found for ${nodeId}`);
+		return wrapper as HTMLElement;
+	}
+
+	function getCenter(el: HTMLElement): { x: number; y: number } {
+		const rect = el.getBoundingClientRect();
+		return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+	}
+
+	function dispatchPointer(
+		target: HTMLElement,
+		type: 'pointerdown' | 'pointerup',
+		clientX: number,
+		clientY: number,
+		pointerId = 1
+	) {
+		target.dispatchEvent(
+			new PointerEvent(type, {
+				clientX,
+				clientY,
+				pointerId,
+				bubbles: true,
+				cancelable: true
+			})
+		);
+	}
+
+	async function dispatchDoubleClick(target: HTMLElement, x: number, y: number): Promise<void> {
+		dispatchPointer(target, 'pointerdown', x, y);
+		dispatchPointer(target, 'pointerup', x, y);
+		await new Promise((resolve) => setTimeout(resolve, DBL_CLICK_MS * 0.1));
+		dispatchPointer(target, 'pointerdown', x, y);
+		dispatchPointer(target, 'pointerup', x, y);
+	}
+
+	function waitForLayout(): Promise<void> {
+		return new Promise((resolve) => {
+			requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+		});
+	}
+
+	function sleep(ms: number): Promise<void> {
+		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
 </script>
 
@@ -149,6 +204,58 @@
 		await waitFor(() => expect(harness.dataset.nodeCount).toBe('1'));
 		await expect(harness.dataset.routedGraphId).toBe('default');
 		await expect(harness.dataset.graphIds).toBe('default');
+	}}
+/>
+
+<Story
+	name="PinningAnimatesWhenGraphEchoesFromPersistence"
+	args={{
+		initialGraphId: 'animated',
+		graphs: {
+			animated: makeGraph({
+				nodeCount: 3,
+				edges: [
+					[0, 1],
+					[1, 2]
+				],
+				posByNodeId: {
+					n0: { x: -280, y: 0 },
+					n1: { x: 0, y: 0 },
+					n2: { x: 280, y: 0 }
+				}
+			})
+		},
+		layoutSettings: {
+			scaleFalloff: 0.5,
+			minScale: 0.2,
+			scaleAnimationDurationMs: 120,
+			relaxIterations: 1
+		}
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForHarnessData(canvasElement, 'loadedGraphId', 'animated');
+		await waitForLayout();
+
+		const harness = getHarness(canvasElement);
+		expect(harness.dataset.graphGeneration).toBe('1');
+		expect(harness.dataset.scaleAnimationDurationMs).toBe('120');
+		expect(Number(getNodeWrapper(canvasElement, 'n0').dataset.scale)).toBe(0.2);
+
+		const generationBeforePin = harness.dataset.graphGeneration;
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+		await dispatchDoubleClick(circle, center.x, center.y);
+
+		const node = canvasElement.querySelector('[data-node-id="n0"] .node');
+		expect(node).toHaveAttribute('data-pinned', 'true');
+		expect(harness.dataset.graphGeneration).toBe(generationBeforePin);
+
+		await sleep(140);
+		await waitForLayout();
+
+		expect(Number(getNodeWrapper(canvasElement, 'n0').dataset.scale)).toBe(1);
+		expect(Number(getNodeWrapper(canvasElement, 'n1').dataset.scale)).toBe(0.5);
+		expect(Number(getNodeWrapper(canvasElement, 'n2').dataset.scale)).toBe(0.25);
 	}}
 />
 

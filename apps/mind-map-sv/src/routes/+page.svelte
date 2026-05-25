@@ -106,6 +106,7 @@
 		{#key persisted.loadedGraphId}
 			<Multigraph
 				multigraphData={persisted.graph}
+				graphGeneration={persisted.graphGeneration}
 				{defaultPrimaryNodeId}
 				onMultigraphChange={persisted.notifyGraphChanged}
 			/>

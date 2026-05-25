@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import Node from '$lib/components/ui/Node/Node.svelte';
 	import NodeActionMenu from './NodeActionMenu.svelte';
 	import NodeEditSheet from './NodeEditSheet.svelte';
@@ -29,17 +30,20 @@
 		pruneFinishedScaleAnimations,
 		type NodeScaleAnimation
 	} from './lib/scaleAnimation.js';
+	import { externalGraphSyncToken } from './lib/graphSync.js';
 	import { MIN_NODE_HIT_RADIUS } from '$lib/constants.js';
 
 	const CENTERED_POSITION: Point = { x: 0, y: 0 };
 
 	let {
 		multigraphData = { nodes: [], edges: [], posByNodeId: {} },
+		graphGeneration = 0,
 		defaultPrimaryNodeId = '',
 		layoutSettings = {},
 		onMultigraphChange
 	}: {
 		multigraphData: MultigraphData;
+		graphGeneration?: number;
 		defaultPrimaryNodeId?: string;
 		layoutSettings?: Partial<LayoutSettings>;
 		onMultigraphChange?: (data: MultigraphData) => void;
@@ -73,12 +77,16 @@
 	});
 
 	$effect(() => {
+		externalGraphSyncToken(graphGeneration);
+		const incoming = untrack(() => multigraphData);
+		const primary = untrack(() => defaultPrimaryNodeId);
+		const settings = untrack(() => layoutSettings);
 		stopRelaxationLoop();
 		scaleAnimations = {};
 		animationNowMs = 0;
 		settleFramesRemaining = 0;
-		graph = withSettledGraphPositions(multigraphData, { settings: layoutSettings });
-		primaryNodeId = defaultPrimaryNodeId;
+		graph = withSettledGraphPositions(incoming, { settings });
+		primaryNodeId = primary;
 	});
 
 	$effect(() => {

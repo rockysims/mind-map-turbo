@@ -16,6 +16,7 @@ export type ControllerView = {
 	graph: MultigraphData;
 	graphSummaries: GraphSummary[];
 	loadedGraphId: string;
+	graphGeneration: number;
 	status: ControllerStatus;
 };
 
@@ -40,6 +41,7 @@ export class GraphPersistenceController {
 	private readonly listeners = new Set<ControllerListener>();
 	private readonly scheduler: GraphSaveScheduler;
 	private view: ControllerView;
+	private graphGeneration = 0;
 
 	constructor(private readonly deps: GraphPersistenceControllerDeps) {
 		this.scheduler = deps.createScheduler((status) => this.handleSaveStatus(status));
@@ -47,6 +49,7 @@ export class GraphPersistenceController {
 			graph: deps.createDefaultGraph(),
 			graphSummaries: [],
 			loadedGraphId: '',
+			graphGeneration: 0,
 			status: { state: 'loading', graphId: DEFAULT_GRAPH_ID }
 		};
 	}
@@ -77,9 +80,11 @@ export class GraphPersistenceController {
 		this.update({ status: { state: 'loading', graphId } });
 		const savedGraph = await this.deps.persistence.load(graphId);
 		const nextGraph = savedGraph ?? this.deps.createDefaultGraph();
+		this.graphGeneration += 1;
 		this.update({
 			graph: nextGraph,
 			loadedGraphId: graphId,
+			graphGeneration: this.graphGeneration,
 			graphSummaries: await this.deps.persistence.list()
 		});
 

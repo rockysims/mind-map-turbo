@@ -7,6 +7,7 @@ import {
 
 export type PersistedGraph = {
 	readonly graph: MultigraphData;
+	readonly graphGeneration: number;
 	readonly graphSummaries: ReturnType<GraphPersistenceController['getView']>['graphSummaries'];
 	readonly loadedGraphId: string;
 	readonly notice: string;
@@ -30,6 +31,9 @@ export function usePersistedGraph(deps: GraphPersistenceControllerDeps): Persist
 	return {
 		get graph() {
 			return view.graph;
+		},
+		get graphGeneration() {
+			return view.graphGeneration;
 		},
 		get graphSummaries() {
 			return view.graphSummaries;

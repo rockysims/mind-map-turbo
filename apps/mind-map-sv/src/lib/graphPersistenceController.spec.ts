@@ -130,10 +130,29 @@ describe('GraphPersistenceController', () => {
 		const graph = makeGraph({ nodeCount: 2 });
 
 		await controller.load('active');
+		const generationAfterLoad = controller.getView().graphGeneration;
 		controller.notifyGraphChanged(graph);
 
 		expect(controller.getView().graph).toEqual(graph);
+		expect(controller.getView().graphGeneration).toBe(generationAfterLoad);
 		expect(scheduler.schedule).toHaveBeenLastCalledWith('active', graph);
+	});
+
+	it('bumps graphGeneration only when loading a graph', async () => {
+		const { controller, persistence } = setup();
+		const first = makeGraph({ nodeCount: 1 });
+		const second = makeGraph({ nodeCount: 2 });
+
+		await persistence.save('first', first);
+		await persistence.save('second', second);
+		await controller.load('first');
+		const firstGeneration = controller.getView().graphGeneration;
+		controller.notifyGraphChanged(first);
+		expect(controller.getView().graphGeneration).toBe(firstGeneration);
+
+		await controller.load('second');
+		expect(controller.getView().graphGeneration).toBe(firstGeneration + 1);
+		expect(controller.getView().graph).toEqual(second);
 	});
 
 	it('flushes pending saves before navigating to another graph', async () => {

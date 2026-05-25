@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { togglePinned } from './graph';
+import { deriveGraphLayout } from './graphLayout';
+import { makeGraph } from './testFixtures';
 import {
 	animatedScalesAt,
 	createScaleAnimations,
@@ -7,7 +10,35 @@ import {
 	pruneFinishedScaleAnimations
 } from './scaleAnimation';
 
+const pinningLayoutSettings = {
+	scaleFalloff: 0.5,
+	minScale: 0.2,
+	relaxIterations: 0
+} as const;
+
 describe('scaleAnimation', () => {
+	it('creates animations when a node is pinned', () => {
+		const graph = makeGraph({
+			nodeCount: 3,
+			edges: [
+				[0, 1],
+				[1, 2]
+			]
+		});
+		const currentLayout = deriveGraphLayout(graph, { settings: pinningLayoutSettings });
+		const pinnedLayout = deriveGraphLayout(togglePinned(graph, 'n0'), {
+			settings: pinningLayoutSettings
+		});
+
+		expect(
+			createScaleAnimations(currentLayout.scaleByNodeId, pinnedLayout.scaleByNodeId, 100, 120)
+		).toMatchObject({
+			n0: { fromScale: 0.2, toScale: 1, durationMs: 120 },
+			n1: { fromScale: 0.2, toScale: 0.5, durationMs: 120 },
+			n2: { fromScale: 0.2, toScale: 0.25, durationMs: 120 }
+		});
+	});
+
 	it('creates animations only for scales that change', () => {
 		expect(createScaleAnimations({ n0: 1, n1: 0.5 }, { n0: 1, n1: 0.25 }, 100, 180)).toEqual({
 			n1: {
