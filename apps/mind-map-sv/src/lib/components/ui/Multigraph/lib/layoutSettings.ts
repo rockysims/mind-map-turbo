@@ -14,6 +14,7 @@ export interface LayoutSettings {
 	hopRepulsionMaxExtraGapRadiusFactor: number;
 	postDragSettleEpsilonPx: number;
 	postDragSettleMaxFrames: number;
+	postScaleChangeSettleMaxFrames: number;
 	scaleAnimationDurationMs: number;
 }
 

@@ -244,6 +244,7 @@
 			scaleFalloff: 0.5,
 			minScale: 0.2,
 			scaleAnimationDurationMs: 120,
+			postScaleChangeSettleMaxFrames: 8,
 			relaxIterations: 1
 		}
 	}}

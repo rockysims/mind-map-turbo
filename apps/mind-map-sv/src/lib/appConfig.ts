@@ -30,6 +30,7 @@ export const APP_CONFIG = {
 			hopRepulsionMaxExtraGapRadiusFactor: 2,
 			postDragSettleEpsilonPx: 0.25,
 			postDragSettleMaxFrames: 90,
+			postScaleChangeSettleMaxFrames: 24,
 			scaleAnimationDurationMs: 500
 		}
 	}

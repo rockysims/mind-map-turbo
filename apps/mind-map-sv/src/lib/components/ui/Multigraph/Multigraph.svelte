@@ -31,6 +31,10 @@
 		pruneFinishedScaleAnimations,
 		type NodeScaleAnimation
 	} from './lib/scaleAnimation.js';
+	import {
+		settleStateAfterScaleAnimationsEnd,
+		settleStateForScaleChange
+	} from './lib/scaleChangeSettle.js';
 	import { externalGraphSyncToken } from './lib/graphSync.js';
 	import { MIN_NODE_HIT_RADIUS } from '$lib/constants.js';
 
@@ -60,6 +64,7 @@
 	let scaleAnimations = $state<Record<string, NodeScaleAnimation>>({});
 	let animationNowMs = $state(0);
 	let settleFramesRemaining = $state(0);
+	let pendingPostScaleSettle = $state(false);
 	let lastSyncedGeneration = $state(-1);
 
 	const resolvedLayoutSettings = $derived(withDefaultLayoutSettings(layoutSettings));
@@ -88,6 +93,7 @@
 		scaleAnimations = {};
 		animationNowMs = 0;
 		settleFramesRemaining = 0;
+		pendingPostScaleSettle = false;
 		graph = withSettledGraphPositions(incoming, { settings });
 		primaryNodeId = primary;
 	});
@@ -278,7 +284,12 @@
 
 		scaleAnimations = nextAnimations;
 		animationNowMs = nowMs;
-		settleFramesRemaining = resolvedLayoutSettings.postDragSettleMaxFrames;
+		const settleState = settleStateForScaleChange(
+			Object.keys(nextAnimations).length > 0,
+			resolvedLayoutSettings.postScaleChangeSettleMaxFrames
+		);
+		pendingPostScaleSettle = settleState.pendingPostScaleSettle;
+		settleFramesRemaining = settleState.settleFramesRemaining;
 
 		if (Object.keys(nextAnimations).length > 0 || settleFramesRemaining > 0) {
 			startRelaxationLoop();
@@ -335,6 +346,15 @@
 		}
 
 		scaleAnimations = pruneFinishedScaleAnimations(scaleAnimations, nowMs);
+
+		const postScaleSettle = settleStateAfterScaleAnimationsEnd(
+			pendingPostScaleSettle,
+			resolvedLayoutSettings.postScaleChangeSettleMaxFrames
+		);
+		if (postScaleSettle !== null) {
+			pendingPostScaleSettle = postScaleSettle.pendingPostScaleSettle;
+			settleFramesRemaining = postScaleSettle.settleFramesRemaining;
+		}
 
 		if (
 			activeDragNodeId !== null ||
