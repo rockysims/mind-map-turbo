@@ -11,7 +11,7 @@ import {
 describe('graphMath', () => {
 	describe('clampScale', () => {
 		it('clamps to min when below', () => {
-			expect(clampScale(0.1)).toBe(DEFAULT_MIN_SCALE);
+			expect(clampScale(0.01)).toBe(DEFAULT_MIN_SCALE);
 			expect(clampScale(0, 0.25, 4)).toBe(0.25);
 		});
 		it('clamps to max when above', () => {

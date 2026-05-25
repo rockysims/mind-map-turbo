@@ -314,6 +314,21 @@ describe('physics', () => {
 
 			expect(positions).toEqual({ n0: { x: 0, y: 0 }, n1: { x: 100, y: 0 } });
 		});
+
+		it('ignores excluded ghost nodes so they do not block active pairs', () => {
+			const positions = {
+				n0: { x: 0, y: 0 },
+				n1: { x: 100, y: 0 },
+				n2: { x: 50, y: 0 }
+			};
+			const radii = { n0: 100, n1: 100, n2: 100 };
+
+			const next = relaxOverlapsStep(positions, radii, new Set(), new Set(['n0', 'n1']));
+
+			expect(next.n2).toEqual({ x: 50, y: 0 });
+			expect(next.n0).toEqual({ x: -50, y: 0 });
+			expect(next.n1).toEqual({ x: 150, y: 0 });
+		});
 	});
 
 	describe('relaxOverlaps', () => {

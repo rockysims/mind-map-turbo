@@ -1,6 +1,6 @@
 # Milestone 07: Layered pin relayout
 
-**Status:** not started
+**Status:** complete
 **Depends on:** milestones 01 + 02 (pinning, hop-distance layout, physics loop).
 **Plan:** [2026-05-25 layered-pin-relayout.md](../plans/2026-05-25%20layered-pin-relayout.md)
 

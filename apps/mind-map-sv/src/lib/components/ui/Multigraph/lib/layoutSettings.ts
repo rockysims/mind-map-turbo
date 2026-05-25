@@ -16,6 +16,8 @@ export interface LayoutSettings {
 	postDragSettleMaxFrames: number;
 	postScaleChangeSettleMaxFrames: number;
 	scaleAnimationDurationMs: number;
+	layeredRelayoutDimOpacity: number;
+	layeredRelayoutOpacityAnimationDurationMs: number;
 }
 
 export const DEFAULT_LAYOUT_SETTINGS: LayoutSettings = {

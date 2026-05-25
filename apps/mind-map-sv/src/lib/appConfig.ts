@@ -35,7 +35,9 @@ export const APP_CONFIG = {
 			postDragSettleEpsilonPx: 0.25,
 			postDragSettleMaxFrames: 90,
 			postScaleChangeSettleMaxFrames: 24,
-			scaleAnimationDurationMs: 500
+			scaleAnimationDurationMs: 500,
+			layeredRelayoutDimOpacity: 0.5,
+			layeredRelayoutOpacityAnimationDurationMs: 500
 		}
 	}
 } as const;

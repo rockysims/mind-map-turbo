@@ -3,7 +3,7 @@
 **Created:** 2026-05-25
 **Author:** Cursor agent
 **Milestone:** [milestones/07-layered-pin-relayout.md](../milestones/07-layered-pin-relayout.md)
-**Status:** draft
+**Status:** done
 **Total estimated effort:** L
 
 ## Summary
@@ -52,7 +52,7 @@ pure layout/physics modules first, then wire Multigraph and stories.
 
 ## Tasks
 
-### T01 — Fibonacci hop batches and relayout state machine
+### T01 — Fibonacci hop batches and relayout state machine ✓
 
 |                |                                                                                                                                                                |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -86,7 +86,7 @@ Implement pure helpers:
   final batch when needed.
 - Bulk-unpin mode skips hop batches and marks all nodes participating.
 
-### T02 — Physics participation filter
+### T02 — Physics participation filter ✓
 
 |                |                                                                                                                                   |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------- |
@@ -112,7 +112,7 @@ to `LayoutSettings` and `APP_CONFIG`.
 - Existing physics and graphLayout specs pass (pin participating fields in
   partial settings literals where needed).
 
-### T03 — Wire Multigraph pin/unpin relayout loop
+### T03 — Wire Multigraph pin/unpin relayout loop ✓
 
 |                |                                                             |
 | -------------- | ----------------------------------------------------------- |
@@ -148,7 +148,7 @@ Extend `withScaleAnimation` / `relaxationStep`:
 - Pinned nodes never animate below opacity 1 during layered relayout.
 - `data-layout-opacity` (or equivalent) exposes the animated value for stories.
 
-### T04 — Story coverage and harness assertions
+### T04 — Story coverage and harness assertions ✓
 
 |                |                                                               |
 | -------------- | ------------------------------------------------------------- |
