@@ -59,3 +59,61 @@ function defaultNodes(count: number): NodeData[] {
 		description: `Description for node ${i}`
 	}));
 }
+
+export interface MakeRandomEdgesInput {
+	nodeCount: number;
+	edgeCount: number;
+	/** Seed for deterministic pseudo-random endpoints. Default 42. */
+	seed?: number;
+}
+
+/** Mulberry32 — small, fast, deterministic PRNG for test fixtures. */
+function createSeededRandom(seed: number): () => number {
+	let state = seed >>> 0;
+	return () => {
+		state = (state + 0x6d2b79f5) | 0;
+		let t = Math.imul(state ^ (state >>> 15), 1 | state);
+		t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+		return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+	};
+}
+
+/**
+ * Build deterministic random edge index pairs for stress-test graphs.
+ * Self-loops and duplicate (source, target) pairs are skipped.
+ */
+export function makeRandomEdges({
+	nodeCount,
+	edgeCount,
+	seed = 42
+}: MakeRandomEdgesInput): Array<[number, number]> {
+	if (edgeCount === 0) return [];
+	if (nodeCount < 2) {
+		throw new Error(`Cannot generate ${edgeCount} edges with nodeCount ${nodeCount}`);
+	}
+
+	const maxEdges = nodeCount * (nodeCount - 1);
+	if (edgeCount > maxEdges) {
+		throw new Error(
+			`Cannot generate ${edgeCount} unique edges among ${nodeCount} nodes (max ${maxEdges})`
+		);
+	}
+
+	const next = createSeededRandom(seed);
+	const seen = new Set<string>();
+	const edges: Array<[number, number]> = [];
+
+	while (edges.length < edgeCount) {
+		const source = Math.floor(next() * nodeCount);
+		const target = Math.floor(next() * nodeCount);
+		if (source === target) continue;
+
+		const key = `${source},${target}`;
+		if (seen.has(key)) continue;
+
+		seen.add(key);
+		edges.push([source, target]);
+	}
+
+	return edges;
+}

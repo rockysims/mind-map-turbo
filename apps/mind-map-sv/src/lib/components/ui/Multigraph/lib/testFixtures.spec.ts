@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { makeGraph } from './testFixtures';
+import { makeGraph, makeRandomEdges } from './testFixtures';
 
 describe('makeGraph', () => {
 	it('produces an empty graph by default', () => {
@@ -55,5 +55,31 @@ describe('makeGraph', () => {
 	it('marks generated nodes pinned by id', () => {
 		const g = makeGraph({ nodeCount: 2, pinned: ['n1'] });
 		expect(g.nodes.map((node) => node.pinned)).toEqual([undefined, true]);
+	});
+});
+
+describe('makeRandomEdges', () => {
+	it('returns the same edges for the same seed', () => {
+		const first = makeRandomEdges({ nodeCount: 100, edgeCount: 300, seed: 42 });
+		const second = makeRandomEdges({ nodeCount: 100, edgeCount: 300, seed: 42 });
+		expect(second).toEqual(first);
+	});
+
+	it('returns different edges for different seeds', () => {
+		const first = makeRandomEdges({ nodeCount: 100, edgeCount: 300, seed: 42 });
+		const second = makeRandomEdges({ nodeCount: 100, edgeCount: 300, seed: 99 });
+		expect(second).not.toEqual(first);
+	});
+
+	it('generates unique non-self edges', () => {
+		const edges = makeRandomEdges({ nodeCount: 100, edgeCount: 300, seed: 42 });
+		expect(edges).toHaveLength(300);
+		const seen = new Set<string>();
+		for (const [source, target] of edges) {
+			expect(source).not.toBe(target);
+			const key = `${source},${target}`;
+			expect(seen.has(key)).toBe(false);
+			seen.add(key);
+		}
 	});
 });

@@ -4,7 +4,7 @@
 	import { expect, fn, waitFor, within } from 'storybook/test';
 	import { APP_CONFIG } from '$lib/appConfig';
 	import { DBL_CLICK_MS, LONG_PRESS_MS, MIN_NODE_HIT_RADIUS, NODE_RADIUS } from '$lib/constants';
-	import { makeGraph } from './lib/testFixtures';
+	import { makeGraph, makeRandomEdges } from './lib/testFixtures';
 	import type { MultigraphData, Point } from '../types/multigraph';
 
 	const { Story } = defineMeta({
@@ -176,6 +176,7 @@
 	}
 
 	const HUNDRED_NODE_POSITIONS = circlePositions(100, 480);
+	const HUNDRED_NODE_MESSY_EDGES = makeRandomEdges({ nodeCount: 100, edgeCount: 300, seed: 42 });
 </script>
 
 <Story
@@ -802,6 +803,30 @@
 		expect(distanceBetween(pinnedCenter, neighborCenter)).toBeGreaterThan(
 			rawNeighborDistance + NODE_RADIUS
 		);
+		expect(maxCircleOverlap(stage)).toBeLessThan(1);
+	}}
+/>
+
+<Story
+	name="HundredNodeMessyGraphLaysOutWithoutHeavyOverlap"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 100,
+			pinned: [0],
+			edges: HUNDRED_NODE_MESSY_EDGES,
+			posByNodeId: HUNDRED_NODE_POSITIONS
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { scaleFalloff: 0.7, minScale: 0.1, relaxIterations: 4 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		await waitForFrames(8);
+
+		const stage = getStage(canvasElement);
+		expect(canvasElement.querySelectorAll('.node-wrapper')).toHaveLength(100);
+		expect(canvasElement.querySelectorAll('.edge')).toHaveLength(300);
+		expect(Number(getNodeWrapper(canvasElement, 'n0').dataset.scale)).toBe(1);
 		expect(maxCircleOverlap(stage)).toBeLessThan(1);
 	}}
 />
