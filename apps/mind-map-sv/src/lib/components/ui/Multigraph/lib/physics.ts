@@ -114,6 +114,25 @@ export function relaxHopRepulsionStep(
 	return moved ? nextPositions : positions;
 }
 
+export function neighborDegreeByNodeId(edges: EdgeEndpointIds[]): Record<string, number> {
+	const neighborsByNodeId = new Map<string, Set<string>>();
+
+	for (const { sourceNodeId, targetNodeId } of edges) {
+		if (!neighborsByNodeId.has(sourceNodeId)) {
+			neighborsByNodeId.set(sourceNodeId, new Set());
+		}
+		if (!neighborsByNodeId.has(targetNodeId)) {
+			neighborsByNodeId.set(targetNodeId, new Set());
+		}
+		neighborsByNodeId.get(sourceNodeId)?.add(targetNodeId);
+		neighborsByNodeId.get(targetNodeId)?.add(sourceNodeId);
+	}
+
+	return Object.fromEntries(
+		[...neighborsByNodeId.entries()].map(([nodeId, neighbors]) => [nodeId, neighbors.size])
+	);
+}
+
 export function relaxEdgeDistancesStep(
 	positions: Record<string, Point>,
 	radii: Record<string, number>,
@@ -126,14 +145,15 @@ export function relaxEdgeDistancesStep(
 	const springStrength = clamp(settings.edgeSpringStrength, 0, 1);
 	if (springStrength === 0) return positions;
 
-	const nextPositions = clonePositions(positions);
+	const neighborDegree = neighborDegreeByNodeId(edges);
+	const displacementByNodeId: Record<string, Point> = {};
 	let moved = false;
 
 	for (const edge of edges) {
 		const sourceId = edge.sourceNodeId;
 		const targetId = edge.targetNodeId;
-		const source = nextPositions[sourceId];
-		const target = nextPositions[targetId];
+		const source = positions[sourceId];
+		const target = positions[targetId];
 		const sourceRadius = radii[sourceId];
 		const targetRadius = radii[targetId];
 		if (!source || !target || sourceRadius === undefined || targetRadius === undefined) continue;
@@ -164,18 +184,35 @@ export function relaxEdgeDistancesStep(
 		const sourceShare = sourceAnchored ? 0 : targetAnchored ? 1 : 0.5;
 		const targetShare = targetAnchored ? 0 : sourceAnchored ? 1 : 0.5;
 
-		nextPositions[sourceId] = {
-			x: source.x + direction.x * adjustment * sourceShare,
-			y: source.y + direction.y * adjustment * sourceShare
-		};
-		nextPositions[targetId] = {
-			x: target.x - direction.x * adjustment * targetShare,
-			y: target.y - direction.y * adjustment * targetShare
-		};
+		addDisplacement(displacementByNodeId, sourceId, {
+			x: direction.x * adjustment * sourceShare,
+			y: direction.y * adjustment * sourceShare
+		});
+		addDisplacement(displacementByNodeId, targetId, {
+			x: -direction.x * adjustment * targetShare,
+			y: -direction.y * adjustment * targetShare
+		});
 		moved = true;
 	}
 
-	return moved ? nextPositions : positions;
+	if (!moved) return positions;
+
+	const nextPositions = clonePositions(positions);
+
+	for (const [nodeId, displacement] of Object.entries(displacementByNodeId)) {
+		const degree = neighborDegree[nodeId] ?? 0;
+		if (degree === 0 || anchoredIds.has(nodeId)) continue;
+
+		const position = positions[nodeId];
+		if (!position) continue;
+
+		nextPositions[nodeId] = {
+			x: position.x + displacement.x / degree,
+			y: position.y + displacement.y / degree
+		};
+	}
+
+	return nextPositions;
 }
 
 export function relaxOverlaps(
@@ -242,6 +279,18 @@ export function relaxOverlapsStep(
 	}
 
 	return moved ? nextPositions : positions;
+}
+
+function addDisplacement(
+	displacementByNodeId: Record<string, Point>,
+	nodeId: string,
+	delta: Point
+): void {
+	const current = displacementByNodeId[nodeId] ?? { x: 0, y: 0 };
+	displacementByNodeId[nodeId] = {
+		x: current.x + delta.x,
+		y: current.y + delta.y
+	};
 }
 
 function clonePositions(positions: Record<string, Point>): Record<string, Point> {

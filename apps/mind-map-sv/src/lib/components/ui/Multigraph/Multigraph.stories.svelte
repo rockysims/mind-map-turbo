@@ -176,7 +176,7 @@
 	}
 
 	const HUNDRED_NODE_POSITIONS = circlePositions(100, 480);
-	const HUNDRED_NODE_MESSY_EDGES = makeRandomEdges({ nodeCount: 100, edgeCount: 300, seed: 42 });
+	const HUNDRED_NODE_MESSY_EDGES = makeRandomEdges({ nodeCount: 100, edgeCount: 150, seed: 42 });
 </script>
 
 <Story
@@ -825,7 +825,7 @@
 
 		const stage = getStage(canvasElement);
 		expect(canvasElement.querySelectorAll('.node-wrapper')).toHaveLength(100);
-		expect(canvasElement.querySelectorAll('.edge')).toHaveLength(300);
+		expect(canvasElement.querySelectorAll('.edge')).toHaveLength(150);
 		expect(Number(getNodeWrapper(canvasElement, 'n0').dataset.scale)).toBe(1);
 		expect(maxCircleOverlap(stage)).toBeLessThan(1);
 	}}

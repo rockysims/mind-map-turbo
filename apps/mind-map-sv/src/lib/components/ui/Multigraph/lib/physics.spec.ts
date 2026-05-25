@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	neighborDegreeByNodeId,
 	relaxEdgeDistancesStep,
 	relaxGraphPhysics,
 	relaxHopRepulsionStep,
@@ -50,6 +51,19 @@ function gapAmount(
 }
 
 describe('physics', () => {
+	describe('neighborDegreeByNodeId', () => {
+		it('counts unique neighbors per node', () => {
+			expect(
+				neighborDegreeByNodeId([
+					{ sourceNodeId: 'hub', targetNodeId: 'a' },
+					{ sourceNodeId: 'hub', targetNodeId: 'b' },
+					{ sourceNodeId: 'hub', targetNodeId: 'c' },
+					{ sourceNodeId: 'a', targetNodeId: 'b' }
+				])
+			).toEqual({ hub: 3, a: 2, b: 2, c: 1 });
+		});
+	});
+
 	describe('relaxEdgeDistancesStep', () => {
 		it('pulls connected nodes together when their visible edge gap exceeds the max', () => {
 			const positions = { n0: { x: 0, y: 0 }, n1: { x: 300, y: 0 } };
@@ -146,6 +160,48 @@ describe('physics', () => {
 					EDGE_DISTANCE_SETTINGS
 				)
 			).toBe(positions);
+		});
+
+		it('moves a high-degree hub less than its leaves for the same edge stretch', () => {
+			const radii = { hub: 20, leafA: 20, leafB: 20, leafC: 20 };
+			const positions = {
+				hub: { x: 0, y: 0 },
+				leafA: { x: 300, y: 0 },
+				leafB: { x: 0, y: 300 },
+				leafC: { x: -300, y: 0 }
+			};
+			const edges = [
+				{ sourceNodeId: 'hub', targetNodeId: 'leafA' },
+				{ sourceNodeId: 'hub', targetNodeId: 'leafB' },
+				{ sourceNodeId: 'hub', targetNodeId: 'leafC' }
+			];
+
+			const next = relaxEdgeDistancesStep(positions, radii, edges, EDGE_DISTANCE_SETTINGS);
+
+			expect(Math.hypot(next.hub.x, next.hub.y)).toBeLessThan(
+				Math.hypot(next.leafA.x - positions.leafA.x, next.leafA.y - positions.leafA.y)
+			);
+			expect(next.hub).toEqual({ x: 0, y: 5.833333333333333 });
+			expect(next.leafA).toEqual({ x: 282.5, y: 0 });
+		});
+
+		it('computes all edge forces from the same position snapshot', () => {
+			const radii = { hub: 20, leafA: 20, leafB: 20 };
+			const positions = {
+				hub: { x: 0, y: 0 },
+				leafA: { x: 300, y: 0 },
+				leafB: { x: 0, y: 300 }
+			};
+			const edges = [
+				{ sourceNodeId: 'hub', targetNodeId: 'leafA' },
+				{ sourceNodeId: 'hub', targetNodeId: 'leafB' }
+			];
+
+			const next = relaxEdgeDistancesStep(positions, radii, edges, EDGE_DISTANCE_SETTINGS);
+
+			expect(next.hub).toEqual({ x: 8.75, y: 8.75 });
+			expect(next.leafA).toEqual({ x: 282.5, y: 0 });
+			expect(next.leafB).toEqual({ x: 0, y: 282.5 });
 		});
 	});
 
