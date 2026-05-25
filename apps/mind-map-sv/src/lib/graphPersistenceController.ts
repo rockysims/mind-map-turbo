@@ -100,10 +100,12 @@ export class GraphPersistenceController {
 		});
 	}
 
-	notifyGraphChanged(data: MultigraphData): void {
+	notifyGraphChanged(data: MultigraphData, options: { syncView?: boolean } = {}): void {
 		const graphId = this.view.loadedGraphId || DEFAULT_GRAPH_ID;
-		this.update({ graph: data });
 		this.scheduler.schedule(graphId, data);
+		if (options.syncView) {
+			this.update({ graph: data });
+		}
 	}
 
 	async selectGraph(graphId: string): Promise<void> {

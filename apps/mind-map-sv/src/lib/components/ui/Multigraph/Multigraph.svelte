@@ -59,6 +59,7 @@
 	let scaleAnimations = $state<Record<string, NodeScaleAnimation>>({});
 	let animationNowMs = $state(0);
 	let settleFramesRemaining = $state(0);
+	let lastSyncedGeneration = $state(-1);
 
 	const resolvedLayoutSettings = $derived(withDefaultLayoutSettings(layoutSettings));
 	const animatedScaleByNodeId = $derived(animatedScalesAt(scaleAnimations, animationNowMs));
@@ -77,7 +78,10 @@
 	});
 
 	$effect(() => {
-		externalGraphSyncToken(graphGeneration);
+		const generation = externalGraphSyncToken(graphGeneration);
+		if (generation === lastSyncedGeneration) return;
+
+		lastSyncedGeneration = generation;
 		const incoming = untrack(() => multigraphData);
 		const primary = untrack(() => defaultPrimaryNodeId);
 		const settings = untrack(() => layoutSettings);
@@ -242,6 +246,10 @@
 	}
 
 	function withScaleAnimation(nextGraph: MultigraphData): MultigraphData {
+		const fromLayout = deriveGraphLayout(graph, {
+			settings: layoutSettings,
+			relaxIterations: 0
+		});
 		const targetLayout = deriveGraphLayout(nextGraph, {
 			settings: layoutSettings,
 			relaxIterations: 0
@@ -250,7 +258,7 @@
 		const nextAnimations =
 			resolvedLayoutSettings.scaleAnimationDurationMs > 0
 				? createScaleAnimations(
-						graphLayout.scaleByNodeId,
+						fromLayout.scaleByNodeId,
 						targetLayout.scaleByNodeId,
 						nowMs,
 						resolvedLayoutSettings.scaleAnimationDurationMs

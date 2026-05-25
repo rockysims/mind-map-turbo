@@ -125,17 +125,28 @@ describe('GraphPersistenceController', () => {
 		});
 	});
 
-	it('schedules saves when the graph changes', async () => {
+	it('schedules saves when the graph changes without syncing the loaded view', async () => {
 		const { controller, scheduler } = setup();
-		const graph = makeGraph({ nodeCount: 2 });
+		const loaded = makeGraph({ nodeCount: 1 });
+		const edited = makeGraph({ nodeCount: 2 });
 
 		await controller.load('active');
 		const generationAfterLoad = controller.getView().graphGeneration;
-		controller.notifyGraphChanged(graph);
+		controller.notifyGraphChanged(edited);
+
+		expect(controller.getView().graph).toEqual(loaded);
+		expect(controller.getView().graphGeneration).toBe(generationAfterLoad);
+		expect(scheduler.schedule).toHaveBeenLastCalledWith('active', edited);
+	});
+
+	it('can optionally sync the loaded view for display-only callers', async () => {
+		const { controller } = setup();
+		const graph = makeGraph({ nodeCount: 2 });
+
+		await controller.load('active');
+		controller.notifyGraphChanged(graph, { syncView: true });
 
 		expect(controller.getView().graph).toEqual(graph);
-		expect(controller.getView().graphGeneration).toBe(generationAfterLoad);
-		expect(scheduler.schedule).toHaveBeenLastCalledWith('active', graph);
 	});
 
 	it('bumps graphGeneration only when loading a graph', async () => {

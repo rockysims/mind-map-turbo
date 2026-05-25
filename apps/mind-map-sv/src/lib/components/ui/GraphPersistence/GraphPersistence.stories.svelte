@@ -101,6 +101,21 @@
 	function sleep(ms: number): Promise<void> {
 		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
+
+	function waitForFrames(count: number): Promise<void> {
+		return new Promise((resolve) => {
+			let remaining = count;
+			const wait = () => {
+				remaining -= 1;
+				if (remaining <= 0) {
+					resolve();
+					return;
+				}
+				requestAnimationFrame(wait);
+			};
+			requestAnimationFrame(wait);
+		});
+	}
 </script>
 
 <Story
@@ -245,10 +260,22 @@
 		const circle = getCircle(canvasElement, 'n0');
 		const center = getCenter(circle);
 		await dispatchDoubleClick(circle, center.x, center.y);
+		await waitForFrames(2);
 
 		const node = canvasElement.querySelector('[data-node-id="n0"] .node');
 		expect(node).toHaveAttribute('data-pinned', 'true');
 		expect(harness.dataset.graphGeneration).toBe(generationBeforePin);
+		await waitFor(() => {
+			expect(canvasElement.querySelector('.graph')).toHaveAttribute(
+				'data-scale-animation-active',
+				'true'
+			);
+			const animatedPinnedScale = Number(getNodeWrapper(canvasElement, 'n0').dataset.scale);
+			const animatedNeighborScale = Number(getNodeWrapper(canvasElement, 'n1').dataset.scale);
+			expect(animatedPinnedScale).toBeGreaterThan(0.2);
+			expect(animatedPinnedScale).toBeLessThan(1);
+			expect(animatedNeighborScale).toBeLessThan(0.5);
+		});
 
 		await sleep(140);
 		await waitForLayout();

@@ -12,7 +12,7 @@ export type PersistedGraph = {
 	readonly loadedGraphId: string;
 	readonly notice: string;
 	load: GraphPersistenceController['load'];
-	notifyGraphChanged: GraphPersistenceController['notifyGraphChanged'];
+	notifyGraphChanged: (data: MultigraphData, options?: { syncView?: boolean }) => void;
 	selectGraph: GraphPersistenceController['selectGraph'];
 	createGraph: GraphPersistenceController['createGraph'];
 	deleteGraph: GraphPersistenceController['deleteGraph'];

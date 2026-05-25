@@ -78,7 +78,9 @@
 	}
 
 	function changeGraph(): void {
-		persisted.notifyGraphChanged(renamePrimaryNode(persisted.graph, 'Changed Node'));
+		persisted.notifyGraphChanged(renamePrimaryNode(persisted.graph, 'Changed Node'), {
+			syncView: true
+		});
 	}
 
 	async function simulateExternalReload(): Promise<void> {
