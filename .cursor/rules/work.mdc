@@ -23,10 +23,10 @@ sentence — only the literal `/work` directive.
 
 ## Plan the run with a TodoWrite list
 
-Before Step 1, create a TodoWrite list with the seven steps (worktree,
-install, work, validate, dry-run merge, report, handle reply). Mark each
-as in-progress when you start it and completed when you finish, so the
-user can follow progress in the IDE without scanning prose.
+Before Step 1, create a TodoWrite list with the eight steps (worktree,
+install, work, validate, dry-run merge, release branch, report, handle
+reply). Mark each as in-progress when you start it and completed when you
+finish, so the user can follow progress in the IDE without scanning prose.
 
 ## Step 1 — derive `<type>` and `<slug>`
 
@@ -135,6 +135,24 @@ Interpret:
 - `MERGE_STATUS=0` + real merge happened → **clean**.
 - otherwise → **conflicts in <files>**; do not auto-resolve, just report.
 
+## Step 5b — release branch for cross-worktree checkout
+
+After Step 5, **inside the worktree**, detach HEAD so the work branch is
+no longer checked out there. Git allows each branch in only one worktree;
+without this step the user cannot `git checkout <type>/work--<slug>` in
+the source worktree while the parallel worktree still exists.
+
+```bash
+git checkout --detach
+```
+
+The branch ref still exists and Step 7 merges it by name. The worktree
+remains at the same commit — only the checked-out ref changes. Do not
+create a duplicate branch (e.g. `B_`); detached HEAD avoids extra cleanup.
+
+Skip this step only if validation failed — there is nothing useful to
+check out elsewhere yet.
+
 ## Step 6 — final report and merge offer
 
 End the task with a report in this shape:
@@ -145,6 +163,7 @@ End the task with a report in this shape:
 - **Task:** <one-sentence restatement>
 - **Worktree:** ../mind-map-turbo-<slug>/
 - **Branch:** <type>/work--<slug>  ←  <BASE>
+- **Branch checkout:** `<type>/work--<slug>` is free to check out in other worktrees
 - **Commits:** <subject 1>; <subject 2>
 - **Validation:** lint pass; check pass; test:unit pass (N tests)
 - **Merges cleanly into <BASE>:** yes | no (conflicts in: <files>)
@@ -189,7 +208,12 @@ the user can decide whether to force-delete, investigate, or leave the
 branch.
 
 If the user declines the merge (`no`, `leave it`, `wait`), stop. Don't
-clean up. The worktree and branch stay live for them to revisit.
+clean up. The worktree stays live (on detached HEAD after Step 5b) and the
+branch ref remains for checkout elsewhere. If they later ask for more edits
+**in the worktree**, the agent runs `git switch "<type>/work--<slug>"` there
+first. If that fails because the branch is checked out in another worktree,
+report which worktree holds it and ask the user to switch that checkout
+before continuing.
 
 ## Edge cases
 
