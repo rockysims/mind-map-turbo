@@ -16,6 +16,10 @@ export const APP_CONFIG = {
 	multigraph: {
 		nodeRadiusPx: NODE_RADIUS_PX,
 		minNodeHitRadiusPx: 32,
+		zoom: {
+			minScale: 0.05,
+			maxScale: 4
+		},
 		layout: {
 			baseRadius: NODE_RADIUS_PX,
 			scaleFalloff: 0.7,

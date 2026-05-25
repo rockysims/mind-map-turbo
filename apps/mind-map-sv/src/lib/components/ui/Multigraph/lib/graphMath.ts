@@ -2,8 +2,10 @@
  * Pure zoom/pan math. No DOM or state — easy to unit test.
  */
 
-export const DEFAULT_MIN_SCALE = 0.25;
-export const DEFAULT_MAX_SCALE = 4;
+import { APP_CONFIG } from '../../../../appConfig';
+
+export const DEFAULT_MIN_SCALE = APP_CONFIG.multigraph.zoom.minScale;
+export const DEFAULT_MAX_SCALE = APP_CONFIG.multigraph.zoom.maxScale;
 export const DEFAULT_ZOOM_SENSITIVITY = 0.002;
 
 export function clampScale(
