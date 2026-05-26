@@ -27,10 +27,12 @@
 	import {
 		advanceLayeredRelayout,
 		bulkUnpinRelayoutState,
+		ghostNodeIds,
 		initialLayeredRelayoutState,
 		participatingNodeIds,
 		type LayeredRelayoutState,
 		relayoutBatchKey,
+		relayoutMobilityByNodeId,
 		shouldClearLayeredRelayoutState,
 		shouldUseLayeredRelayout,
 		targetLayoutOpacityByNodeId
@@ -185,8 +187,14 @@
 		startRelaxationLoop();
 	}
 
-	function handleNodeDragEnd() {
+	function handleNodeDragEnd(node: NodeData) {
 		activeDragNodeId = null;
+
+		if (node.pinned) {
+			commitUserGraph(withScaleAnimation(graph, node.id));
+			return;
+		}
+
 		commitUserGraph(withRelaxedPositions(graph, null, 1));
 		settleFramesRemaining = resolvedLayoutSettings.postDragSettleMaxFrames;
 		startRelaxationLoop();
@@ -274,6 +282,8 @@
 			scaleByNodeId?: Record<string, number>;
 			scaleAnchoredNodeIds?: readonly string[];
 			participatingNodeIds?: ReadonlySet<string>;
+			mobilityByNodeId?: Record<string, number>;
+			ghostNodeIds?: ReadonlySet<string>;
 		} = {}
 	) {
 		const hopsByNodeId = hopsFromPinned(graph);
@@ -281,6 +291,17 @@
 		const relayoutParticipating =
 			overrides.participatingNodeIds ??
 			participatingNodeIds(hopsByNodeId, nodeIds, layeredRelayoutState);
+		const relayoutGhosts =
+			overrides.ghostNodeIds ?? ghostNodeIds(hopsByNodeId, nodeIds, layeredRelayoutState);
+		const relayoutMobility =
+			overrides.mobilityByNodeId ??
+			relayoutMobilityByNodeId(
+				nodeIds,
+				hopsByNodeId,
+				pinnedNodeIds(),
+				layeredRelayoutState,
+				resolvedLayoutSettings
+			);
 
 		return {
 			settings: layoutSettings,
@@ -288,7 +309,9 @@
 			scaleAnchoredNodeIds: overrides.scaleAnchoredNodeIds ?? scaleAnchoredNodeIds,
 			relaxIterations: overrides.relaxIterations,
 			scaleByNodeId: overrides.scaleByNodeId ?? animatedScaleByNodeId,
-			participatingNodeIds: relayoutParticipating
+			participatingNodeIds: relayoutParticipating,
+			mobilityByNodeId: relayoutMobility,
+			ghostNodeIds: relayoutGhosts
 		};
 	}
 
@@ -321,9 +344,10 @@
 		const pinnedIds = pinnedNodeIds(nextGraph);
 		const nodeIds = nextGraph.nodes.map((node) => node.id);
 		const settleMaxFrames = resolvedLayoutSettings.layeredRelayoutSettleMaxFrames;
+		const settleMaxFramesFinal = resolvedLayoutSettings.layeredRelayoutSettleMaxFramesFinal;
 
 		layeredRelayoutState = shouldUseLayeredRelayout(pinnedIds.size > 0)
-			? initialLayeredRelayoutState(hopsByNodeId, pinnedIds, settleMaxFrames)
+			? initialLayeredRelayoutState(hopsByNodeId, pinnedIds, settleMaxFrames, settleMaxFramesFinal)
 			: bulkUnpinRelayoutState(settleMaxFrames);
 		lastRelayoutBatchKey = relayoutBatchKey(layeredRelayoutState);
 
@@ -514,7 +538,8 @@
 				layeredRelayoutState = advanceLayeredRelayout(layeredRelayoutState, {
 					maxPositionDelta: step.maxPositionDelta,
 					settleEpsilonPx: resolvedLayoutSettings.layeredRelayoutSettleEpsilonPx,
-					settleMaxFrames: resolvedLayoutSettings.layeredRelayoutSettleMaxFrames
+					settleMaxFrames: resolvedLayoutSettings.layeredRelayoutSettleMaxFrames,
+					settleMaxFramesFinal: resolvedLayoutSettings.layeredRelayoutSettleMaxFramesFinal
 				});
 				const nextBatchKey = relayoutBatchKey(layeredRelayoutState);
 				if (nextBatchKey !== previousBatchKey) {

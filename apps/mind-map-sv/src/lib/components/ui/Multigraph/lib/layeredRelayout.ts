@@ -5,11 +5,17 @@ export interface LayeredRelayoutState {
 	mode: LayeredRelayoutMode;
 	batchIndex: number;
 	batchMaxes: readonly number[];
+	settledBatchCount: number;
 	unreachableBatchActive: boolean;
 	hasUnreachableBatch: boolean;
 	settleFramesRemaining: number;
 	pinnedNodeIds: ReadonlySet<string>;
 	restoreOpacity: boolean;
+}
+
+export interface LayeredRelayoutMobilitySettings {
+	layeredRelayoutMobilityStep: number;
+	layeredRelayoutMobilityFloor: number;
 }
 
 export function fibonacciHopBatchMaxes(maxFiniteHop: number): number[] {
@@ -45,19 +51,54 @@ export function shouldUseLayeredRelayout(hasPinnedNodes: boolean): boolean {
 	return hasPinnedNodes;
 }
 
+export function initialLayeredRelayoutSettleMaxFrames(
+	batchMaxes: readonly number[],
+	hasUnreachableBatch: boolean,
+	settleMaxFrames: number,
+	settleMaxFramesFinal: number
+): number {
+	const isOnlyBatch = batchMaxes.length <= 1 && !hasUnreachableBatch;
+	return isOnlyBatch ? settleMaxFramesFinal : settleMaxFrames;
+}
+
+export function settleMaxFramesForNextBatch(
+	batchMaxes: readonly number[],
+	hasUnreachableBatch: boolean,
+	nextBatchIndex: number,
+	enteringUnreachable: boolean,
+	settleMaxFrames: number,
+	settleMaxFramesFinal: number
+): number {
+	if (enteringUnreachable) return settleMaxFramesFinal;
+	if (!hasUnreachableBatch && nextBatchIndex >= batchMaxes.length - 1) {
+		return settleMaxFramesFinal;
+	}
+	return settleMaxFrames;
+}
+
 export function initialLayeredRelayoutState(
 	hopsByNodeId: Record<string, number>,
 	pinnedNodeIds: ReadonlySet<string>,
-	settleMaxFrames: number
+	settleMaxFrames: number,
+	settleMaxFramesFinal: number
 ): LayeredRelayoutState {
+	const batchMaxes = fibonacciHopBatchMaxes(maxFiniteHop(hopsByNodeId));
+	const hasUnreachableBatch = hasUnreachableNodes(hopsByNodeId);
+
 	return {
 		active: true,
 		mode: 'hop-batches',
 		batchIndex: 0,
-		batchMaxes: fibonacciHopBatchMaxes(maxFiniteHop(hopsByNodeId)),
+		batchMaxes,
+		settledBatchCount: 0,
 		unreachableBatchActive: false,
-		hasUnreachableBatch: hasUnreachableNodes(hopsByNodeId),
-		settleFramesRemaining: settleMaxFrames,
+		hasUnreachableBatch,
+		settleFramesRemaining: initialLayeredRelayoutSettleMaxFrames(
+			batchMaxes,
+			hasUnreachableBatch,
+			settleMaxFrames,
+			settleMaxFramesFinal
+		),
 		pinnedNodeIds,
 		restoreOpacity: false
 	};
@@ -69,6 +110,7 @@ export function bulkUnpinRelayoutState(settleMaxFrames: number): LayeredRelayout
 		mode: 'bulk-unpin',
 		batchIndex: 0,
 		batchMaxes: [],
+		settledBatchCount: 0,
 		unreachableBatchActive: false,
 		hasUnreachableBatch: false,
 		settleFramesRemaining: settleMaxFrames,
@@ -91,6 +133,48 @@ export function relayoutBatchKey(state: LayeredRelayoutState | null): string | n
 	return `batch-${state.batchIndex}`;
 }
 
+export function mobilityBumpsForHop(
+	hopCount: number,
+	batchMaxes: readonly number[],
+	settledBatchCount: number
+): number {
+	if (!Number.isFinite(hopCount)) return settledBatchCount;
+
+	let bumps = 0;
+	for (
+		let batchIndex = 0;
+		batchIndex < settledBatchCount && batchIndex < batchMaxes.length;
+		batchIndex += 1
+	) {
+		if (batchMaxes[batchIndex] >= hopCount) bumps += 1;
+	}
+	return bumps;
+}
+
+export function relayoutMobilityByNodeId(
+	nodeIds: readonly string[],
+	hopsByNodeId: Record<string, number>,
+	pinnedNodeIds: ReadonlySet<string>,
+	state: LayeredRelayoutState | null,
+	settings: LayeredRelayoutMobilitySettings
+): Record<string, number> | undefined {
+	if (!state?.active || state.mode === 'bulk-unpin') return undefined;
+
+	return Object.fromEntries(
+		nodeIds.map((nodeId) => {
+			if (pinnedNodeIds.has(nodeId)) return [nodeId, 0];
+
+			const hopCount = hopsByNodeId[nodeId];
+			const bumps = mobilityBumpsForHop(hopCount, state.batchMaxes, state.settledBatchCount);
+			const mobility = Math.max(
+				settings.layeredRelayoutMobilityFloor,
+				1 - settings.layeredRelayoutMobilityStep * bumps
+			);
+			return [nodeId, mobility];
+		})
+	);
+}
+
 export function participatingNodeIds(
 	hopsByNodeId: Record<string, number>,
 	nodeIds: readonly string[],
@@ -111,6 +195,21 @@ export function participatingNodeIds(
 			return Number.isFinite(hopCount) && hopCount <= activeMaxHop;
 		})
 	);
+}
+
+export function ghostNodeIds(
+	hopsByNodeId: Record<string, number>,
+	nodeIds: readonly string[],
+	state: LayeredRelayoutState | null
+): Set<string> | undefined {
+	if (!state?.active || state.mode === 'bulk-unpin' || state.unreachableBatchActive) {
+		return undefined;
+	}
+
+	const participating = participatingNodeIds(hopsByNodeId, nodeIds, state);
+	if (!participating) return undefined;
+
+	return new Set(nodeIds.filter((nodeId) => !participating.has(nodeId)));
 }
 
 export function targetLayoutOpacityByNodeId(
@@ -147,6 +246,7 @@ export interface LayeredRelayoutAdvanceInput {
 	maxPositionDelta: number;
 	settleEpsilonPx: number;
 	settleMaxFrames: number;
+	settleMaxFramesFinal: number;
 }
 
 export function advanceLayeredRelayout(
@@ -162,35 +262,46 @@ export function advanceLayeredRelayout(
 		return { ...state, settleFramesRemaining: nextSettleFrames };
 	}
 
-	return advanceAfterBatchSettle(state, input.settleMaxFrames);
+	return advanceAfterBatchSettle(state, input.settleMaxFrames, input.settleMaxFramesFinal);
 }
 
 function advanceAfterBatchSettle(
 	state: LayeredRelayoutState,
-	settleMaxFrames: number
+	settleMaxFrames: number,
+	settleMaxFramesFinal: number
 ): LayeredRelayoutState {
 	if (state.mode === 'bulk-unpin') {
 		return { ...state, restoreOpacity: true, settleFramesRemaining: 0, active: true };
 	}
 
+	const settledBatchCount = state.settledBatchCount + 1;
 	const nextBatchIndex = state.batchIndex + 1;
 
 	if (nextBatchIndex >= state.batchMaxes.length) {
 		if (state.hasUnreachableBatch && !state.unreachableBatchActive) {
 			return {
 				...state,
+				settledBatchCount,
 				unreachableBatchActive: true,
-				settleFramesRemaining: settleMaxFrames
+				settleFramesRemaining: settleMaxFramesFinal
 			};
 		}
 
-		return { ...state, active: false, settleFramesRemaining: 0 };
+		return { ...state, settledBatchCount, active: false, settleFramesRemaining: 0 };
 	}
 
 	return {
 		...state,
 		batchIndex: nextBatchIndex,
-		settleFramesRemaining: settleMaxFrames
+		settledBatchCount,
+		settleFramesRemaining: settleMaxFramesForNextBatch(
+			state.batchMaxes,
+			state.hasUnreachableBatch,
+			nextBatchIndex,
+			false,
+			settleMaxFrames,
+			settleMaxFramesFinal
+		)
 	};
 }
 

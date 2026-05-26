@@ -15,11 +15,118 @@ export interface HopRepulsionSettings {
 	hopRepulsionMaxExtraGapRadiusFactor: number;
 }
 
-export type GraphPhysicsSettings = EdgeDistanceSettings & HopRepulsionSettings;
+export interface GhostRepulsionSettings {
+	layeredRelayoutGhostRepulsionStrength: number;
+	layeredRelayoutGhostRepulsionClearanceRadiusFactor: number;
+	layeredRelayoutGhostRepulsionShortRangeBoost: number;
+}
+
+export type GraphPhysicsSettings = EdgeDistanceSettings &
+	HopRepulsionSettings &
+	GhostRepulsionSettings;
 
 export interface EdgeEndpointIds {
 	sourceNodeId: string;
 	targetNodeId: string;
+}
+
+export function nodeMobility(
+	nodeId: string,
+	anchoredIds: Set<string>,
+	mobilityByNodeId?: Record<string, number>
+): number {
+	if (anchoredIds.has(nodeId)) return 0;
+	return mobilityByNodeId?.[nodeId] ?? 1;
+}
+
+export function displacementShares(
+	sourceId: string,
+	targetId: string,
+	anchoredIds: Set<string>,
+	mobilityByNodeId?: Record<string, number>
+): { sourceShare: number; targetShare: number } | null {
+	const sourceMobility = nodeMobility(sourceId, anchoredIds, mobilityByNodeId);
+	const targetMobility = nodeMobility(targetId, anchoredIds, mobilityByNodeId);
+	if (sourceMobility === 0 && targetMobility === 0) return null;
+	if (sourceMobility === 0) return { sourceShare: 0, targetShare: 1 };
+	if (targetMobility === 0) return { sourceShare: 1, targetShare: 0 };
+
+	const totalMobility = sourceMobility + targetMobility;
+	return {
+		sourceShare: sourceMobility / totalMobility,
+		targetShare: targetMobility / totalMobility
+	};
+}
+
+export function ghostRepulsionForce(
+	distance: number,
+	radiusSum: number,
+	settings: GhostRepulsionSettings
+): number {
+	const strength = clamp(settings.layeredRelayoutGhostRepulsionStrength, 0, 1);
+	const clearanceFactor = Math.max(0, settings.layeredRelayoutGhostRepulsionClearanceRadiusFactor);
+	const shortRangeBoost = Math.max(1, settings.layeredRelayoutGhostRepulsionShortRangeBoost);
+	if (strength === 0) return 0;
+
+	const preferredDistance = radiusSum * (1 + clearanceFactor);
+	const deficit = preferredDistance - distance;
+	if (deficit <= OVERLAP_EPSILON) return 0;
+
+	const boost = distance < radiusSum ? shortRangeBoost : 1;
+	return deficit * strength * boost;
+}
+
+export function relaxGhostRepulsionStep(
+	positions: Record<string, Point>,
+	radii: Record<string, number>,
+	revealedNodeIds: ReadonlySet<string>,
+	ghostNodeIds: ReadonlySet<string>,
+	settings: GhostRepulsionSettings,
+	anchoredIds: Set<string> = new Set(),
+	mobilityByNodeId?: Record<string, number>
+): Record<string, Point> {
+	if (revealedNodeIds.size === 0 || ghostNodeIds.size === 0) return positions;
+
+	const nextPositions = clonePositions(positions);
+	let moved = false;
+
+	for (const revealedId of revealedNodeIds) {
+		for (const ghostId of ghostNodeIds) {
+			const revealed = nextPositions[revealedId];
+			const ghost = nextPositions[ghostId];
+			const revealedRadius = radii[revealedId];
+			const ghostRadius = radii[ghostId];
+			if (!revealed || !ghost || revealedRadius === undefined || ghostRadius === undefined) {
+				continue;
+			}
+
+			const radiusSum = revealedRadius + ghostRadius;
+			const dx = ghost.x - revealed.x;
+			const dy = ghost.y - revealed.y;
+			const distance = Math.hypot(dx, dy);
+			const adjustment = ghostRepulsionForce(distance, radiusSum, settings);
+			if (adjustment <= OVERLAP_EPSILON) continue;
+
+			const direction =
+				distance > 0
+					? { x: dx / distance, y: dy / distance }
+					: zeroDistanceDirection(revealedId, ghostId);
+			const shares = displacementShares(revealedId, ghostId, anchoredIds, mobilityByNodeId);
+			if (shares === null) continue;
+
+			nextPositions[revealedId] = {
+				x: revealed.x - direction.x * adjustment * shares.sourceShare,
+				y: revealed.y - direction.y * adjustment * shares.sourceShare
+			};
+			nextPositions[ghostId] = {
+				x: ghost.x + direction.x * adjustment * shares.targetShare,
+				y: ghost.y + direction.y * adjustment * shares.targetShare
+			};
+			moved = true;
+		}
+	}
+
+	return moved ? nextPositions : positions;
 }
 
 export function relaxGraphPhysics(
@@ -30,7 +137,9 @@ export function relaxGraphPhysics(
 	iterations = 1,
 	anchoredIds: Set<string> = new Set(),
 	shortestPathHops: Record<string, Record<string, number>> = {},
-	participatingNodeIds?: ReadonlySet<string>
+	participatingNodeIds?: ReadonlySet<string>,
+	mobilityByNodeId?: Record<string, number>,
+	ghostNodeIds?: ReadonlySet<string>
 ): Record<string, Point> {
 	let relaxed = positions;
 
@@ -41,7 +150,9 @@ export function relaxGraphPhysics(
 			edges,
 			settings,
 			anchoredIds,
-			participatingNodeIds
+			participatingNodeIds,
+			mobilityByNodeId,
+			ghostNodeIds
 		);
 		const withRepelledHops = relaxHopRepulsionStep(
 			withRelaxedEdges,
@@ -49,14 +160,43 @@ export function relaxGraphPhysics(
 			shortestPathHops,
 			settings,
 			anchoredIds,
-			participatingNodeIds
+			participatingNodeIds,
+			mobilityByNodeId,
+			ghostNodeIds
 		);
-		const next = relaxOverlapsStep(withRepelledHops, radii, anchoredIds, participatingNodeIds);
+		const withGhostRepulsion =
+			ghostNodeIds && participatingNodeIds
+				? relaxGhostRepulsionStep(
+						withRepelledHops,
+						radii,
+						participatingNodeIds,
+						ghostNodeIds,
+						settings,
+						anchoredIds,
+						mobilityByNodeId
+					)
+				: withRepelledHops;
+		const next = relaxOverlapsStep(
+			withGhostRepulsion,
+			radii,
+			anchoredIds,
+			participatingNodeIds,
+			mobilityByNodeId,
+			ghostNodeIds
+		);
 		if (next === relaxed) return relaxed;
 		relaxed = next;
 	}
 
-	return relaxOverlaps(relaxed, radii, iterations, anchoredIds, participatingNodeIds);
+	return relaxOverlaps(
+		relaxed,
+		radii,
+		iterations,
+		anchoredIds,
+		participatingNodeIds,
+		mobilityByNodeId,
+		ghostNodeIds
+	);
 }
 
 export function relaxHopRepulsionStep(
@@ -65,7 +205,9 @@ export function relaxHopRepulsionStep(
 	shortestPathHops: Record<string, Record<string, number>>,
 	settings: HopRepulsionSettings,
 	anchoredIds: Set<string> = new Set(),
-	participatingNodeIds?: ReadonlySet<string>
+	participatingNodeIds?: ReadonlySet<string>,
+	mobilityByNodeId?: Record<string, number>,
+	ghostNodeIds?: ReadonlySet<string>
 ): Record<string, Point> {
 	const strength = clamp(settings.hopRepulsionStrength, 0, 1);
 	const maxExtraGapFactor = Math.max(0, settings.hopRepulsionMaxExtraGapRadiusFactor);
@@ -81,7 +223,7 @@ export function relaxHopRepulsionStep(
 		for (let targetIndex = sourceIndex + 1; targetIndex < nodeIds.length; targetIndex += 1) {
 			const sourceId = nodeIds[sourceIndex];
 			const targetId = nodeIds[targetIndex];
-			if (!pairParticipates(sourceId, targetId, participatingNodeIds)) continue;
+			if (!pairParticipates(sourceId, targetId, participatingNodeIds, ghostNodeIds)) continue;
 			const hops = shortestPathHops[sourceId]?.[targetId] ?? shortestPathHops[targetId]?.[sourceId];
 			const progress = hopRepulsionProgress(hops, minHops, maxHops);
 			if (progress === 0) continue;
@@ -92,9 +234,8 @@ export function relaxHopRepulsionStep(
 			const targetRadius = radii[targetId];
 			const radiusSum = sourceRadius + targetRadius;
 			const preferredDistance = radiusSum + radiusSum * maxExtraGapFactor * progress;
-			const sourceAnchored = anchoredIds.has(sourceId);
-			const targetAnchored = anchoredIds.has(targetId);
-			if (sourceAnchored && targetAnchored) continue;
+			const shares = displacementShares(sourceId, targetId, anchoredIds, mobilityByNodeId);
+			if (shares === null) continue;
 
 			const dx = target.x - source.x;
 			const dy = target.y - source.y;
@@ -106,8 +247,7 @@ export function relaxHopRepulsionStep(
 				distance > 0
 					? { x: dx / distance, y: dy / distance }
 					: zeroDistanceDirection(sourceId, targetId);
-			const sourceShare = sourceAnchored ? 0 : targetAnchored ? 1 : 0.5;
-			const targetShare = targetAnchored ? 0 : sourceAnchored ? 1 : 0.5;
+			const { sourceShare, targetShare } = shares;
 			const adjustment = deficit * strength;
 
 			nextPositions[sourceId] = {
@@ -150,7 +290,9 @@ export function relaxEdgeDistancesStep(
 	edges: EdgeEndpointIds[],
 	settings: EdgeDistanceSettings,
 	anchoredIds: Set<string> = new Set(),
-	participatingNodeIds?: ReadonlySet<string>
+	participatingNodeIds?: ReadonlySet<string>,
+	mobilityByNodeId?: Record<string, number>,
+	ghostNodeIds?: ReadonlySet<string>
 ): Record<string, Point> {
 	const minGapFactor = Math.min(settings.edgeGapMinRadiusFactor, settings.edgeGapMaxRadiusFactor);
 	const maxGapFactor = Math.max(settings.edgeGapMinRadiusFactor, settings.edgeGapMaxRadiusFactor);
@@ -164,7 +306,7 @@ export function relaxEdgeDistancesStep(
 	for (const edge of edges) {
 		const sourceId = edge.sourceNodeId;
 		const targetId = edge.targetNodeId;
-		if (!pairParticipates(sourceId, targetId, participatingNodeIds)) continue;
+		if (!pairParticipates(sourceId, targetId, participatingNodeIds, ghostNodeIds)) continue;
 		const source = positions[sourceId];
 		const target = positions[targetId];
 		const sourceRadius = radii[sourceId];
@@ -174,9 +316,8 @@ export function relaxEdgeDistancesStep(
 		const radiusSum = sourceRadius + targetRadius;
 		const minGap = radiusSum * minGapFactor;
 		const maxGap = radiusSum * maxGapFactor;
-		const sourceAnchored = anchoredIds.has(sourceId);
-		const targetAnchored = anchoredIds.has(targetId);
-		if (sourceAnchored && targetAnchored) continue;
+		const shares = displacementShares(sourceId, targetId, anchoredIds, mobilityByNodeId);
+		if (shares === null) continue;
 
 		const dx = target.x - source.x;
 		const dy = target.y - source.y;
@@ -194,8 +335,7 @@ export function relaxEdgeDistancesStep(
 			distance > 0
 				? { x: dx / distance, y: dy / distance }
 				: zeroDistanceDirection(sourceId, targetId);
-		const sourceShare = sourceAnchored ? 0 : targetAnchored ? 1 : 0.5;
-		const targetShare = targetAnchored ? 0 : sourceAnchored ? 1 : 0.5;
+		const { sourceShare, targetShare } = shares;
 
 		addDisplacement(displacementByNodeId, sourceId, {
 			x: direction.x * adjustment * sourceShare,
@@ -239,12 +379,21 @@ export function relaxOverlaps(
 	radii: Record<string, number>,
 	iterations = 1,
 	anchoredIds: Set<string> = new Set(),
-	participatingNodeIds?: ReadonlySet<string>
+	participatingNodeIds?: ReadonlySet<string>,
+	mobilityByNodeId?: Record<string, number>,
+	ghostNodeIds?: ReadonlySet<string>
 ): Record<string, Point> {
 	let relaxed = positions;
 
 	for (let index = 0; index < iterations; index += 1) {
-		const next = relaxOverlapsStep(relaxed, radii, anchoredIds, participatingNodeIds);
+		const next = relaxOverlapsStep(
+			relaxed,
+			radii,
+			anchoredIds,
+			participatingNodeIds,
+			mobilityByNodeId,
+			ghostNodeIds
+		);
 		if (next === relaxed) return relaxed;
 		relaxed = next;
 	}
@@ -256,7 +405,9 @@ export function relaxOverlapsStep(
 	positions: Record<string, Point>,
 	radii: Record<string, number>,
 	anchoredIds: Set<string> = new Set(),
-	participatingNodeIds?: ReadonlySet<string>
+	participatingNodeIds?: ReadonlySet<string>,
+	mobilityByNodeId?: Record<string, number>,
+	ghostNodeIds?: ReadonlySet<string>
 ): Record<string, Point> {
 	const nextPositions = clonePositions(positions);
 	const nodeIds = Object.keys(positions).filter((nodeId) => radii[nodeId] !== undefined);
@@ -266,7 +417,7 @@ export function relaxOverlapsStep(
 		for (let targetIndex = sourceIndex + 1; targetIndex < nodeIds.length; targetIndex += 1) {
 			const sourceId = nodeIds[sourceIndex];
 			const targetId = nodeIds[targetIndex];
-			if (!pairParticipates(sourceId, targetId, participatingNodeIds)) continue;
+			if (!pairParticipates(sourceId, targetId, participatingNodeIds, ghostNodeIds, true)) continue;
 			const source = nextPositions[sourceId];
 			const target = nextPositions[targetId];
 			const minDistance = radii[sourceId] + radii[targetId];
@@ -277,16 +428,14 @@ export function relaxOverlapsStep(
 
 			if (overlap <= OVERLAP_EPSILON) continue;
 
-			const sourceAnchored = anchoredIds.has(sourceId);
-			const targetAnchored = anchoredIds.has(targetId);
-			if (sourceAnchored && targetAnchored) continue;
+			const shares = displacementShares(sourceId, targetId, anchoredIds, mobilityByNodeId);
+			if (shares === null) continue;
 
 			const direction =
 				distance > 0
 					? { x: dx / distance, y: dy / distance }
 					: zeroDistanceDirection(sourceId, targetId);
-			const sourceShare = sourceAnchored ? 0 : targetAnchored ? 1 : 0.5;
-			const targetShare = targetAnchored ? 0 : sourceAnchored ? 1 : 0.5;
+			const { sourceShare, targetShare } = shares;
 
 			nextPositions[sourceId] = {
 				x: source.x - direction.x * overlap * sourceShare,
@@ -338,12 +487,18 @@ function nodeParticipates(nodeId: string, participatingNodeIds?: ReadonlySet<str
 function pairParticipates(
 	sourceId: string,
 	targetId: string,
-	participatingNodeIds?: ReadonlySet<string>
+	participatingNodeIds?: ReadonlySet<string>,
+	ghostNodeIds?: ReadonlySet<string>,
+	allowGhostPairs = false
 ): boolean {
-	return (
-		nodeParticipates(sourceId, participatingNodeIds) &&
-		nodeParticipates(targetId, participatingNodeIds)
-	);
+	if (!participatingNodeIds) return true;
+
+	const sourceParticipates = participatingNodeIds.has(sourceId);
+	const targetParticipates = participatingNodeIds.has(targetId);
+	if (sourceParticipates && targetParticipates) return true;
+	if (!allowGhostPairs || !ghostNodeIds) return false;
+
+	return ghostNodeIds.has(sourceId) && ghostNodeIds.has(targetId);
 }
 
 function zeroDistanceDirection(sourceId: string, targetId: string): Point {

@@ -19,7 +19,13 @@ export interface LayoutSettings {
 	layeredRelayoutDimOpacity: number;
 	layeredRelayoutOpacityAnimationDurationMs: number;
 	layeredRelayoutSettleMaxFrames: number;
+	layeredRelayoutSettleMaxFramesFinal: number;
 	layeredRelayoutSettleEpsilonPx: number;
+	layeredRelayoutMobilityStep: number;
+	layeredRelayoutMobilityFloor: number;
+	layeredRelayoutGhostRepulsionStrength: number;
+	layeredRelayoutGhostRepulsionClearanceRadiusFactor: number;
+	layeredRelayoutGhostRepulsionShortRangeBoost: number;
 }
 
 export const DEFAULT_LAYOUT_SETTINGS: LayoutSettings = {

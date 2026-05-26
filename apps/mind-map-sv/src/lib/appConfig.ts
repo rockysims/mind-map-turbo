@@ -38,8 +38,14 @@ export const APP_CONFIG = {
 			scaleAnimationDurationMs: 500,
 			layeredRelayoutDimOpacity: 0.5,
 			layeredRelayoutOpacityAnimationDurationMs: 500,
-			layeredRelayoutSettleMaxFrames: 24,
-			layeredRelayoutSettleEpsilonPx: 0.25
+			layeredRelayoutSettleMaxFrames: 14,
+			layeredRelayoutSettleMaxFramesFinal: 140,
+			layeredRelayoutSettleEpsilonPx: 0.25,
+			layeredRelayoutMobilityStep: 0.2,
+			layeredRelayoutMobilityFloor: 0.05,
+			layeredRelayoutGhostRepulsionStrength: 1,
+			layeredRelayoutGhostRepulsionClearanceRadiusFactor: 0.5,
+			layeredRelayoutGhostRepulsionShortRangeBoost: 2
 		}
 	}
 } as const;

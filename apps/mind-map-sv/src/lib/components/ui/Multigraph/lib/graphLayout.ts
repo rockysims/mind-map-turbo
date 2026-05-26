@@ -33,6 +33,8 @@ export interface GraphLayoutOptions {
 	relaxIterations?: number;
 	scaleByNodeId?: Record<string, number>;
 	participatingNodeIds?: ReadonlySet<string>;
+	mobilityByNodeId?: Record<string, number>;
+	ghostNodeIds?: ReadonlySet<string>;
 }
 
 export interface GraphRelaxationStep {
@@ -68,7 +70,9 @@ export function deriveGraphLayout(
 					iterations,
 					anchoredIds,
 					shortestPathHops,
-					options.participatingNodeIds
+					options.participatingNodeIds,
+					options.mobilityByNodeId,
+					options.ghostNodeIds
 				)
 			: basePositions;
 
@@ -116,7 +120,11 @@ export function relaxGraphPositionsStep(
 			...data,
 			posByNodeId: nextPositions
 		},
-		maxPositionDelta: maxPositionDelta(data.posByNodeId, nextPositions)
+		maxPositionDelta: maxPositionDelta(
+			data.posByNodeId,
+			nextPositions,
+			options.participatingNodeIds
+		)
 	};
 }
 
@@ -155,9 +163,13 @@ function anchoredNodeIds(data: MultigraphData, options: GraphLayoutOptions): Set
 
 function maxPositionDelta(
 	previousPositions: Record<string, Point>,
-	nextPositions: Record<string, Point>
+	nextPositions: Record<string, Point>,
+	participatingNodeIds?: ReadonlySet<string>
 ): number {
-	return Object.entries(nextPositions).reduce((maxDelta, [nodeId, nextPosition]) => {
+	const nodeIds = participatingNodeIds ?? Object.keys(nextPositions);
+
+	return [...nodeIds].reduce((maxDelta, nodeId) => {
+		const nextPosition = nextPositions[nodeId] ?? CENTERED_POSITION;
 		const previousPosition = previousPositions[nodeId] ?? CENTERED_POSITION;
 		const delta = Math.hypot(
 			nextPosition.x - previousPosition.x,
