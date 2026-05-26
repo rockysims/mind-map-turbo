@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { makeGraph, makeRandomEdges } from './testFixtures';
+import {
+	assignNodeGroups,
+	makeClusteredRandomEdges,
+	makeGraph,
+	makeRandomEdges
+} from './testFixtures';
 
 describe('makeGraph', () => {
 	it('produces an empty graph by default', () => {
@@ -81,5 +86,124 @@ describe('makeRandomEdges', () => {
 			expect(seen.has(key)).toBe(false);
 			seen.add(key);
 		}
+	});
+});
+
+describe('assignNodeGroups', () => {
+	it('returns the same groups for the same seed', () => {
+		const first = assignNodeGroups({ nodeCount: 100, groupCount: 8, seed: 42 });
+		const second = assignNodeGroups({ nodeCount: 100, groupCount: 8, seed: 42 });
+		expect(second).toEqual(first);
+	});
+
+	it('assigns every node to a valid group index', () => {
+		const groups = assignNodeGroups({ nodeCount: 100, groupCount: 8, seed: 42 });
+		expect(groups).toHaveLength(100);
+		for (const group of groups) {
+			expect(group).toBeGreaterThanOrEqual(0);
+			expect(group).toBeLessThan(8);
+		}
+	});
+});
+
+describe('makeClusteredRandomEdges', () => {
+	const nodeCount = 100;
+	const edgeCount = 300;
+	const groupCount = 8;
+	const crossGroupFraction = 0.05;
+	const seed = 42;
+
+	function crossGroupCount(edges: Array<[number, number]>, groupByNode: number[]): number {
+		return edges.filter(([source, target]) => groupByNode[source] !== groupByNode[target]).length;
+	}
+
+	function isConnected(nodeCount: number, edges: Array<[number, number]>): boolean {
+		const parent = Array.from({ length: nodeCount }, (_, index) => index);
+
+		function find(index: number): number {
+			if (parent[index] !== index) parent[index] = find(parent[index]);
+			return parent[index];
+		}
+
+		function unite(left: number, right: number): void {
+			const leftRoot = find(left);
+			const rightRoot = find(right);
+			if (leftRoot !== rightRoot) parent[leftRoot] = rightRoot;
+		}
+
+		for (const [source, target] of edges) unite(source, target);
+
+		const root = find(0);
+		for (let index = 1; index < nodeCount; index += 1) {
+			if (find(index) !== root) return false;
+		}
+		return true;
+	}
+
+	it('returns the same edges for the same seed', () => {
+		const first = makeClusteredRandomEdges({
+			nodeCount,
+			edgeCount,
+			groupCount,
+			crossGroupFraction,
+			seed
+		});
+		const second = makeClusteredRandomEdges({
+			nodeCount,
+			edgeCount,
+			groupCount,
+			crossGroupFraction,
+			seed
+		});
+		expect(second).toEqual(first);
+	});
+
+	it('generates unique non-self edges with the requested cross-group fraction', () => {
+		const edges = makeClusteredRandomEdges({
+			nodeCount,
+			edgeCount,
+			groupCount,
+			crossGroupFraction,
+			seed
+		});
+		const groupByNode = assignNodeGroups({ nodeCount, groupCount, seed });
+
+		expect(edges).toHaveLength(edgeCount);
+		const seen = new Set<string>();
+		for (const [source, target] of edges) {
+			expect(source).not.toBe(target);
+			const key = `${source},${target}`;
+			expect(seen.has(key)).toBe(false);
+			seen.add(key);
+		}
+
+		expect(crossGroupCount(edges, groupByNode)).toBe(Math.round(edgeCount * crossGroupFraction));
+	});
+
+	it('produces one connected component', () => {
+		const edges = makeClusteredRandomEdges({
+			nodeCount,
+			edgeCount,
+			groupCount,
+			crossGroupFraction,
+			seed
+		});
+
+		expect(isConnected(nodeCount, edges)).toBe(true);
+	});
+
+	it('keeps most edges within the same group', () => {
+		const edges = makeClusteredRandomEdges({
+			nodeCount,
+			edgeCount,
+			groupCount,
+			crossGroupFraction,
+			seed
+		});
+		const groupByNode = assignNodeGroups({ nodeCount, groupCount, seed });
+		const cross = crossGroupCount(edges, groupByNode);
+
+		expect(cross / edgeCount).toBeLessThanOrEqual(crossGroupFraction + 0.01);
+		expect((edgeCount - cross) / edgeCount).toBeGreaterThanOrEqual(1 - crossGroupFraction - 0.01);
 	});
 });

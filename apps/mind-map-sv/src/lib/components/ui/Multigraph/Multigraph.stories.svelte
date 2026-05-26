@@ -4,7 +4,7 @@
 	import { expect, fn, waitFor, within } from 'storybook/test';
 	import { APP_CONFIG } from '$lib/appConfig';
 	import { DBL_CLICK_MS, LONG_PRESS_MS, MIN_NODE_HIT_RADIUS, NODE_RADIUS } from '$lib/constants';
-	import { makeGraph, makeRandomEdges } from './lib/testFixtures';
+	import { makeClusteredRandomEdges, makeGraph, makeRandomEdges } from './lib/testFixtures';
 	import { togglePinned } from './lib/graph';
 	import { hopsFromPinned } from './lib/layout';
 	import type { MultigraphData, Point } from '../types/multigraph';
@@ -193,6 +193,13 @@
 
 	const HUNDRED_NODE_POSITIONS = circlePositions(100, 480);
 	const HUNDRED_NODE_MESSY_EDGES = makeRandomEdges({ nodeCount: 100, edgeCount: 150, seed: 42 });
+	const HUNDRED_NODE_CLUSTERED_EDGES = makeClusteredRandomEdges({
+		nodeCount: 100,
+		edgeCount: 300,
+		groupCount: 8,
+		crossGroupFraction: 0.05,
+		seed: 42
+	});
 </script>
 
 <Story
@@ -844,6 +851,80 @@
 		expect(canvasElement.querySelectorAll('.edge')).toHaveLength(150);
 		expect(Number(getNodeWrapper(canvasElement, 'n0').dataset.scale)).toBe(1);
 		expect(maxCircleOverlap(stage)).toBeLessThan(1);
+	}}
+/>
+
+<Story
+	name="HundredNodeClusteredGraphLaysOutWithoutHeavyOverlap"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 100,
+			pinned: [0],
+			edges: HUNDRED_NODE_CLUSTERED_EDGES,
+			posByNodeId: HUNDRED_NODE_POSITIONS
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { scaleFalloff: 0.7, minScale: 0.1, relaxIterations: 4 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		await waitForFrames(8);
+
+		const stage = getStage(canvasElement);
+		expect(canvasElement.querySelectorAll('.node-wrapper')).toHaveLength(100);
+		expect(canvasElement.querySelectorAll('.edge')).toHaveLength(300);
+		expect(Number(getNodeWrapper(canvasElement, 'n0').dataset.scale)).toBe(1);
+		expect(maxCircleOverlap(stage)).toBeLessThan(1);
+	}}
+/>
+
+<Story
+	name="MovingPinnedNodeTriggersLayeredRelayout"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 5,
+			pinned: [0],
+			edges: chainEdges(5),
+			posByNodeId: {
+				n0: { x: -480, y: 0 },
+				n1: { x: -240, y: 0 },
+				n2: { x: 0, y: 0 },
+				n3: { x: 240, y: 0 },
+				n4: { x: 480, y: 0 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: {
+			scaleFalloff: 0.5,
+			minScale: 0.2,
+			scaleAnimationDurationMs: 120,
+			layeredRelayoutOpacityAnimationDurationMs: 120,
+			layeredRelayoutSettleMaxFrames: 8,
+			layeredRelayoutSettleEpsilonPx: 0,
+			relaxIterations: 1
+		}
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const pinnedCircle = getCircle(canvasElement, 'n0');
+		const pinnedCenter = getCenter(pinnedCircle);
+		const dragX = pinnedCenter.x + 200;
+
+		dispatchPointer(pinnedCircle, 'pointerdown', pinnedCenter.x, pinnedCenter.y);
+		dispatchPointer(stage, 'pointermove', dragX, pinnedCenter.y);
+		dispatchPointer(stage, 'pointerup', dragX, pinnedCenter.y);
+		await waitForFrames(2);
+
+		expect(
+			canvasElement.querySelector('.graph')?.getAttribute('data-layered-relayout-active')
+		).toBe('true');
+		expect(canvasElement.querySelector('.graph')?.getAttribute('data-layered-relayout-batch')).toBe(
+			'batch-0'
+		);
+		expect(layoutOpacity(canvasElement, 'n0')).toBe(1);
+		expect(layoutOpacity(canvasElement, 'n1')).toBe(1);
+		expect(layoutOpacity(canvasElement, 'n2')).toBeLessThan(0.6);
 	}}
 />
 
