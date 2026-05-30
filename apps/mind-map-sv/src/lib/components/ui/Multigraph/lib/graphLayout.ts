@@ -34,7 +34,6 @@ export interface GraphLayoutOptions {
 	scaleByNodeId?: Record<string, number>;
 	participatingNodeIds?: ReadonlySet<string>;
 	mobilityByNodeId?: Record<string, number>;
-	ghostNodeIds?: ReadonlySet<string>;
 }
 
 export interface GraphRelaxationStep {
@@ -71,8 +70,7 @@ export function deriveGraphLayout(
 					anchoredIds,
 					shortestPathHops,
 					options.participatingNodeIds,
-					options.mobilityByNodeId,
-					options.ghostNodeIds
+					options.mobilityByNodeId
 				)
 			: basePositions;
 

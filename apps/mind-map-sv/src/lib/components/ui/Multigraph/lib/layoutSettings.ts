@@ -2,6 +2,7 @@ import { APP_CONFIG } from '../../../../appConfig';
 
 export interface LayoutSettings {
 	baseRadius: number;
+	displayedLayers: number;
 	scaleFalloff: number;
 	minScale: number;
 	relaxIterations: number;
@@ -16,16 +17,11 @@ export interface LayoutSettings {
 	postDragSettleMaxFrames: number;
 	postScaleChangeSettleMaxFrames: number;
 	scaleAnimationDurationMs: number;
-	layeredRelayoutDimOpacity: number;
-	layeredRelayoutOpacityAnimationDurationMs: number;
 	layeredRelayoutSettleMaxFrames: number;
 	layeredRelayoutSettleMaxFramesFinal: number;
 	layeredRelayoutSettleEpsilonPx: number;
 	layeredRelayoutMobilityStep: number;
 	layeredRelayoutMobilityFloor: number;
-	layeredRelayoutGhostRepulsionStrength: number;
-	layeredRelayoutGhostRepulsionClearanceRadiusFactor: number;
-	layeredRelayoutGhostRepulsionShortRangeBoost: number;
 }
 
 export const DEFAULT_LAYOUT_SETTINGS: LayoutSettings = {

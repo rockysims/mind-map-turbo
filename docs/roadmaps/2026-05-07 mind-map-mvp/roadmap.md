@@ -41,7 +41,7 @@ individual PR-sized tasks.
 | 03  | Mobile polish and node editing UX                  | in progress | [milestone](milestones/03-mobile-polish-and-editing.md), [plan](plans/2026-05-17%20mobile-polish-and-editing.md)                            |
 | 04  | Persistence (local-first → server)                 | complete    | [milestone](milestones/04-persistence.md), [plan](plans/2026-05-17%20persistence.md)                                                        |
 | 04a | Layered pin relayout                               | complete    | [milestone](milestones/04a-layered-pin-relayout.md), [plan](plans/2026-05-25%20layered-pin-relayout.md)                                     |
-| 04b | Bounded pinned-neighborhood visibility             | not started | [milestone](milestones/04b-bounded-pinned-neighborhood-visibility.md), [plan](plans/2026-05-30%20bounded-pinned-neighborhood-visibility.md) |
+| 04b | Bounded pinned-neighborhood visibility             | complete    | [milestone](milestones/04b-bounded-pinned-neighborhood-visibility.md), [plan](plans/2026-05-30%20bounded-pinned-neighborhood-visibility.md) |
 | 04c | JSON file import/export                            | not started | [milestones/04c-json-file-import-export.md](milestones/04c-json-file-import-export.md)                                                      |
 | 04d | Edge toggle and inline node creation               | not started | [milestones/04d-edge-toggle-and-inline-node-creation.md](milestones/04d-edge-toggle-and-inline-node-creation.md)                            |
 | 04e | Title syntax for direction and tags                | not started | [milestones/04e-title-syntax-for-direction-and-tags.md](milestones/04e-title-syntax-for-direction-and-tags.md)                              |

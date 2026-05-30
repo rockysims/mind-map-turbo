@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
 	displacementShares,
-	ghostRepulsionForce,
 	neighborDegreeByNodeId,
 	relaxEdgeDistancesStep,
-	relaxGhostRepulsionStep,
 	relaxGraphPhysics,
 	relaxHopRepulsionStep,
 	relaxOverlaps,
@@ -25,16 +23,9 @@ const HOP_REPULSION_SETTINGS = {
 	hopRepulsionMaxExtraGapRadiusFactor: 1
 };
 
-const GHOST_REPULSION_SETTINGS = {
-	layeredRelayoutGhostRepulsionStrength: 1,
-	layeredRelayoutGhostRepulsionClearanceRadiusFactor: 0.5,
-	layeredRelayoutGhostRepulsionShortRangeBoost: 2
-};
-
 const GRAPH_PHYSICS_SETTINGS = {
 	...EDGE_DISTANCE_SETTINGS,
 	...HOP_REPULSION_SETTINGS,
-	...GHOST_REPULSION_SETTINGS,
 	hopRepulsionStrength: 0
 };
 
@@ -74,39 +65,6 @@ describe('physics', () => {
 				sourceShare: 0,
 				targetShare: 1
 			});
-		});
-	});
-
-	describe('ghostRepulsionForce', () => {
-		it('returns zero beyond the preferred clearance distance', () => {
-			expect(ghostRepulsionForce(300, 200, GHOST_REPULSION_SETTINGS)).toBe(0);
-		});
-
-		it('ramps up as ghosts get closer and boosts overlapping pairs', () => {
-			const near = ghostRepulsionForce(250, 200, GHOST_REPULSION_SETTINGS);
-			const overlapping = ghostRepulsionForce(150, 200, GHOST_REPULSION_SETTINGS);
-
-			expect(near).toBeGreaterThan(0);
-			expect(overlapping).toBeGreaterThan(near);
-		});
-	});
-
-	describe('relaxGhostRepulsionStep', () => {
-		it('pushes ghost nodes away from revealed nodes while keeping anchors still', () => {
-			const positions = { revealed: { x: 0, y: 0 }, ghost: { x: 50, y: 0 } };
-			const radii = { revealed: 100, ghost: 100 };
-
-			const next = relaxGhostRepulsionStep(
-				positions,
-				radii,
-				new Set(['revealed']),
-				new Set(['ghost']),
-				GHOST_REPULSION_SETTINGS,
-				new Set(['revealed'])
-			);
-
-			expect(next.revealed).toEqual({ x: 0, y: 0 });
-			expect(next.ghost.x).toBeGreaterThan(positions.ghost.x);
 		});
 	});
 
@@ -420,7 +378,7 @@ describe('physics', () => {
 			expect(positions).toEqual({ n0: { x: 0, y: 0 }, n1: { x: 100, y: 0 } });
 		});
 
-		it('ignores excluded ghost nodes so they do not block active pairs', () => {
+		it('ignores excluded nodes so they do not block active pairs', () => {
 			const positions = {
 				n0: { x: 0, y: 0 },
 				n1: { x: 100, y: 0 },
@@ -428,34 +386,10 @@ describe('physics', () => {
 			};
 			const radii = { n0: 100, n1: 100, n2: 100 };
 
-			const next = relaxOverlapsStep(
-				positions,
-				radii,
-				new Set(),
-				new Set(['n0', 'n1']),
-				undefined,
-				new Set(['n2'])
-			);
+			const next = relaxOverlapsStep(positions, radii, new Set(), new Set(['n0', 'n1']));
 
 			expect(next.n0).toEqual({ x: -50, y: 0 });
 			expect(next.n1).toEqual({ x: 150, y: 0 });
-		});
-
-		it('separates overlapping ghost nodes even while they are unrevealed', () => {
-			const positions = { ghostA: { x: 0, y: 0 }, ghostB: { x: 100, y: 0 } };
-			const radii = { ghostA: 100, ghostB: 100 };
-
-			const next = relaxOverlapsStep(
-				positions,
-				radii,
-				new Set(),
-				new Set(['revealed']),
-				undefined,
-				new Set(['ghostA', 'ghostB'])
-			);
-
-			expect(next.ghostA).toEqual({ x: -50, y: 0 });
-			expect(next.ghostB).toEqual({ x: 150, y: 0 });
 		});
 	});
 

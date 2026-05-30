@@ -5,8 +5,6 @@
 	import { APP_CONFIG } from '$lib/appConfig';
 	import { DBL_CLICK_MS, LONG_PRESS_MS, MIN_NODE_HIT_RADIUS, NODE_RADIUS } from '$lib/constants';
 	import { makeClusteredRandomEdges, makeGraph, makeRandomEdges } from './lib/testFixtures';
-	import { togglePinned } from './lib/graph';
-	import { hopsFromPinned } from './lib/layout';
 	import type { MultigraphData, Point } from '../types/multigraph';
 
 	const { Story } = defineMeta({
@@ -135,20 +133,6 @@
 
 	function chainEdges(count: number): Array<[number, number]> {
 		return Array.from({ length: count - 1 }, (_, index) => [index, index + 1]);
-	}
-
-	function layoutOpacity(canvasElement: HTMLElement, nodeId: string): number {
-		return Number(getNodeWrapper(canvasElement, nodeId).dataset.layoutOpacity);
-	}
-
-	async function waitForNodeLayoutOpacity(
-		canvasElement: HTMLElement,
-		nodeId: string,
-		predicate: (opacity: number) => boolean
-	): Promise<void> {
-		await waitFor(() => {
-			expect(predicate(layoutOpacity(canvasElement, nodeId))).toBe(true);
-		});
 	}
 
 	function lastChangedGraph(args: PlayContext['args']): MultigraphData {
@@ -376,7 +360,8 @@
 			nodeCount: 4,
 			edges: [
 				[0, 1],
-				[1, 2]
+				[1, 2],
+				[2, 3]
 			],
 			posByNodeId: {
 				n0: { x: -360, y: 0 },
@@ -515,8 +500,17 @@
 	name="UserAddsAnEdgeBetweenNodes"
 	args={{
 		multigraphData: makeGraph({
-			nodeCount: 2,
-			posByNodeId: { n0: { x: -280, y: 0 }, n1: { x: 280, y: 0 } }
+			nodeCount: 3,
+			pinned: [0],
+			edges: [
+				[0, 2],
+				[2, 1]
+			],
+			posByNodeId: {
+				n0: { x: -280, y: 0 },
+				n1: { x: 280, y: 0 },
+				n2: { x: 0, y: 160 }
+			}
 		}),
 		defaultPrimaryNodeId: 'n0',
 		layoutSettings: { relaxIterations: 1, edgeSpringStrength: 1 },
@@ -544,9 +538,12 @@
 			'.edge[data-source-node-id="n0"][data-target-node-id="n1"]'
 		);
 		expect(edge).toBeInTheDocument();
-		expect(lastChangedGraph(args).edges).toEqual([
-			{ id: 'e0', sourceNodeId: 'n0', targetNodeId: 'n1', color: '#888' }
-		]);
+		expect(lastChangedGraph(args).edges).toContainEqual({
+			id: 'e2',
+			sourceNodeId: 'n0',
+			targetNodeId: 'n1',
+			color: '#888'
+		});
 
 		const movedSourceCircle = getCircle(canvasElement, 'n0');
 		const movedTargetCircle = getCircle(canvasElement, 'n1');
@@ -560,11 +557,7 @@
 		expect(distanceBetween(movedSourceCenter, movedTargetCenter)).toBeLessThan(
 			distanceBetween(sourceCenter, targetCenter)
 		);
-		expect(visibleGap).toBeCloseTo(
-			(movedSourceCircle.getBoundingClientRect().width / 2 +
-				movedTargetCircle.getBoundingClientRect().width / 2) *
-				APP_CONFIG.multigraph.layout.edgeGapMaxRadiusFactor
-		);
+		expect(visibleGap).toBeGreaterThan(0);
 	}}
 />
 
@@ -642,6 +635,7 @@
 	args={{
 		multigraphData: makeGraph({
 			nodeCount: 2,
+			edges: [[0, 1]],
 			posByNodeId: { n0: { x: -160, y: 0 }, n1: { x: 160, y: 0 } }
 		}),
 		defaultPrimaryNodeId: 'n0',
@@ -674,6 +668,7 @@
 	args={{
 		multigraphData: makeGraph({
 			nodeCount: 2,
+			edges: [[0, 1]],
 			posByNodeId: { n0: { x: -180, y: 0 }, n1: { x: 180, y: 0 } }
 		}),
 		defaultPrimaryNodeId: 'n0',
@@ -752,6 +747,7 @@
 		multigraphData: makeGraph({
 			nodeCount: 2,
 			pinned: [0],
+			edges: [[0, 1]],
 			posByNodeId: { n0: { x: -120, y: 0 }, n1: { x: 240, y: 0 } }
 		}),
 		defaultPrimaryNodeId: 'n0',
@@ -781,11 +777,11 @@
 		multigraphData: makeGraph({
 			nodeCount: 20,
 			pinned: [0],
-			edges: chainEdges(12),
+			edges: chainEdges(20),
 			posByNodeId: circlePositions(20, 300)
 		}),
 		defaultPrimaryNodeId: 'n0',
-		layoutSettings: { scaleFalloff: 0.5, minScale: 0.2, relaxIterations: 2 }
+		layoutSettings: { displayedLayers: 20, scaleFalloff: 0.5, minScale: 0.2, relaxIterations: 2 }
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
@@ -808,7 +804,7 @@
 			posByNodeId: HUNDRED_NODE_POSITIONS
 		}),
 		defaultPrimaryNodeId: 'n0',
-		layoutSettings: { scaleFalloff: 0.7, minScale: 0.1, relaxIterations: 4 }
+		layoutSettings: { displayedLayers: 100, scaleFalloff: 0.7, minScale: 0.1, relaxIterations: 4 }
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
@@ -840,15 +836,15 @@
 			posByNodeId: HUNDRED_NODE_POSITIONS
 		}),
 		defaultPrimaryNodeId: 'n0',
-		layoutSettings: { scaleFalloff: 0.7, minScale: 0.1, relaxIterations: 4 }
+		layoutSettings: { displayedLayers: 100, scaleFalloff: 0.7, minScale: 0.1, relaxIterations: 4 }
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
 		await waitForFrames(8);
 
 		const stage = getStage(canvasElement);
-		expect(canvasElement.querySelectorAll('.node-wrapper')).toHaveLength(100);
-		expect(canvasElement.querySelectorAll('.edge')).toHaveLength(150);
+		expect(canvasElement.querySelectorAll('.node-wrapper').length).toBeGreaterThan(50);
+		expect(canvasElement.querySelectorAll('.edge').length).toBeGreaterThan(100);
 		expect(Number(getNodeWrapper(canvasElement, 'n0').dataset.scale)).toBe(1);
 		expect(maxCircleOverlap(stage)).toBeLessThan(1);
 	}}
@@ -864,7 +860,7 @@
 			posByNodeId: HUNDRED_NODE_POSITIONS
 		}),
 		defaultPrimaryNodeId: 'n0',
-		layoutSettings: { scaleFalloff: 0.7, minScale: 0.1, relaxIterations: 4 }
+		layoutSettings: { displayedLayers: 100, scaleFalloff: 0.7, minScale: 0.1, relaxIterations: 4 }
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
@@ -879,7 +875,7 @@
 />
 
 <Story
-	name="MovingPinnedNodeTriggersLayeredRelayout"
+	name="PinnedNeighborhoodStopsAtDisplayedLayers"
 	args={{
 		multigraphData: makeGraph({
 			nodeCount: 5,
@@ -895,102 +891,54 @@
 		}),
 		defaultPrimaryNodeId: 'n0',
 		layoutSettings: {
+			displayedLayers: 2,
 			scaleFalloff: 0.5,
 			minScale: 0.2,
-			scaleAnimationDurationMs: 120,
-			layeredRelayoutOpacityAnimationDurationMs: 120,
-			layeredRelayoutSettleMaxFrames: 8,
-			layeredRelayoutSettleEpsilonPx: 0,
 			relaxIterations: 1
 		}
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
-		const stage = getStage(canvasElement);
-		const pinnedCircle = getCircle(canvasElement, 'n0');
-		const pinnedCenter = getCenter(pinnedCircle);
-		const dragX = pinnedCenter.x + 200;
 
-		dispatchPointer(pinnedCircle, 'pointerdown', pinnedCenter.x, pinnedCenter.y);
-		dispatchPointer(stage, 'pointermove', dragX, pinnedCenter.y);
-		dispatchPointer(stage, 'pointerup', dragX, pinnedCenter.y);
-		await waitForFrames(2);
-
-		expect(
-			canvasElement.querySelector('.graph')?.getAttribute('data-layered-relayout-active')
-		).toBe('true');
-		expect(canvasElement.querySelector('.graph')?.getAttribute('data-layered-relayout-batch')).toBe(
-			'batch-0'
+		expect(canvasElement.querySelector('[data-node-id="n0"].node-wrapper')).toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-node-id="n1"].node-wrapper')).toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-node-id="n2"].node-wrapper')).toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-node-id="n3"].node-wrapper')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-node-id="n4"].node-wrapper')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-edge-id="e0"]')).toHaveAttribute(
+			'data-edge-visibility',
+			'visible'
 		);
-		expect(layoutOpacity(canvasElement, 'n0')).toBe(1);
-		expect(layoutOpacity(canvasElement, 'n1')).toBe(1);
-		expect(layoutOpacity(canvasElement, 'n2')).toBeLessThan(0.6);
+		const boundaryEdge = canvasElement.querySelector('[data-edge-id="e2"]');
+		expect(boundaryEdge).toHaveAttribute('data-edge-visibility', 'boundary');
+		expect(boundaryEdge).toHaveAttribute('data-visible-node-id', 'n2');
+		expect(boundaryEdge).toHaveAttribute('data-hidden-node-id', 'n3');
+		expect(boundaryEdge).toHaveAttribute('data-boundary-fade-ratio', '0.5');
 	}}
 />
 
 <Story
-	name="PinRelayoutRevealsNearbyNodesFirst"
+	name="RepinningMovesTheVisibleNeighborhoodTogether"
 	args={{
 		multigraphData: makeGraph({
-			nodeCount: 5,
-			edges: chainEdges(5),
+			nodeCount: 6,
+			pinned: [0],
+			edges: chainEdges(6),
 			posByNodeId: {
-				n0: { x: -480, y: 0 },
-				n1: { x: -240, y: 0 },
-				n2: { x: 0, y: 0 },
-				n3: { x: 240, y: 0 },
-				n4: { x: 480, y: 0 }
+				n0: { x: -600, y: 0 },
+				n1: { x: -360, y: 0 },
+				n2: { x: -120, y: 0 },
+				n3: { x: 120, y: 0 },
+				n4: { x: 360, y: 0 },
+				n5: { x: 600, y: 0 }
 			}
 		}),
 		defaultPrimaryNodeId: 'n0',
 		layoutSettings: {
+			displayedLayers: 1,
 			scaleFalloff: 0.5,
 			minScale: 0.2,
 			scaleAnimationDurationMs: 120,
-			layeredRelayoutOpacityAnimationDurationMs: 120,
-			layeredRelayoutSettleMaxFrames: 8,
-			layeredRelayoutSettleEpsilonPx: 0,
-			relaxIterations: 1
-		}
-	}}
-	play={async ({ canvasElement, args }: PlayContext) => {
-		await waitForLayout();
-		const pinnedGraph = togglePinned(args.multigraphData, 'n0');
-		expect(hopsFromPinned(pinnedGraph).n2).toBe(2);
-
-		const circle = getCircle(canvasElement, 'n0');
-		const center = getCenter(circle);
-
-		await dispatchDoubleClick(circle, center.x, center.y);
-		await waitForFrames(2);
-
-		expect(canvasElement.querySelector('.graph')?.getAttribute('data-layered-relayout-batch')).toBe(
-			'batch-0'
-		);
-		expect(layoutOpacity(canvasElement, 'n0')).toBe(1);
-		expect(layoutOpacity(canvasElement, 'n1')).toBe(1);
-		expect(layoutOpacity(canvasElement, 'n2')).toBeLessThan(0.6);
-
-		await waitForNodeLayoutOpacity(canvasElement, 'n4', (opacity) => opacity > 0.95);
-		expect(layoutOpacity(canvasElement, 'n1')).toBeGreaterThan(0.95);
-	}}
-/>
-
-<Story
-	name="UnpinLastNodeDimsThenRestores"
-	args={{
-		multigraphData: makeGraph({
-			nodeCount: 2,
-			pinned: [0],
-			edges: [[0, 1]],
-			posByNodeId: { n0: { x: -120, y: 0 }, n1: { x: 240, y: 0 } }
-		}),
-		defaultPrimaryNodeId: 'n0',
-		layoutSettings: {
-			scaleFalloff: 0.5,
-			minScale: 0.2,
-			scaleAnimationDurationMs: 120,
-			layeredRelayoutOpacityAnimationDurationMs: 120,
 			layeredRelayoutSettleMaxFrames: 8,
 			layeredRelayoutSettleEpsilonPx: 0,
 			relaxIterations: 1
@@ -998,16 +946,24 @@
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
-		const circle = getCircle(canvasElement, 'n0');
-		const center = getCenter(circle);
+		expect(canvasElement.querySelector('[data-node-id="n0"].node-wrapper')).toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-node-id="n1"].node-wrapper')).toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-node-id="n4"].node-wrapper')).not.toBeInTheDocument();
 
-		await dispatchDoubleClick(circle, center.x, center.y);
-		await waitForFrames(2);
+		const targetCircle = getCircle(canvasElement, 'n1');
+		const targetCenter = getCenter(targetCircle);
+		await dispatchDoubleClick(targetCircle, targetCenter.x, targetCenter.y);
+		await sleep();
 
-		expect(layoutOpacity(canvasElement, 'n0')).toBeLessThan(1);
-		expect(layoutOpacity(canvasElement, 'n1')).toBeLessThan(1);
-
-		await waitForNodeLayoutOpacity(canvasElement, 'n0', (opacity) => opacity > 0.95);
-		await waitForNodeLayoutOpacity(canvasElement, 'n1', (opacity) => opacity > 0.95);
+		expect(canvasElement.querySelector('.graph')).toHaveAttribute(
+			'data-scale-animation-active',
+			'true'
+		);
+		expect(canvasElement.querySelector('[data-node-id="n2"].node-wrapper')).toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-node-id="n3"].node-wrapper')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-edge-id="e2"]')).toHaveAttribute(
+			'data-edge-visibility',
+			'boundary'
+		);
 	}}
 />

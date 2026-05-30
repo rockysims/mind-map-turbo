@@ -22,6 +22,7 @@ export const APP_CONFIG = {
 		},
 		layout: {
 			baseRadius: NODE_RADIUS_PX,
+			displayedLayers: 10,
 			scaleFalloff: 0.7,
 			minScale: 0.1,
 			relaxIterations: 2,
@@ -36,16 +37,11 @@ export const APP_CONFIG = {
 			postDragSettleMaxFrames: 90,
 			postScaleChangeSettleMaxFrames: 24,
 			scaleAnimationDurationMs: 500,
-			layeredRelayoutDimOpacity: 0.5,
-			layeredRelayoutOpacityAnimationDurationMs: 500,
 			layeredRelayoutSettleMaxFrames: 14,
 			layeredRelayoutSettleMaxFramesFinal: 140,
 			layeredRelayoutSettleEpsilonPx: 0.25,
 			layeredRelayoutMobilityStep: 0.2,
-			layeredRelayoutMobilityFloor: 0.05,
-			layeredRelayoutGhostRepulsionStrength: 1,
-			layeredRelayoutGhostRepulsionClearanceRadiusFactor: 0.5,
-			layeredRelayoutGhostRepulsionShortRangeBoost: 2
+			layeredRelayoutMobilityFloor: 0.05
 		}
 	}
 } as const;

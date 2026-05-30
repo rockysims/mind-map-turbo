@@ -25,25 +25,19 @@
 	import type { LayoutSettings } from './lib/layoutSettings.js';
 	import { withDefaultLayoutSettings } from './lib/layoutSettings.js';
 	import {
+		edgeVisibilityForPinnedNeighborhood,
+		visibleNodeIdsForPinnedNeighborhood,
+		type EdgeVisibility
+	} from './lib/boundedVisibility.js';
+	import {
 		advanceLayeredRelayout,
-		bulkUnpinRelayoutState,
-		ghostNodeIds,
 		initialLayeredRelayoutState,
 		participatingNodeIds,
 		type LayeredRelayoutState,
-		relayoutBatchKey,
+		relayoutStateKey,
 		relayoutMobilityByNodeId,
-		shouldClearLayeredRelayoutState,
-		shouldUseLayeredRelayout,
-		targetLayoutOpacityByNodeId
+		shouldClearLayeredRelayoutState
 	} from './lib/layeredRelayout.js';
-	import {
-		createLayoutOpacityAnimations,
-		hasActiveLayoutOpacityAnimations,
-		interpolateOpacity,
-		pruneFinishedLayoutOpacityAnimations,
-		type NodeLayoutOpacityAnimation
-	} from './lib/layoutOpacityAnimation.js';
 	import {
 		animatedScalesAt,
 		createScaleAnimations,
@@ -61,6 +55,7 @@
 	import { MIN_NODE_HIT_RADIUS } from '$lib/constants.js';
 
 	const CENTERED_POSITION: Point = { x: 0, y: 0 };
+	type RenderableEdgeVisibility = Exclude<EdgeVisibility, { kind: 'hidden' }>;
 
 	let {
 		multigraphData = { nodes: [], edges: [], posByNodeId: {} },
@@ -89,12 +84,31 @@
 	let pendingPostScaleSettle = $state(false);
 	let scaleChangeFocalNodeId = $state<string | null>(null);
 	let layeredRelayoutState = $state<LayeredRelayoutState | null>(null);
-	let layoutOpacityAnimations = $state<Record<string, NodeLayoutOpacityAnimation>>({});
-	let lastRelayoutBatchKey = $state<string | null>(null);
+	let lastRelayoutStateKey = $state<string | null>(null);
+	let lastPinnedNodeId = $state<string | null>(null);
 	let lastSyncedGeneration = $state(-1);
 
 	const resolvedLayoutSettings = $derived(withDefaultLayoutSettings(layoutSettings));
 	const animatedScaleByNodeId = $derived(animatedScalesAt(scaleAnimations, animationNowMs));
+	const hopsByNodeId = $derived(hopsFromPinned(graph));
+	const visibleNodeIds = $derived(
+		visibleNodeIdsForPinnedNeighborhood(graph, hopsByNodeId, {
+			displayedLayers: resolvedLayoutSettings.displayedLayers,
+			fallbackAnchorNodeId: lastPinnedNodeId
+		})
+	);
+	const visibleGraph = $derived(graphWithVisibleNodes(graph, visibleNodeIds));
+	const edgeVisibility = $derived(
+		edgeVisibilityForPinnedNeighborhood(graph, hopsByNodeId, {
+			displayedLayers: resolvedLayoutSettings.displayedLayers,
+			fallbackAnchorNodeId: lastPinnedNodeId
+		})
+	);
+	const renderableEdgeVisibility = $derived(
+		edgeVisibility.filter(
+			(visibility): visibility is RenderableEdgeVisibility => visibility.kind !== 'hidden'
+		)
+	);
 	const scaleChangeSettleState = $derived({
 		pendingPostScaleSettle,
 		settleFramesRemaining,
@@ -104,14 +118,8 @@
 		scaleChangeLayoutAnchoredNodeIds(scaleChangeFocalNodeId, scaleChangeSettleState)
 	);
 	const graphLayout = $derived(
-		deriveGraphLayout(graph, graphLayoutOptions({ relaxIterations: 0 }))
+		deriveGraphLayout(visibleGraph, graphLayoutOptions(visibleGraph, { relaxIterations: 0 }))
 	);
-	const layoutOpacityByNodeId = $derived.by(() => {
-		const nowMs = animationNowMs;
-		return Object.fromEntries(
-			graph.nodes.map((node) => [node.id, layoutOpacityForNode(node.id, nowMs)])
-		);
-	});
 	const editNode = $derived(graph.nodes.find((node) => node.id === editNodeId) ?? null);
 	const actionMenuNode = $derived.by(() => {
 		const menu = actionMenu;
@@ -133,10 +141,26 @@
 		pendingPostScaleSettle = false;
 		scaleChangeFocalNodeId = null;
 		layeredRelayoutState = null;
-		layoutOpacityAnimations = {};
-		lastRelayoutBatchKey = null;
+		lastRelayoutStateKey = null;
 		graph = withSettledGraphPositions(incoming, { settings });
 		primaryNodeId = primary;
+		lastPinnedNodeId =
+			incoming.nodes.find((node) => node.pinned)?.id ??
+			incoming.nodes.find((node) => node.id === primary)?.id ??
+			null;
+	});
+
+	$effect(() => {
+		const nodeIds = graph.nodes.map((node) => node.id);
+		const pinnedIds = graph.nodes.filter((node) => node.pinned).map((node) => node.id);
+		if (pinnedIds.length > 0) {
+			if (!lastPinnedNodeId || !pinnedIds.includes(lastPinnedNodeId)) {
+				lastPinnedNodeId = pinnedIds[0];
+			}
+			return;
+		}
+		if (lastPinnedNodeId && nodeIds.includes(lastPinnedNodeId)) return;
+		lastPinnedNodeId = nodeIds[Math.floor(Math.random() * nodeIds.length)] ?? null;
 	});
 
 	$effect(() => {
@@ -203,6 +227,7 @@
 	function handleNodeMakePrimary(node: NodeData) {
 		closeOverlays();
 		const wasPinned = node.pinned === true;
+		lastPinnedNodeId = node.id;
 		commitUserGraph(withScaleAnimation(togglePinned(graph, node.id), node.id));
 
 		if (!wasPinned) {
@@ -250,11 +275,15 @@
 	}
 
 	function toggleNodePinned(nodeId: string) {
+		lastPinnedNodeId = nodeId;
 		commitUserGraph(withScaleAnimation(togglePinned(graph, nodeId), nodeId));
 	}
 
 	function deleteNode(nodeId: string) {
 		commitUserGraph(withRelaxedPositions(removeNode(graph, nodeId)));
+		if (lastPinnedNodeId === nodeId) {
+			lastPinnedNodeId = graph.nodes.find((candidate) => candidate.id !== nodeId)?.id ?? null;
+		}
 		if (primaryNodeId === nodeId) {
 			primaryNodeId =
 				graph.nodes.find((candidate) => candidate.pinned)?.id ??
@@ -276,6 +305,7 @@
 	}
 
 	function graphLayoutOptions(
+		layoutGraph: MultigraphData,
 		overrides: {
 			activeDragNodeId?: string | null;
 			relaxIterations?: number;
@@ -283,22 +313,16 @@
 			scaleAnchoredNodeIds?: readonly string[];
 			participatingNodeIds?: ReadonlySet<string>;
 			mobilityByNodeId?: Record<string, number>;
-			ghostNodeIds?: ReadonlySet<string>;
 		} = {}
 	) {
-		const hopsByNodeId = hopsFromPinned(graph);
-		const nodeIds = graph.nodes.map((node) => node.id);
+		const nodeIds = layoutGraph.nodes.map((node) => node.id);
 		const relayoutParticipating =
-			overrides.participatingNodeIds ??
-			participatingNodeIds(hopsByNodeId, nodeIds, layeredRelayoutState);
-		const relayoutGhosts =
-			overrides.ghostNodeIds ?? ghostNodeIds(hopsByNodeId, nodeIds, layeredRelayoutState);
+			overrides.participatingNodeIds ?? participatingNodeIds(nodeIds, layeredRelayoutState);
 		const relayoutMobility =
 			overrides.mobilityByNodeId ??
 			relayoutMobilityByNodeId(
 				nodeIds,
-				hopsByNodeId,
-				pinnedNodeIds(),
+				pinnedNodeIds(layoutGraph),
 				layeredRelayoutState,
 				resolvedLayoutSettings
 			);
@@ -310,8 +334,7 @@
 			relaxIterations: overrides.relaxIterations,
 			scaleByNodeId: overrides.scaleByNodeId ?? animatedScaleByNodeId,
 			participatingNodeIds: relayoutParticipating,
-			mobilityByNodeId: relayoutMobility,
-			ghostNodeIds: relayoutGhosts
+			mobilityByNodeId: relayoutMobility
 		};
 	}
 
@@ -319,113 +342,27 @@
 		return new Set(data.nodes.filter((node) => node.pinned).map((node) => node.id));
 	}
 
-	function layoutOpacityForNode(nodeId: string, nowMs: number): number {
-		if (pinnedNodeIds().has(nodeId)) return 1;
-
-		const animation = layoutOpacityAnimations[nodeId];
-		if (animation) return interpolateOpacity(animation, nowMs);
-
-		if (layeredRelayoutState?.active) {
-			const targets = targetLayoutOpacityByNodeId(
-				graph.nodes.map((node) => node.id),
-				hopsFromPinned(graph),
-				pinnedNodeIds(),
-				layeredRelayoutState,
-				resolvedLayoutSettings.layeredRelayoutDimOpacity
-			);
-			return targets[nodeId] ?? 1;
-		}
-
-		return 1;
+	function graphWithVisibleNodes(
+		data: MultigraphData,
+		nodeIds: ReadonlySet<string>
+	): MultigraphData {
+		return {
+			...data,
+			nodes: data.nodes.filter((node) => nodeIds.has(node.id)),
+			edges: data.edges.filter(
+				(edge) => nodeIds.has(edge.sourceNodeId) && nodeIds.has(edge.targetNodeId)
+			)
+		};
 	}
 
 	function startLayeredRelayout(nextGraph: MultigraphData, nowMs: number): void {
-		const hopsByNodeId = hopsFromPinned(nextGraph);
 		const pinnedIds = pinnedNodeIds(nextGraph);
-		const nodeIds = nextGraph.nodes.map((node) => node.id);
-		const settleMaxFrames = resolvedLayoutSettings.layeredRelayoutSettleMaxFrames;
-		const settleMaxFramesFinal = resolvedLayoutSettings.layeredRelayoutSettleMaxFramesFinal;
-
-		layeredRelayoutState = shouldUseLayeredRelayout(pinnedIds.size > 0)
-			? initialLayeredRelayoutState(hopsByNodeId, pinnedIds, settleMaxFrames, settleMaxFramesFinal)
-			: bulkUnpinRelayoutState(settleMaxFrames);
-		lastRelayoutBatchKey = relayoutBatchKey(layeredRelayoutState);
-
-		const opacityTargets = targetLayoutOpacityByNodeId(
-			nodeIds,
-			hopsByNodeId,
+		layeredRelayoutState = initialLayeredRelayoutState(
 			pinnedIds,
-			layeredRelayoutState,
-			resolvedLayoutSettings.layeredRelayoutDimOpacity
+			resolvedLayoutSettings.layeredRelayoutSettleMaxFrames
 		);
-
-		if (layeredRelayoutState.mode === 'bulk-unpin') {
-			const fromOpacities = Object.fromEntries(nodeIds.map((nodeId) => [nodeId, 1]));
-			layoutOpacityAnimations =
-				resolvedLayoutSettings.layeredRelayoutOpacityAnimationDurationMs > 0
-					? createLayoutOpacityAnimations(
-							fromOpacities,
-							opacityTargets,
-							nowMs,
-							resolvedLayoutSettings.layeredRelayoutOpacityAnimationDurationMs
-						)
-					: {};
-			return;
-		}
-
-		layoutOpacityAnimations = {};
-	}
-
-	function syncLayoutOpacityAnimations(nowMs: number): void {
-		if (!layeredRelayoutState) return;
-
-		const hopsByNodeId = hopsFromPinned(graph);
-		const pinnedIds = pinnedNodeIds();
-		const nodeIds = graph.nodes.map((node) => node.id);
-		const currentOpacities = Object.fromEntries(
-			nodeIds.map((nodeId) => [nodeId, layoutOpacityForNode(nodeId, nowMs)])
-		);
-		const opacityTargets = targetLayoutOpacityByNodeId(
-			nodeIds,
-			hopsByNodeId,
-			pinnedIds,
-			layeredRelayoutState,
-			resolvedLayoutSettings.layeredRelayoutDimOpacity
-		);
-		const revealTargets = Object.fromEntries(
-			Object.entries(opacityTargets).filter(
-				([nodeId, targetOpacity]) =>
-					targetOpacity > currentOpacities[nodeId] + 0.001 && !pinnedIds.has(nodeId)
-			)
-		);
-
-		layoutOpacityAnimations = {
-			...pruneFinishedLayoutOpacityAnimations(layoutOpacityAnimations, nowMs),
-			...(Object.keys(revealTargets).length > 0
-				? createLayoutOpacityAnimations(
-						currentOpacities,
-						revealTargets,
-						nowMs,
-						resolvedLayoutSettings.layeredRelayoutOpacityAnimationDurationMs
-					)
-				: {})
-		};
-
-		if (
-			layeredRelayoutState.mode === 'bulk-unpin' &&
-			layeredRelayoutState.restoreOpacity &&
-			Object.keys(revealTargets).length === 0
-		) {
-			layoutOpacityAnimations = {
-				...layoutOpacityAnimations,
-				...createLayoutOpacityAnimations(
-					currentOpacities,
-					opacityTargets,
-					nowMs,
-					resolvedLayoutSettings.layeredRelayoutOpacityAnimationDurationMs
-				)
-			};
-		}
+		lastRelayoutStateKey = relayoutStateKey(layeredRelayoutState);
+		animationNowMs = nowMs;
 	}
 
 	function edgeStyle(sourcePos: Point, targetPos: Point): string {
@@ -437,24 +374,82 @@
 		return `left: calc(50% + ${sourcePos.x}px); top: calc(50% + ${sourcePos.y}px); width: ${length}px; transform: translateY(-50%) rotate(${angle}rad);`;
 	}
 
+	function edgeRenderPoints(visibility: RenderableEdgeVisibility): {
+		source: Point;
+		target: Point;
+	} {
+		if (visibility.kind === 'visible') {
+			return {
+				source: graphLayout.posByNodeId[visibility.edge.sourceNodeId] ?? CENTERED_POSITION,
+				target: graphLayout.posByNodeId[visibility.edge.targetNodeId] ?? CENTERED_POSITION
+			};
+		}
+
+		const visiblePos = graphLayout.posByNodeId[visibility.visibleNodeId] ?? CENTERED_POSITION;
+		const hiddenPos = graph.posByNodeId[visibility.hiddenNodeId] ?? visiblePos;
+		return {
+			source: visiblePos,
+			target: {
+				x: visiblePos.x + (hiddenPos.x - visiblePos.x) * visibility.fadeRatio,
+				y: visiblePos.y + (hiddenPos.y - visiblePos.y) * visibility.fadeRatio
+			}
+		};
+	}
+
+	function edgeBackground(visibility: RenderableEdgeVisibility): string {
+		if (visibility.kind === 'visible') return visibility.edge.color;
+		return `linear-gradient(to right, ${visibility.edge.color}, transparent)`;
+	}
+
 	function withRelaxedPositions(
 		nextGraph: MultigraphData,
 		dragNodeId: string | null = activeDragNodeId,
 		relaxIterations = layoutSettings.relaxIterations
 	): MultigraphData {
-		return withRelaxedGraphPositions(
+		const nextVisibleNodeIds = visibleNodeIdsForPinnedNeighborhood(
 			nextGraph,
-			graphLayoutOptions({
+			hopsFromPinned(nextGraph),
+			{
+				displayedLayers: resolvedLayoutSettings.displayedLayers,
+				fallbackAnchorNodeId: lastPinnedNodeId
+			}
+		);
+		const nextVisibleGraph = graphWithVisibleNodes(nextGraph, nextVisibleNodeIds);
+		const relaxedVisibleGraph = withRelaxedGraphPositions(
+			nextVisibleGraph,
+			graphLayoutOptions(nextVisibleGraph, {
 				activeDragNodeId: dragNodeId,
 				relaxIterations
 			})
 		);
+		return {
+			...nextGraph,
+			posByNodeId: {
+				...nextGraph.posByNodeId,
+				...relaxedVisibleGraph.posByNodeId
+			}
+		};
 	}
 
 	function withScaleAnimation(nextGraph: MultigraphData, focalNodeId: string): MultigraphData {
 		scaleChangeFocalNodeId = focalNodeId;
-		const fromLayout = deriveGraphLayout(graph, graphLayoutOptions({ relaxIterations: 0 }));
-		const targetLayout = deriveGraphLayout(nextGraph, graphLayoutOptions({ relaxIterations: 0 }));
+		const nextVisibleNodeIds = visibleNodeIdsForPinnedNeighborhood(
+			nextGraph,
+			hopsFromPinned(nextGraph),
+			{
+				displayedLayers: resolvedLayoutSettings.displayedLayers,
+				fallbackAnchorNodeId: lastPinnedNodeId
+			}
+		);
+		const nextVisibleGraph = graphWithVisibleNodes(nextGraph, nextVisibleNodeIds);
+		const fromLayout = deriveGraphLayout(
+			visibleGraph,
+			graphLayoutOptions(visibleGraph, { relaxIterations: 0 })
+		);
+		const targetLayout = deriveGraphLayout(
+			nextVisibleGraph,
+			graphLayoutOptions(nextVisibleGraph, { relaxIterations: 0 })
+		);
 		const nowMs = performance.now();
 		const nextAnimations =
 			resolvedLayoutSettings.scaleAnimationDurationMs > 0
@@ -484,14 +479,21 @@
 			startRelaxationLoop();
 		}
 
-		return withRelaxedGraphPositions(
-			nextGraph,
-			graphLayoutOptions({
+		const relaxedVisibleGraph = withRelaxedGraphPositions(
+			nextVisibleGraph,
+			graphLayoutOptions(nextVisibleGraph, {
 				relaxIterations: layoutSettings.relaxIterations,
 				scaleByNodeId: animatedScalesAt(nextAnimations, nowMs),
 				scaleAnchoredNodeIds: [focalNodeId]
 			})
 		);
+		return {
+			...nextGraph,
+			posByNodeId: {
+				...nextGraph.posByNodeId,
+				...relaxedVisibleGraph.posByNodeId
+			}
+		};
 	}
 
 	function startRelaxationLoop() {
@@ -517,14 +519,21 @@
 			layeredRelayoutState?.active === true;
 
 		if (shouldRelax) {
+			const currentVisibleGraph = visibleGraph;
 			const step = relaxGraphPositionsStep(
-				graph,
-				graphLayoutOptions({
+				currentVisibleGraph,
+				graphLayoutOptions(currentVisibleGraph, {
 					relaxIterations: 1,
 					scaleByNodeId: nextScaleByNodeId
 				})
 			);
-			graph = step.data;
+			graph = {
+				...graph,
+				posByNodeId: {
+					...graph.posByNodeId,
+					...step.data.posByNodeId
+				}
+			};
 
 			if (activeDragNodeId === null && settleFramesRemaining > 0) {
 				settleFramesRemaining -= 1;
@@ -534,23 +543,19 @@
 			}
 
 			if (activeDragNodeId === null && layeredRelayoutState?.active) {
-				const previousBatchKey = lastRelayoutBatchKey;
+				const previousStateKey = lastRelayoutStateKey;
 				layeredRelayoutState = advanceLayeredRelayout(layeredRelayoutState, {
 					maxPositionDelta: step.maxPositionDelta,
-					settleEpsilonPx: resolvedLayoutSettings.layeredRelayoutSettleEpsilonPx,
-					settleMaxFrames: resolvedLayoutSettings.layeredRelayoutSettleMaxFrames,
-					settleMaxFramesFinal: resolvedLayoutSettings.layeredRelayoutSettleMaxFramesFinal
+					settleEpsilonPx: resolvedLayoutSettings.layeredRelayoutSettleEpsilonPx
 				});
-				const nextBatchKey = relayoutBatchKey(layeredRelayoutState);
-				if (nextBatchKey !== previousBatchKey) {
-					lastRelayoutBatchKey = nextBatchKey;
-					syncLayoutOpacityAnimations(nowMs);
+				const nextStateKey = relayoutStateKey(layeredRelayoutState);
+				if (nextStateKey !== previousStateKey) {
+					lastRelayoutStateKey = nextStateKey;
 				}
 			}
 		}
 
 		scaleAnimations = pruneFinishedScaleAnimations(scaleAnimations, nowMs);
-		layoutOpacityAnimations = pruneFinishedLayoutOpacityAnimations(layoutOpacityAnimations, nowMs);
 
 		const postScaleSettle = settleStateAfterScaleAnimationsEnd(
 			pendingPostScaleSettle,
@@ -571,21 +576,15 @@
 			scaleChangeFocalNodeId = null;
 		}
 
-		if (
-			shouldClearLayeredRelayoutState(
-				layeredRelayoutState,
-				hasActiveLayoutOpacityAnimations(layoutOpacityAnimations, nowMs)
-			)
-		) {
+		if (shouldClearLayeredRelayoutState(layeredRelayoutState)) {
 			layeredRelayoutState = null;
-			lastRelayoutBatchKey = null;
+			lastRelayoutStateKey = null;
 		}
 
 		if (
 			activeDragNodeId !== null ||
 			settleFramesRemaining > 0 ||
 			hasActiveScaleAnimations(scaleAnimations, nowMs) ||
-			hasActiveLayoutOpacityAnimations(layoutOpacityAnimations, nowMs) ||
 			layeredRelayoutState?.active
 		) {
 			startRelaxationLoop();
@@ -602,7 +601,7 @@
 		? 'true'
 		: undefined}
 	data-layered-relayout-active={layeredRelayoutState?.active ? 'true' : undefined}
-	data-layered-relayout-batch={lastRelayoutBatchKey ?? undefined}
+	data-layered-relayout-state={lastRelayoutStateKey ?? undefined}
 >
 	<Stage
 		{getNodeAt}
@@ -615,36 +614,38 @@
 		onNodeLongPress={handleNodeLongPress}
 	>
 		<div class="edges" aria-hidden="true">
-			{#each graph.edges as edge (edge.id)}
-				{@const sourcePos = graphLayout.posByNodeId[edge.sourceNodeId] ?? CENTERED_POSITION}
-				{@const targetPos = graphLayout.posByNodeId[edge.targetNodeId] ?? CENTERED_POSITION}
-				{@const edgeOpacity = Math.min(
-					layoutOpacityByNodeId[edge.sourceNodeId] ?? 1,
-					layoutOpacityByNodeId[edge.targetNodeId] ?? 1
-				)}
+			{#each renderableEdgeVisibility as visibility (visibility.edge.id)}
+				{@const edge = visibility.edge}
+				{@const edgePoints = edgeRenderPoints(visibility)}
 				<div
 					class="edge"
 					data-edge-id={edge.id}
 					data-source-node-id={edge.sourceNodeId}
 					data-target-node-id={edge.targetNodeId}
-					style={`${edgeStyle(sourcePos, targetPos)} background-color: ${edge.color}; opacity: ${edgeOpacity};`}
+					data-edge-visibility={visibility.kind}
+					data-visible-node-id={visibility.kind === 'boundary'
+						? visibility.visibleNodeId
+						: undefined}
+					data-hidden-node-id={visibility.kind === 'boundary' ? visibility.hiddenNodeId : undefined}
+					data-boundary-fade-ratio={visibility.kind === 'boundary'
+						? visibility.fadeRatio
+						: undefined}
+					style={`${edgeStyle(edgePoints.source, edgePoints.target)} background: ${edgeBackground(visibility)};`}
 				></div>
 			{/each}
 		</div>
 
-		{#each graph.nodes as node (node.id)}
+		{#each visibleGraph.nodes as node (node.id)}
 			{@const nodePos = graphLayout.posByNodeId[node.id] ?? CENTERED_POSITION}
 			{@const nodeScale = graphLayout.scaleByNodeId[node.id] ?? 1}
-			{@const nodeLayoutOpacity = layoutOpacityByNodeId[node.id] ?? 1}
 			<div
 				class="node-wrapper"
 				class:primary={primaryNodeId === node.id}
 				data-node-id={node.id}
 				data-scale={nodeScale}
-				data-layout-opacity={nodeLayoutOpacity}
 				data-x={nodePos.x}
 				data-y={nodePos.y}
-				style={`left: calc(50% + ${nodePos.x}px); top: calc(50% + ${nodePos.y}px); transform: translate(-50%, -50%) scale(${nodeScale}); opacity: ${nodeLayoutOpacity};`}
+				style={`left: calc(50% + ${nodePos.x}px); top: calc(50% + ${nodePos.y}px); transform: translate(-50%, -50%) scale(${nodeScale});`}
 			>
 				<Node nodeData={node} isOpen={false} />
 			</div>

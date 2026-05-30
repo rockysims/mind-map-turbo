@@ -3,7 +3,7 @@
 **Created:** 2026-05-30
 **Author:** Cursor agent
 **Milestone:** [milestones/04b-bounded-pinned-neighborhood-visibility.md](../milestones/04b-bounded-pinned-neighborhood-visibility.md)
-**Status:** draft
+**Status:** done
 **Total estimated effort:** L
 
 ## Summary
@@ -38,7 +38,7 @@ state instead of layering another mode on top.
 
 ## Tasks
 
-### T01 — Add pure bounded visibility helpers
+### ✓ T01 — Add pure bounded visibility helpers
 
 |                |                                                                                     |
 | -------------- | ----------------------------------------------------------------------------------- |
@@ -76,7 +76,7 @@ Expected API shape:
 - Existing `layout` and `graphLayout` specs continue to pass without importing
   component code.
 
-### T02 — Add `displayedLayers` layout setting
+### ✓ T02 — Add `displayedLayers` layout setting
 
 |                |                                                                                               |
 | -------------- | --------------------------------------------------------------------------------------------- |
@@ -100,7 +100,7 @@ changing behavior until the render integration consumes it.
 - Grep for `LayoutSettings` and partial `settings: { ... }` literals; pin the
   new field where the default would make a test ambiguous.
 
-### T03 — Render the bounded visible subgraph
+### ✓ T03 — Render the bounded visible subgraph
 
 |                |                                                                             |
 | -------------- | --------------------------------------------------------------------------- |
@@ -139,7 +139,7 @@ Implementation notes:
   metadata for stories.
 - Existing layout and scale behavior still works for the visible subgraph.
 
-### T04 — Simplify 04a relayout state for bounded visibility
+### ✓ T04 — Simplify 04a relayout state for bounded visibility
 
 |                |                                                                                                                              |
 | -------------- | ---------------------------------------------------------------------------------------------------------------------------- |
@@ -165,7 +165,7 @@ still settle positions over the visible set without carrying the old reveal UX.
 - Repinning starts a single visible-set animation/settle pass rather than
   advancing through batches.
 
-### T05 — Add bounded visibility story coverage
+### ✓ T05 — Add bounded visibility story coverage
 
 |                |                                                                                          |
 | -------------- | ---------------------------------------------------------------------------------------- |

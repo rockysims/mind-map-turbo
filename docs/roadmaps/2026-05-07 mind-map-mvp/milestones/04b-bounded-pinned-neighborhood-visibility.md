@@ -1,6 +1,6 @@
 # Milestone 04b: Bounded pinned-neighborhood visibility
 
-**Status:** not started
+**Status:** complete
 **Depends on:** milestones 01 (pinning and immutable graph mutations), 02
 (hop-distance layout), 04 (local persistence), and 04a (current layered
 pin relayout behavior to simplify).

@@ -8,8 +8,9 @@ describe('layoutSettings', () => {
 	});
 
 	it('allows callers to override individual app defaults', () => {
-		expect(withDefaultLayoutSettings({ edgeSpringStrength: 1 })).toEqual({
+		expect(withDefaultLayoutSettings({ displayedLayers: 4, edgeSpringStrength: 1 })).toEqual({
 			...APP_CONFIG.multigraph.layout,
+			displayedLayers: 4,
 			edgeSpringStrength: 1
 		});
 	});
