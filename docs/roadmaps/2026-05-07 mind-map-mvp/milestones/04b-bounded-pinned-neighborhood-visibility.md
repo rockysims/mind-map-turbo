@@ -4,7 +4,7 @@
 **Depends on:** milestones 01 (pinning and immutable graph mutations), 02
 (hop-distance layout), 04 (local persistence), and 04a (current layered
 pin relayout behavior to simplify).
-**Plan:** _none yet._
+**Plan:** [2026-05-30 bounded-pinned-neighborhood-visibility](../plans/2026-05-30%20bounded-pinned-neighborhood-visibility.md)
 
 ## Goal
 
