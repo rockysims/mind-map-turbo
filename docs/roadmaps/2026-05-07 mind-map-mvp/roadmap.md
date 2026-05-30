@@ -8,8 +8,9 @@
 A low-friction mind-map / knowledge web that can be used live during a
 conversation by one or more people. Critically: the graph remains
 _usable_ even when very large, by **pinning** nodes of interest at full
-size while their neighbors scale down with hop distance. Users can pan,
-zoom, drag, add nodes/edges, and have the layout self-tidy via gentle
+size while showing only the useful neighborhood around those pins. Users
+can pan, zoom, drag, add nodes/edges, label and tag nodes quickly, save
+their work locally or as JSON, and have the layout self-tidy via gentle
 overlap repulsion. Mobile-first input.
 
 ## Design principles
@@ -19,28 +20,38 @@ overlap repulsion. Mobile-first input.
 2. **One gesture vocabulary across desktop and mobile.** Pointer Events
    only; the same handler works for mouse, touch, and pen.
 3. **Tests describe behavior, not implementation.** Storybook story
-   names read like sentences ("User pins a node and neighbors scale
-   down"). Unit specs cover pure functions exhaustively.
+   names read like sentences ("User pins a node and the visible
+   neighborhood stays readable"). Unit specs cover pure functions
+   exhaustively.
 4. **Local-first, then server.** Persistence starts with `localStorage`
-   behind an interface; swapping to Postgres/Yjs later is a backend
-   change, not a UI change.
+   behind an interface and JSON import/export for user-controlled files;
+   swapping to Postgres/Yjs later is a backend change, not a UI change.
 
 ## Milestones (medium granularity)
 
-Six milestones, each landing as a small set of PRs. Each has a milestone
-doc describing scope, acceptance criteria, and risks. When work on a
-milestone is about to start, we write a dated **plan** in `plans/` that
-breaks it into individual PR-sized tasks.
+Milestones land as small sets of PRs. Each has a milestone doc describing
+scope, acceptance criteria, and risks. When work on a milestone is about
+to start, we write a dated **plan** in `plans/` that breaks it into
+individual PR-sized tasks.
 
-| #   | Milestone                                          | Status      | Doc                                                                                                                |
-| --- | -------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------ |
-| 01  | Graph mutations and pinning                        | complete    | [milestone](milestones/01-graph-mutations-and-pinning.md), [plan](plans/2026-05-15 graph-mutations-and-pinning.md) |
-| 02  | Layout: hop-distance scaling and overlap repulsion | complete    | [milestone](milestones/02-layout-and-repulsion.md), [plan](plans/2026-05-15 layout-and-repulsion.md)               |
-| 03  | Mobile polish and node editing UX                  | in progress | [milestone](milestones/03-mobile-polish-and-editing.md), [plan](plans/2026-05-17%20mobile-polish-and-editing.md)   |
-| 04  | Persistence (local-first → server)                 | complete    | [milestone](milestones/04-persistence.md), [plan](plans/2026-05-17%20persistence.md)                               |
-| 05  | Multiplayer                                        | not started | [milestones/05-multiplayer.md](milestones/05-multiplayer.md)                                                       |
-| 06  | Search                                             | not started | [milestones/06-search.md](milestones/06-search.md)                                                                 |
-| 07  | Layered pin relayout                               | complete    | [milestone](milestones/07-layered-pin-relayout.md), [plan](plans/2026-05-25%20layered-pin-relayout.md)             |
+| #   | Milestone                                          | Status      | Doc                                                                                                                  |
+| --- | -------------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------- |
+| 01  | Graph mutations and pinning                        | complete    | [milestone](milestones/01-graph-mutations-and-pinning.md), [plan](plans/2026-05-15 graph-mutations-and-pinning.md)   |
+| 02  | Layout: hop-distance scaling and overlap repulsion | complete    | [milestone](milestones/02-layout-and-repulsion.md), [plan](plans/2026-05-15 layout-and-repulsion.md)                 |
+| 03  | Mobile polish and node editing UX                  | in progress | [milestone](milestones/03-mobile-polish-and-editing.md), [plan](plans/2026-05-17%20mobile-polish-and-editing.md)     |
+| 04  | Persistence (local-first → server)                 | complete    | [milestone](milestones/04-persistence.md), [plan](plans/2026-05-17%20persistence.md)                                 |
+| 04a | Bounded pinned-neighborhood visibility             | not started | [milestones/04a-bounded-pinned-neighborhood-visibility.md](milestones/04a-bounded-pinned-neighborhood-visibility.md) |
+| 04b | JSON file import/export                            | not started | [milestones/04b-json-file-import-export.md](milestones/04b-json-file-import-export.md)                               |
+| 04c | Edge toggle and inline node creation               | not started | [milestones/04c-edge-toggle-and-inline-node-creation.md](milestones/04c-edge-toggle-and-inline-node-creation.md)     |
+| 04d | Title syntax for direction and tags                | not started | [milestones/04d-title-syntax-for-direction-and-tags.md](milestones/04d-title-syntax-for-direction-and-tags.md)       |
+| 04e | Tag colors and graph tag config                    | not started | [milestones/04e-tag-colors-and-graph-tag-config.md](milestones/04e-tag-colors-and-graph-tag-config.md)               |
+| 05  | Multiplayer                                        | not started | [milestones/05-multiplayer.md](milestones/05-multiplayer.md)                                                         |
+| 06  | Search                                             | not started | [milestones/06-search.md](milestones/06-search.md)                                                                   |
+| 07  | Layered pin relayout                               | complete    | [milestone](milestones/07-layered-pin-relayout.md), [plan](plans/2026-05-25%20layered-pin-relayout.md)               |
+
+Milestones 04a-04e are inserted between persistence and multiplayer. The
+completed milestone 07 remains as historical work; milestone 04a
+intentionally supersedes its Fibonacci reveal and dimming behavior.
 
 ## How this directory is organized
 
