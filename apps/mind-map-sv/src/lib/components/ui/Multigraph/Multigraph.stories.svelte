@@ -204,6 +204,19 @@
 />
 
 <Story
+	name="Many"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 100,
+			pinned: [0],
+			edges: HUNDRED_NODE_CLUSTERED_EDGES,
+			posByNodeId: HUNDRED_NODE_POSITIONS
+		}),
+		defaultPrimaryNodeId: 'n0'
+	}}
+/>
+
+<Story
 	name="UserPinsANode"
 	args={{
 		multigraphData: makeGraph({ nodeCount: 1 }),
