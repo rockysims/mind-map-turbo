@@ -20,7 +20,8 @@
 		tags: [],
 		argTypes: {
 			nodes: { control: 'object' },
-			positions: { control: 'object' }
+			positions: { control: 'object' },
+			initialScale: { control: 'number' }
 		},
 		parameters: {
 			viewport: {
@@ -130,6 +131,15 @@
 </script>
 
 <Story name="Summary" args={{ nodes: NODES.slice(0, 3) }} />
+
+<Story
+	name="StartsAtInitialScale"
+	args={{ nodes: NODES.slice(0, 3), initialScale: 0.5 }}
+	play={async ({ canvasElement }) => {
+		await waitForLayout();
+		expect(getStageTransform(canvasElement)).toContain('scale(0.5)');
+	}}
+/>
 
 <Story
 	name="Empty"

@@ -10,11 +10,13 @@
 		nodes = [],
 		/** Optional: nodeId -> { left, top } for positioning (default: 50%, 50%) */
 		positions = {},
+		initialScale,
 		onNodeMoved: onNodeMovedProp,
 		...rest
 	}: {
 		nodes: NodeData[];
 		positions?: Record<string, { left: string; top: string }>;
+		initialScale?: number;
 		onNodeMoved?: (node: NodeData, point: Point) => void;
 	} = $props();
 
@@ -83,6 +85,7 @@
 >
 	<Stage
 		{getNodeAt}
+		{initialScale}
 		onNodeMoved={(n, point) => {
 			lastNodeMoved = { nodeId: n.id, point };
 			onNodeMovedProp?.(n, point);

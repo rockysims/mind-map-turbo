@@ -15,6 +15,7 @@
 			multigraphData: { control: 'object' },
 			defaultPrimaryNodeId: { control: 'text' },
 			layoutSettings: { control: 'object' },
+			initialStageScale: { control: 'number' },
 			onMultigraphChange: { control: false }
 		},
 		parameters: {
@@ -42,6 +43,12 @@
 		const stage = el.querySelector('.stage');
 		if (!stage) throw new Error('Stage not found');
 		return stage as HTMLElement;
+	}
+
+	function getStageTransform(el: HTMLElement): string {
+		const content = el.querySelector('.stage-content');
+		if (!content) throw new Error('Stage content not found');
+		return (content as HTMLElement).style.transform || '';
 	}
 
 	function getCircle(el: HTMLElement, nodeId: string): HTMLElement {
@@ -212,7 +219,12 @@
 			edges: HUNDRED_NODE_CLUSTERED_EDGES,
 			posByNodeId: HUNDRED_NODE_POSITIONS
 		}),
-		defaultPrimaryNodeId: 'n0'
+		defaultPrimaryNodeId: 'n0',
+		initialStageScale: 0.5
+	}}
+	play={async ({ canvasElement }) => {
+		await waitForLayout();
+		expect(getStageTransform(canvasElement)).toContain('scale(0.5)');
 	}}
 />
 

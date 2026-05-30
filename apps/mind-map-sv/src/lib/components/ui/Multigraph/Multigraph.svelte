@@ -62,12 +62,14 @@
 		graphGeneration = 0,
 		defaultPrimaryNodeId = '',
 		layoutSettings = {},
+		initialStageScale,
 		onMultigraphChange
 	}: {
 		multigraphData: MultigraphData;
 		graphGeneration?: number;
 		defaultPrimaryNodeId?: string;
 		layoutSettings?: Partial<LayoutSettings>;
+		initialStageScale?: number;
 		onMultigraphChange?: (data: MultigraphData) => void;
 	} = $props();
 
@@ -605,6 +607,7 @@
 >
 	<Stage
 		{getNodeAt}
+		initialScale={initialStageScale}
 		onNodeMoved={handleNodeMoved}
 		onNodeDragStart={handleNodeDragStart}
 		onNodeDragEnd={handleNodeDragEnd}

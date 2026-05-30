@@ -17,6 +17,8 @@
 	interface Props {
 		/** Resolve node at (clientX, clientY); return null if none. Injected for testability. */
 		getNodeAt: (clientX: number, clientY: number) => NodeData | null;
+		/** Stage zoom scale on mount, clamped to configured min/max. */
+		initialScale?: number;
 		/** Pixels of movement below which we treat as click rather than drag. */
 		dragThreshold?: number;
 		/** Callback when user single-click-drags a node and releases with a graph-local point. */
@@ -37,6 +39,7 @@
 
 	let {
 		getNodeAt,
+		initialScale = 1,
 		dragThreshold = DRAG_THRESHOLD,
 		onNodeMoved,
 		onNodeDragStart,
@@ -58,8 +61,9 @@
 		panY: number;
 	} | null>(null);
 
-	// Zoom
-	let scale = $state(1);
+	// Zoom — mount-only seed from initialScale; user gestures own scale afterward.
+	// svelte-ignore state_referenced_locally
+	let scale = $state(clampScale(initialScale));
 	let pinchStart = $state<{ distance: number; scale: number } | null>(null);
 
 	// Node drag
