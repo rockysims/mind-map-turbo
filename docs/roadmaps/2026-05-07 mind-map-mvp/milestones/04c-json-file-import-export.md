@@ -2,7 +2,7 @@
 
 **Status:** not started
 **Depends on:** milestone 04 (persistence).
-**Plan:** _none yet._
+**Plan:** [2026-05-30 json-file-import-export.md](../plans/2026-05-30%20json-file-import-export.md)
 
 ## Goal
 
@@ -14,10 +14,10 @@ simple backup and sharing path before multiplayer or accounts exist.
 
 ### File operations
 
-- Add an export action that serializes the current graph to a `.json`
-  file.
+- Add an export action that serializes the current graph and view state
+  to a `.json` file.
 - Add an import action that reads a `.json` file and replaces the current
-  graph after validation.
+  graph and view state after validation.
 - Reuse the milestone-04 schema envelope and migrations rather than adding
   a second ad hoc file format.
 - Surface import errors in a non-blocking UI notice with enough detail to
@@ -25,8 +25,8 @@ simple backup and sharing path before multiplayer or accounts exist.
 
 ### Local refresh recovery
 
-- Keep `localStorage` responsible for remembering the current graph and
-  graph id so a refresh does not lose the user's place.
+- Keep `localStorage` responsible for remembering the current graph, graph
+  id, pan, and zoom so a refresh does not lose the user's place.
 - JSON files are explicit import/export artifacts, not a replacement for
   the autosave path.
 
@@ -36,16 +36,19 @@ simple backup and sharing path before multiplayer or accounts exist.
 - Confirm before replacing a non-empty current graph during import.
 - Preserve graph metadata that belongs to the multigraph, including future
   tag color config from milestone 04f.
+- Preserve view state that belongs to the user's current graph context,
+  including pan and zoom.
 
 ## Acceptance Criteria
 
-- Unit specs cover schema-envelope round-trip for exported files.
+- Unit specs cover schema-envelope round-trip for exported files,
+  including pan and zoom.
 - Unit specs cover import validation failures without mutating the current
-  graph.
+  graph or view state.
 - A story or browser test covers exporting a graph and importing the same
   payload back into the app.
-- A browser test confirms refresh still restores the current graph without
-  requiring a file import.
+- A browser test confirms refresh still restores the current graph, pan, and
+  zoom without requiring a file import.
 - Lint, check, and unit tests pass.
 
 ## Non-goals
