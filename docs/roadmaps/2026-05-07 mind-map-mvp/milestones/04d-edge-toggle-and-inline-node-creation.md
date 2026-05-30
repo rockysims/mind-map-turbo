@@ -1,4 +1,4 @@
-# Milestone 04c: Edge toggle and inline node creation
+# Milestone 04d: Edge toggle and inline node creation
 
 **Status:** not started
 **Depends on:** milestones 01 (graph mutation API) and 03 (editing UX).
@@ -56,7 +56,7 @@ showing a generic label.
 ## Risks and Open Questions
 
 - **Edge identity.** Decide in the plan whether directed edges from
-  milestone 04d affect duplicate-edge matching immediately or only after
+  milestone 04e affect duplicate-edge matching immediately or only after
   direction lands.
 - **Dialog primitive.** Reuse an existing small confirmation pattern if
   one exists; otherwise keep the dialog local and accessible.

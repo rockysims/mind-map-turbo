@@ -40,18 +40,17 @@ individual PR-sized tasks.
 | 02  | Layout: hop-distance scaling and overlap repulsion | complete    | [milestone](milestones/02-layout-and-repulsion.md), [plan](plans/2026-05-15 layout-and-repulsion.md)                 |
 | 03  | Mobile polish and node editing UX                  | in progress | [milestone](milestones/03-mobile-polish-and-editing.md), [plan](plans/2026-05-17%20mobile-polish-and-editing.md)     |
 | 04  | Persistence (local-first → server)                 | complete    | [milestone](milestones/04-persistence.md), [plan](plans/2026-05-17%20persistence.md)                                 |
-| 04a | Bounded pinned-neighborhood visibility             | not started | [milestones/04a-bounded-pinned-neighborhood-visibility.md](milestones/04a-bounded-pinned-neighborhood-visibility.md) |
-| 04b | JSON file import/export                            | not started | [milestones/04b-json-file-import-export.md](milestones/04b-json-file-import-export.md)                               |
-| 04c | Edge toggle and inline node creation               | not started | [milestones/04c-edge-toggle-and-inline-node-creation.md](milestones/04c-edge-toggle-and-inline-node-creation.md)     |
-| 04d | Title syntax for direction and tags                | not started | [milestones/04d-title-syntax-for-direction-and-tags.md](milestones/04d-title-syntax-for-direction-and-tags.md)       |
-| 04e | Tag colors and graph tag config                    | not started | [milestones/04e-tag-colors-and-graph-tag-config.md](milestones/04e-tag-colors-and-graph-tag-config.md)               |
+| 04a | Layered pin relayout                               | complete    | [milestone](milestones/04a-layered-pin-relayout.md), [plan](plans/2026-05-25%20layered-pin-relayout.md)              |
+| 04b | Bounded pinned-neighborhood visibility             | not started | [milestones/04b-bounded-pinned-neighborhood-visibility.md](milestones/04b-bounded-pinned-neighborhood-visibility.md) |
+| 04c | JSON file import/export                            | not started | [milestones/04c-json-file-import-export.md](milestones/04c-json-file-import-export.md)                               |
+| 04d | Edge toggle and inline node creation               | not started | [milestones/04d-edge-toggle-and-inline-node-creation.md](milestones/04d-edge-toggle-and-inline-node-creation.md)     |
+| 04e | Title syntax for direction and tags                | not started | [milestones/04e-title-syntax-for-direction-and-tags.md](milestones/04e-title-syntax-for-direction-and-tags.md)       |
+| 04f | Tag colors and graph tag config                    | not started | [milestones/04f-tag-colors-and-graph-tag-config.md](milestones/04f-tag-colors-and-graph-tag-config.md)               |
 | 05  | Multiplayer                                        | not started | [milestones/05-multiplayer.md](milestones/05-multiplayer.md)                                                         |
 | 06  | Search                                             | not started | [milestones/06-search.md](milestones/06-search.md)                                                                   |
-| 07  | Layered pin relayout                               | complete    | [milestone](milestones/07-layered-pin-relayout.md), [plan](plans/2026-05-25%20layered-pin-relayout.md)               |
 
-Milestones 04a-04e are inserted between persistence and multiplayer. The
-completed milestone 07 remains as historical work; milestone 04a
-intentionally supersedes its Fibonacci reveal and dimming behavior.
+Milestones 04a-04f sit between persistence and multiplayer. Milestone 04b
+intentionally supersedes 04a's Fibonacci reveal and dimming behavior.
 
 ## How this directory is organized
 

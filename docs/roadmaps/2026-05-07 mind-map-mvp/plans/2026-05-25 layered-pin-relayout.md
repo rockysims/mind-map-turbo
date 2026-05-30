@@ -2,7 +2,7 @@
 
 **Created:** 2026-05-25
 **Author:** Cursor agent
-**Milestone:** [milestones/07-layered-pin-relayout.md](../milestones/07-layered-pin-relayout.md)
+**Milestone:** [milestones/04a-layered-pin-relayout.md](../milestones/04a-layered-pin-relayout.md)
 **Status:** done
 **Total estimated effort:** L
 
@@ -209,10 +209,10 @@ Before starting wave N, verify all `Depends on` tasks are merged to `main`.
 The plan is done when:
 
 - All 4 tasks are merged to `main`.
-- [Milestone 07 acceptance criteria](../milestones/07-layered-pin-relayout.md)
+- [Milestone 04a acceptance criteria](../milestones/04a-layered-pin-relayout.md)
   are satisfied.
 - Plan status is `done`, milestone status is `complete`, and the roadmap row
-  for milestone 07 is `complete` with a link to this plan.
+  for milestone 04a is `complete` with a link to this plan.
 - The finished work has been committed unless the user explicitly asked not
   to commit yet.
 

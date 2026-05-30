@@ -1,4 +1,4 @@
-# Milestone 04b: JSON file import/export
+# Milestone 04c: JSON file import/export
 
 **Status:** not started
 **Depends on:** milestone 04 (persistence).
@@ -35,7 +35,7 @@ simple backup and sharing path before multiplayer or accounts exist.
 - Put file actions near the existing graph persistence controls.
 - Confirm before replacing a non-empty current graph during import.
 - Preserve graph metadata that belongs to the multigraph, including future
-  tag color config from milestone 04e.
+  tag color config from milestone 04f.
 
 ## Acceptance Criteria
 
@@ -61,5 +61,5 @@ simple backup and sharing path before multiplayer or accounts exist.
   browser-test strategy for asserting export behavior.
 - **Import confirmation.** Decide whether the confirmation belongs in a
   reusable dialog primitive or a small local control.
-- **Graph metadata shape.** Coordinate with milestone 04e so tag color
+- **Graph metadata shape.** Coordinate with milestone 04f so tag color
   config persists in both local autosaves and exported files.

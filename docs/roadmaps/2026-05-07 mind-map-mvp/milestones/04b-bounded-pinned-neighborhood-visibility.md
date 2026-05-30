@@ -1,8 +1,8 @@
-# Milestone 04a: Bounded pinned-neighborhood visibility
+# Milestone 04b: Bounded pinned-neighborhood visibility
 
 **Status:** not started
 **Depends on:** milestones 01 (pinning and immutable graph mutations), 02
-(hop-distance layout), 04 (local persistence), and 07 (current layered
+(hop-distance layout), 04 (local persistence), and 04a (current layered
 pin relayout behavior to simplify).
 **Plan:** _none yet._
 
@@ -74,6 +74,6 @@ the displayed range.
 - **Boundary-edge semantics.** An edge may connect two visible nodes even
   when one endpoint is also a boundary for another pinned neighborhood.
   The pure visibility API should make this unambiguous.
-- **Current milestone 07 behavior.** This milestone intentionally replaces
-  the Fibonacci and dimming UX delivered in milestone 07; the plan should
+- **Current milestone 04a behavior.** This milestone intentionally replaces
+  the Fibonacci and dimming UX delivered in milestone 04a; the plan should
   delete obsolete state rather than layering another mode on top.

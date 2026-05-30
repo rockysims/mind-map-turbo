@@ -59,7 +59,7 @@ SearchHit[]` — substring + fuzzy match (small custom scorer; no
 ## Non-goals
 
 - **Boolean operators** (AND / OR / NOT). Plain substring is fine.
-- **Tag-based search/filtering.** Tags exist after milestones 04d and 04e,
+- **Tag-based search/filtering.** Tags exist after milestones 04e and 04f,
   but the first search milestone stays focused on title and description.
 - **Server-side search.** Index lives client-side only.
 - **Full-text fuzzy ranking** with libraries like `fuse.js` or

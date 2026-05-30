@@ -1,7 +1,7 @@
-# Milestone 04d: Title syntax for direction and tags
+# Milestone 04e: Title syntax for direction and tags
 
 **Status:** not started
-**Depends on:** milestones 01 (graph mutations), 03 (editing UX), and 04c
+**Depends on:** milestones 01 (graph mutations), 03 (editing UX), and 04d
 (inline title entry).
 **Plan:** _none yet._
 
@@ -71,7 +71,7 @@ and displayed title `The displayed node title part.`
 
 ## Non-goals
 
-- Tag color management; that is milestone 04e.
+- Tag color management; that is milestone 04f.
 - Full markdown or rich text in titles.
 - Search/filtering by tag.
 

@@ -1,6 +1,6 @@
 # TODO intake
 
-**Status:** folded into the MindMap MVP roadmap as milestones 04a-04e.
+**Status:** folded into the MindMap MVP roadmap as milestones 04b-04f.
 
 - Remove fibonacci idea in favor of only displaying nodes that are within displayedLayers (10?) hops of a pinned node. The edges to the displayedLayers+1 layer should be shown but fade out half way along to the displayedLayers+1 layer node(s).
 
@@ -26,8 +26,8 @@
 
 ## Roadmap mapping
 
-- `04a-bounded-pinned-neighborhood-visibility.md`: displayed layers, boundary edge fade, and in-memory relayout with one visible animation.
-- `04b-json-file-import-export.md`: JSON save/load plus refresh-safe local persistence.
-- `04c-edge-toggle-and-inline-node-creation.md`: existing-edge removal confirmation and inline title input for newly created nodes.
-- `04d-title-syntax-for-direction-and-tags.md`: editable title syntax, directed edges, parsed display titles, and node tag data.
-- `04e-tag-colors-and-graph-tag-config.md`: graph-level tag color config and multi-tag border rendering.
+- `04b-bounded-pinned-neighborhood-visibility.md`: displayed layers, boundary edge fade, and in-memory relayout with one visible animation.
+- `04c-json-file-import-export.md`: JSON save/load plus refresh-safe local persistence.
+- `04d-edge-toggle-and-inline-node-creation.md`: existing-edge removal confirmation and inline title input for newly created nodes.
+- `04e-title-syntax-for-direction-and-tags.md`: editable title syntax, directed edges, parsed display titles, and node tag data.
+- `04f-tag-colors-and-graph-tag-config.md`: graph-level tag color config and multi-tag border rendering.

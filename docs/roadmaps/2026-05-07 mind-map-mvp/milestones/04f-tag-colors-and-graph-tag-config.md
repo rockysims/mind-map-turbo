@@ -1,7 +1,7 @@
-# Milestone 04e: Tag colors and graph tag config
+# Milestone 04f: Tag colors and graph tag config
 
 **Status:** not started
-**Depends on:** milestones 04b (JSON import/export) and 04d (tag data).
+**Depends on:** milestones 04c (JSON import/export) and 04e (tag data).
 **Plan:** _none yet._
 
 ## Goal

@@ -1,4 +1,4 @@
-# Milestone 07: Layered pin relayout
+# Milestone 04a: Layered pin relayout
 
 **Status:** complete
 **Depends on:** milestones 01 + 02 (pinning, hop-distance layout, physics loop).
