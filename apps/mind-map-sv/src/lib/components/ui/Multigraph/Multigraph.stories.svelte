@@ -244,11 +244,11 @@
 			posByNodeId: HUNDRED_NODE_POSITIONS
 		}),
 		defaultPrimaryNodeId: 'n0',
-		initialViewState: { panX: 0, panY: 0, scale: 0.5 }
+		initialViewState: { panX: 0, panY: 0, scale: 0.25 }
 	}}
 	play={async ({ canvasElement }) => {
 		await waitForLayout();
-		expect(getStageTransform(canvasElement)).toContain('scale(0.5)');
+		expect(getStageTransform(canvasElement)).toContain('scale(0.25)');
 	}}
 />
 

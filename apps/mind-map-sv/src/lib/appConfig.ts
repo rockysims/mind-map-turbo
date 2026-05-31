@@ -22,23 +22,23 @@ export const APP_CONFIG = {
 		},
 		layout: {
 			baseRadius: NODE_RADIUS_PX,					// base radius for hop-scaled layout
-			displayedLayers: 5,							// hop layers visible around pinned nodes
+			displayedLayers: 3,							// hop layers visible around pinned nodes
 			scaleFalloff: 0.7,							// scale multiplier per hop from pinned
 			minScale: 0.1,								// minimum node scale in layout
-			relaxIterations: 2,							// physics relax iterations per layout pass
+			relaxIterations: 12,						// physics relax iterations per layout pass
 			edgeGapMinRadiusFactor: 0.2,				// min edge gap as fraction of node radius
 			edgeGapMaxRadiusFactor: 0.4,				// max edge gap as fraction of node radius
 			edgeSpringStrength: 0.5,					// how strongly edges pull nodes together
 			hopRepulsionStrength: 0.3,					// repulsion strength between distant hops
-			hopRepulsionMinHops: 2,						// min hop distance before repulsion applies
+			hopRepulsionMinHops: 0,						// min hop distance before repulsion applies
 			hopRepulsionMaxHops: 8,						// hop distance where repulsion peaks
 			hopRepulsionMaxExtraGapRadiusFactor: 8,		// cap on extra gap from hop repulsion
 			postDragSettleEpsilonPx: 0.25,				// motion threshold to end post-drag settle
-			postDragSettleMaxFrames: 90,				// max frames for post-drag physics settle
-			postScaleChangeSettleMaxFrames: 24,			// max frames to settle after scale animation
+			postDragSettleMaxFrames: 200,				// max frames for post-drag physics settle
+			postScaleChangeSettleMaxFrames: 200,		// max frames to settle after scale animation
 			scaleAnimationDurationMs: 500,				// duration of node scale change animation
-			layeredRelayoutSettleMaxFrames: 14,			// max frames per layered relayout phase
-			layeredRelayoutSettleMaxFramesFinal: 140,	// max frames for final layered relayout settle
+			layeredRelayoutSettleMaxFrames: 20,			// max frames per layered relayout phase
+			layeredRelayoutSettleMaxFramesFinal: 200,	// max frames for final layered relayout settle
 			layeredRelayoutSettleEpsilonPx: 0.25,		// motion threshold to end layered relayout
 			layeredRelayoutMobilityStep: 0.2,			// per-phase mobility reduction during relayout
 			layeredRelayoutMobilityFloor: 0.05			// minimum node mobility during relayout
