@@ -37,7 +37,7 @@ Prefer setting the tool's `working_directory` parameter over chaining
 2. `pnpm --filter mind-map-sv lint` passes.
 3. `pnpm --filter mind-map-sv check` (svelte-check) passes.
 4. `pnpm --filter mind-map-sv test:unit -- --run` passes.
-5. If you touched gestures, layout, or anything visible: run the relevant story locally (or rely on the storybook Vitest project to run the `play`).
+5. If you touched gestures, layout, or anything visible: run the relevant story locally (or rely on the storybook Vitest project to run the `play`). E2E tests use Playwright's configured 30 second per-test timeout; do not pass a longer timeout unless you are deliberately debugging a hang.
 6. If the work executes a roadmap plan, update the plan, milestone, and roadmap status fields before closing out.
 7. Commit message follows Conventional Commits (see `commits.mdc`).
 8. No tracked changes to `.svelte-kit/`, build output, or log files (those are gitignored).
