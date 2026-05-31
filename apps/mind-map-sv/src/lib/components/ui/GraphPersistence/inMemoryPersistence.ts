@@ -1,8 +1,9 @@
 import type { MultigraphData } from '$lib/components/ui/types/multigraph';
-import type { GraphSummary, Persistence } from '$lib/persistence';
+import { NEUTRAL_VIEW_STATE, type ViewState } from '$lib/migrations';
+import type { GraphSummary, PersistedGraphRecord, Persistence } from '$lib/persistence';
 
 type StoredGraph = {
-	data: MultigraphData;
+	graph: PersistedGraphRecord;
 	updatedAt: number;
 };
 
@@ -14,17 +15,25 @@ export class InMemoryPersistence implements Persistence {
 		private readonly now: () => number = Date.now
 	) {
 		for (const [id, graph] of Object.entries(initialGraphs)) {
-			this.graphs.set(id, { data: cloneGraph(graph), updatedAt: this.now() });
+			this.graphs.set(id, {
+				graph: { data: cloneGraph(graph), viewState: { ...NEUTRAL_VIEW_STATE } },
+				updatedAt: this.now()
+			});
 		}
 	}
 
-	async load(id: string): Promise<MultigraphData | null> {
+	async load(id: string): Promise<PersistedGraphRecord | null> {
 		const graph = this.graphs.get(id);
-		return graph ? cloneGraph(graph.data) : null;
+		return graph
+			? { data: cloneGraph(graph.graph.data), viewState: cloneViewState(graph.graph.viewState) }
+			: null;
 	}
 
-	async save(id: string, data: MultigraphData): Promise<void> {
-		this.graphs.set(id, { data: cloneGraph(data), updatedAt: this.now() });
+	async save(id: string, graph: PersistedGraphRecord): Promise<void> {
+		this.graphs.set(id, {
+			graph: { data: cloneGraph(graph.data), viewState: cloneViewState(graph.viewState) },
+			updatedAt: this.now()
+		});
 	}
 
 	async list(): Promise<GraphSummary[]> {
@@ -40,4 +49,8 @@ export class InMemoryPersistence implements Persistence {
 
 function cloneGraph(graph: MultigraphData): MultigraphData {
 	return JSON.parse(JSON.stringify(graph)) as MultigraphData;
+}
+
+function cloneViewState(viewState: ViewState): ViewState {
+	return { panX: viewState.panX, panY: viewState.panY, scale: viewState.scale };
 }

@@ -3,7 +3,7 @@
 **Created:** 2026-05-30
 **Author:** Cursor agent
 **Milestone:** [milestones/04c-json-file-import-export.md](../milestones/04c-json-file-import-export.md)
-**Status:** draft
+**Status:** done
 **Total estimated effort:** L
 
 ## Summary
@@ -301,3 +301,9 @@ The plan is done when:
   them as graph-level `viewState` adjacent to `data`, not as fields on
   `MultigraphData`, because node positions already capture graph geometry while
   pan/zoom capture the user's camera.
+- 2026-05-30 (04f handoff): **schemaVersion 1** persisted payloads use
+  `data` (`MultigraphData`) plus optional `viewState` (pan/zoom). Local
+  autosaves add `updatedAt`; file exports deliberately omit `updatedAt` so
+  backups stay portable and match the server persistence body. Milestone 04f
+  must preserve or migrate this split when widening graph metadata—one
+  migration path for autosave and files, not separate ad hoc formats.

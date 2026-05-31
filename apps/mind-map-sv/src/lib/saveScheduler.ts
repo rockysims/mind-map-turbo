@@ -1,4 +1,5 @@
 import type { MultigraphData } from './components/ui/types/multigraph';
+import type { ViewState } from './migrations';
 import type { Persistence } from './persistence';
 
 export type SaveStatus =
@@ -17,7 +18,10 @@ export type QuotaWarning = {
 
 type PendingSave = {
 	id: string;
-	data: MultigraphData;
+	graph: {
+		data: MultigraphData;
+		viewState: ViewState;
+	};
 };
 
 export class SaveScheduler {
@@ -39,8 +43,8 @@ export class SaveScheduler {
 		}
 	) {}
 
-	schedule(id: string, data: MultigraphData): void {
-		this.pending = { id, data };
+	schedule(id: string, data: MultigraphData, viewState: ViewState): void {
+		this.pending = { id, graph: { data, viewState } };
 		this.clearPendingTimer();
 		this.timer = this.setTimer(() => {
 			this.timer = null;
@@ -65,7 +69,7 @@ export class SaveScheduler {
 		this.report({ state: 'saving' });
 
 		try {
-			await this.options.persistence.save(save.id, save.data);
+			await this.options.persistence.save(save.id, save.graph);
 			if (this.pending === save) this.pending = null;
 			const savedAt = this.now();
 			const warning = calculateQuotaWarning(
@@ -89,7 +93,7 @@ export class SaveScheduler {
 		} finally {
 			this.saving = false;
 			if (this.pending !== null && this.pending !== save) {
-				this.schedule(this.pending.id, this.pending.data);
+				this.schedule(this.pending.id, this.pending.graph.data, this.pending.graph.viewState);
 			}
 		}
 	}

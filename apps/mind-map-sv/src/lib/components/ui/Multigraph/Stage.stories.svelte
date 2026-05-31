@@ -21,7 +21,9 @@
 		argTypes: {
 			nodes: { control: 'object' },
 			positions: { control: 'object' },
-			initialScale: { control: 'number' }
+			initialScale: { control: 'number' },
+			initialPanX: { control: 'number' },
+			initialPanY: { control: 'number' }
 		},
 		parameters: {
 			viewport: {
@@ -93,6 +95,11 @@
 		return { nodeId, x: Number(x), y: Number(y) };
 	}
 
+	function parseViewStateCallback(value: string): { panX: number; panY: number; scale: number } {
+		const [panX, panY, scale] = value.split(',');
+		return { panX: Number(panX), panY: Number(panY), scale: Number(scale) };
+	}
+
 	function sleep(ms: number = 0) {
 		return new Promise((r) => setTimeout(r, ms));
 	}
@@ -138,6 +145,80 @@
 	play={async ({ canvasElement }) => {
 		await waitForLayout();
 		expect(getStageTransform(canvasElement)).toContain('scale(0.5)');
+	}}
+/>
+
+<Story
+	name="StartsAtInitialPan"
+	args={{ nodes: NODES.slice(0, 3), initialPanX: 80, initialPanY: -40 }}
+	play={async ({ canvasElement }) => {
+		await waitForLayout();
+		expect(getStageTransform(canvasElement)).toContain('translate(80px, -40px)');
+	}}
+/>
+
+<Story
+	name="StartsAtInitialPanAndScale"
+	args={{ nodes: NODES.slice(0, 3), initialPanX: 50, initialPanY: 30, initialScale: 1.5 }}
+	play={async ({ canvasElement }) => {
+		await waitForLayout();
+		const transform = getStageTransform(canvasElement);
+		expect(transform).toContain('translate(50px, 30px)');
+		expect(transform).toContain('scale(1.5)');
+	}}
+/>
+
+<Story
+	name="PanEmitsViewStateChange"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = canvasElement.querySelector('[data-testid="stage-callbacks"]') as HTMLElement;
+		const stage = getStage(canvasElement);
+
+		await waitForLayout();
+
+		expect(wrapper.dataset.lastViewState).toBe('');
+
+		const center = getCenter(stage);
+		dispatchPointer(stage, 'pointerdown', center.x, center.y);
+		dispatchPointer(stage, 'pointermove', center.x + 60, center.y + 40);
+		dispatchPointer(stage, 'pointerup', center.x + 60, center.y + 40);
+
+		await sleep();
+
+		const parts = (wrapper.dataset.lastViewState ?? '').split(',');
+		expect(parts).toHaveLength(3);
+		expect(Number(parts[0])).toBeCloseTo(60);
+		expect(Number(parts[1])).toBeCloseTo(40);
+		expect(Number(parts[2])).toBeCloseTo(1);
+	}}
+/>
+
+<Story
+	name="WheelZoomEmitsViewStateChange"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = canvasElement.querySelector('[data-testid="stage-callbacks"]') as HTMLElement;
+		const stage = getStage(canvasElement);
+
+		await waitForLayout();
+
+		dispatchWheel(stage, -200);
+
+		await sleep();
+
+		const parts = (wrapper.dataset.lastViewState ?? '').split(',');
+		expect(parts).toHaveLength(3);
+		expect(Number(parts[2])).toBeGreaterThan(1);
+	}}
+/>
+
+<Story
+	name="StartsAtInitialPanAndZoom"
+	args={{ nodes: NODES.slice(0, 3), initialScale: 1.5, initialPanX: 32, initialPanY: -24 }}
+	play={async ({ canvasElement }) => {
+		await waitForLayout();
+		expect(getStageTransform(canvasElement)).toContain('translate(32px, -24px) scale(1.5)');
 	}}
 />
 
@@ -326,6 +407,7 @@
 	name="PanAndZoom"
 	args={{ nodes: [] }}
 	play={async ({ canvasElement }) => {
+		const wrapper = canvasElement.querySelector('[data-testid="stage-callbacks"]') as HTMLElement;
 		const stage = getStage(canvasElement);
 
 		await waitForLayout();
@@ -339,11 +421,20 @@
 		await sleep();
 		const afterPan = getStageTransform(canvasElement);
 		expect(afterPan).toContain('translate(20px, 20px)');
+		let viewState = parseViewStateCallback(wrapper.dataset.lastViewState ?? '');
+		expect(viewState.panX).toBe(20);
+		expect(viewState.panY).toBe(20);
+		expect(viewState.scale).toBe(1);
 
 		// Zoom in (negative deltaY)
 		dispatchWheel(stage, -200);
+		await sleep();
 		const afterZoom = getStageTransform(canvasElement);
 		expect(afterZoom).toMatch(/scale\([1-9]/);
+		viewState = parseViewStateCallback(wrapper.dataset.lastViewState ?? '');
+		expect(viewState.panX).toBe(20);
+		expect(viewState.panY).toBe(20);
+		expect(viewState.scale).toBeGreaterThan(1);
 	}}
 />
 

@@ -14,11 +14,21 @@
 	import { clientPointToGraphPoint } from './lib/stageCoordinates.js';
 	import { DRAG_THRESHOLD, DBL_CLICK_MS, LONG_PRESS_DIST, LONG_PRESS_MS } from '$lib/constants.js';
 
+	interface ViewStateSnapshot {
+		panX: number;
+		panY: number;
+		scale: number;
+	}
+
 	interface Props {
 		/** Resolve node at (clientX, clientY); return null if none. Injected for testability. */
 		getNodeAt: (clientX: number, clientY: number) => NodeData | null;
 		/** Stage zoom scale on mount, clamped to configured min/max. */
 		initialScale?: number;
+		/** Stage pan X offset in pixels on mount. */
+		initialPanX?: number;
+		/** Stage pan Y offset in pixels on mount. */
+		initialPanY?: number;
 		/** Pixels of movement below which we treat as click rather than drag. */
 		dragThreshold?: number;
 		/** Callback when user single-click-drags a node and releases with a graph-local point. */
@@ -35,11 +45,19 @@
 		onNodeDoubleClickDropOntoBackground?: (node: NodeData, point: Point) => void;
 		/** Callback when user holds a node without dragging. */
 		onNodeLongPress?: (node: NodeData, point: Point) => void;
+		/**
+		 * Fired after a user pan/zoom gesture completes (pointer-up after pan, wheel event,
+		 * or pinch end). Moving camera does not mutate graph data, so this callback is kept
+		 * separate from graph-data mutation callbacks.
+		 */
+		onViewStateChange?: (state: ViewStateSnapshot) => void;
 	}
 
 	let {
 		getNodeAt,
 		initialScale = 1,
+		initialPanX = 0,
+		initialPanY = 0,
 		dragThreshold = DRAG_THRESHOLD,
 		onNodeMoved,
 		onNodeDragStart,
@@ -48,12 +66,15 @@
 		onNodeDoubleClickDropOntoNode,
 		onNodeDoubleClickDropOntoBackground,
 		onNodeLongPress,
+		onViewStateChange,
 		children
 	}: Props & { children?: Snippet } = $props();
 
 	// Pan
-	let panX = $state(0);
-	let panY = $state(0);
+	// svelte-ignore state_referenced_locally
+	let panX = $state(initialPanX);
+	// svelte-ignore state_referenced_locally
+	let panY = $state(initialPanY);
 	let panStart = $state<{
 		clientX: number;
 		clientY: number;
@@ -61,7 +82,7 @@
 		panY: number;
 	} | null>(null);
 
-	// Zoom — mount-only seed from initialScale; user gestures own scale afterward.
+	// Zoom: mount-only seed from initialScale; user gestures own scale afterward.
 	// svelte-ignore state_referenced_locally
 	let scale = $state(clampScale(initialScale));
 	let pinchStart = $state<{ distance: number; scale: number } | null>(null);
@@ -225,12 +246,14 @@
 		if (panStart) {
 			panStart = null;
 			stage.releasePointerCapture(e.pointerId);
+			onViewStateChange?.({ panX, panY, scale });
 		}
 	}
 
 	function onWheel(e: WheelEvent) {
 		e.preventDefault();
 		scale = scaleFromWheelDelta(scale, e.deltaY, undefined, DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE);
+		onViewStateChange?.({ panX, panY, scale });
 	}
 
 	// Pinch: track two active pointers and update scale from distance ratio
@@ -276,8 +299,12 @@
 
 	function onPointerUpStage(e: PointerEvent) {
 		activePointers.delete(e.pointerId);
+		const pinchWasActive = pinchStart !== null;
 		if (activePointers.size < 2) pinchStart = null;
 		onPointerUp(e);
+		if (pinchWasActive && activePointers.size < 2) {
+			onViewStateChange?.({ panX, panY, scale });
+		}
 	}
 
 	const transformStyle = $derived(`translate(${panX}px, ${panY}px) scale(${scale})`);

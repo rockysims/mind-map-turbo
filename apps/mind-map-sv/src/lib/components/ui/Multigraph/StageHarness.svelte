@@ -11,12 +11,16 @@
 		/** Optional: nodeId -> { left, top } for positioning (default: 50%, 50%) */
 		positions = {},
 		initialScale,
+		initialPanX,
+		initialPanY,
 		onNodeMoved: onNodeMovedProp,
 		...rest
 	}: {
 		nodes: NodeData[];
 		positions?: Record<string, { left: string; top: string }>;
 		initialScale?: number;
+		initialPanX?: number;
+		initialPanY?: number;
 		onNodeMoved?: (node: NodeData, point: Point) => void;
 	} = $props();
 
@@ -61,6 +65,7 @@
 	let lastDoubleClickDropBg = $state<{ nodeId: string; point: Point } | null>(null);
 	let lastDoubleClickDropNodeIds = $state<string | null>(null);
 	let lastNodeLongPress = $state<{ nodeId: string; point: Point } | null>(null);
+	let lastViewState = $state<{ panX: number; panY: number; scale: number } | null>(null);
 </script>
 
 <div
@@ -81,11 +86,16 @@
 	data-last-node-long-press={lastNodeLongPress
 		? `${lastNodeLongPress.nodeId},${lastNodeLongPress.point.x},${lastNodeLongPress.point.y}`
 		: ''}
+	data-last-view-state={lastViewState
+		? `${lastViewState.panX},${lastViewState.panY},${lastViewState.scale}`
+		: ''}
 	{...rest}
 >
 	<Stage
 		{getNodeAt}
 		{initialScale}
+		{initialPanX}
+		{initialPanY}
 		onNodeMoved={(n, point) => {
 			lastNodeMoved = { nodeId: n.id, point };
 			onNodeMovedProp?.(n, point);
@@ -107,6 +117,9 @@
 		}}
 		onNodeLongPress={(n, point) => {
 			lastNodeLongPress = { nodeId: n.id, point };
+		}}
+		onViewStateChange={(state) => {
+			lastViewState = state;
 		}}
 	>
 		{#each nodes as node (node.id)}

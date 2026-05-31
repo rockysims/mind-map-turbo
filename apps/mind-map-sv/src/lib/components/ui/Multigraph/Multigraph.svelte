@@ -53,6 +53,7 @@
 	} from './lib/scaleChangeSettle.js';
 	import { externalGraphSyncToken } from './lib/graphSync.js';
 	import { MIN_NODE_HIT_RADIUS } from '$lib/constants.js';
+	import type { ViewState } from '$lib/migrations.js';
 
 	const CENTERED_POSITION: Point = { x: 0, y: 0 };
 	type RenderableEdgeVisibility = Exclude<EdgeVisibility, { kind: 'hidden' }>;
@@ -62,15 +63,17 @@
 		graphGeneration = 0,
 		defaultPrimaryNodeId = '',
 		layoutSettings = {},
-		initialStageScale,
-		onMultigraphChange
+		initialViewState,
+		onMultigraphChange,
+		onViewStateChange
 	}: {
 		multigraphData: MultigraphData;
 		graphGeneration?: number;
 		defaultPrimaryNodeId?: string;
 		layoutSettings?: Partial<LayoutSettings>;
-		initialStageScale?: number;
+		initialViewState?: ViewState;
 		onMultigraphChange?: (data: MultigraphData) => void;
+		onViewStateChange?: (state: ViewState) => void;
 	} = $props();
 
 	let graph = $state<MultigraphData>({ nodes: [], edges: [], posByNodeId: {} });
@@ -607,7 +610,9 @@
 >
 	<Stage
 		{getNodeAt}
-		initialScale={initialStageScale}
+		initialScale={initialViewState?.scale}
+		initialPanX={initialViewState?.panX}
+		initialPanY={initialViewState?.panY}
 		onNodeMoved={handleNodeMoved}
 		onNodeDragStart={handleNodeDragStart}
 		onNodeDragEnd={handleNodeDragEnd}
@@ -615,6 +620,7 @@
 		onNodeDoubleClickDropOntoNode={handleNodeDoubleClickDropOntoNode}
 		onNodeDoubleClickDropOntoBackground={handleNodeDoubleClickDropOntoBackground}
 		onNodeLongPress={handleNodeLongPress}
+		{onViewStateChange}
 	>
 		<div class="edges" aria-hidden="true">
 			{#each renderableEdgeVisibility as visibility (visibility.edge.id)}

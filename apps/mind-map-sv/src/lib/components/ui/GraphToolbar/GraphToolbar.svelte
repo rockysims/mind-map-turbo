@@ -7,7 +7,9 @@
 		notice = '',
 		onGraphSelected,
 		onNewGraph,
-		onDeleteGraph
+		onDeleteGraph,
+		onExport,
+		onImport
 	}: {
 		selectedGraphId: string;
 		graphSummaries?: GraphSummary[];
@@ -15,11 +17,27 @@
 		onGraphSelected?: (graphId: string) => void;
 		onNewGraph?: () => void;
 		onDeleteGraph?: () => void;
+		onExport?: () => void;
+		onImport?: (file: File) => void;
 	} = $props();
+
+	let fileInput = $state<HTMLInputElement | undefined>(undefined);
 
 	function handleGraphSelection(event: Event): void {
 		const target = event.currentTarget as HTMLSelectElement;
 		onGraphSelected?.(target.value);
+	}
+
+	function handleFileChange(event: Event): void {
+		const target = event.currentTarget as HTMLInputElement;
+		const file = target.files?.[0];
+		if (file) {
+			onImport?.(file);
+		}
+		// Reset so the same file can be imported again.
+		if (fileInput) {
+			fileInput.value = '';
+		}
 	}
 </script>
 
@@ -37,6 +55,19 @@
 	</label>
 	<button type="button" onclick={() => onNewGraph?.()}>New graph</button>
 	<button type="button" onclick={() => onDeleteGraph?.()}>Delete graph</button>
+	<button type="button" onclick={() => onExport?.()}>Export</button>
+	<label>
+		<span class="sr-only">Import graph from file</span>
+		<input
+			bind:this={fileInput}
+			type="file"
+			accept=".json,application/json"
+			aria-label="Import graph from file"
+			class="file-input-hidden"
+			onchange={handleFileChange}
+		/>
+		<span aria-hidden="true" class="file-input-button">Import</span>
+	</label>
 	<p role="status">{notice}</p>
 </div>
 
@@ -67,13 +98,40 @@
 	}
 
 	.graph-toolbar select,
-	.graph-toolbar button {
+	.graph-toolbar button,
+	.file-input-button {
 		border: 0;
 		border-radius: 999px;
 		padding: 0.375rem 0.625rem;
 		background: #e2e8f0;
 		color: #0f172a;
 		font: inherit;
+		cursor: pointer;
+	}
+
+	.file-input-hidden {
+		/* Visually hidden but accessible: clicking the label triggers the input. */
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
+	}
+
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
 	}
 
 	.graph-toolbar p {

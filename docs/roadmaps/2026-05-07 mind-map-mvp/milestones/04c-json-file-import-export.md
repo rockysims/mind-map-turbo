@@ -1,6 +1,6 @@
 # Milestone 04c: JSON file import/export
 
-**Status:** not started
+**Status:** complete
 **Depends on:** milestone 04 (persistence).
 **Plan:** [2026-05-30 json-file-import-export.md](../plans/2026-05-30%20json-file-import-export.md)
 
@@ -66,3 +66,11 @@ simple backup and sharing path before multiplayer or accounts exist.
   reusable dialog primitive or a small local control.
 - **Graph metadata shape.** Coordinate with milestone 04f so tag color
   config persists in both local autosaves and exported files.
+
+## Notes
+
+- 2026-05-30 (04f handoff): **schemaVersion 1** payloads carry `data` plus
+  optional `viewState`. Local autosaves also include `updatedAt`; exported
+  `.json` files omit `updatedAt` on purpose. Milestone 04f should extend or
+  migrate this contract in one place (migrations) so autosave and file
+  import/export stay aligned.

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { makeGraph } from './components/ui/Multigraph/lib/testFixtures';
 import type { MultigraphData } from './components/ui/types/multigraph';
+import { CURRENT_SCHEMA_VERSION, NEUTRAL_VIEW_STATE, type ViewState } from './migrations';
 import {
 	GraphPersistenceController,
 	statusToNotice,
@@ -8,20 +9,25 @@ import {
 	type GraphSaveScheduler
 } from './graphPersistenceController';
 import { DEFAULT_GRAPH_ID } from './graphRoute';
-import { graphStorageKey, type GraphSummary, type Persistence } from './persistence';
+import {
+	graphStorageKey,
+	type GraphSummary,
+	type PersistedGraphRecord,
+	type Persistence
+} from './persistence';
 import type { SaveStatus } from './saveScheduler';
 
 class MemoryPersistence implements Persistence {
-	private readonly graphs = new Map<string, { data: MultigraphData; updatedAt: number }>();
+	private readonly graphs = new Map<string, { graph: PersistedGraphRecord; updatedAt: number }>();
 	private clock = 0;
 
-	load = vi.fn(async (id: string): Promise<MultigraphData | null> => {
-		return this.graphs.get(id)?.data ?? null;
+	load = vi.fn(async (id: string): Promise<PersistedGraphRecord | null> => {
+		return this.graphs.get(id)?.graph ?? null;
 	});
 
-	save = vi.fn(async (id: string, data: MultigraphData): Promise<void> => {
+	save = vi.fn(async (id: string, graph: PersistedGraphRecord): Promise<void> => {
 		this.clock += 1;
-		this.graphs.set(id, { data, updatedAt: this.clock });
+		this.graphs.set(id, { graph, updatedAt: this.clock });
 	});
 
 	list = vi.fn(async (): Promise<GraphSummary[]> => {
@@ -36,7 +42,7 @@ class MemoryPersistence implements Persistence {
 }
 
 class TestScheduler implements GraphSaveScheduler {
-	private pending: { id: string; data: MultigraphData } | null = null;
+	private pending: { id: string; graph: PersistedGraphRecord } | null = null;
 	failFlushOnce = false;
 	dispose = vi.fn();
 
@@ -46,8 +52,8 @@ class TestScheduler implements GraphSaveScheduler {
 		private readonly events: string[]
 	) {}
 
-	schedule = vi.fn((id: string, data: MultigraphData): void => {
-		this.pending = { id, data };
+	schedule = vi.fn((id: string, data: MultigraphData, viewState: ViewState): void => {
+		this.pending = { id, graph: { data, viewState } };
 	});
 
 	flush = vi.fn(async (): Promise<void> => {
@@ -61,7 +67,7 @@ class TestScheduler implements GraphSaveScheduler {
 		const save = this.pending;
 		this.onStatus({ state: 'saving' });
 		this.events.push('save');
-		await this.persistence.save(save.id, save.data);
+		await this.persistence.save(save.id, save.graph);
 		this.pending = null;
 		this.onStatus({ state: 'saved', savedAt: 123 });
 	});
@@ -71,7 +77,19 @@ function createDefaultGraph(): MultigraphData {
 	return makeGraph({ nodeCount: 1 });
 }
 
-function setup() {
+function nonNeutralViewState(): ViewState {
+	return { panX: 120, panY: -80, scale: 1.5 };
+}
+
+function setup(
+	options: {
+		confirmGraphImportReplace?: (context: {
+			loadedGraphId: string;
+			currentGraph: MultigraphData;
+			incomingGraph: MultigraphData;
+		}) => boolean | Promise<boolean>;
+	} = {}
+) {
 	const persistence = new MemoryPersistence();
 	const events: string[] = [];
 	const navigate = vi.fn(async (graphId: string) => {
@@ -87,6 +105,7 @@ function setup() {
 		createDefaultGraph,
 		navigate,
 		storageNamespace: 'test',
+		confirmGraphImportReplace: options.confirmGraphImportReplace,
 		createGraphId: () => 'graph-new'
 	});
 
@@ -101,10 +120,18 @@ describe('GraphPersistenceController', () => {
 		await controller.load('missing');
 
 		expect(persistence.load).toHaveBeenCalledWith('missing');
-		expect(scheduler.schedule).toHaveBeenCalledWith('missing', createDefaultGraph());
-		expect(persistence.save).toHaveBeenCalledWith('missing', createDefaultGraph());
+		expect(scheduler.schedule).toHaveBeenCalledWith(
+			'missing',
+			createDefaultGraph(),
+			NEUTRAL_VIEW_STATE
+		);
+		expect(persistence.save).toHaveBeenCalledWith('missing', {
+			data: createDefaultGraph(),
+			viewState: NEUTRAL_VIEW_STATE
+		});
 		expect(controller.getView()).toMatchObject({
 			graph: createDefaultGraph(),
+			viewState: NEUTRAL_VIEW_STATE,
 			loadedGraphId: 'missing',
 			status: { state: 'saved', savedAt: 123 },
 			graphSummaries: [{ id: 'missing', updatedAt: 1 }]
@@ -114,12 +141,13 @@ describe('GraphPersistenceController', () => {
 	it('loads existing graphs and reports loaded status', async () => {
 		const { controller, persistence } = setup();
 		const graph = makeGraph({ nodeCount: 2 });
-		await persistence.save('saved', graph);
+		await persistence.save('saved', { data: graph, viewState: nonNeutralViewState() });
 
 		await controller.load('saved');
 
 		expect(controller.getView()).toMatchObject({
 			graph,
+			viewState: nonNeutralViewState(),
 			loadedGraphId: 'saved',
 			status: { state: 'loaded', graphId: 'saved' }
 		});
@@ -136,7 +164,7 @@ describe('GraphPersistenceController', () => {
 
 		expect(controller.getView().graph).toEqual(loaded);
 		expect(controller.getView().graphGeneration).toBe(generationAfterLoad);
-		expect(scheduler.schedule).toHaveBeenLastCalledWith('active', edited);
+		expect(scheduler.schedule).toHaveBeenLastCalledWith('active', edited, NEUTRAL_VIEW_STATE);
 	});
 
 	it('can optionally sync the loaded view for display-only callers', async () => {
@@ -154,8 +182,8 @@ describe('GraphPersistenceController', () => {
 		const first = makeGraph({ nodeCount: 1 });
 		const second = makeGraph({ nodeCount: 2 });
 
-		await persistence.save('first', first);
-		await persistence.save('second', second);
+		await persistence.save('first', { data: first, viewState: NEUTRAL_VIEW_STATE });
+		await persistence.save('second', { data: second, viewState: NEUTRAL_VIEW_STATE });
 		await controller.load('first');
 		const firstGeneration = controller.getView().graphGeneration;
 		controller.notifyGraphChanged(first);
@@ -188,8 +216,14 @@ describe('GraphPersistenceController', () => {
 
 	it('deletes the selected graph and navigates to an existing graph when one remains', async () => {
 		const { controller, persistence, navigate } = setup();
-		await persistence.save('first', makeGraph({ nodeCount: 1 }));
-		await persistence.save('second', makeGraph({ nodeCount: 2 }));
+		await persistence.save('first', {
+			data: makeGraph({ nodeCount: 1 }),
+			viewState: NEUTRAL_VIEW_STATE
+		});
+		await persistence.save('second', {
+			data: makeGraph({ nodeCount: 2 }),
+			viewState: NEUTRAL_VIEW_STATE
+		});
 		await controller.load('second');
 
 		await controller.deleteGraph('second');
@@ -201,7 +235,10 @@ describe('GraphPersistenceController', () => {
 
 	it('reloads the default graph in place when deleting the only default graph', async () => {
 		const { controller, persistence, navigate } = setup();
-		await persistence.save(DEFAULT_GRAPH_ID, makeGraph({ nodeCount: 2 }));
+		await persistence.save(DEFAULT_GRAPH_ID, {
+			data: makeGraph({ nodeCount: 2 }),
+			viewState: NEUTRAL_VIEW_STATE
+		});
 		await controller.load(DEFAULT_GRAPH_ID);
 
 		await controller.deleteGraph(DEFAULT_GRAPH_ID);
@@ -233,10 +270,13 @@ describe('GraphPersistenceController', () => {
 		const { controller, persistence } = setup();
 		const first = makeGraph({ nodeCount: 1 });
 		const updated = makeGraph({ nodeCount: 3 });
-		await persistence.save('active', first);
+		await persistence.save('active', { data: first, viewState: NEUTRAL_VIEW_STATE });
 		await controller.load('active');
-		await persistence.save('active', updated);
-		await persistence.save('other', makeGraph({ nodeCount: 2 }));
+		await persistence.save('active', { data: updated, viewState: NEUTRAL_VIEW_STATE });
+		await persistence.save('other', {
+			data: makeGraph({ nodeCount: 2 }),
+			viewState: NEUTRAL_VIEW_STATE
+		});
 
 		await controller.handleStorageEvent({ key: graphStorageKey('test', 'other') });
 		expect(controller.getView().graph).toEqual(first);
@@ -245,6 +285,192 @@ describe('GraphPersistenceController', () => {
 		expect(controller.getView()).toMatchObject({
 			graph: updated,
 			status: { state: 'reloaded', graphId: 'active' }
+		});
+	});
+
+	it('exports current graph and view state as schema-envelope JSON', async () => {
+		const { controller } = setup();
+		const graph = makeGraph({
+			nodeCount: 3,
+			edges: [
+				[0, 1],
+				[1, 2]
+			]
+		});
+		const viewState = nonNeutralViewState();
+		await controller.load('active');
+		controller.notifyGraphChanged(graph, { syncView: true });
+		controller.notifyViewStateChanged(viewState, { syncView: true });
+
+		const exported = JSON.parse(controller.exportGraphDocument()) as {
+			schemaVersion: number;
+			data: MultigraphData;
+			viewState: ViewState;
+		};
+		expect(exported).toEqual({
+			schemaVersion: CURRENT_SCHEMA_VERSION,
+			data: graph,
+			viewState
+		});
+	});
+
+	it('imports a valid graph file into the active graph id and refreshes summaries', async () => {
+		const confirmReplace = vi.fn(() => true);
+		const { controller, persistence } = setup({ confirmGraphImportReplace: confirmReplace });
+		const existing = makeGraph({ nodeCount: 2 });
+		await persistence.save('active', { data: existing, viewState: NEUTRAL_VIEW_STATE });
+		await controller.load('active');
+		const generationBeforeImport = controller.getView().graphGeneration;
+
+		controller.notifyGraphChanged(makeGraph({ nodeCount: 4 }));
+		const importedGraph = makeGraph({ nodeCount: 3, edges: [[0, 1]] });
+		const importedViewState = { panX: 50, panY: -20, scale: 1.25 };
+		const importResult = await controller.importGraphDocument(
+			JSON.stringify({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data: importedGraph,
+				viewState: importedViewState
+			})
+		);
+
+		expect(importResult).toBe('imported');
+		expect(confirmReplace).toHaveBeenCalledTimes(1);
+		expect(controller.getView()).toMatchObject({
+			loadedGraphId: 'active',
+			graph: importedGraph,
+			viewState: importedViewState,
+			graphGeneration: generationBeforeImport + 1,
+			status: { state: 'notice', message: 'Imported graph into "active".' }
+		});
+		expect(persistence.save).toHaveBeenLastCalledWith('active', {
+			data: importedGraph,
+			viewState: importedViewState
+		});
+		expect(controller.getView().graphSummaries).toEqual([{ id: 'active', updatedAt: 3 }]);
+	});
+
+	it('leaves graph, generation, and view state unchanged on invalid import payloads', async () => {
+		const { controller, persistence } = setup();
+		await controller.load('active');
+		const before = controller.getView();
+		const saveCallsBefore = persistence.save.mock.calls.length;
+
+		const result = await controller.importGraphDocument(
+			JSON.stringify({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data: { nodes: [] }
+			})
+		);
+
+		expect(result).toBe('invalid');
+		expect(controller.getView()).toMatchObject({
+			graph: before.graph,
+			viewState: before.viewState,
+			graphGeneration: before.graphGeneration
+		});
+		expect(persistence.save).toHaveBeenCalledTimes(saveCallsBefore);
+	});
+
+	it('leaves graph, generation, and view state unchanged on unsupported versions', async () => {
+		const { controller, persistence } = setup();
+		await controller.load('active');
+		const before = controller.getView();
+		const saveCallsBefore = persistence.save.mock.calls.length;
+
+		const result = await controller.importGraphDocument(
+			JSON.stringify({
+				schemaVersion: 999,
+				data: makeGraph({ nodeCount: 1 })
+			})
+		);
+
+		expect(result).toBe('unsupported');
+		expect(controller.getView()).toMatchObject({
+			graph: before.graph,
+			viewState: before.viewState,
+			graphGeneration: before.graphGeneration
+		});
+		expect(persistence.save).toHaveBeenCalledTimes(saveCallsBefore);
+	});
+
+	it('autosaves pan and zoom changes without mutating graph positions', async () => {
+		const { controller, persistence, scheduler } = setup();
+		await controller.load('active');
+		const graphBefore = controller.getView().graph;
+		const positionsBefore = graphBefore.posByNodeId;
+		const updatedViewState = { panX: 25, panY: 10, scale: 0.8 };
+
+		controller.notifyViewStateChanged(updatedViewState, { syncView: true });
+		await scheduler.flush();
+
+		expect(controller.getView().graph).toEqual(graphBefore);
+		expect(controller.getView().graph.posByNodeId).toEqual(positionsBefore);
+		expect(persistence.save).toHaveBeenLastCalledWith('active', {
+			data: graphBefore,
+			viewState: updatedViewState
+		});
+		expect(controller.getView().graphSummaries).toEqual([{ id: 'active', updatedAt: 2 }]);
+	});
+
+	it('cancels import when replacement confirmation is declined for non-empty graphs', async () => {
+		const confirmReplace = vi.fn(() => false);
+		const { controller, persistence } = setup({ confirmGraphImportReplace: confirmReplace });
+		await persistence.save('active', {
+			data: makeGraph({ nodeCount: 2 }),
+			viewState: NEUTRAL_VIEW_STATE
+		});
+		await controller.load('active');
+		const before = controller.getView();
+		const saveCallsBefore = persistence.save.mock.calls.length;
+
+		const result = await controller.importGraphDocument(
+			JSON.stringify({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data: makeGraph({ nodeCount: 1 }),
+				viewState: nonNeutralViewState()
+			})
+		);
+
+		expect(result).toBe('cancelled');
+		expect(confirmReplace).toHaveBeenCalledTimes(1);
+		expect(controller.getView()).toMatchObject({
+			graph: before.graph,
+			viewState: before.viewState,
+			graphGeneration: before.graphGeneration,
+			status: { state: 'notice', message: 'Import cancelled.' }
+		});
+		expect(persistence.save).toHaveBeenCalledTimes(saveCallsBefore);
+	});
+
+	it('imports without confirmation when current graph is default-safe', async () => {
+		const confirmReplace = vi.fn(() => true);
+		const { controller } = setup({ confirmGraphImportReplace: confirmReplace });
+		await controller.load('active');
+
+		const result = await controller.importGraphDocument(
+			JSON.stringify({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data: makeGraph({ nodeCount: 1 }),
+				viewState: nonNeutralViewState()
+			})
+		);
+
+		expect(result).toBe('imported');
+		expect(confirmReplace).not.toHaveBeenCalled();
+	});
+
+	it('emits a read failure notice when import text cannot be read', async () => {
+		const { controller } = setup();
+		await controller.load('active');
+
+		const result = await controller.importGraphDocumentFromReader(async () => {
+			throw new Error('read failed');
+		});
+
+		expect(result).toBe('read-failed');
+		expect(controller.getView().status).toEqual({
+			state: 'notice',
+			message: 'Import failed: unable to read file.'
 		});
 	});
 
@@ -273,6 +499,7 @@ describe('statusToNotice', () => {
 				{ state: 'warning', savedAt: 1, message: 'Stored graphs use 81% of the local budget.' },
 				'Stored graphs use 81% of the local budget.'
 			],
+			[{ state: 'notice', message: 'Import cancelled.' }, 'Import cancelled.'],
 			[{ state: 'error', message: 'quota exceeded' }, 'Save failed: quota exceeded']
 		];
 

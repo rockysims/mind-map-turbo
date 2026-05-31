@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { APP_CONFIG } from './appConfig';
 import { makeGraph } from './components/ui/Multigraph/lib/testFixtures';
-import { CURRENT_SCHEMA_VERSION } from './migrations';
+import { CURRENT_SCHEMA_VERSION, NEUTRAL_VIEW_STATE } from './migrations';
 import {
 	LocalStoragePersistence,
 	ServerPersistence,
@@ -39,14 +39,16 @@ describe('LocalStoragePersistence', () => {
 		const storage = new MemoryStorage();
 		const persistence = new LocalStoragePersistence(storage, 'test', () => 123);
 		const graph = makeGraph({ nodeCount: 2, edges: [[0, 1]] });
+		const viewState = { panX: 10, panY: -5, scale: 1.25 };
 
-		await persistence.save('graph one', graph);
+		await persistence.save('graph one', { data: graph, viewState });
 
-		expect(await persistence.load('graph one')).toEqual(graph);
+		expect(await persistence.load('graph one')).toEqual({ data: graph, viewState });
 		expect(JSON.parse(storage.getItem(graphStorageKey('test', 'graph one')) ?? '{}')).toMatchObject(
 			{
 				schemaVersion: CURRENT_SCHEMA_VERSION,
 				data: graph,
+				viewState,
 				updatedAt: 123
 			}
 		);
@@ -63,9 +65,15 @@ describe('LocalStoragePersistence', () => {
 		let now = 100;
 		const persistence = new LocalStoragePersistence(storage, 'test', () => now);
 
-		await persistence.save('older', makeGraph({ nodeCount: 1 }));
+		await persistence.save('older', {
+			data: makeGraph({ nodeCount: 1 }),
+			viewState: NEUTRAL_VIEW_STATE
+		});
 		now = 200;
-		await persistence.save('newer', makeGraph({ nodeCount: 2 }));
+		await persistence.save('newer', {
+			data: makeGraph({ nodeCount: 2 }),
+			viewState: NEUTRAL_VIEW_STATE
+		});
 
 		await expect(persistence.list()).resolves.toEqual([
 			{ id: 'newer', updatedAt: 200 },
@@ -76,7 +84,10 @@ describe('LocalStoragePersistence', () => {
 	it('deletes saved graphs', async () => {
 		const persistence = new LocalStoragePersistence(new MemoryStorage(), 'test');
 
-		await persistence.save('graph', makeGraph({ nodeCount: 1 }));
+		await persistence.save('graph', {
+			data: makeGraph({ nodeCount: 1 }),
+			viewState: NEUTRAL_VIEW_STATE
+		});
 		await persistence.delete('graph');
 
 		await expect(persistence.load('graph')).resolves.toBeNull();
@@ -87,10 +98,27 @@ describe('LocalStoragePersistence', () => {
 		const first = new LocalStoragePersistence(storage, 'first');
 		const second = new LocalStoragePersistence(storage, 'second');
 
-		await first.save('graph', makeGraph({ nodeCount: 1 }));
+		await first.save('graph', { data: makeGraph({ nodeCount: 1 }), viewState: NEUTRAL_VIEW_STATE });
 
 		await expect(second.load('graph')).resolves.toBeNull();
 		await expect(second.list()).resolves.toEqual([]);
+	});
+
+	it('defaults missing viewState to neutral for backward-compatible payloads', async () => {
+		const storage = new MemoryStorage();
+		storage.setItem(
+			graphStorageKey('test', 'legacy'),
+			JSON.stringify({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data: makeGraph({ nodeCount: 1 }),
+				updatedAt: 101
+			})
+		);
+		const persistence = new LocalStoragePersistence(storage, 'test');
+
+		await expect(persistence.load('legacy')).resolves.toMatchObject({
+			viewState: NEUTRAL_VIEW_STATE
+		});
 	});
 
 	it('estimates namespace usage from UTF-16 storage size', () => {
@@ -107,24 +135,28 @@ describe('LocalStoragePersistence', () => {
 describe('ServerPersistence', () => {
 	it('loads graph data from a schema envelope', async () => {
 		const graph = makeGraph({ nodeCount: 1 });
-		const fetchGraph = vi.fn(async () => Response.json({ schemaVersion: 1, data: graph }));
+		const viewState = { panX: 1, panY: 2, scale: 1.5 };
+		const fetchGraph = vi.fn(async () =>
+			Response.json({ schemaVersion: 1, data: graph, viewState })
+		);
 		const persistence = new ServerPersistence(fetchGraph);
 
-		await expect(persistence.load('graph one')).resolves.toEqual(graph);
+		await expect(persistence.load('graph one')).resolves.toEqual({ data: graph, viewState });
 		expect(fetchGraph).toHaveBeenCalledWith('/api/graphs/graph%20one');
 	});
 
 	it('saves graph data with method, path, and envelope body', async () => {
 		const graph = makeGraph({ nodeCount: 1 });
+		const viewState = { panX: 0, panY: 0, scale: 0.9 };
 		const fetchGraph = vi.fn(async () => new Response(null, { status: 204 }));
 		const persistence = new ServerPersistence(fetchGraph);
 
-		await persistence.save('graph', graph);
+		await persistence.save('graph', { data: graph, viewState });
 
 		expect(fetchGraph).toHaveBeenCalledWith('/api/graphs/graph', {
 			method: 'PUT',
 			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ schemaVersion: 1, data: graph })
+			body: JSON.stringify({ schemaVersion: 1, data: graph, viewState })
 		});
 	});
 

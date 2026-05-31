@@ -1,12 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { APP_CONFIG } from '$lib/appConfig';
+	import { readFileText } from '$lib/browserGraphFile';
 	import { makeGraph } from '$lib/components/ui/Multigraph/lib/testFixtures';
 	import Multigraph from '$lib/components/ui/Multigraph/Multigraph.svelte';
 	import GraphToolbar from '$lib/components/ui/GraphToolbar/GraphToolbar.svelte';
 	import type { LayoutSettings } from '$lib/components/ui/Multigraph/lib/layoutSettings';
 	import type { MultigraphData } from '$lib/components/ui/types/multigraph';
 	import { DEFAULT_GRAPH_ID } from '$lib/graphRoute';
+	import { NEUTRAL_VIEW_STATE } from '$lib/migrations';
 	import { graphStorageKey } from '$lib/persistence';
 	import { SaveScheduler } from '$lib/saveScheduler';
 	import { InMemoryPersistence } from './inMemoryPersistence';
@@ -15,11 +17,17 @@
 	let {
 		initialGraphId = DEFAULT_GRAPH_ID,
 		graphs = {},
-		layoutSettings = {}
+		layoutSettings = {},
+		/** Controls whether confirmGraphImportReplace returns true or false in stories. */
+		confirmResponse = true,
+		/** Text to import when the "Import text" harness button is clicked. */
+		simulateImportText = ''
 	}: {
 		initialGraphId?: string;
 		graphs?: Record<string, MultigraphData>;
 		layoutSettings?: Partial<LayoutSettings>;
+		confirmResponse?: boolean;
+		simulateImportText?: string;
 	} = $props();
 
 	let now = 0;
@@ -29,6 +37,8 @@
 		return now;
 	});
 	let routedGraphId = $state(initialGraphIdAtMount());
+	let lastDownload = $state('');
+	let lastImportResult = $state('');
 	const persisted = usePersistedGraph({
 		persistence,
 		createScheduler: (onStatus) =>
@@ -50,7 +60,10 @@
 			await persisted.load(graphId, { flushCurrent: false });
 		},
 		storageNamespace: namespace,
-		createGraphId: () => 'graph-new'
+		createGraphId: () => 'graph-new',
+		confirmGraphImportReplace: () => confirmResponse,
+		minScale: APP_CONFIG.multigraph.zoom.minScale,
+		maxScale: APP_CONFIG.multigraph.zoom.maxScale
 	});
 
 	const graphIds = $derived(persisted.graphSummaries.map((summary) => summary.id).join(','));
@@ -85,7 +98,10 @@
 
 	async function simulateExternalReload(): Promise<void> {
 		const graphId = persisted.loadedGraphId || routedGraphId;
-		await persistence.save(graphId, renamePrimaryNode(persisted.graph, 'Externally Reloaded'));
+		await persistence.save(graphId, {
+			data: renamePrimaryNode(persisted.graph, 'Externally Reloaded'),
+			viewState: { ...NEUTRAL_VIEW_STATE }
+		});
 		await persisted.handleStorageEvent({ key: graphStorageKey(namespace, graphId) });
 	}
 
@@ -94,6 +110,23 @@
 			...graph,
 			nodes: graph.nodes.map((node, index) => (index === 0 ? { ...node, title } : node))
 		};
+	}
+
+	function handleExport(): void {
+		lastDownload = persisted.exportGraphDocument();
+	}
+
+	async function handleImportLastDownload(): Promise<void> {
+		if (!lastDownload) return;
+		lastImportResult = await persisted.importGraphDocument(lastDownload);
+	}
+
+	async function handleImportText(): Promise<void> {
+		lastImportResult = await persisted.importGraphDocument(simulateImportText);
+	}
+
+	async function handleRealImport(file: File): Promise<void> {
+		lastImportResult = await persisted.importGraphDocumentFromReader(() => readFileText(file));
 	}
 </script>
 
@@ -107,6 +140,11 @@
 	data-primary-title={primaryTitle}
 	data-graph-generation={persisted.graphGeneration}
 	data-scale-animation-duration-ms={layoutSettings.scaleAnimationDurationMs ?? ''}
+	data-last-download={lastDownload}
+	data-last-import-result={lastImportResult}
+	data-view-pan-x={persisted.viewState.panX}
+	data-view-pan-y={persisted.viewState.panY}
+	data-view-scale={persisted.viewState.scale}
 >
 	<GraphToolbar
 		selectedGraphId={routedGraphId}
@@ -115,6 +153,8 @@
 		onGraphSelected={(graphId) => void persisted.selectGraph(graphId)}
 		onNewGraph={() => void persisted.createGraph()}
 		onDeleteGraph={() => void persisted.deleteGraph(routedGraphId)}
+		onExport={handleExport}
+		onImport={(file) => void handleRealImport(file)}
 	/>
 
 	<div class="harness-actions" aria-label="Story harness controls">
@@ -122,15 +162,24 @@
 		<button type="button" onclick={() => void simulateExternalReload()}>
 			Simulate external reload
 		</button>
+		<button type="button" onclick={() => void handleImportLastDownload()}>
+			Import last download
+		</button>
+		{#if simulateImportText !== ''}
+			<button type="button" onclick={() => void handleImportText()}>Import text</button>
+		{/if}
 	</div>
 
 	{#key `${persisted.loadedGraphId}:${persisted.graphGeneration}`}
 		<Multigraph
 			multigraphData={persisted.graph}
 			graphGeneration={persisted.graphGeneration}
+			initialViewState={persisted.viewState}
 			{defaultPrimaryNodeId}
 			{layoutSettings}
-			onMultigraphChange={persisted.notifyGraphChanged}
+			onMultigraphChange={(graph) => persisted.notifyGraphChanged(graph, { syncView: true })}
+			onViewStateChange={(viewState) =>
+				persisted.notifyViewStateChanged(viewState, { syncView: true })}
 		/>
 	{/key}
 </div>

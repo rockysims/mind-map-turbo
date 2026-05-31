@@ -6,6 +6,7 @@
 	import { DBL_CLICK_MS, LONG_PRESS_MS, MIN_NODE_HIT_RADIUS, NODE_RADIUS } from '$lib/constants';
 	import { makeClusteredRandomEdges, makeGraph, makeRandomEdges } from './lib/testFixtures';
 	import type { MultigraphData, Point } from '../types/multigraph';
+	import type { ViewState } from '$lib/migrations';
 
 	const { Story } = defineMeta({
 		title: 'Components/Multigraph',
@@ -15,8 +16,9 @@
 			multigraphData: { control: 'object' },
 			defaultPrimaryNodeId: { control: 'text' },
 			layoutSettings: { control: 'object' },
-			initialStageScale: { control: 'number' },
-			onMultigraphChange: { control: false }
+			initialViewState: { control: 'object' },
+			onMultigraphChange: { control: false },
+			onViewStateChange: { control: false }
 		},
 		parameters: {
 			viewport: {
@@ -32,11 +34,16 @@
 			multigraphData: MultigraphData;
 			defaultPrimaryNodeId?: string;
 			onMultigraphChange?: (data: MultigraphData) => void;
+			onViewStateChange?: (state: ViewState) => void;
 		};
 	};
 
 	type ChangeSpy = {
 		mock: { calls: Array<[MultigraphData]> };
+	};
+
+	type ViewStateSpy = {
+		mock: { calls: Array<[ViewState]> };
 	};
 
 	function getStage(el: HTMLElement): HTMLElement {
@@ -113,6 +120,16 @@
 		);
 	}
 
+	function dispatchWheel(target: HTMLElement, deltaY: number) {
+		target.dispatchEvent(
+			new WheelEvent('wheel', {
+				deltaY,
+				bubbles: true,
+				cancelable: true
+			})
+		);
+	}
+
 	function sleep(ms: number = 0) {
 		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
@@ -147,6 +164,13 @@
 		const graph = spy?.mock.calls.at(-1)?.[0];
 		if (!graph) throw new Error('Expected onMultigraphChange to be called with graph data');
 		return graph;
+	}
+
+	function lastViewState(args: PlayContext['args']): ViewState {
+		const spy = args.onViewStateChange as ViewStateSpy | undefined;
+		const viewState = spy?.mock.calls.at(-1)?.[0];
+		if (!viewState) throw new Error('Expected onViewStateChange to be called with view state');
+		return viewState;
 	}
 
 	function circlePositions(count: number, radius: number): Record<string, Point> {
@@ -220,11 +244,54 @@
 			posByNodeId: HUNDRED_NODE_POSITIONS
 		}),
 		defaultPrimaryNodeId: 'n0',
-		initialStageScale: 0.5
+		initialViewState: { panX: 0, panY: 0, scale: 0.5 }
 	}}
 	play={async ({ canvasElement }) => {
 		await waitForLayout();
 		expect(getStageTransform(canvasElement)).toContain('scale(0.5)');
+	}}
+/>
+
+<Story
+	name="StartsAtPersistedViewState"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1 }),
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: { panX: 36, panY: -18, scale: 1.25 }
+	}}
+	play={async ({ canvasElement }) => {
+		await waitForLayout();
+		expect(getStageTransform(canvasElement)).toContain('translate(36px, -18px) scale(1.25)');
+	}}
+/>
+
+<Story
+	name="UserPansAndZoomsWithoutChangingGraphData"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 0 }),
+		onMultigraphChange: fn(),
+		onViewStateChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const center = getCenter(stage);
+
+		dispatchPointer(stage, 'pointerdown', center.x, center.y);
+		dispatchPointer(stage, 'pointermove', center.x + 24, center.y + 12);
+		dispatchPointer(stage, 'pointerup', center.x + 24, center.y + 12);
+		await sleep();
+
+		expect(args.onMultigraphChange).not.toHaveBeenCalled();
+		expect(lastViewState(args)).toMatchObject({ panX: 24, panY: 12, scale: 1 });
+
+		dispatchWheel(stage, -200);
+		await sleep();
+
+		expect(args.onMultigraphChange).not.toHaveBeenCalled();
+		expect(lastViewState(args).panX).toBe(24);
+		expect(lastViewState(args).panY).toBe(12);
+		expect(lastViewState(args).scale).toBeGreaterThan(1);
 	}}
 />
 

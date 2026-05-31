@@ -16,6 +16,10 @@
 	import { SaveScheduler } from '$lib/saveScheduler';
 	import type { PageData } from './$types';
 
+	// Safe to import at module level: functions only use DOM APIs when called,
+	// not at import time, so SSR paths never touch Blob/FileReader/anchor.
+	import { downloadTextFile, readFileText } from '$lib/browserGraphFile';
+
 	let { data }: { data: PageData } = $props();
 
 	let persisted = $state<PersistedGraph | null>(null);
@@ -53,7 +57,13 @@
 			navigate: (graphId) =>
 				// eslint-disable-next-line svelte/no-navigation-without-resolve -- resolveGraphHref delegates the root path through SvelteKit's resolve().
 				goto(resolveGraphHref(resolve, graphId)),
-			storageNamespace: APP_CONFIG.persistence.storageNamespace
+			storageNamespace: APP_CONFIG.persistence.storageNamespace,
+			confirmGraphImportReplace: ({ loadedGraphId }) =>
+				window.confirm(
+					`Replace the current graph "${loadedGraphId}" with the imported graph? This cannot be undone.`
+				),
+			minScale: APP_CONFIG.multigraph.zoom.minScale,
+			maxScale: APP_CONFIG.multigraph.zoom.maxScale
 		});
 		persisted = persistedGraph;
 		hasRequestedInitialLoad = true;
@@ -90,6 +100,17 @@
 	async function deleteSelectedGraph(): Promise<void> {
 		await persisted?.deleteGraph(selectedGraphId);
 	}
+
+	function handleExport(): void {
+		if (!persisted) return;
+		const json = persisted.exportGraphDocument();
+		const graphId = persisted.loadedGraphId || DEFAULT_GRAPH_ID;
+		downloadTextFile(json, `${graphId}.json`);
+	}
+
+	async function handleImport(file: File): Promise<void> {
+		await persisted?.importGraphDocumentFromReader(() => readFileText(file));
+	}
 </script>
 
 <div class="page-shell">
@@ -100,15 +121,20 @@
 		onGraphSelected={handleGraphSelection}
 		onNewGraph={createNewGraph}
 		onDeleteGraph={() => void deleteSelectedGraph()}
+		onExport={handleExport}
+		onImport={(file) => void handleImport(file)}
 	/>
 
 	{#if persisted !== null}
-		{#key persisted.loadedGraphId}
+		{#key `${persisted.loadedGraphId}:${persisted.graphGeneration}`}
 			<Multigraph
 				multigraphData={persisted.graph}
 				graphGeneration={persisted.graphGeneration}
+				initialViewState={persisted.viewState}
 				{defaultPrimaryNodeId}
-				onMultigraphChange={persisted.notifyGraphChanged}
+				onMultigraphChange={(graph) => persisted?.notifyGraphChanged(graph, { syncView: true })}
+				onViewStateChange={(viewState) =>
+					persisted?.notifyViewStateChanged(viewState, { syncView: true })}
 			/>
 		{/key}
 	{/if}

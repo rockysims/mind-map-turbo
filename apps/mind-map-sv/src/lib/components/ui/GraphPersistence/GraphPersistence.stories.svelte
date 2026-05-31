@@ -307,6 +307,108 @@
 	}}
 />
 
+<Story
+	name="ExportAndImportRoundTrip"
+	args={{
+		initialGraphId: 'export-graph',
+		graphs: {
+			'export-graph': graphWithTitle('Export Me')
+		}
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const canvas = within(canvasElement);
+		const harness = getHarness(canvasElement);
+
+		await waitForHarnessData(canvasElement, 'loadedGraphId', 'export-graph');
+		await expect(harness.dataset.primaryTitle).toBe('Export Me');
+
+		// Export captures JSON into data-last-download without a real download.
+		await userEvent.click(canvas.getByRole('button', { name: 'Export' }));
+		await waitFor(() => expect(harness.dataset.lastDownload).toBeTruthy());
+
+		const exportedJson = harness.dataset.lastDownload!;
+		const parsed = JSON.parse(exportedJson) as {
+			schemaVersion: number;
+			viewState: { panX: number; panY: number; scale: number };
+		};
+		expect(parsed.schemaVersion).toBe(1);
+		expect(typeof parsed.viewState.panX).toBe('number');
+		expect(typeof parsed.viewState.panY).toBe('number');
+		expect(typeof parsed.viewState.scale).toBe('number');
+
+		// Import the exported JSON back.
+		await userEvent.click(canvas.getByRole('button', { name: 'Import last download' }));
+
+		await waitFor(() => expect(harness.dataset.lastImportResult).toBe('imported'));
+		await waitFor(() =>
+			expect(harness.dataset.notice).toMatch(/Imported graph into "export-graph"/)
+		);
+
+		// Graph data is preserved.
+		await expect(harness.dataset.primaryTitle).toBe('Export Me');
+
+		// View state is restored from the file.
+		expect(harness.dataset.viewPanX).toBe(String(parsed.viewState.panX));
+		expect(harness.dataset.viewPanY).toBe(String(parsed.viewState.panY));
+		expect(harness.dataset.viewScale).toBe(String(parsed.viewState.scale));
+	}}
+/>
+
+<Story
+	name="ImportInvalidJsonKeepsExistingGraph"
+	args={{
+		initialGraphId: 'stable',
+		graphs: {
+			stable: graphWithTitle('Stable Graph')
+		},
+		simulateImportText: '{ not valid json !!!'
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const canvas = within(canvasElement);
+		const harness = getHarness(canvasElement);
+
+		await waitForHarnessData(canvasElement, 'loadedGraphId', 'stable');
+		await expect(harness.dataset.primaryTitle).toBe('Stable Graph');
+
+		await userEvent.click(canvas.getByRole('button', { name: 'Import text' }));
+
+		await waitFor(() => expect(harness.dataset.lastImportResult).toBe('invalid'));
+		await waitFor(() => expect(harness.dataset.notice).toMatch(/Import failed/));
+
+		// Existing graph is still rendered.
+		expect(harness.dataset.primaryTitle).toBe('Stable Graph');
+	}}
+/>
+
+<Story
+	name="ImportConfirmsReplacementOfNonEmptyGraph"
+	args={{
+		initialGraphId: 'nonempty',
+		graphs: {
+			nonempty: graphWithTitle('Non-Empty Graph', 3)
+		},
+		confirmResponse: true
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const canvas = within(canvasElement);
+		const harness = getHarness(canvasElement);
+
+		await waitForHarnessData(canvasElement, 'loadedGraphId', 'nonempty');
+		await expect(harness.dataset.nodeCount).toBe('3');
+
+		// Export so we have a valid payload to import.
+		await userEvent.click(canvas.getByRole('button', { name: 'Export' }));
+		await waitFor(() => expect(harness.dataset.lastDownload).toBeTruthy());
+
+		// Import with confirmResponse=true; replacement is confirmed.
+		await userEvent.click(canvas.getByRole('button', { name: 'Import last download' }));
+
+		await waitFor(() => expect(harness.dataset.lastImportResult).toBe('imported'));
+		await waitFor(() => expect(harness.dataset.notice).toMatch(/Imported graph into "nonempty"/));
+		expect(harness.dataset.nodeCount).toBe('3');
+	}}
+/>
+
 <style>
 	:global(body) {
 		min-height: 100vh;

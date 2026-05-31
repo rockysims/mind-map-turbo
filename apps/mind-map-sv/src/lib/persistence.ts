@@ -1,9 +1,10 @@
 import type { MultigraphData } from './components/ui/types/multigraph';
 import {
-	parsePersistedGraph,
+	NEUTRAL_VIEW_STATE,
 	unwrapPersistedGraph,
 	wrapPersistedGraph,
-	type PersistedGraphPayload
+	type PersistedGraphPayload,
+	type ViewState
 } from './migrations';
 
 export type GraphSummary = {
@@ -12,8 +13,8 @@ export type GraphSummary = {
 };
 
 export interface Persistence {
-	load(id: string): Promise<MultigraphData | null>;
-	save(id: string, data: MultigraphData): Promise<void>;
+	load(id: string): Promise<PersistedGraphRecord | null>;
+	save(id: string, graph: PersistedGraphRecord): Promise<void>;
 	list(): Promise<GraphSummary[]>;
 	delete(id: string): Promise<void>;
 }
@@ -24,6 +25,11 @@ export type StorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem' | '
 
 type StoredGraphPayload = PersistedGraphPayload & {
 	updatedAt: number;
+};
+
+export type PersistedGraphRecord = {
+	data: MultigraphData;
+	viewState: ViewState;
 };
 
 export function graphStorageKey(namespace: string, graphId: string): string {
@@ -43,14 +49,20 @@ export class LocalStoragePersistence implements Persistence {
 		private readonly now: () => number = Date.now
 	) {}
 
-	async load(id: string): Promise<MultigraphData | null> {
+	async load(id: string): Promise<PersistedGraphRecord | null> {
 		const item = this.storage.getItem(graphStorageKey(this.namespace, id));
-		return item === null ? null : parsePersistedGraph(item);
+		if (item === null) return null;
+		const raw = JSON.parse(item) as unknown;
+		return {
+			data: unwrapPersistedGraph(raw),
+			viewState: readViewState(raw)
+		};
 	}
 
-	async save(id: string, data: MultigraphData): Promise<void> {
+	async save(id: string, graph: PersistedGraphRecord): Promise<void> {
 		const payload: StoredGraphPayload = {
-			...wrapPersistedGraph(data),
+			...wrapPersistedGraph(graph.data),
+			viewState: graph.viewState,
 			updatedAt: this.now()
 		};
 		this.storage.setItem(graphStorageKey(this.namespace, id), JSON.stringify(payload));
@@ -87,18 +99,25 @@ export class ServerPersistence implements Persistence {
 		private readonly basePath = '/api/graphs'
 	) {}
 
-	async load(id: string): Promise<MultigraphData | null> {
+	async load(id: string): Promise<PersistedGraphRecord | null> {
 		const response = await this.fetchGraph(`${this.basePath}/${encodeURIComponent(id)}`);
 		if (response.status === 404) return null;
 		if (!response.ok) throw new Error(`Failed to load graph ${id}: ${response.status}`);
-		return unwrapPersistedGraph(await response.json());
+		const payload = (await response.json()) as unknown;
+		return {
+			data: unwrapPersistedGraph(payload),
+			viewState: readViewState(payload)
+		};
 	}
 
-	async save(id: string, data: MultigraphData): Promise<void> {
+	async save(id: string, graph: PersistedGraphRecord): Promise<void> {
 		const response = await this.fetchGraph(`${this.basePath}/${encodeURIComponent(id)}`, {
 			method: 'PUT',
 			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify(wrapPersistedGraph(data))
+			body: JSON.stringify({
+				...wrapPersistedGraph(graph.data),
+				viewState: graph.viewState
+			})
 		});
 		if (!response.ok) throw new Error(`Failed to save graph ${id}: ${response.status}`);
 	}
@@ -156,4 +175,31 @@ function readUpdatedAt(payload: unknown): number {
 	}
 
 	return 0;
+}
+
+function readViewState(payload: unknown): ViewState {
+	if (typeof payload === 'object' && payload !== null && 'viewState' in payload) {
+		const maybeViewState = payload.viewState;
+		if (
+			typeof maybeViewState === 'object' &&
+			maybeViewState !== null &&
+			'panX' in maybeViewState &&
+			'panY' in maybeViewState &&
+			'scale' in maybeViewState &&
+			typeof maybeViewState.panX === 'number' &&
+			typeof maybeViewState.panY === 'number' &&
+			typeof maybeViewState.scale === 'number' &&
+			Number.isFinite(maybeViewState.panX) &&
+			Number.isFinite(maybeViewState.panY) &&
+			Number.isFinite(maybeViewState.scale)
+		) {
+			return {
+				panX: maybeViewState.panX,
+				panY: maybeViewState.panY,
+				scale: maybeViewState.scale
+			};
+		}
+	}
+
+	return { ...NEUTRAL_VIEW_STATE };
 }

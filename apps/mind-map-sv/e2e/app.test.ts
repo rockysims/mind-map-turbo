@@ -1,3 +1,6 @@
+import { readFile, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { expect, test, type Page } from '@playwright/test';
 
 test('home page renders the graph entrypoint', async ({ page }) => {
@@ -69,8 +72,184 @@ test('deletes the selected graph without recreating it when another graph exists
 	await expectStoredGraphMissing(page, secondGraphId);
 });
 
+test('exports graph document containing schemaVersion, graph data, and viewState', async ({
+	page
+}) => {
+	const graphId = `e2e-export-${Date.now()}`;
+
+	await page.goto('/');
+	await page.evaluate(() => localStorage.clear());
+	await page.goto(`/?graph=${graphId}`);
+	await expect(page.getByText('Node 0')).toBeVisible();
+
+	await editFirstNodeTitle(page, 'Exported Node');
+	await waitForStoredTitle(page, graphId, 'Exported Node');
+
+	// Dispatch a wheel event directly on the stage to trigger a zoom and produce
+	// a non-default viewState before exporting.
+	await page.locator('.stage').dispatchEvent('wheel', { deltaY: -300 });
+	await waitForStoredViewState(page, graphId, { scaleDifferentFrom: 1 });
+
+	// Capture the Export download.
+	const downloadPromise = page.waitForEvent('download');
+	await page.getByRole('button', { name: 'Export' }).click();
+	const download = await downloadPromise;
+	const downloadedPath = await download.path();
+	if (!downloadedPath) throw new Error('Export download did not produce a file');
+	const json = await readFile(downloadedPath, 'utf-8');
+
+	const doc = JSON.parse(json) as {
+		schemaVersion: unknown;
+		data: { nodes: Array<{ title: string }> };
+		viewState: { panX: number; panY: number; scale: number };
+	};
+	expect(doc.schemaVersion).toBe(1);
+	expect(doc.data.nodes.some((n) => n.title === 'Exported Node')).toBe(true);
+	expect(doc.viewState).toMatchObject({
+		panX: expect.any(Number),
+		panY: expect.any(Number),
+		scale: expect.any(Number)
+	});
+	// Wheel zoom should have changed scale away from the neutral value of 1.
+	expect(doc.viewState.scale).not.toBe(1);
+});
+
+test('imports graph document and restores graph data and viewState', async ({ page }) => {
+	const graphId = `e2e-import-${Date.now()}`;
+	const importedTitle = 'Imported Node Title';
+	const knownViewState = { panX: 80, panY: 40, scale: 1.5 };
+	const knownDoc = {
+		schemaVersion: 1,
+		data: {
+			nodes: [{ id: 'n0', title: importedTitle, description: 'Imported description' }],
+			edges: [],
+			posByNodeId: { n0: { x: 0, y: 0 } }
+		},
+		viewState: knownViewState
+	};
+	const tmpFile = join(tmpdir(), `e2e-import-${Date.now()}.json`);
+	await writeFile(tmpFile, JSON.stringify(knownDoc, null, 2));
+
+	await page.goto('/');
+	await page.evaluate(() => localStorage.clear());
+	await page.goto(`/?graph=${graphId}`);
+	await expect(page.getByText('Node 0')).toBeVisible();
+
+	// The default graph is unchanged, so no confirm dialog fires on import.
+	await page.getByLabel('Import graph from file').setInputFiles(tmpFile);
+
+	// Wait for the import success notice.
+	await expect(page.getByRole('status')).toContainText(`Imported graph into "${graphId}"`);
+
+	// Graph should now display the imported node title.
+	await expect(page.getByText(importedTitle)).toBeVisible();
+
+	// Verify viewState was persisted to localStorage.
+	const storedPayload = await page.evaluate((id) => {
+		const item = localStorage.getItem(`mind-map:graph:${encodeURIComponent(id)}`);
+		return item
+			? (JSON.parse(item) as { viewState?: { panX: number; panY: number; scale: number } })
+			: null;
+	}, graphId);
+	expect(storedPayload?.viewState).toMatchObject(knownViewState);
+
+	// Stage transform should reflect the imported viewState (graphGeneration bump remounts Stage).
+	const transform = await page
+		.locator('.stage-content')
+		.evaluate((el) => (el as HTMLElement).style.transform);
+	expect(transform).toContain(`scale(${knownViewState.scale})`);
+});
+
+test('reload restores graph data and viewState from localStorage without file import', async ({
+	page
+}) => {
+	const graphId = `e2e-refresh-vs-${Date.now()}`;
+
+	await page.goto('/');
+	await page.evaluate(() => localStorage.clear());
+	await page.goto(`/?graph=${graphId}`);
+	await expect(page.getByText('Node 0')).toBeVisible();
+
+	await editFirstNodeTitle(page, 'Refresh Test Node');
+	await waitForStoredTitle(page, graphId, 'Refresh Test Node');
+
+	// Zoom with a wheel event to create a non-default viewState.
+	await page.locator('.stage').dispatchEvent('wheel', { deltaY: -300 });
+	await waitForStoredViewState(page, graphId, { scaleDifferentFrom: 1 });
+
+	// Capture the saved viewState before reloading.
+	const savedViewState = await page.evaluate((id) => {
+		const item = localStorage.getItem(`mind-map:graph:${encodeURIComponent(id)}`);
+		if (!item) return null;
+		return (
+			(JSON.parse(item) as { viewState?: { panX: number; panY: number; scale: number } })
+				.viewState ?? null
+		);
+	}, graphId);
+	if (!savedViewState) throw new Error('viewState was not saved to localStorage before reload');
+
+	// Reload without any file import; localStorage is the only source of truth.
+	await page.reload();
+	await expect(page.getByText('Refresh Test Node')).toBeVisible();
+
+	// Graph data should be restored from localStorage.
+	const restoredPayload = await page.evaluate((id) => {
+		const item = localStorage.getItem(`mind-map:graph:${encodeURIComponent(id)}`);
+		return item ? JSON.parse(item) : null;
+	}, graphId);
+	expect(
+		(restoredPayload?.data?.nodes as Array<{ title: string }> | undefined)?.some(
+			(n) => n.title === 'Refresh Test Node'
+		)
+	).toBe(true);
+
+	// viewState should also be restored from localStorage.
+	expect(restoredPayload?.viewState).toMatchObject(savedViewState);
+
+	// Stage transform should reflect the restored viewState.
+	const transform = await page
+		.locator('.stage-content')
+		.evaluate((el) => (el as HTMLElement).style.transform);
+	expect(transform).toContain(`scale(${savedViewState.scale})`);
+});
+
 async function editFirstNodeTitle(page: Page, title: string) {
-	await page.getByText(/Node 0|Persisted Node/).click();
+	// .stage-content has pointer-events:none; all clicks pass to the stage handler.
+	// The editor opens via long-press (>1000ms), then action menu, then Edit.
+	// Dispatch synthetic pointer events directly on the stage at the first node's
+	// screen coordinates so the stage's hit-test finds the node.
+	const circle = page.locator('.node-wrapper .circle').first();
+	const box = await circle.boundingBox();
+	if (!box) throw new Error('Node .circle element not found');
+	const cx = Math.round(box.x + box.width / 2);
+	const cy = Math.round(box.y + box.height / 2);
+
+	const stage = page.locator('.stage');
+	await stage.dispatchEvent('pointerdown', {
+		pointerId: 1,
+		isPrimary: true,
+		button: 0,
+		buttons: 1,
+		clientX: cx,
+		clientY: cy,
+		bubbles: true,
+		cancelable: true
+	});
+	// LONG_PRESS_MS = 1000 ms; wait longer to ensure the long-press timer fires.
+	await page.waitForTimeout(1300);
+	await stage.dispatchEvent('pointerup', {
+		pointerId: 1,
+		isPrimary: true,
+		button: 0,
+		buttons: 0,
+		clientX: cx,
+		clientY: cy,
+		bubbles: true,
+		cancelable: true
+	});
+
+	// NodeActionMenu buttons have role="menuitem" (not "button").
+	await page.getByRole('menuitem', { name: 'Edit' }).click();
 	await expect(page.getByLabel('Title')).toBeVisible();
 	await page.getByLabel('Title').fill(title);
 	await page.getByRole('button', { name: 'Save' }).click();
@@ -86,6 +265,23 @@ async function waitForStoredTitle(page: Page, graphId: string, title: string) {
 			return payload.data?.nodes?.some((node) => node.title === title) ?? false;
 		},
 		{ graphId, title }
+	);
+}
+
+async function waitForStoredViewState(
+	page: Page,
+	graphId: string,
+	opts: { scaleDifferentFrom: number }
+) {
+	await page.waitForFunction(
+		({ graphId, scaleDifferentFrom }) => {
+			const item = localStorage.getItem(`mind-map:graph:${encodeURIComponent(graphId)}`);
+			if (!item) return false;
+			const payload = JSON.parse(item) as { viewState?: { scale?: number } };
+			const scale = payload.viewState?.scale;
+			return scale !== undefined && scale !== scaleDifferentFrom;
+		},
+		{ graphId, scaleDifferentFrom: opts.scaleDifferentFrom }
 	);
 }
 

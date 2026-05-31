@@ -4,9 +4,18 @@ import type { NodeData } from './components/ui/types/node';
 
 export const CURRENT_SCHEMA_VERSION = 1;
 
+export type ViewState = {
+	panX: number;
+	panY: number;
+	scale: number;
+};
+
+export const NEUTRAL_VIEW_STATE: ViewState = { panX: 0, panY: 0, scale: 1 };
+
 export type PersistedGraphPayload = {
 	schemaVersion: typeof CURRENT_SCHEMA_VERSION;
 	data: MultigraphData;
+	viewState?: ViewState;
 };
 
 export class PersistedGraphError extends Error {

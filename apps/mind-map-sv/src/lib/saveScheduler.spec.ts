@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { makeGraph } from './components/ui/Multigraph/lib/testFixtures';
+import { NEUTRAL_VIEW_STATE } from './migrations';
 import { SaveScheduler, calculateQuotaWarning, type SaveStatus } from './saveScheduler';
 import type { Persistence } from './persistence';
 
@@ -24,15 +25,18 @@ describe('SaveScheduler', () => {
 		const first = makeGraph({ nodeCount: 1 });
 		const latest = makeGraph({ nodeCount: 2 });
 
-		scheduler.schedule('graph', first);
-		scheduler.schedule('graph', latest);
+		scheduler.schedule('graph', first, NEUTRAL_VIEW_STATE);
+		scheduler.schedule('graph', latest, NEUTRAL_VIEW_STATE);
 		await vi.advanceTimersByTimeAsync(499);
 		expect(persistence.save).not.toHaveBeenCalled();
 
 		await vi.advanceTimersByTimeAsync(1);
 
 		expect(persistence.save).toHaveBeenCalledTimes(1);
-		expect(persistence.save).toHaveBeenCalledWith('graph', latest);
+		expect(persistence.save).toHaveBeenCalledWith('graph', {
+			data: latest,
+			viewState: NEUTRAL_VIEW_STATE
+		});
 	});
 
 	it('flushes pending graph changes immediately', async () => {
@@ -41,12 +45,15 @@ describe('SaveScheduler', () => {
 		const scheduler = new SaveScheduler({ persistence, debounceMs: 500 });
 		const graph = makeGraph({ nodeCount: 1 });
 
-		scheduler.schedule('graph', graph);
+		scheduler.schedule('graph', graph, NEUTRAL_VIEW_STATE);
 		await scheduler.flush();
 		await vi.advanceTimersByTimeAsync(500);
 
 		expect(persistence.save).toHaveBeenCalledTimes(1);
-		expect(persistence.save).toHaveBeenCalledWith('graph', graph);
+		expect(persistence.save).toHaveBeenCalledWith('graph', {
+			data: graph,
+			viewState: NEUTRAL_VIEW_STATE
+		});
 	});
 
 	it('reports save errors without dropping the pending graph', async () => {
@@ -60,7 +67,7 @@ describe('SaveScheduler', () => {
 		});
 		const graph = makeGraph({ nodeCount: 1 });
 
-		scheduler.schedule('graph', graph);
+		scheduler.schedule('graph', graph, NEUTRAL_VIEW_STATE);
 		await expect(scheduler.flush()).rejects.toThrow('quota exceeded');
 		await scheduler.flush();
 
@@ -80,7 +87,7 @@ describe('SaveScheduler', () => {
 			onStatus: (status) => statuses.push(status)
 		});
 
-		scheduler.schedule('graph', makeGraph({ nodeCount: 1 }));
+		scheduler.schedule('graph', makeGraph({ nodeCount: 1 }), NEUTRAL_VIEW_STATE);
 		await scheduler.flush();
 
 		expect(statuses).toContainEqual({
