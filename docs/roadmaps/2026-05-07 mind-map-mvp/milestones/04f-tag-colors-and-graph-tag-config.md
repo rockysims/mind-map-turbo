@@ -27,22 +27,34 @@ part of the multigraph and included in local saves and exported JSON.
   one segment per tag color.
 - A node with no tags keeps the existing border style.
 - Tags without explicit colors use a deterministic fallback until the user
-  assigns a color.
+  assigns a color. The fallback is a pure function of the tag name, so the
+  same name looks the same whether it is used as a node tag or an edge tag,
+  even though their config maps are separate.
 
 ### Edge rendering
 
+- Remove the per-edge `EdgeData.color` field; edge stroke color is derived
+  entirely from edge tags and the edge-tag color config. Coordinate the
+  schema bump and `isEdgeData` change with milestone 04e, which already
+  touches `EdgeData` to add tags.
 - An edge with one or more tags renders its stroke in the first edge tag's
   color.
-- An edge with no tags keeps the existing stroke style.
-- Edge tags without explicit colors use a deterministic fallback from the
-  edge-tag color namespace until the user assigns a color.
+- An edge with no tags renders in a single neutral default stroke color.
+- Edge tags without explicit config colors use the deterministic fallback
+  until the user assigns one.
 - The Edges tab supports reordering an edge's tags because tag order controls
   the rendered edge color.
 
 ### Color management UI
 
-- Add a small way to view and edit the color for known node tags and edge
-  tags.
+- Add a global tag legend/palette panel that lists all known tags, grouped by
+  node tags and edge tags, each with its current color swatch.
+- "Known tags" is the union of tags currently in use on any node/edge and
+  tags that already have a config entry. In-use tags appear immediately at
+  their fallback color, so no config entry is required before editing.
+- Use a native `<input type="color">` per tag for color assignment (hex,
+  mobile-friendly). Editing a color writes to the relevant node-tag or
+  edge-tag config map.
 - Keep the first version scoped to color assignment only: no tag rename,
   merge, or delete workflow unless the plan finds a cheap local pattern.
 
@@ -51,14 +63,16 @@ part of the multigraph and included in local saves and exported JSON.
 - Unit specs cover separate node/edge tag color lookup, deterministic fallback
   colors, multi-tag node segment calculation, and first-edge-tag color
   selection.
-- Migration specs cover adding empty tag config to existing persisted
-  graphs.
+- Migration specs cover adding empty tag config to existing persisted graphs
+  and dropping the legacy `EdgeData.color` field.
 - JSON export/import preserves tag color config.
 - Story coverage shows no-tag, one-tag, and multi-tag node borders.
-- Story coverage shows changing a tag color updates all nodes with that
-  tag.
+- Story coverage shows changing a tag color in the legend panel updates all
+  nodes (and edges) with that tag.
 - Story coverage shows edge stroke color follows the first edge tag and
   updates when edge tags are reordered in the Edges tab.
+- Story coverage shows the legend lists in-use tags that have no config entry
+  at their fallback color and lets the user assign a color.
 - Lint, check, and unit tests pass.
 
 ## Non-goals
@@ -73,12 +87,17 @@ part of the multigraph and included in local saves and exported JSON.
 - **Segment rendering technique.** The plan should choose between CSS
   gradients, SVG overlays, or another local pattern that works with the
   current node shape and test harness.
+- **Removing `EdgeData.color`.** Edge stroke color now comes only from tags,
+  so the plan must drop `color` from `EdgeData`, `addEdge`, `isEdgeData`, and
+  any fixtures/stories that set it, then migrate persisted edges by ignoring
+  the old field. Sequence this with milestone 04e so the two `EdgeData`
+  schema changes land on one coherent version, not two conflicting bumps.
 - **Edge color precedence.** Edges use the first edge tag only, so the Edges
   tab needs an accessible reordering control that works on mobile.
 - **Color accessibility.** Border color alone may be insufficient for some
-  users, and colored edge strokes may have similar contrast issues; consider
-  tooltip/title text or a future tag legend without
-  expanding this milestone too far.
-- **Unknown tags.** Decide whether creating a tag through title syntax also
-  inserts a config entry in the relevant node-tag or edge-tag map immediately
-  or relies on fallback color until the user edits it.
+  users, and colored edge strokes may have similar contrast issues; the
+  legend panel can carry tag-name labels next to swatches, but a fuller a11y
+  treatment stays out of scope here.
+- **Unknown tags resolved.** Tags created through title syntax do not need a
+  config entry; they render at their deterministic fallback color and appear
+  in the legend (as in-use tags) where the user can assign a color.
