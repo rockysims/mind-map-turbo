@@ -31,3 +31,30 @@
 - `04d-edge-toggle-and-inline-node-creation.md`: existing-edge removal confirmation and inline title input for newly created nodes.
 - `04e-title-syntax-for-direction-and-tags.md`: editable title syntax, directed edges, parsed display titles, and node tag data.
 - `04f-tag-colors-and-graph-tag-config.md`: graph-level tag color config and multi-tag border rendering.
+
+More TODO:
+
+- Add a small amount of friction so nodes don't move/rotate together endlessly until timeout stops them.
+- New nodes should be pinned by default.
+- Eliminate all abruptness:
+- - - Scale into and out of existence (or fade into and out of existence if scale doesn't work well such as for edges).
+- - Add node & edge / remove edge currently appear instantly.
+- - When a node is pinned and, as a result, new nodes appear they currently appear instantly.
+- - Give new nodes lots of friction when first created (reduce to normal friction over a few seconds). Then make new nodes unpinned by default. Should solve issue where new node moved immediately to new position and the user's eye couldn't follow it.
+
+IMPROVEMENTS:
+
+- If creating a new node and user hits esc, cancel (remove) new node & edge.
+- On new node submit (click away / blur / whatever), if title is empty, cancel (remove) new node & edge.
+- Add text size control (slider).
+- Scale arrow size with node.
+- Tabs look like buttons. UI should visually indicate its a tab by giving it a flat bottom and perhaps drawing an outline or adding a background to the contents of the tab.
+- Find a more elegant way to view/edit/delete tags (plain text doesn't immediately suggest its tags nor make it visually clear at a glance where one tag starts and another begins).
+
+PROBLEMS:
+
+- When a graph is disconnected from all pinned nodes, it is invisible (no way to interact).
+
+BUGS:
+
+- Edit dialog background (click to close) has very rounded edges and padding so it doesn't cover the full Stage.
