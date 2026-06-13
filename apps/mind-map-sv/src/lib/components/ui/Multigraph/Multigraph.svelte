@@ -61,6 +61,7 @@
 	import {
 		EDGE_ARROW_HALF_HEIGHT,
 		EDGE_ARROW_LENGTH,
+		EDGE_ARROW_REFERENCE_NODE_SCALE,
 		MIN_NODE_HIT_RADIUS
 	} from '$lib/constants.js';
 	import type { ViewState } from '$lib/migrations.js';
@@ -440,6 +441,12 @@
 		return `linear-gradient(to right, ${visibility.edge.color}, transparent)`;
 	}
 
+	function edgeArrowScale(visibility: RenderableEdgeVisibility): number {
+		if (visibility.kind !== 'visible' || visibility.edge.directed !== true) return 1;
+		const targetScale = graphLayout.scaleByNodeId[visibility.edge.targetNodeId] ?? 1;
+		return targetScale / EDGE_ARROW_REFERENCE_NODE_SCALE;
+	}
+
 	function duplicateEdgeIdentifier(edgeId: string): string {
 		const edge = graph.edges.find((candidate) => candidate.id === edgeId);
 		if (!edge) return 'Unknown edge';
@@ -674,6 +681,7 @@
 			{#each renderableEdgeVisibility as visibility (visibility.edge.id)}
 				{@const edge = visibility.edge}
 				{@const edgePoints = edgeRenderPoints(visibility)}
+				{@const arrowScale = edgeArrowScale(visibility)}
 				<div
 					class="edge"
 					class:directed={edge.directed === true && visibility.kind === 'visible'}
@@ -692,7 +700,10 @@
 					data-boundary-fade-ratio={visibility.kind === 'boundary'
 						? visibility.fadeRatio
 						: undefined}
-					style={`${edgeStyle(edgePoints.source, edgePoints.target)} --edge-background: ${edgeBackground(visibility)}; color: ${edge.color}; --edge-arrow-length: ${EDGE_ARROW_LENGTH}px; --edge-arrow-half-height: ${EDGE_ARROW_HALF_HEIGHT}px;`}
+					data-edge-arrow-scale={edge.directed === true && visibility.kind === 'visible'
+						? arrowScale
+						: undefined}
+					style={`${edgeStyle(edgePoints.source, edgePoints.target)} --edge-background: ${edgeBackground(visibility)}; color: ${edge.color}; --edge-arrow-length: ${EDGE_ARROW_LENGTH * arrowScale}px; --edge-arrow-half-height: ${EDGE_ARROW_HALF_HEIGHT * arrowScale}px;`}
 				></div>
 			{/each}
 		</div>

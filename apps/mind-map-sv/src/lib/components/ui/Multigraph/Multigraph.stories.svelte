@@ -381,6 +381,7 @@
 	args={{
 		multigraphData: makeGraph({
 			nodeCount: 2,
+			pinned: [0],
 			edges: [{ source: 0, target: 1, directed: true }],
 			posByNodeId: { n0: { x: -180, y: 0 }, n1: { x: 180, y: 0 } }
 		}),
@@ -390,13 +391,12 @@
 	}}
 	play={async ({ canvasElement, args }: PlayContext) => {
 		await waitForLayout();
-		expect(canvasElement.querySelector('[data-edge-id="e0"]')).toHaveAttribute(
-			'data-arrow-target-node-id',
-			'n1'
+		const initialEdge = canvasElement.querySelector('[data-edge-id="e0"]')!;
+		expect(initialEdge).toHaveAttribute('data-arrow-target-node-id', 'n1');
+		expect(Number(initialEdge.getAttribute('data-edge-arrow-scale'))).toBeCloseTo(
+			0.7 / APP_CONFIG.multigraph.edgeArrow.referenceNodeScale
 		);
-		const initialEdgeRect = canvasElement
-			.querySelector('[data-edge-id="e0"]')!
-			.getBoundingClientRect();
+		const initialEdgeRect = initialEdge.getBoundingClientRect();
 		const sourceCircleRect = getCircle(canvasElement, 'n0').getBoundingClientRect();
 		const targetCircleRect = getCircle(canvasElement, 'n1').getBoundingClientRect();
 		expect(initialEdgeRect.left).toBeGreaterThanOrEqual(sourceCircleRect.right);
@@ -430,9 +430,10 @@
 			targetNodeId: 'n0',
 			directed: true
 		});
-		expect(canvasElement.querySelector('[data-edge-id="e0"]')).toHaveAttribute(
-			'data-arrow-target-node-id',
-			'n0'
+		const flippedEdge = canvasElement.querySelector('[data-edge-id="e0"]')!;
+		expect(flippedEdge).toHaveAttribute('data-arrow-target-node-id', 'n0');
+		expect(Number(flippedEdge.getAttribute('data-edge-arrow-scale'))).toBeCloseTo(
+			1 / APP_CONFIG.multigraph.edgeArrow.referenceNodeScale
 		);
 		expect((canvas.getByLabelText('Edge tags for Node 1') as HTMLInputElement).value).toBe(
 			'rel strong'

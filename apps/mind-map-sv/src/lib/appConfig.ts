@@ -18,7 +18,8 @@ export const APP_CONFIG = {
 		minNodeHitRadiusPx: 32, // minimum tap/hit target radius
 		edgeArrow: {
 			lengthPx: 10, // arrowhead length along the edge
-			halfHeightPx: 6 // arrowhead half-height from edge centerline
+			halfHeightPx: 6, // arrowhead half-height from edge centerline
+			referenceNodeScale: 0.25 // node scale where the configured arrow size applies
 		},
 		zoom: {
 			minScale: 0.05, // minimum stage zoom scale
