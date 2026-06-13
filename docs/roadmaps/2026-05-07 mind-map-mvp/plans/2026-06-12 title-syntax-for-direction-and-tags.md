@@ -3,7 +3,7 @@
 **Created:** 2026-06-12
 **Author:** Cursor agent
 **Milestone:** [milestones/04e-title-syntax-for-direction-and-tags.md](../milestones/04e-title-syntax-for-direction-and-tags.md)
-**Status:** draft
+**Status:** done
 **Total estimated effort:** L
 
 ## Summary
@@ -51,7 +51,7 @@ mobile-friendly Node/Edges edit sheet.
 > logical commit, split it. The PR title is drafted up front so reviewers
 > (and the model writing the commit) start aligned.
 
-### T01 — Extend graph data and persistence schema for tags and direction
+### ✓ T01 — Extend graph data and persistence schema for tags and direction
 
 |                |                                                                                                                                                       |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -76,7 +76,7 @@ version 1 graph files load with empty tag arrays and undirected edges.
 - Existing graph, persistence, and Storybook fixtures compile without callers
   hand-writing default tags everywhere.
 
-### T02 — Add pure title syntax parsing and tag normalization
+### ✓ T02 — Add pure title syntax parsing and tag normalization
 
 |                |                                                                                                          |
 | -------------- | -------------------------------------------------------------------------------------------------------- |
@@ -103,7 +103,7 @@ same tag-name rules.
 - Tag normalization drops empty tokens and rejects or ignores invalid tag
   names consistently with parser rules.
 
-### T03 — Add graph mutations for parsed node creation and edge editing
+### ✓ T03 — Add graph mutations for parsed node creation and edge editing
 
 |                |                                                                                            |
 | -------------- | ------------------------------------------------------------------------------------------ |
@@ -130,7 +130,7 @@ gesture.
 - `updateEdge` returns new graph data, preserves unrelated edges, and is a
   no-op for unknown edge ids.
 
-### T04 — Wire inline creation syntax into `Multigraph`
+### ✓ T04 — Wire inline creation syntax into `Multigraph`
 
 |                |                                                                      |
 | -------------- | -------------------------------------------------------------------- |
@@ -157,7 +157,7 @@ only the parser's display title.
 - Editing an existing node title does not mutate incident edge tags or
   direction.
 
-### T05 — Add Node/Edges tabs and structured tag/direction editing
+### ✓ T05 — Add Node/Edges tabs and structured tag/direction editing
 
 |                |                                                                                                     |
 | -------------- | --------------------------------------------------------------------------------------------------- |
@@ -185,7 +185,7 @@ edge tag inputs.
   full-row controls.
 - Node tag edits update `NodeData.tags` without changing the node title.
 
-### T06 — Render directed edges with arrowheads
+### ✓ T06 — Render directed edges with arrowheads
 
 |                |                                                         |
 | -------------- | ------------------------------------------------------- |
@@ -258,3 +258,6 @@ The plan is done when:
 
 - 2026-06-12: plan written against the post-04d code shape, where inline title
   creation and duplicate-edge confirmation already live in `Multigraph`.
+- 2026-06-12: implemented schema v2 tags/directed edges, title parsing,
+  inline creation syntax, Node/Edges sheet editing, arrowheads, and validation
+  coverage.

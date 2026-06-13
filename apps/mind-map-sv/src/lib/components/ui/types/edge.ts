@@ -3,4 +3,6 @@ export interface EdgeData {
 	sourceNodeId: string;
 	targetNodeId: string;
 	color: string;
+	tags: string[];
+	directed?: boolean;
 }

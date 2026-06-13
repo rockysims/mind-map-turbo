@@ -19,6 +19,7 @@ describe('makeGraph', () => {
 		expect(g.nodes).toHaveLength(3);
 		expect(g.nodes.map((n) => n.id)).toEqual(['n0', 'n1', 'n2']);
 		expect(g.nodes[0].title).toBe('Node 0');
+		expect(g.nodes[0].tags).toEqual([]);
 	});
 
 	it('creates edges from index pairs and assigns ids', () => {
@@ -37,6 +38,28 @@ describe('makeGraph', () => {
 	it('accepts edges by node id strings', () => {
 		const g = makeGraph({ nodeCount: 2, edges: [['n0', 'n1']] });
 		expect(g.edges[0]).toMatchObject({ sourceNodeId: 'n0', targetNodeId: 'n1' });
+	});
+
+	it('accepts tagged nodes', () => {
+		const g = makeGraph({
+			nodes: [{ id: 'topic', title: 'Topic', description: '', tags: ['abc'] }]
+		});
+
+		expect(g.nodes[0].tags).toEqual(['abc']);
+	});
+
+	it('accepts tagged and directed edges', () => {
+		const g = makeGraph({
+			nodeCount: 2,
+			edges: [{ source: 0, target: 1, tags: ['rel'], directed: true }]
+		});
+
+		expect(g.edges[0]).toMatchObject({
+			sourceNodeId: 'n0',
+			targetNodeId: 'n1',
+			tags: ['rel'],
+			directed: true
+		});
 	});
 
 	it('defaults positions to (0, 0) for every node', () => {

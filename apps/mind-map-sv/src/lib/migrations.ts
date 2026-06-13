@@ -2,7 +2,7 @@ import type { EdgeData } from './components/ui/types/edge';
 import type { MultigraphData, Point } from './components/ui/types/multigraph';
 import type { NodeData } from './components/ui/types/node';
 
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
 
 export type ViewState = {
 	panX: number;
@@ -43,6 +43,13 @@ export function unwrapPersistedGraph(payload: unknown): MultigraphData {
 		);
 	}
 
+	if (payload.schemaVersion === 1) {
+		if (!isMultigraphData(payload.data, { allowLegacyTags: true })) {
+			throw new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload');
+		}
+		return migrateV1GraphData(payload.data);
+	}
+
 	if (payload.schemaVersion !== CURRENT_SCHEMA_VERSION) {
 		throw new PersistedGraphError(
 			`Unsupported graph schema version: ${String(payload.schemaVersion)}`,
@@ -66,41 +73,73 @@ export function parsePersistedGraph(json: string): MultigraphData {
 	}
 }
 
-function isMultigraphData(value: unknown): value is MultigraphData {
+function migrateV1GraphData(data: MultigraphData): MultigraphData {
+	return {
+		...data,
+		nodes: data.nodes.map((node) => ({ ...node, tags: node.tags ?? [] })),
+		edges: data.edges.map((edge) => ({
+			...edge,
+			tags: edge.tags ?? [],
+			directed: edge.directed ?? false
+		}))
+	};
+}
+
+function isMultigraphData(
+	value: unknown,
+	options: { allowLegacyTags?: boolean } = {}
+): value is MultigraphData {
 	if (!isRecord(value)) return false;
 	if (!Array.isArray(value.nodes) || !Array.isArray(value.edges) || !isRecord(value.posByNodeId)) {
 		return false;
 	}
 
 	return (
-		value.nodes.every(isNodeData) &&
-		value.edges.every(isEdgeData) &&
+		value.nodes.every((node) => isNodeData(node, options)) &&
+		value.edges.every((edge) => isEdgeData(edge, options)) &&
 		Object.values(value.posByNodeId).every(isPoint)
 	);
 }
 
-function isNodeData(value: unknown): value is NodeData {
+function isNodeData(
+	value: unknown,
+	options: { allowLegacyTags?: boolean } = {}
+): value is NodeData {
 	return (
 		isRecord(value) &&
 		typeof value.id === 'string' &&
 		typeof value.title === 'string' &&
 		typeof value.description === 'string' &&
+		(options.allowLegacyTags
+			? value.tags === undefined || isStringArray(value.tags)
+			: isStringArray(value.tags)) &&
 		(value.pinned === undefined || typeof value.pinned === 'boolean')
 	);
 }
 
-function isEdgeData(value: unknown): value is EdgeData {
+function isEdgeData(
+	value: unknown,
+	options: { allowLegacyTags?: boolean } = {}
+): value is EdgeData {
 	return (
 		isRecord(value) &&
 		typeof value.id === 'string' &&
 		typeof value.sourceNodeId === 'string' &&
 		typeof value.targetNodeId === 'string' &&
-		typeof value.color === 'string'
+		typeof value.color === 'string' &&
+		(options.allowLegacyTags
+			? value.tags === undefined || isStringArray(value.tags)
+			: isStringArray(value.tags)) &&
+		(value.directed === undefined || typeof value.directed === 'boolean')
 	);
 }
 
 function isPoint(value: unknown): value is Point {
 	return isRecord(value) && typeof value.x === 'number' && typeof value.y === 'number';
+}
+
+function isStringArray(value: unknown): value is string[] {
+	return Array.isArray(value) && value.every((item) => typeof item === 'string');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

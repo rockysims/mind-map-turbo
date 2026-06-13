@@ -183,7 +183,7 @@ describe('parseGraphFile: error cases', () => {
 	});
 
 	it('throws PersistedGraphError with stable message text for unsupported version', () => {
-		const payload = JSON.stringify({ schemaVersion: 2, data: makeGraph() });
+		const payload = JSON.stringify({ schemaVersion: 99, data: makeGraph() });
 		expect(() => parseGraphFile(payload)).toThrow(PersistedGraphError);
 		try {
 			parseGraphFile(payload);

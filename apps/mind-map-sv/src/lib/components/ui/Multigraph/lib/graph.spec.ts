@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	addEdge,
 	addNode,
+	commitInlineTitleSyntax,
 	findExistingEdge,
 	moveNode,
 	neighborsOf,
@@ -10,6 +11,7 @@ import {
 	removeEdge,
 	removeNode,
 	togglePinned,
+	updateEdge,
 	updateNodeContent
 } from './graph';
 import { makeGraph } from './testFixtures';
@@ -19,8 +21,8 @@ describe('graph mutations', () => {
 		it('adds a node with the next available generated id', () => {
 			const graph = makeGraph({
 				nodes: [
-					{ id: 'n0', title: 'Node 0', description: '' },
-					{ id: 'n2', title: 'Node 2', description: '' }
+					{ id: 'n0', title: 'Node 0', description: '', tags: [] },
+					{ id: 'n2', title: 'Node 2', description: '', tags: [] }
 				]
 			});
 
@@ -37,6 +39,7 @@ describe('graph mutations', () => {
 				id: 'custom-node',
 				title: 'Custom',
 				description: 'Provided by persistence',
+				tags: ['topic'],
 				pinned: true,
 				position: { x: 10, y: 20 }
 			});
@@ -45,6 +48,7 @@ describe('graph mutations', () => {
 				id: 'custom-node',
 				title: 'Custom',
 				description: 'Provided by persistence',
+				tags: ['topic'],
 				pinned: true
 			});
 			expect(next.posByNodeId['custom-node']).toEqual({ x: 10, y: 20 });
@@ -90,7 +94,9 @@ describe('graph mutations', () => {
 				id: 'e1',
 				sourceNodeId: 'n1',
 				targetNodeId: 'n0',
-				color: '#888'
+				color: '#888',
+				tags: [],
+				directed: false
 			});
 		});
 
@@ -98,8 +104,8 @@ describe('graph mutations', () => {
 			const graph = {
 				...makeGraph({ nodeCount: 2 }),
 				edges: [
-					{ id: 'e0', sourceNodeId: 'n0', targetNodeId: 'n1', color: '#888' },
-					{ id: 'e2', sourceNodeId: 'n1', targetNodeId: 'n0', color: '#888' }
+					{ id: 'e0', sourceNodeId: 'n0', targetNodeId: 'n1', color: '#888', tags: [] },
+					{ id: 'e2', sourceNodeId: 'n1', targetNodeId: 'n0', color: '#888', tags: [] }
 				]
 			};
 
@@ -108,16 +114,23 @@ describe('graph mutations', () => {
 			expect(next.edges.at(-1)?.id).toBe('e1');
 		});
 
-		it('preserves explicit edge ids and color', () => {
+		it('preserves explicit edge ids, color, tags, and direction', () => {
 			const graph = makeGraph({ nodeCount: 2 });
 
-			const next = addEdge(graph, 'n0', 'n1', { id: 'external-edge', color: '#f00' });
+			const next = addEdge(graph, 'n0', 'n1', {
+				id: 'external-edge',
+				color: '#f00',
+				tags: ['rel'],
+				directed: true
+			});
 
 			expect(next.edges.at(-1)).toEqual({
 				id: 'external-edge',
 				sourceNodeId: 'n0',
 				targetNodeId: 'n1',
-				color: '#f00'
+				color: '#f00',
+				tags: ['rel'],
+				directed: true
 			});
 		});
 
@@ -186,13 +199,27 @@ describe('graph mutations', () => {
 			expect(next.nodes[1]).toEqual({
 				id: 'n1',
 				title: 'Edited title',
-				description: 'Edited description'
+				description: 'Edited description',
+				tags: []
 			});
 			expect(graph.nodes[1]).toEqual({
 				id: 'n1',
 				title: 'Node 1',
-				description: 'Description for node 1'
+				description: 'Description for node 1',
+				tags: []
 			});
+		});
+
+		it('updates node tags without changing the node title', () => {
+			const graph = makeGraph({ nodeCount: 1 });
+
+			const next = updateNodeContent(graph, 'n0', {
+				title: graph.nodes[0].title,
+				description: graph.nodes[0].description,
+				tags: ['abc']
+			});
+
+			expect(next.nodes[0]).toMatchObject({ title: 'Node 0', tags: ['abc'] });
 		});
 
 		it('is a no-op for missing node ids', () => {
@@ -201,6 +228,121 @@ describe('graph mutations', () => {
 			expect(updateNodeContent(graph, 'missing', { title: 'Nope', description: 'Nope' })).toBe(
 				graph
 			);
+		});
+	});
+
+	describe('updateEdge', () => {
+		it('updates edge fields without mutating the original graph', () => {
+			const graph = makeGraph({ nodeCount: 2, edges: [[0, 1]] });
+
+			const next = updateEdge(graph, 'e0', {
+				tags: ['rel'],
+				directed: true,
+				sourceNodeId: 'n1',
+				targetNodeId: 'n0'
+			});
+
+			expect(next).not.toBe(graph);
+			expect(next.edges).not.toBe(graph.edges);
+			expect(next.edges[0]).toMatchObject({
+				sourceNodeId: 'n1',
+				targetNodeId: 'n0',
+				tags: ['rel'],
+				directed: true
+			});
+			expect(graph.edges[0]).toMatchObject({
+				sourceNodeId: 'n0',
+				targetNodeId: 'n1',
+				tags: [],
+				directed: false
+			});
+		});
+
+		it('preserves unrelated edges', () => {
+			const graph = makeGraph({
+				nodeCount: 3,
+				edges: [
+					[0, 1],
+					[1, 2]
+				]
+			});
+
+			const next = updateEdge(graph, 'e0', { tags: ['rel'] });
+
+			expect(next.edges[1]).toBe(graph.edges[1]);
+		});
+
+		it('is a no-op for unknown edge ids', () => {
+			const graph = makeGraph({ nodeCount: 2, edges: [[0, 1]] });
+
+			expect(updateEdge(graph, 'missing', { tags: ['rel'] })).toBe(graph);
+		});
+	});
+
+	describe('commitInlineTitleSyntax', () => {
+		it('commits parent-to-child direction, tags, and display title to a connected node', () => {
+			const graph = makeGraph({ nodeCount: 2, edges: [[0, 1]] });
+
+			const next = commitInlineTitleSyntax(graph, 'n1', '>:abc ;rel Displayed title', 'e0');
+
+			expect(next.nodes[1]).toMatchObject({ title: 'Displayed title', tags: ['abc'] });
+			expect(next.edges[0]).toMatchObject({
+				sourceNodeId: 'n0',
+				targetNodeId: 'n1',
+				tags: ['rel'],
+				directed: true
+			});
+		});
+
+		it('commits child-to-parent direction to a connected node', () => {
+			const graph = makeGraph({ nodeCount: 2, edges: [[0, 1]] });
+
+			const next = commitInlineTitleSyntax(graph, 'n1', '< Child points back', 'e0');
+
+			expect(next.edges[0]).toMatchObject({
+				sourceNodeId: 'n1',
+				targetNodeId: 'n0',
+				directed: true
+			});
+		});
+
+		it('keeps a connected edge undirected when no marker is present', () => {
+			const graph = makeGraph({ nodeCount: 2, edges: [[0, 1]] });
+
+			const next = commitInlineTitleSyntax(graph, 'n1', ':node ;rel Plain title', 'e0');
+
+			expect(next.nodes[1]).toMatchObject({ title: 'Plain title', tags: ['node'] });
+			expect(next.edges[0]).toMatchObject({ tags: ['rel'], directed: false });
+		});
+
+		it('ignores direction and edge tags for standalone node creation', () => {
+			const graph = makeGraph({ nodeCount: 1 });
+
+			const next = commitInlineTitleSyntax(graph, 'n0', '>:node ;rel Standalone title');
+
+			expect(next.nodes[0]).toMatchObject({ title: 'Standalone title', tags: ['node'] });
+			expect(next.edges).toEqual([]);
+		});
+
+		it('is a no-op when the node id is missing', () => {
+			const graph = makeGraph({ nodeCount: 2, edges: [[0, 1]] });
+
+			expect(commitInlineTitleSyntax(graph, 'missing', '>:node ;rel Missing', 'e0')).toBe(graph);
+		});
+
+		it('does not mutate a created edge that is not incident to the node', () => {
+			const graph = makeGraph({
+				nodeCount: 3,
+				edges: [
+					[0, 1],
+					[1, 2]
+				]
+			});
+
+			const next = commitInlineTitleSyntax(graph, 'n2', '>:node ;rel Node title', 'e0');
+
+			expect(next.nodes[2]).toMatchObject({ title: 'Node title', tags: ['node'] });
+			expect(next.edges[0]).toEqual(graph.edges[0]);
 		});
 	});
 

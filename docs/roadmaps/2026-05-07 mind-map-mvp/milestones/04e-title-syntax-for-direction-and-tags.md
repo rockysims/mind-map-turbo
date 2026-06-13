@@ -1,6 +1,6 @@
 # Milestone 04e: Title syntax for direction and tags, with edge editing
 
-**Status:** not started
+**Status:** complete
 **Depends on:** milestones 01 (graph mutations), 03 (editing UX), and 04d
 (inline title entry).
 **Plan:** [2026-06-12 title syntax for direction and tags](../plans/2026-06-12%20title-syntax-for-direction-and-tags.md)

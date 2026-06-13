@@ -10,7 +10,8 @@
 		nodeData = {
 			id: 'id_fallback',
 			title: 'title_fallback',
-			description: 'description_fallback'
+			description: 'description_fallback',
+			tags: []
 		},
 		isOpen = false,
 		isTitleEditing = false,

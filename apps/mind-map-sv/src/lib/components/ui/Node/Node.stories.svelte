@@ -17,7 +17,8 @@
 			nodeData: {
 				id: 'node id',
 				title: 'Node title',
-				description: 'Node description'
+				description: 'Node description',
+				tags: []
 			},
 			isOpen: false
 		}
@@ -194,7 +195,8 @@
 			id: 'node id short title',
 			title: 'Short node title goes here.',
 			description:
-				'Node description and of course the description is probably going to be fairly long. Certainly multiple sentences. Maybe more.'
+				'Node description and of course the description is probably going to be fairly long. Certainly multiple sentences. Maybe more.',
+			tags: []
 		},
 		isOpen: false
 	}}
@@ -210,7 +212,8 @@
 			description:
 				'Node description and of course the description is probably going to be fairly long. Likely multiple sentences long. Maybe even more. '.repeat(
 					10
-				)
+				),
+			tags: []
 		},
 		isOpen: false
 	}}
@@ -224,6 +227,7 @@
 			id: 'node id pinned closed',
 			title: 'Pinned node title',
 			description: 'Pinned node description',
+			tags: [],
 			pinned: true
 		},
 		isOpen: false
@@ -237,7 +241,8 @@
 		nodeData: {
 			id: 'node id short open',
 			title: 'Node title short open',
-			description: 'Short description.'
+			description: 'Short description.',
+			tags: []
 		},
 		isOpen: true
 	}}
@@ -253,7 +258,8 @@
 			description:
 				'Node description and of course the description is probably going to be fairly long. Likely multiple sentences long. Maybe even more. '.repeat(
 					10
-				)
+				),
+			tags: []
 		},
 		isOpen: true
 	}}

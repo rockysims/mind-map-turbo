@@ -10,13 +10,22 @@ import type { NodeData } from '../../types/node';
 import type { EdgeData } from '../../types/edge';
 import type { MultigraphData, Point } from '../../types/multigraph';
 
+type MakeNodeInput = Omit<NodeData, 'tags'> & Partial<Pick<NodeData, 'tags'>>;
+type MakeEdgeInput =
+	| [number, number]
+	| [string, string]
+	| (Partial<Pick<EdgeData, 'id' | 'color' | 'tags' | 'directed'>> & {
+			source: number | string;
+			target: number | string;
+	  });
+
 export interface MakeGraphInput {
 	/** Number of nodes to generate (with ids 'n0', 'n1', ...). Ignored if `nodes` is provided. */
 	nodeCount?: number;
 	/** Explicit nodes; takes precedence over nodeCount. */
-	nodes?: NodeData[];
-	/** Edges as [sourceIndex, targetIndex] pairs (or [sourceId, targetId] strings). */
-	edges?: Array<[number, number] | [string, string]>;
+	nodes?: MakeNodeInput[];
+	/** Edges as endpoint pairs or objects with optional tags/direction fields. */
+	edges?: MakeEdgeInput[];
 	/** Nodes to mark pinned, by generated index or explicit id. */
 	pinned?: Array<number | string>;
 	/** Optional explicit positions, keyed by node id. Defaults to (0, 0). */
@@ -36,15 +45,23 @@ export function makeGraph(input: MakeGraphInput = {}): MultigraphData {
 		typeof idx === 'number' ? (baseNodes[idx]?.id ?? `n${idx}`) : idx;
 	const pinnedIds = new Set((input.pinned ?? []).map(idAt));
 	const nodes = baseNodes.map((node) =>
-		pinnedIds.has(node.id) ? { ...node, pinned: true } : { ...node }
+		pinnedIds.has(node.id)
+			? { ...node, tags: node.tags ?? [], pinned: true }
+			: { ...node, tags: node.tags ?? [] }
 	);
 
-	const edges: EdgeData[] = (input.edges ?? []).map(([s, t], i) => ({
-		id: `e${i}`,
-		sourceNodeId: idAt(s),
-		targetNodeId: idAt(t),
-		color: '#888'
-	}));
+	const edges: EdgeData[] = (input.edges ?? []).map((edge, i) => {
+		const source = Array.isArray(edge) ? edge[0] : edge.source;
+		const target = Array.isArray(edge) ? edge[1] : edge.target;
+		return {
+			id: Array.isArray(edge) ? `e${i}` : (edge.id ?? `e${i}`),
+			sourceNodeId: idAt(source),
+			targetNodeId: idAt(target),
+			color: Array.isArray(edge) ? '#888' : (edge.color ?? '#888'),
+			tags: Array.isArray(edge) ? [] : (edge.tags ?? []),
+			directed: Array.isArray(edge) ? false : (edge.directed ?? false)
+		};
+	});
 
 	const posByNodeId =
 		input.posByNodeId ?? Object.fromEntries(nodes.map((n) => [n.id, { x: 0, y: 0 }]));
@@ -56,7 +73,8 @@ function defaultNodes(count: number): NodeData[] {
 	return Array.from({ length: count }, (_, i) => ({
 		id: `n${i}`,
 		title: `Node ${i}`,
-		description: `Description for node ${i}`
+		description: `Description for node ${i}`,
+		tags: []
 	}));
 }
 

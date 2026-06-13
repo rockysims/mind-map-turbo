@@ -83,7 +83,7 @@
 
 	function createDefaultGraph(): MultigraphData {
 		return {
-			nodes: [{ id: 'n0', title: 'Node 0', description: 'Description for node 0' }],
+			nodes: [{ id: 'n0', title: 'Node 0', description: 'Description for node 0', tags: [] }],
 			edges: [],
 			posByNodeId: { n0: { x: 0, y: 0 } }
 		};

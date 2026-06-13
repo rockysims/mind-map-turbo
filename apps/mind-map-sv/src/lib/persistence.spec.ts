@@ -137,7 +137,7 @@ describe('ServerPersistence', () => {
 		const graph = makeGraph({ nodeCount: 1 });
 		const viewState = { panX: 1, panY: 2, scale: 1.5 };
 		const fetchGraph = vi.fn(async () =>
-			Response.json({ schemaVersion: 1, data: graph, viewState })
+			Response.json({ schemaVersion: CURRENT_SCHEMA_VERSION, data: graph, viewState })
 		);
 		const persistence = new ServerPersistence(fetchGraph);
 
@@ -156,7 +156,7 @@ describe('ServerPersistence', () => {
 		expect(fetchGraph).toHaveBeenCalledWith('/api/graphs/graph', {
 			method: 'PUT',
 			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ schemaVersion: 1, data: graph, viewState })
+			body: JSON.stringify({ schemaVersion: CURRENT_SCHEMA_VERSION, data: graph, viewState })
 		});
 	});
 

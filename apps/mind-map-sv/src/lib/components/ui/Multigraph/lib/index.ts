@@ -1,4 +1,6 @@
 export * from './graph.js';
+export * from './titleSyntax.js';
+export * from './edgeRender.js';
 export * from './graphMath.js';
 export * from './graphLayout.js';
 export * from './boundedVisibility.js';

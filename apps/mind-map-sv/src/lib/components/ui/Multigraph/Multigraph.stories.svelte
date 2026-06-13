@@ -224,7 +224,7 @@
 	name="Single"
 	args={{
 		multigraphData: {
-			nodes: [{ id: '1', title: 'Node 1', description: 'Node 1 description' }],
+			nodes: [{ id: '1', title: 'Node 1', description: 'Node 1 description', tags: [] }],
 			edges: [],
 			posByNodeId: {}
 		},
@@ -364,11 +364,112 @@
 		const titleInput = canvas.getByLabelText('Title') as HTMLInputElement;
 		titleInput.value = 'Updated mobile title';
 		titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+		const nodeTagsInput = canvas.getByLabelText('Node tags') as HTMLInputElement;
+		nodeTagsInput.value = 'abc urgent';
+		nodeTagsInput.dispatchEvent(new Event('input', { bubbles: true }));
 		canvas.getByRole('button', { name: 'Save' }).click();
 		await sleep();
 
 		expect(canvas.getByText('Updated mobile title')).toBeInTheDocument();
 		expect(lastChangedGraph(args).nodes[0].title).toBe('Updated mobile title');
+		expect(lastChangedGraph(args).nodes[0].tags).toEqual(['abc', 'urgent']);
+	}}
+/>
+
+<Story
+	name="UserEditsIncidentEdgeDirectionAndTags"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 2,
+			edges: [{ source: 0, target: 1, directed: true }],
+			posByNodeId: { n0: { x: -180, y: 0 }, n1: { x: 180, y: 0 } }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { relaxIterations: 0 },
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		expect(canvasElement.querySelector('[data-edge-id="e0"]')).toHaveAttribute(
+			'data-arrow-target-node-id',
+			'n1'
+		);
+		const initialEdgeRect = canvasElement
+			.querySelector('[data-edge-id="e0"]')!
+			.getBoundingClientRect();
+		const sourceCircleRect = getCircle(canvasElement, 'n0').getBoundingClientRect();
+		const targetCircleRect = getCircle(canvasElement, 'n1').getBoundingClientRect();
+		expect(initialEdgeRect.left).toBeGreaterThanOrEqual(sourceCircleRect.right);
+		expect(initialEdgeRect.right).toBeLessThanOrEqual(targetCircleRect.left);
+
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+		dispatchPointer(circle, 'pointerdown', center.x, center.y);
+		await sleep(LONG_PRESS_MS + 20);
+
+		const canvas = within(canvasElement);
+		canvas.getByRole('menuitem', { name: 'Edit' }).click();
+		await sleep();
+
+		expect(canvas.getByRole('tablist', { name: 'Edit node and edges' })).toBeInTheDocument();
+		canvas.getByRole('tab', { name: 'Edges' }).click();
+		await sleep();
+		expect(canvas.getByRole('tabpanel')).toHaveTextContent('Connected to Node 1');
+
+		const edgeTagsInput = canvas.getByLabelText('Edge tags for Node 1') as HTMLInputElement;
+		edgeTagsInput.value = 'rel strong';
+		edgeTagsInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+		const direction = canvas.getByLabelText('Direction for Node 1') as HTMLSelectElement;
+		direction.value = 'incoming';
+		direction.dispatchEvent(new Event('change', { bubbles: true }));
+		await sleep();
+
+		expect(lastChangedGraph(args).edges[0]).toMatchObject({
+			sourceNodeId: 'n1',
+			targetNodeId: 'n0',
+			directed: true
+		});
+		expect(canvasElement.querySelector('[data-edge-id="e0"]')).toHaveAttribute(
+			'data-arrow-target-node-id',
+			'n0'
+		);
+		expect((canvas.getByLabelText('Edge tags for Node 1') as HTMLInputElement).value).toBe(
+			'rel strong'
+		);
+
+		canvas.getByRole('button', { name: 'Save edge to Node 1' }).click();
+		await sleep();
+
+		expect(lastChangedGraph(args).edges[0].tags).toEqual(['rel', 'strong']);
+
+		canvas.getByRole('button', { name: 'Close' }).click();
+		await sleep();
+
+		const targetCircle = getCircle(canvasElement, 'n1');
+		const targetCenter = getCenter(targetCircle);
+		dispatchPointer(targetCircle, 'pointerdown', targetCenter.x, targetCenter.y);
+		await sleep(LONG_PRESS_MS + 20);
+		canvas.getByRole('menuitem', { name: 'Edit' }).click();
+		await sleep();
+		canvas.getByRole('tab', { name: 'Edges' }).click();
+		await sleep();
+		expect(canvas.getByRole('tabpanel')).toHaveTextContent('Connected to Node 0');
+
+		const oppositeDirection = canvas.getByLabelText('Direction for Node 0') as HTMLSelectElement;
+		oppositeDirection.value = 'incoming';
+		oppositeDirection.dispatchEvent(new Event('change', { bubbles: true }));
+		await sleep();
+
+		expect(lastChangedGraph(args).edges[0]).toMatchObject({
+			sourceNodeId: 'n0',
+			targetNodeId: 'n1',
+			directed: true
+		});
+		expect(canvasElement.querySelector('[data-edge-id="e0"]')).toHaveAttribute(
+			'data-arrow-target-node-id',
+			'n1'
+		);
 	}}
 />
 
@@ -638,7 +739,9 @@
 			id: 'e2',
 			sourceNodeId: 'n0',
 			targetNodeId: 'n1',
-			color: '#888'
+			color: '#888',
+			tags: [],
+			directed: false
 		});
 
 		const movedSourceCircle = getCircle(canvasElement, 'n0');
@@ -1008,15 +1111,16 @@
 		expect(canvasElement.querySelector('[data-node-id="n2"].node-wrapper')).toBeInTheDocument();
 		expect(canvasElement.querySelector('[data-node-id="n3"].node-wrapper')).not.toBeInTheDocument();
 		expect(canvasElement.querySelector('[data-node-id="n4"].node-wrapper')).not.toBeInTheDocument();
-		expect(canvasElement.querySelector('[data-edge-id="e0"]')).toHaveAttribute(
-			'data-edge-visibility',
-			'visible'
-		);
+		const visibleUndirectedEdge = canvasElement.querySelector('[data-edge-id="e0"]');
+		expect(visibleUndirectedEdge).toHaveAttribute('data-edge-visibility', 'visible');
+		expect(visibleUndirectedEdge).not.toHaveAttribute('data-arrow-target-node-id');
 		const boundaryEdge = canvasElement.querySelector('[data-edge-id="e2"]');
 		expect(boundaryEdge).toHaveAttribute('data-edge-visibility', 'boundary');
 		expect(boundaryEdge).toHaveAttribute('data-visible-node-id', 'n2');
 		expect(boundaryEdge).toHaveAttribute('data-hidden-node-id', 'n3');
 		expect(boundaryEdge).toHaveAttribute('data-boundary-fade-ratio', '0.5');
+		expect(boundaryEdge).not.toHaveAttribute('data-arrow-target-node-id');
+		expect(canvasElement.querySelector('[data-edge-id="e3"]')).not.toBeInTheDocument();
 	}}
 />
 
@@ -1192,7 +1296,7 @@
 />
 
 <Story
-	name="UserCreatesNodeAndNamesItInline"
+	name="UserCreatesNodeAndAppliesTitleSyntaxInline"
 	args={{
 		multigraphData: makeGraph({
 			nodeCount: 1,
@@ -1227,14 +1331,30 @@
 		);
 		expect(lastChangedGraph(args).nodes.find((node) => node.id === 'n1')?.pinned).toBe(true);
 
-		titleInput!.value = 'My New Node';
+		titleInput!.value = '>:abc ;rel The displayed title';
 		titleInput!.dispatchEvent(
 			new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
 		);
 		await sleep();
 
 		expect(canvasElement.querySelector('.title-input')).not.toBeInTheDocument();
-		expect(canvasElement).toHaveTextContent('My New Node');
+		expect(canvasElement).toHaveTextContent('The displayed title');
+		expect(canvasElement).not.toHaveTextContent('>:abc ;rel');
+		const changedGraph = lastChangedGraph(args);
+		expect(changedGraph.nodes.find((node) => node.id === 'n1')).toMatchObject({
+			title: 'The displayed title',
+			tags: ['abc']
+		});
+		expect(changedGraph.edges.find((edge) => edge.id === 'e0')).toMatchObject({
+			sourceNodeId: 'n0',
+			targetNodeId: 'n1',
+			tags: ['rel'],
+			directed: true
+		});
+		expect(canvasElement.querySelector('[data-edge-id="e0"]')).toHaveAttribute(
+			'data-arrow-target-node-id',
+			'n1'
+		);
 	}}
 />
 

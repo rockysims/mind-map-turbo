@@ -4,6 +4,7 @@
 	import { DBL_CLICK_MS } from '$lib/constants';
 	import { makeGraph } from '$lib/components/ui/Multigraph/lib/testFixtures';
 	import type { MultigraphData } from '$lib/components/ui/types/multigraph';
+	import { CURRENT_SCHEMA_VERSION } from '$lib/migrations';
 	import PersistedGraphHarness from './PersistedGraphHarness.svelte';
 
 	const { Story } = defineMeta({
@@ -331,7 +332,7 @@
 			schemaVersion: number;
 			viewState: { panX: number; panY: number; scale: number };
 		};
-		expect(parsed.schemaVersion).toBe(1);
+		expect(parsed.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
 		expect(typeof parsed.viewState.panX).toBe('number');
 		expect(typeof parsed.viewState.panY).toBe('number');
 		expect(typeof parsed.viewState.scale).toBe('number');

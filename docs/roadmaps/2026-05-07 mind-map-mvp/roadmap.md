@@ -44,7 +44,7 @@ individual PR-sized tasks.
 | 04b | Bounded pinned-neighborhood visibility             | complete    | [milestone](milestones/04b-bounded-pinned-neighborhood-visibility.md), [plan](plans/2026-05-30%20bounded-pinned-neighborhood-visibility.md) |
 | 04c | JSON file import/export                            | complete    | [milestone](milestones/04c-json-file-import-export.md), [plan](plans/2026-05-30%20json-file-import-export.md)                               |
 | 04d | Edge toggle and inline node creation               | complete    | [milestone](milestones/04d-edge-toggle-and-inline-node-creation.md), [plan](plans/2026-06-12%20edge-toggle-and-inline-node-creation.md)     |
-| 04e | Title syntax for direction and tags                | not started | [milestone](milestones/04e-title-syntax-for-direction-and-tags.md), [plan](plans/2026-06-12%20title-syntax-for-direction-and-tags.md)       |
+| 04e | Title syntax for direction and tags                | complete    | [milestone](milestones/04e-title-syntax-for-direction-and-tags.md), [plan](plans/2026-06-12%20title-syntax-for-direction-and-tags.md)       |
 | 04f | Tag colors and graph tag config                    | not started | [milestones/04f-tag-colors-and-graph-tag-config.md](milestones/04f-tag-colors-and-graph-tag-config.md)                                      |
 | 05  | Multiplayer                                        | not started | [milestones/05-multiplayer.md](milestones/05-multiplayer.md)                                                                                |
 | 06  | Search                                             | not started | [milestones/06-search.md](milestones/06-search.md)                                                                                          |

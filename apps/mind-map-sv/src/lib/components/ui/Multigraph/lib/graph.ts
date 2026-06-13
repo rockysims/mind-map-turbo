@@ -1,11 +1,13 @@
 import type { EdgeData } from '../../types/edge';
 import type { MultigraphData, Point } from '../../types/multigraph';
 import type { NodeData } from '../../types/node';
+import { parseTitleSyntax } from './titleSyntax';
 
 export interface AddNodeInput {
 	id?: string;
 	title?: string;
 	description?: string;
+	tags?: string[];
 	pinned?: boolean;
 	position?: Point;
 }
@@ -13,7 +15,13 @@ export interface AddNodeInput {
 export interface AddEdgeInput {
 	id?: string;
 	color?: string;
+	tags?: string[];
+	directed?: boolean;
 }
+
+export type EdgePatch = Partial<
+	Pick<EdgeData, 'sourceNodeId' | 'targetNodeId' | 'tags' | 'directed'>
+>;
 
 const DEFAULT_NODE_POSITION: Point = { x: 0, y: 0 };
 const DEFAULT_EDGE_COLOR = '#888';
@@ -57,6 +65,7 @@ export function addNode(data: MultigraphData, input: AddNodeInput = {}): Multigr
 		id,
 		title: input.title ?? NEW_NODE_TITLE,
 		description: input.description ?? '',
+		tags: input.tags ?? [],
 		pinned: input.pinned
 	};
 
@@ -102,7 +111,9 @@ export function addEdge(
 			),
 		sourceNodeId,
 		targetNodeId,
-		color: edgeInput.color ?? DEFAULT_EDGE_COLOR
+		color: edgeInput.color ?? DEFAULT_EDGE_COLOR,
+		tags: edgeInput.tags ?? [],
+		directed: edgeInput.directed ?? false
 	};
 
 	return {
@@ -120,6 +131,17 @@ export function removeEdge(data: MultigraphData, edgeId: string): MultigraphData
 	};
 }
 
+export function updateEdge(data: MultigraphData, edgeId: string, patch: EdgePatch): MultigraphData {
+	if (!data.edges.some((edge) => edge.id === edgeId)) return data;
+	if (patch.sourceNodeId !== undefined && !hasNode(data, patch.sourceNodeId)) return data;
+	if (patch.targetNodeId !== undefined && !hasNode(data, patch.targetNodeId)) return data;
+
+	return {
+		...data,
+		edges: data.edges.map((edge) => (edge.id === edgeId ? { ...edge, ...patch } : edge))
+	};
+}
+
 export function togglePinned(data: MultigraphData, nodeId: string): MultigraphData {
 	if (!hasNode(data, nodeId)) return data;
 
@@ -132,7 +154,7 @@ export function togglePinned(data: MultigraphData, nodeId: string): MultigraphDa
 export function updateNodeContent(
 	data: MultigraphData,
 	nodeId: string,
-	content: Pick<NodeData, 'title' | 'description'>
+	content: Pick<NodeData, 'title' | 'description'> & Partial<Pick<NodeData, 'tags'>>
 ): MultigraphData {
 	if (!hasNode(data, nodeId)) return data;
 
@@ -142,6 +164,41 @@ export function updateNodeContent(
 			node.id === nodeId ? { ...node, ...content, title: normalizeNodeTitle(content.title) } : node
 		)
 	};
+}
+
+export function commitInlineTitleSyntax(
+	data: MultigraphData,
+	nodeId: string,
+	rawTitle: string,
+	createdEdgeId?: string
+): MultigraphData {
+	if (!hasNode(data, nodeId)) return data;
+
+	const parsed = parseTitleSyntax(rawTitle);
+	const graphWithNode = updateNodeContent(data, nodeId, {
+		title: parsed.displayTitle,
+		description: data.nodes.find((node) => node.id === nodeId)?.description ?? '',
+		tags: parsed.nodeTags
+	});
+
+	if (!createdEdgeId) return graphWithNode;
+
+	const edge = graphWithNode.edges.find((candidate) => candidate.id === createdEdgeId);
+	if (!edge) return graphWithNode;
+	if (!isIncidentEdge(edge, nodeId)) return graphWithNode;
+
+	const endpointPatch =
+		parsed.direction === 'child-to-parent'
+			? { sourceNodeId: nodeId, targetNodeId: otherEndpoint(edge, nodeId) }
+			: parsed.direction === 'parent-to-child'
+				? { sourceNodeId: otherEndpoint(edge, nodeId), targetNodeId: nodeId }
+				: {};
+
+	return updateEdge(graphWithNode, createdEdgeId, {
+		...endpointPatch,
+		tags: parsed.edgeTags,
+		directed: parsed.direction === 'undirected' ? false : true
+	});
 }
 
 export function moveNode(data: MultigraphData, nodeId: string, point: Point): MultigraphData {
@@ -169,6 +226,14 @@ export function neighborsOf(data: MultigraphData, nodeId: string): NodeData[] {
 
 function hasNode(data: MultigraphData, nodeId: string): boolean {
 	return data.nodes.some((node) => node.id === nodeId);
+}
+
+function isIncidentEdge(edge: EdgeData, nodeId: string): boolean {
+	return edge.sourceNodeId === nodeId || edge.targetNodeId === nodeId;
+}
+
+function otherEndpoint(edge: EdgeData, nodeId: string): string {
+	return edge.sourceNodeId === nodeId ? edge.targetNodeId : edge.sourceNodeId;
 }
 
 function nextId(prefix: string, existingIds: string[]): string {

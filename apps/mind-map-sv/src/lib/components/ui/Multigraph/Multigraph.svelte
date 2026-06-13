@@ -7,15 +7,18 @@
 	import type { NodeData } from '../types/node';
 	import type { MultigraphData, Point } from '../types/multigraph';
 	import { effectiveHitRadius, isPointInCircle } from './lib/hitTest.js';
+	import { trimSegmentToNodeBorders } from './lib/edgeRender.js';
 	import {
 		addEdge,
 		addNode,
+		commitInlineTitleSyntax,
 		findExistingEdge,
 		moveNode,
 		normalizeNodeTitle,
 		removeEdge,
 		removeNode,
 		togglePinned,
+		updateEdge,
 		updateNodeContent
 	} from './lib/graph.js';
 	import {
@@ -55,7 +58,11 @@
 		shouldClearScaleChangeFocalNode
 	} from './lib/scaleChangeSettle.js';
 	import { externalGraphSyncToken } from './lib/graphSync.js';
-	import { MIN_NODE_HIT_RADIUS } from '$lib/constants.js';
+	import {
+		EDGE_ARROW_HALF_HEIGHT,
+		EDGE_ARROW_LENGTH,
+		MIN_NODE_HIT_RADIUS
+	} from '$lib/constants.js';
 	import type { ViewState } from '$lib/migrations.js';
 
 	const CENTERED_POSITION: Point = { x: 0, y: 0 };
@@ -85,7 +92,7 @@
 	let editNodeId = $state<string | null>(null);
 	let actionMenu = $state<{ nodeId: string; position: Point } | null>(null);
 	let duplicateEdgeConfirm = $state<{ edgeId: string } | null>(null);
-	let titleEditNodeId = $state<string | null>(null);
+	let titleEditContext = $state<{ nodeId: string; edgeId?: string } | null>(null);
 	let graphRef = $state<HTMLElement | null>(null);
 	let relaxationFrameId: number | null = null;
 	let scaleAnimations = $state<Record<string, NodeScaleAnimation>>({});
@@ -266,15 +273,15 @@
 		closeOverlays();
 		const graphWithNode = addNode(graph, { pinned: true, position: point });
 		const newNode = graphWithNode.nodes[graphWithNode.nodes.length - 1] ?? null;
+		const graphWithEdge = newNode
+			? addEdge(graphWithNode, sourceNode.id, newNode.id)
+			: graphWithNode;
+		const newEdge = graphWithEdge.edges[graphWithEdge.edges.length - 1] ?? null;
 
-		commitUserGraph(
-			withRelaxedPositions(
-				newNode ? addEdge(graphWithNode, sourceNode.id, newNode.id) : graphWithNode
-			)
-		);
+		commitUserGraph(withRelaxedPositions(graphWithEdge));
 
 		if (newNode) {
-			titleEditNodeId = newNode.id;
+			titleEditContext = { nodeId: newNode.id, edgeId: newEdge?.id };
 		}
 	}
 
@@ -292,7 +299,7 @@
 		actionMenu = null;
 		editNodeId = null;
 		duplicateEdgeConfirm = null;
-		titleEditNodeId = null;
+		titleEditContext = null;
 	}
 
 	function toggleNodePinned(nodeId: string) {
@@ -315,9 +322,16 @@
 		closeOverlays();
 	}
 
-	function saveNodeContent(nodeId: string, content: { title: string; description: string }) {
+	function saveNodeContent(
+		nodeId: string,
+		content: { title: string; description: string; tags?: string[] }
+	) {
 		commitUserGraph(updateNodeContent(graph, nodeId, content));
 		closeOverlays();
+	}
+
+	function saveEdgeContent(edgeId: string, patch: Parameters<typeof updateEdge>[2]) {
+		commitUserGraph(updateEdge(graph, edgeId, patch));
 	}
 
 	function commitUserGraph(nextGraph: MultigraphData) {
@@ -400,10 +414,14 @@
 		target: Point;
 	} {
 		if (visibility.kind === 'visible') {
-			return {
-				source: graphLayout.posByNodeId[visibility.edge.sourceNodeId] ?? CENTERED_POSITION,
-				target: graphLayout.posByNodeId[visibility.edge.targetNodeId] ?? CENTERED_POSITION
-			};
+			const source = graphLayout.posByNodeId[visibility.edge.sourceNodeId] ?? CENTERED_POSITION;
+			const target = graphLayout.posByNodeId[visibility.edge.targetNodeId] ?? CENTERED_POSITION;
+			return trimSegmentToNodeBorders(
+				source,
+				target,
+				graphLayout.radiusByNodeId[visibility.edge.sourceNodeId] ?? 0,
+				graphLayout.radiusByNodeId[visibility.edge.targetNodeId] ?? 0
+			);
 		}
 
 		const visiblePos = graphLayout.posByNodeId[visibility.visibleNodeId] ?? CENTERED_POSITION;
@@ -658,9 +676,14 @@
 				{@const edgePoints = edgeRenderPoints(visibility)}
 				<div
 					class="edge"
+					class:directed={edge.directed === true && visibility.kind === 'visible'}
 					data-edge-id={edge.id}
 					data-source-node-id={edge.sourceNodeId}
 					data-target-node-id={edge.targetNodeId}
+					data-directed={edge.directed === true ? 'true' : undefined}
+					data-arrow-target-node-id={edge.directed === true && visibility.kind === 'visible'
+						? edge.targetNodeId
+						: undefined}
 					data-edge-visibility={visibility.kind}
 					data-visible-node-id={visibility.kind === 'boundary'
 						? visibility.visibleNodeId
@@ -669,7 +692,7 @@
 					data-boundary-fade-ratio={visibility.kind === 'boundary'
 						? visibility.fadeRatio
 						: undefined}
-					style={`${edgeStyle(edgePoints.source, edgePoints.target)} background: ${edgeBackground(visibility)};`}
+					style={`${edgeStyle(edgePoints.source, edgePoints.target)} --edge-background: ${edgeBackground(visibility)}; color: ${edge.color}; --edge-arrow-length: ${EDGE_ARROW_LENGTH}px; --edge-arrow-half-height: ${EDGE_ARROW_HALF_HEIGHT}px;`}
 				></div>
 			{/each}
 		</div>
@@ -689,15 +712,11 @@
 				<Node
 					nodeData={node}
 					isOpen={false}
-					isTitleEditing={titleEditNodeId === node.id}
+					isTitleEditing={titleEditContext?.nodeId === node.id}
 					onTitleCommit={(title) => {
-						titleEditNodeId = null;
-						commitUserGraph(
-							updateNodeContent(graph, node.id, {
-								title,
-								description: node.description ?? ''
-							})
-						);
+						const createdEdgeId = titleEditContext?.edgeId;
+						titleEditContext = null;
+						commitUserGraph(commitInlineTitleSyntax(graph, node.id, title, createdEdgeId));
 					}}
 				/>
 			</div>
@@ -721,7 +740,11 @@
 	{#if editNode}
 		<NodeEditSheet
 			node={editNode}
-			onSave={(content) => saveNodeContent(editNode.id, content)}
+			nodes={graph.nodes}
+			edges={graph.edges}
+			onSave={(content: { title: string; description: string; tags: string[] }) =>
+				saveNodeContent(editNode.id, content)}
+			onSaveEdge={saveEdgeContent}
 			onCancel={() => (editNodeId = null)}
 			onTogglePinned={() => toggleNodePinned(editNode.id)}
 			onDelete={() => deleteNode(editNode.id)}
@@ -796,6 +819,32 @@
 		position: absolute;
 		height: 2px;
 		transform-origin: left center;
+	}
+
+	.edge::before {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		background: var(--edge-background);
+		content: '';
+	}
+
+	.edge.directed::before {
+		width: calc(100% - var(--edge-arrow-length) / 2);
+	}
+
+	.edge.directed::after {
+		position: absolute;
+		right: 0;
+		top: 50%;
+		width: 0;
+		height: 0;
+		border-top: var(--edge-arrow-half-height) solid transparent;
+		border-bottom: var(--edge-arrow-half-height) solid transparent;
+		border-left: var(--edge-arrow-length) solid currentColor;
+		color: inherit;
+		content: '';
+		transform: translateY(-50%);
 	}
 
 	.duplicate-edge-dialog-backdrop {

@@ -10,7 +10,8 @@
 		NODES.push({
 			id: `node-${i}`,
 			title: `Node ${i}`,
-			description: `Node ${i} description`
+			description: `Node ${i} description`,
+			tags: []
 		});
 	}
 
