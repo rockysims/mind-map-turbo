@@ -3,7 +3,7 @@
 **Created:** 2026-06-12
 **Author:** Cursor agent
 **Milestone:** [milestones/04d-edge-toggle-and-inline-node-creation.md](../milestones/04d-edge-toggle-and-inline-node-creation.md)
-**Status:** draft
+**Status:** done
 **Total estimated effort:** M–L
 
 ## Summary
@@ -45,7 +45,7 @@ creation by focusing an inline title editor immediately.
 > logical commit, split it. The PR title is drafted up front so reviewers
 > (and the model writing the commit) start aligned.
 
-### T01 — Add pure edge lookup and title fallback helpers
+### T01 done — Add pure edge lookup and title fallback helpers
 
 |                |                                                                                              |
 | -------------- | -------------------------------------------------------------------------------------------- |
@@ -68,7 +68,7 @@ constant used by `addNode`, `updateNodeContent`, and `NodeEditSheet`.
   without mutating the original graph.
 - Empty title saves from the edit sheet render as `New Node`.
 
-### T02 — Confirm and remove duplicate edge creation
+### T02 done — Confirm and remove duplicate edge creation
 
 |                |                                                         |
 | -------------- | ------------------------------------------------------- |
@@ -94,7 +94,7 @@ and leaves graph data unchanged.
   closes on cancel without affecting action-menu/edit-sheet overlays.
 - Non-duplicate edge creation still adds an edge as before.
 
-### T03 — Add inline title editing mode to `Node`
+### T03 done — Add inline title editing mode to `Node`
 
 |                |                                                          |
 | -------------- | -------------------------------------------------------- |
@@ -133,7 +133,7 @@ inline editing.
 - `closeOverlays()` clears `titleEditNodeId`.
 - Existing edit-sheet title/description editing still works.
 
-### T04 — Add integrated story coverage for inline creation
+### T04 done — Add integrated story coverage for inline creation
 
 |                |                                                         |
 | -------------- | ------------------------------------------------------- |

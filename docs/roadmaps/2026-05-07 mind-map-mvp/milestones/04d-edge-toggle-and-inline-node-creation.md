@@ -1,6 +1,6 @@
 # Milestone 04d: Edge toggle and inline node creation
 
-**Status:** not started
+**Status:** complete
 **Depends on:** milestones 01 (graph mutation API) and 03 (editing UX).
 **Plan:** [plans/2026-06-12 edge-toggle-and-inline-node-creation.md](../plans/2026-06-12%20edge-toggle-and-inline-node-creation.md)
 
