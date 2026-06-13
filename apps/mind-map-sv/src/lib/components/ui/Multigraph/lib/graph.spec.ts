@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
 	addEdge,
 	addNode,
+	findExistingEdge,
 	moveNode,
 	neighborsOf,
+	NEW_NODE_TITLE,
+	normalizeNodeTitle,
 	removeEdge,
 	removeNode,
 	togglePinned,
@@ -232,6 +235,75 @@ describe('graph mutations', () => {
 			});
 
 			expect(neighborsOf(graph, 'n0').map((node) => node.id)).toEqual(['n1', 'n2']);
+		});
+	});
+
+	describe('findExistingEdge', () => {
+		it('finds an edge by same-order endpoints', () => {
+			const graph = makeGraph({ nodeCount: 2, edges: [[0, 1]] });
+
+			const found = findExistingEdge(graph, 'n0', 'n1');
+
+			expect(found).toMatchObject({ sourceNodeId: 'n0', targetNodeId: 'n1' });
+		});
+
+		it('finds an edge by reversed endpoints (undirected matching)', () => {
+			const graph = makeGraph({ nodeCount: 2, edges: [[0, 1]] });
+
+			const found = findExistingEdge(graph, 'n1', 'n0');
+
+			expect(found).toMatchObject({ sourceNodeId: 'n0', targetNodeId: 'n1' });
+		});
+
+		it('returns undefined when source endpoint is missing from the graph', () => {
+			const graph = makeGraph({ nodeCount: 2, edges: [[0, 1]] });
+
+			expect(findExistingEdge(graph, 'missing', 'n1')).toBeUndefined();
+		});
+
+		it('returns undefined when target endpoint is missing from the graph', () => {
+			const graph = makeGraph({ nodeCount: 2, edges: [[0, 1]] });
+
+			expect(findExistingEdge(graph, 'n0', 'missing')).toBeUndefined();
+		});
+
+		it('returns undefined when no edge connects the given nodes', () => {
+			const graph = makeGraph({ nodeCount: 3, edges: [[0, 1]] });
+
+			expect(findExistingEdge(graph, 'n0', 'n2')).toBeUndefined();
+			expect(findExistingEdge(graph, 'n2', 'n0')).toBeUndefined();
+		});
+	});
+
+	describe('removeEdge immutability', () => {
+		it('returns the same reference when the edge id is missing', () => {
+			const graph = makeGraph({ nodeCount: 2, edges: [[0, 1]] });
+
+			expect(removeEdge(graph, 'missing')).toBe(graph);
+		});
+	});
+
+	describe('normalizeNodeTitle', () => {
+		it('returns the trimmed title when non-empty', () => {
+			expect(normalizeNodeTitle('  My Node  ')).toBe('My Node');
+		});
+
+		it(`returns "${NEW_NODE_TITLE}" for an empty string`, () => {
+			expect(normalizeNodeTitle('')).toBe(NEW_NODE_TITLE);
+		});
+
+		it(`returns "${NEW_NODE_TITLE}" for a whitespace-only string`, () => {
+			expect(normalizeNodeTitle('   ')).toBe(NEW_NODE_TITLE);
+		});
+
+		it('does not mutate the original graph when used via updateNodeContent', () => {
+			const graph = makeGraph({ nodeCount: 1 });
+			const originalTitle = graph.nodes[0].title;
+
+			const next = updateNodeContent(graph, 'n0', { title: '', description: '' });
+
+			expect(next.nodes[0].title).toBe(NEW_NODE_TITLE);
+			expect(graph.nodes[0].title).toBe(originalTitle);
 		});
 	});
 });

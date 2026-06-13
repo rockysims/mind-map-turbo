@@ -1,7 +1,6 @@
 <script lang="ts">
 	import type { NodeData } from '../types/node';
-
-	const EMPTY_TITLE = 'Untitled node';
+	import { normalizeNodeTitle } from './lib/graph';
 
 	let {
 		node,
@@ -29,7 +28,7 @@
 
 	function save() {
 		onSave({
-			title: title.trim() || EMPTY_TITLE,
+			title: normalizeNodeTitle(title),
 			description
 		});
 	}

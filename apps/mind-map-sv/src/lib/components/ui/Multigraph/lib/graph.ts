@@ -18,6 +18,34 @@ export interface AddEdgeInput {
 const DEFAULT_NODE_POSITION: Point = { x: 0, y: 0 };
 const DEFAULT_EDGE_COLOR = '#888';
 
+export const NEW_NODE_TITLE = 'New Node';
+
+/** Returns a trimmed title, falling back to NEW_NODE_TITLE when empty. */
+export function normalizeNodeTitle(title: string): string {
+	return title.trim() || NEW_NODE_TITLE;
+}
+
+/**
+ * Returns the first edge whose endpoints match the given source/target pair,
+ * treating the match as undirected (so n0→n1 and n1→n0 are considered the
+ * same edge). Returns undefined when no match exists.
+ *
+ * NOTE: Undirected matching is intentional until directed-edge semantics land
+ * in milestone 04e. At that point this helper can add a `directed` parameter
+ * without touching callers.
+ */
+export function findExistingEdge(
+	data: MultigraphData,
+	sourceNodeId: string,
+	targetNodeId: string
+): EdgeData | undefined {
+	return data.edges.find(
+		(edge) =>
+			(edge.sourceNodeId === sourceNodeId && edge.targetNodeId === targetNodeId) ||
+			(edge.sourceNodeId === targetNodeId && edge.targetNodeId === sourceNodeId)
+	);
+}
+
 export function addNode(data: MultigraphData, input: AddNodeInput = {}): MultigraphData {
 	const id =
 		input.id ??
@@ -27,7 +55,7 @@ export function addNode(data: MultigraphData, input: AddNodeInput = {}): Multigr
 		);
 	const node: NodeData = {
 		id,
-		title: input.title ?? 'New Node',
+		title: input.title ?? NEW_NODE_TITLE,
 		description: input.description ?? '',
 		pinned: input.pinned
 	};
@@ -110,7 +138,9 @@ export function updateNodeContent(
 
 	return {
 		...data,
-		nodes: data.nodes.map((node) => (node.id === nodeId ? { ...node, ...content } : node))
+		nodes: data.nodes.map((node) =>
+			node.id === nodeId ? { ...node, ...content, title: normalizeNodeTitle(content.title) } : node
+		)
 	};
 }
 
