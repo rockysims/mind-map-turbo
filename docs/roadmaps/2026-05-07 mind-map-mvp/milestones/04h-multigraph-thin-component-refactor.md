@@ -1,6 +1,6 @@
 # Milestone 04h: Thin the Multigraph component
 
-**Status:** not started
+**Status:** complete
 **Depends on:** milestone 04g (its in-flight `Multigraph.svelte` / `graphLayout.ts`
 relaxation-loop changes should land first so this refactor rebases onto the final
 loop, not a moving target).

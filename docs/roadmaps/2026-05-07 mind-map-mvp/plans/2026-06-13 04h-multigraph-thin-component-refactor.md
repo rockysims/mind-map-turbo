@@ -3,7 +3,7 @@
 **Created:** 2026-06-13
 **Author:** Cursor agent
 **Milestone:** [milestones/04h-multigraph-thin-component-refactor.md](../milestones/04h-multigraph-thin-component-refactor.md)
-**Status:** executing
+**Status:** done
 **Total estimated effort:** M
 
 ## Summary
@@ -221,3 +221,6 @@ The plan is done when:
   cluster (RAF loop + wrappers + ~8 loop-only `$state`) is ~250 lines and the
   main source of bloat; the per-frame decisions already live in tested lib
   modules, so T04 is mostly relocating glue, not re-deriving algorithms.
+- 2026-06-13: User chose to implement T01-T04 in one `/work` branch instead of
+  four separate PRs. The branch keeps the tasks as separate commits and closes
+  the milestone in the final docs commit.
