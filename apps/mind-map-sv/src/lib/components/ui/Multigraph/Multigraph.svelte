@@ -12,6 +12,7 @@
 		addNode,
 		findExistingEdge,
 		moveNode,
+		normalizeNodeTitle,
 		removeEdge,
 		removeNode,
 		togglePinned,
@@ -421,6 +422,20 @@
 		return `linear-gradient(to right, ${visibility.edge.color}, transparent)`;
 	}
 
+	function duplicateEdgeRemoveLabel(edgeId: string): string {
+		const edge = graph.edges.find((candidate) => candidate.id === edgeId);
+		if (!edge) return 'Remove edge';
+
+		const sourceTitle = normalizeNodeTitle(
+			graph.nodes.find((node) => node.id === edge.sourceNodeId)?.title ?? ''
+		);
+		const targetTitle = normalizeNodeTitle(
+			graph.nodes.find((node) => node.id === edge.targetNodeId)?.title ?? ''
+		);
+
+		return `Remove edge ${sourceTitle} -- ${targetTitle}`;
+	}
+
 	function withRelaxedPositions(
 		nextGraph: MultigraphData,
 		dragNodeId: string | null = activeDragNodeId,
@@ -715,6 +730,7 @@
 
 	{#if duplicateEdgeConfirm}
 		{@const confirmEdgeId = duplicateEdgeConfirm.edgeId}
+		{@const removeLabel = duplicateEdgeRemoveLabel(confirmEdgeId)}
 		<div
 			class="duplicate-edge-dialog-backdrop"
 			role="presentation"
@@ -731,9 +747,15 @@
 				onkeydown={() => {}}
 			>
 				<p id="duplicate-edge-dialog-title" class="duplicate-edge-dialog-message">
-					This edge already exists. Remove it?
+					{removeLabel}
 				</p>
 				<div class="duplicate-edge-dialog-actions">
+					<button
+						class="duplicate-edge-dialog-cancel"
+						onclick={() => (duplicateEdgeConfirm = null)}
+					>
+						Cancel
+					</button>
 					<button
 						class="duplicate-edge-dialog-confirm"
 						onclick={() => {
@@ -742,12 +764,6 @@
 						}}
 					>
 						Remove
-					</button>
-					<button
-						class="duplicate-edge-dialog-cancel"
-						onclick={() => (duplicateEdgeConfirm = null)}
-					>
-						Cancel
 					</button>
 				</div>
 			</div>
