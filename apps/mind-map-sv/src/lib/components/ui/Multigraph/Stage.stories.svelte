@@ -66,9 +66,12 @@
 		);
 	}
 
-	function dispatchWheel(target: HTMLElement, deltaY: number) {
+	function dispatchWheel(target: HTMLElement, deltaY: number, clientX?: number, clientY?: number) {
+		const center = getCenter(target);
 		target.dispatchEvent(
 			new WheelEvent('wheel', {
+				clientX: clientX ?? center.x,
+				clientY: clientY ?? center.y,
 				deltaY,
 				bubbles: true,
 				cancelable: true
@@ -203,13 +206,15 @@
 
 		await waitForLayout();
 
-		dispatchWheel(stage, -200);
+		const center = getCenter(stage);
+		dispatchWheel(stage, -200, center.x + 80, center.y + 40);
 
 		await sleep();
 
-		const parts = (wrapper.dataset.lastViewState ?? '').split(',');
-		expect(parts).toHaveLength(3);
-		expect(Number(parts[2])).toBeGreaterThan(1);
+		const viewState = parseViewStateCallback(wrapper.dataset.lastViewState ?? '');
+		expect(viewState.scale).toBeGreaterThan(1);
+		expect(viewState.panX).toBeCloseTo(80 - 80 * viewState.scale);
+		expect(viewState.panY).toBeCloseTo(40 - 40 * viewState.scale);
 	}}
 />
 
@@ -432,9 +437,9 @@
 		const afterZoom = getStageTransform(canvasElement);
 		expect(afterZoom).toMatch(/scale\([1-9]/);
 		viewState = parseViewStateCallback(wrapper.dataset.lastViewState ?? '');
-		expect(viewState.panX).toBe(20);
-		expect(viewState.panY).toBe(20);
 		expect(viewState.scale).toBeGreaterThan(1);
+		expect(viewState.panX).toBeCloseTo(20 * viewState.scale);
+		expect(viewState.panY).toBeCloseTo(20 * viewState.scale);
 	}}
 />
 

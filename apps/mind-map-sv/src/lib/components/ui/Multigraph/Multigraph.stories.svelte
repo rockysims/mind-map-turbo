@@ -120,9 +120,12 @@
 		);
 	}
 
-	function dispatchWheel(target: HTMLElement, deltaY: number) {
+	function dispatchWheel(target: HTMLElement, deltaY: number, clientX?: number, clientY?: number) {
+		const center = getCenter(target);
 		target.dispatchEvent(
 			new WheelEvent('wheel', {
+				clientX: clientX ?? center.x,
+				clientY: clientY ?? center.y,
 				deltaY,
 				bubbles: true,
 				cancelable: true
@@ -289,9 +292,10 @@
 		await sleep();
 
 		expect(args.onMultigraphChange).not.toHaveBeenCalled();
-		expect(lastViewState(args).panX).toBe(24);
-		expect(lastViewState(args).panY).toBe(12);
-		expect(lastViewState(args).scale).toBeGreaterThan(1);
+		const zoomedViewState = lastViewState(args);
+		expect(zoomedViewState.scale).toBeGreaterThan(1);
+		expect(zoomedViewState.panX).toBeCloseTo(24 * zoomedViewState.scale);
+		expect(zoomedViewState.panY).toBeCloseTo(12 * zoomedViewState.scale);
 	}}
 />
 

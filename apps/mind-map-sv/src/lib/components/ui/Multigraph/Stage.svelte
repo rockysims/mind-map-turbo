@@ -7,7 +7,8 @@
 		scaleFromWheelDelta,
 		clampScale,
 		DEFAULT_MIN_SCALE,
-		DEFAULT_MAX_SCALE
+		DEFAULT_MAX_SCALE,
+		zoomViewTransformAtPoint
 	} from './lib/graphMath.js';
 	import { pointerDistance } from './lib/hitTest.js';
 	import { recognizeLongPress } from './lib/longPress.js';
@@ -252,7 +253,18 @@
 
 	function onWheel(e: WheelEvent) {
 		e.preventDefault();
-		scale = scaleFromWheelDelta(scale, e.deltaY, undefined, DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE);
+		const stage = e.currentTarget as HTMLElement;
+		const rect = stage.getBoundingClientRect();
+		const nextView = zoomViewTransformAtPoint(
+			{ panX, panY, scale },
+			scaleFromWheelDelta(scale, e.deltaY, undefined, DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE),
+			{ x: e.clientX, y: e.clientY },
+			{ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+		);
+
+		panX = nextView.panX;
+		panY = nextView.panY;
+		scale = nextView.scale;
 		onViewStateChange?.({ panX, panY, scale });
 	}
 
