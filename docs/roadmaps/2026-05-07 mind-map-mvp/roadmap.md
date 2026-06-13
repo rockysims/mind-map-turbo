@@ -48,12 +48,15 @@ individual PR-sized tasks.
 | 04f | Tag colors and graph tag config                    | complete    | [milestone](milestones/04f-tag-colors-and-graph-tag-config.md), [plan](plans/2026-06-12%2004f-node-and-edge-tag-colors.md)                      |
 | 04g | Layout settle: eliminate endless drift/rotation    | not started | [milestone](milestones/04g-layout-settle-eliminate-drift.md), [plan](plans/2026-06-13%2004g-layout-settle-rigid-motion.md)                      |
 | 04h | Thin the Multigraph component (refactor)           | not started | [milestone](milestones/04h-multigraph-thin-component-refactor.md), [plan](plans/2026-06-13%2004h-multigraph-thin-component-refactor.md)         |
+| 04i | Eliminate appearance/disappearance abruptness      | not started | [milestone](milestones/04i-eliminate-appearance-abruptness.md), [plan](plans/2026-06-13%2004i-enter-exit-and-reveal-wave.md)                    |
 | 05  | Multiplayer                                        | not started | [milestones/05-multiplayer.md](milestones/05-multiplayer.md)                                                                                    |
 | 06  | Search                                             | not started | [milestones/06-search.md](milestones/06-search.md)                                                                                              |
 
-Milestones 04a-04h sit between persistence and multiplayer. Milestone 04b
+Milestones 04a-04i sit between persistence and multiplayer. Milestone 04b
 intentionally supersedes 04a's Fibonacci reveal and dimming behavior. Milestone
-04h is a behavior-preserving refactor, not new product scope.
+04h is a behavior-preserving refactor, not new product scope. Milestone 04i adds
+enter/exit and pin reveal-wave animation as pure modules so 04h can absorb the
+wiring; if 04h lands first, 04i targets the post-split files.
 
 ## How this directory is organized
 
