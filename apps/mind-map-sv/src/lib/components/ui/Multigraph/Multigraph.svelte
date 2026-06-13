@@ -8,7 +8,14 @@
 	import type { NodeData } from '../types/node';
 	import type { MultigraphData, Point, TagColorNamespace } from '../types/multigraph';
 	import { effectiveHitRadius, isPointInCircle } from './lib/hitTest.js';
-	import { trimSegmentToNodeBorders } from './lib/edgeRender.js';
+	import {
+		edgeArrowScale,
+		edgeBackground,
+		edgeRenderPoints,
+		edgeStrokeScale,
+		edgeStyle,
+		type RenderableEdgeVisibility
+	} from './lib/edgeStyle.js';
 	import {
 		addEdge,
 		addNode,
@@ -35,8 +42,7 @@
 	import { withDefaultLayoutSettings } from './lib/layoutSettings.js';
 	import {
 		edgeVisibilityForPinnedNeighborhood,
-		visibleNodeIdsForPinnedNeighborhood,
-		type EdgeVisibility
+		visibleNodeIdsForPinnedNeighborhood
 	} from './lib/boundedVisibility.js';
 	import {
 		advanceLayeredRelayout,
@@ -69,15 +75,12 @@
 	import {
 		EDGE_ARROW_HALF_HEIGHT,
 		EDGE_ARROW_LENGTH,
-		EDGE_ARROW_REFERENCE_NODE_SCALE,
-		EDGE_STROKE_REFERENCE_NODE_SCALE,
 		EDGE_STROKE_WIDTH,
 		MIN_NODE_HIT_RADIUS
 	} from '$lib/constants.js';
 	import type { ViewState } from '$lib/migrations.js';
 
 	const CENTERED_POSITION: Point = { x: 0, y: 0 };
-	type RenderableEdgeVisibility = Exclude<EdgeVisibility, { kind: 'hidden' }>;
 
 	let {
 		multigraphData = {
@@ -433,73 +436,6 @@
 		animationNowMs = nowMs;
 	}
 
-	function edgeStyle(sourcePos: Point, targetPos: Point): string {
-		const dx = targetPos.x - sourcePos.x;
-		const dy = targetPos.y - sourcePos.y;
-		const length = Math.sqrt(dx ** 2 + dy ** 2);
-		const angle = Math.atan2(dy, dx);
-
-		return `left: calc(50% + ${sourcePos.x}px); top: calc(50% + ${sourcePos.y}px); width: ${length}px; transform: translateY(-50%) rotate(${angle}rad);`;
-	}
-
-	function edgeRenderPoints(visibility: RenderableEdgeVisibility): {
-		source: Point;
-		target: Point;
-	} {
-		if (visibility.kind === 'visible') {
-			const source = graphLayout.posByNodeId[visibility.edge.sourceNodeId] ?? CENTERED_POSITION;
-			const target = graphLayout.posByNodeId[visibility.edge.targetNodeId] ?? CENTERED_POSITION;
-			return trimSegmentToNodeBorders(
-				source,
-				target,
-				graphLayout.radiusByNodeId[visibility.edge.sourceNodeId] ?? 0,
-				graphLayout.radiusByNodeId[visibility.edge.targetNodeId] ?? 0
-			);
-		}
-
-		const visiblePos = graphLayout.posByNodeId[visibility.visibleNodeId] ?? CENTERED_POSITION;
-		const hiddenPos = graph.posByNodeId[visibility.hiddenNodeId] ?? visiblePos;
-		return {
-			source: visiblePos,
-			target: {
-				x: visiblePos.x + (hiddenPos.x - visiblePos.x) * visibility.fadeRatio,
-				y: visiblePos.y + (hiddenPos.y - visiblePos.y) * visibility.fadeRatio
-			}
-		};
-	}
-
-	function edgeBackground(visibility: RenderableEdgeVisibility, color: string): string {
-		if (visibility.kind === 'visible') return color;
-		return `linear-gradient(to right, ${color}, transparent)`;
-	}
-
-	function edgeArrowScale(visibility: RenderableEdgeVisibility): number {
-		if (visibility.kind !== 'visible' || visibility.edge.directed !== true) return 1;
-		const targetScale = graphLayout.scaleByNodeId[visibility.edge.targetNodeId] ?? 1;
-		return targetScale / EDGE_ARROW_REFERENCE_NODE_SCALE;
-	}
-
-	function edgeStrokeScale(visibility: RenderableEdgeVisibility): number {
-		if (visibility.kind === 'boundary') {
-			return nodeScale(visibility.visibleNodeId) / EDGE_STROKE_REFERENCE_NODE_SCALE;
-		}
-
-		const edge = visibility.edge;
-		if (edge.directed === true) {
-			return nodeScale(edge.targetNodeId) / EDGE_STROKE_REFERENCE_NODE_SCALE;
-		}
-
-		return (
-			(nodeScale(edge.sourceNodeId) + nodeScale(edge.targetNodeId)) /
-			2 /
-			EDGE_STROKE_REFERENCE_NODE_SCALE
-		);
-	}
-
-	function nodeScale(nodeId: string): number {
-		return graphLayout.scaleByNodeId[nodeId] ?? 1;
-	}
-
 	function duplicateEdgeIdentifier(edgeId: string): string {
 		const edge = graph.edges.find((candidate) => candidate.id === edgeId);
 		if (!edge) return 'Unknown edge';
@@ -746,9 +682,9 @@
 		<div class="edges" aria-hidden="true">
 			{#each renderableEdgeVisibility as visibility (visibility.edge.id)}
 				{@const edge = visibility.edge}
-				{@const edgePoints = edgeRenderPoints(visibility)}
-				{@const arrowScale = edgeArrowScale(visibility)}
-				{@const strokeScale = edgeStrokeScale(visibility)}
+				{@const edgePoints = edgeRenderPoints(visibility, graphLayout, graph.posByNodeId)}
+				{@const arrowScale = edgeArrowScale(visibility, graphLayout.scaleByNodeId)}
+				{@const strokeScale = edgeStrokeScale(visibility, graphLayout.scaleByNodeId)}
 				{@const edgeColor = edgeStrokeColor(edge, graph.tagColorConfig.edgeTags)}
 				<div
 					class="edge"
