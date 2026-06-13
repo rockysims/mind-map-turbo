@@ -1059,3 +1059,107 @@
 		);
 	}}
 />
+
+<Story
+	name="UserConfirmsDuplicateEdgeRemoval"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 2,
+			pinned: [0],
+			edges: [[0, 1]],
+			posByNodeId: {
+				n0: { x: -200, y: 0 },
+				n1: { x: 200, y: 0 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { relaxIterations: 1, edgeSpringStrength: 1 },
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const sourceCircle = getCircle(canvasElement, 'n0');
+		const targetCircle = getCircle(canvasElement, 'n1');
+		const sourceCenter = getCenter(sourceCircle);
+		const targetCenter = getCenter(targetCircle);
+
+		expect(canvasElement.querySelector('[data-edge-id="e0"]')).toBeInTheDocument();
+		expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
+
+		await dispatchDoubleClickDrag(
+			sourceCircle,
+			sourceCenter.x,
+			sourceCenter.y,
+			stage,
+			targetCenter.x,
+			targetCenter.y
+		);
+		await sleep();
+
+		const dialog = canvasElement.querySelector('[role="dialog"]');
+		expect(dialog).toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-edge-id="e0"]')).toBeInTheDocument();
+
+		const confirmButton = canvasElement.querySelector(
+			'.duplicate-edge-dialog-confirm'
+		) as HTMLElement;
+		confirmButton.click();
+		await sleep();
+
+		expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-edge-id="e0"]')).not.toBeInTheDocument();
+		expect(lastChangedGraph(args).edges).toEqual([]);
+	}}
+/>
+
+<Story
+	name="UserCancelsDuplicateEdgeRemoval"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 2,
+			pinned: [0],
+			edges: [[0, 1]],
+			posByNodeId: {
+				n0: { x: -200, y: 0 },
+				n1: { x: 200, y: 0 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { relaxIterations: 1, edgeSpringStrength: 1 },
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const sourceCircle = getCircle(canvasElement, 'n0');
+		const targetCircle = getCircle(canvasElement, 'n1');
+		const sourceCenter = getCenter(sourceCircle);
+		const targetCenter = getCenter(targetCircle);
+
+		expect(canvasElement.querySelector('[data-edge-id="e0"]')).toBeInTheDocument();
+
+		await dispatchDoubleClickDrag(
+			sourceCircle,
+			sourceCenter.x,
+			sourceCenter.y,
+			stage,
+			targetCenter.x,
+			targetCenter.y
+		);
+		await sleep();
+
+		expect(canvasElement.querySelector('[role="dialog"]')).toBeInTheDocument();
+
+		const cancelButton = canvasElement.querySelector(
+			'.duplicate-edge-dialog-cancel'
+		) as HTMLElement;
+		cancelButton.click();
+		await sleep();
+
+		expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-edge-id="e0"]')).toBeInTheDocument();
+		const spy = args.onMultigraphChange as ChangeSpy | undefined;
+		expect(spy?.mock.calls.length ?? 0).toBe(0);
+	}}
+/>

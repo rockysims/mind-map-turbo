@@ -10,7 +10,9 @@
 	import {
 		addEdge,
 		addNode,
+		findExistingEdge,
 		moveNode,
+		removeEdge,
 		removeNode,
 		togglePinned,
 		updateNodeContent
@@ -81,6 +83,7 @@
 	let activeDragNodeId = $state<string | null>(null);
 	let editNodeId = $state<string | null>(null);
 	let actionMenu = $state<{ nodeId: string; position: Point } | null>(null);
+	let duplicateEdgeConfirm = $state<{ edgeId: string } | null>(null);
 	let graphRef = $state<HTMLElement | null>(null);
 	let relaxationFrameId: number | null = null;
 	let scaleAnimations = $state<Record<string, NodeScaleAnimation>>({});
@@ -249,7 +252,12 @@
 
 	function handleNodeDoubleClickDropOntoNode(sourceNode: NodeData, targetNode: NodeData) {
 		closeOverlays();
-		commitUserGraph(withRelaxedPositions(addEdge(graph, sourceNode.id, targetNode.id)));
+		const existing = findExistingEdge(graph, sourceNode.id, targetNode.id);
+		if (existing) {
+			duplicateEdgeConfirm = { edgeId: existing.id };
+		} else {
+			commitUserGraph(withRelaxedPositions(addEdge(graph, sourceNode.id, targetNode.id)));
+		}
 	}
 
 	function handleNodeDoubleClickDropOntoBackground(sourceNode: NodeData, point: Point) {
@@ -277,6 +285,7 @@
 	function closeOverlays() {
 		actionMenu = null;
 		editNodeId = null;
+		duplicateEdgeConfirm = null;
 	}
 
 	function toggleNodePinned(nodeId: string) {
@@ -684,6 +693,47 @@
 			onDelete={() => deleteNode(editNode.id)}
 		/>
 	{/if}
+
+	{#if duplicateEdgeConfirm}
+		{@const confirmEdgeId = duplicateEdgeConfirm.edgeId}
+		<div
+			class="duplicate-edge-dialog-backdrop"
+			role="presentation"
+			onclick={() => (duplicateEdgeConfirm = null)}
+			onkeydown={() => {}}
+		>
+			<div
+				role="dialog"
+				aria-modal="true"
+				aria-labelledby="duplicate-edge-dialog-title"
+				tabindex="-1"
+				class="duplicate-edge-dialog"
+				onclick={(e) => e.stopPropagation()}
+				onkeydown={() => {}}
+			>
+				<p id="duplicate-edge-dialog-title" class="duplicate-edge-dialog-message">
+					This edge already exists. Remove it?
+				</p>
+				<div class="duplicate-edge-dialog-actions">
+					<button
+						class="duplicate-edge-dialog-confirm"
+						onclick={() => {
+							commitUserGraph(withRelaxedPositions(removeEdge(graph, confirmEdgeId)));
+							duplicateEdgeConfirm = null;
+						}}
+					>
+						Remove
+					</button>
+					<button
+						class="duplicate-edge-dialog-cancel"
+						onclick={() => (duplicateEdgeConfirm = null)}
+					>
+						Cancel
+					</button>
+				</div>
+			</div>
+		</div>
+	{/if}
 </div>
 
 <style>
@@ -710,5 +760,59 @@
 		position: absolute;
 		height: 2px;
 		transform-origin: left center;
+	}
+
+	.duplicate-edge-dialog-backdrop {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: rgba(0, 0, 0, 0.4);
+		z-index: 100;
+	}
+
+	.duplicate-edge-dialog {
+		background: white;
+		border-radius: 8px;
+		padding: 24px;
+		max-width: 280px;
+		width: 100%;
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+	}
+
+	.duplicate-edge-dialog-message {
+		margin: 0;
+		font-size: 1rem;
+		text-align: center;
+	}
+
+	.duplicate-edge-dialog-actions {
+		display: flex;
+		gap: 12px;
+		justify-content: center;
+	}
+
+	.duplicate-edge-dialog-confirm,
+	.duplicate-edge-dialog-cancel {
+		padding: 10px 20px;
+		border-radius: 6px;
+		border: none;
+		font-size: 0.9rem;
+		cursor: pointer;
+		min-width: 80px;
+		min-height: 44px;
+	}
+
+	.duplicate-edge-dialog-confirm {
+		background: #e53935;
+		color: white;
+	}
+
+	.duplicate-edge-dialog-cancel {
+		background: #e0e0e0;
+		color: #333;
 	}
 </style>
