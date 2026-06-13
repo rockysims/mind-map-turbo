@@ -1,4 +1,4 @@
-# Milestone 04e: Title syntax for direction and tags
+# Milestone 04e: Title syntax for direction and tags, with edge editing
 
 **Status:** not started
 **Depends on:** milestones 01 (graph mutations), 03 (editing UX), and 04d
@@ -7,9 +7,10 @@
 
 ## Goal
 
-Let users type lightweight syntax into a node title to set edge direction
-and node tags during creation or editing, while keeping the non-editing
-node label clean.
+Let users type lightweight syntax into a node title to set edge direction,
+node tags, and edge tags during creation, and edit those properties later
+through a tabbed node editor — while keeping the non-editing node label clean
+and the whole flow mobile-friendly.
 
 ## Scope
 
@@ -22,51 +23,72 @@ node label clean.
   to child.
 - If neither `<` nor `>` is first, the edge is undirected by default.
 - After removing or ignoring the optional direction marker, parse leading
-  tags in the form `:some-tagName_withoutASpaceOrColonCharacter`.
+  tags:
+  - `:tagName` applies the tag to the **node**.
+  - `;tagName` applies the tag to the **edge** created by the gesture.
+  - Tag names contain no space, colon, or semicolon characters.
 - Parsing stops at the first token that is not a leading tag. The remaining
   text is the displayed node title.
+- Direction and `;` edge tags only apply when the gesture creates an edge
+  (i.e. creating a connected node). Editing a standalone node never mutates
+  unrelated edges.
 
 Example:
 
 ```text
->:abc:xyz :alsoFine The displayed node title part.
+>:abc ;rel The displayed node title part.
 ```
 
-This means parent-to-child direction, tags `abc`, `xyz`, and `alsoFine`,
-and displayed title `The displayed node title part.`
+This means parent-to-child direction, node tag `abc`, edge tag `rel`, and
+displayed title `The displayed node title part.`
 
 ### Editing model
 
-- Editable title fields show the full syntax-bearing text.
+- Title syntax is a **creation-time shortcut** only. It is parsed into
+  structured graph fields; the editor does not round-trip raw syntax.
 - Non-editable node labels show only the parsed display title.
-- Preserve a user's tags and direction markers when reopening an editor,
-  unless the plan chooses a structured editor that can round-trip the same
-  information clearly.
+- The node edit sheet gains a tab switcher:
+  - **Node** tab: today's title / description / pin / delete UI.
+  - **Edges** tab: a scrollable list of the edges incident to this node, one
+    row per neighbor. Each row edits that edge's direction and tags.
+- The Edges tab is the mobile-friendly path to any edge: every edge is
+  reachable from either endpoint's list, so users tap node-sized targets and
+  full-width rows instead of a hairline edge.
 
 ### Directed edges
 
-- Extend edge data to represent optional direction.
+- Extend `EdgeData` with `directed?: boolean`; the arrow points from
+  `sourceNodeId` to `targetNodeId` when `directed` is true.
+- Flipping direction in the Edges tab swaps the edge's source/target
+  endpoints (endpoint order is already cosmetic across layout, physics, and
+  undirected duplicate matching).
 - Render an arrowhead at the pointed-to end when an edge is directed.
 - Existing undirected edges remain visually unchanged.
 
 ### Tags
 
-- Extend node data with a list of tags.
+- Extend `NodeData` with a list of tags and `EdgeData` with a list of tags.
+- Add a pure `updateEdge(data, edgeId, patch)` mutation mirroring
+  `updateNodeContent`, with a colocated spec.
 - Keep parsing, serialization, and display-title derivation in pure modules
   with colocated specs.
 
 ## Acceptance Criteria
 
-- Parser specs cover no marker, `<`, `>`, multiple leading tags, malformed
-  tag-like text, empty display titles, and whitespace around tags.
+- Parser specs cover no marker, `<`, `>`, multiple leading node tags (`:`),
+  edge tags (`;`), mixed node/edge tags, malformed tag-like text, empty
+  display titles, and whitespace around tags.
 - Graph mutation specs cover creating a connected node with parsed
-  direction and tags.
-- Existing graphs without direction or tags still load through migrations.
+  direction, node tags, and edge tags, plus `updateEdge` returning new graph
+  data without mutating the original.
+- Existing graphs without direction or tags still load through migrations
+  (edges → undirected with `tags: []`, nodes → `tags: []`).
 - Story coverage shows inline creation with direction and tags, then plain
   display text after commit.
-- Story coverage shows editing an existing node exposes the syntax-bearing
-  editable text and saves updated tags/title.
-- Directed edges render arrowheads on the correct endpoint.
+- Story coverage shows the node edit sheet's Node/Edges tabs, and that the
+  Edges tab edits an existing edge's direction and tags.
+- Directed edges render arrowheads on the correct endpoint, including after
+  a flip in the Edges tab.
 - Lint, check, and unit tests pass.
 
 ## Non-goals
@@ -74,14 +96,21 @@ and displayed title `The displayed node title part.`
 - Tag color management; that is milestone 04f.
 - Full markdown or rich text in titles.
 - Search/filtering by tag.
+- Direct edge hit-testing / tap-an-edge selection on the canvas (the Edges
+  tab covers editing; canvas edge picking can be a later enhancement).
 
 ## Risks and Open Questions
 
-- **Raw title vs. structured fields.** The plan should decide whether to
-  store raw editable text, structured title/tags/direction fields, or both.
-  Prefer structured graph data if round-tripping stays clear.
-- **Direction ownership.** Direction belongs to the edge, while tags belong
-  to the node. Creating a node from an edge gesture can set both; editing a
-  standalone node title should not silently mutate unrelated edges.
-- **Migration defaults.** Existing edges should migrate to undirected, and
-  existing nodes should migrate to `tags: []`.
+- **Storage is structured, not raw text.** Title syntax parses into
+  `NodeData.tags`, `EdgeData.tags`, and `EdgeData.directed`; the editor reads
+  and writes those fields directly so round-tripping stays clear.
+- **Direction and edge tags are gesture-scoped.** `<`/`>` and `;` only
+  affect the edge created alongside a new node; editing a standalone node
+  title never mutates unrelated edges. Per-edge changes happen in the Edges
+  tab.
+- **Migration defaults.** Existing edges migrate to `directed: false` /
+  `tags: []`; existing nodes migrate to `tags: []`. Bump the schema version
+  and extend `isEdgeData` validation accordingly.
+- **First tab UI in the codebase.** No existing tab pattern; align with the
+  sheet's pill-button styling and use `role="tablist"`/`role="tabpanel"` for
+  a11y.
