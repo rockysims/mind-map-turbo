@@ -226,7 +226,8 @@
 		multigraphData: {
 			nodes: [{ id: '1', title: 'Node 1', description: 'Node 1 description', tags: [] }],
 			edges: [],
-			posByNodeId: {}
+			posByNodeId: {},
+			tagColorConfig: { nodeTags: {}, edgeTags: {} }
 		},
 		defaultPrimaryNodeId: '1'
 	}}
@@ -746,7 +747,6 @@
 			id: 'e2',
 			sourceNodeId: 'n0',
 			targetNodeId: 'n1',
-			color: '#888',
 			tags: [],
 			directed: false
 		});
@@ -1458,5 +1458,162 @@
 		// No extra nodes or edges created by the input interaction
 		expect(canvasElement.querySelectorAll('.node-wrapper')).toHaveLength(2);
 		expect(canvasElement.querySelectorAll('.edge')).toHaveLength(1);
+	}}
+/>
+
+<Story
+	name="TagColorsRenderOnNodesAndEdges"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'n0', title: 'Topic', description: '', tags: ['topic'] },
+				{ id: 'n1', title: 'Mixed', description: '', tags: ['topic', 'urgent'] },
+				{ id: 'n2', title: 'Plain', description: '', tags: [] }
+			],
+			edges: [
+				{ source: 'n0', target: 'n1', tags: ['rel'] },
+				{ source: 'n1', target: 'n2', tags: [] }
+			],
+			posByNodeId: { n0: { x: -240, y: 0 }, n1: { x: 0, y: 0 }, n2: { x: 240, y: 0 } },
+			tagColorConfig: {
+				nodeTags: { topic: '#ff0000', urgent: '#00ff00' },
+				edgeTags: { rel: '#0000ff' }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+
+		expect(canvasElement.querySelector('[data-node-id="n0"] .node')).toHaveAttribute(
+			'data-tag-border',
+			'true'
+		);
+		expect(canvasElement.querySelector('[data-node-id="n1"] .node')).toHaveAttribute(
+			'data-tag-border',
+			'true'
+		);
+		expect(canvasElement.querySelector('[data-node-id="n2"] .node')).not.toHaveAttribute(
+			'data-tag-border'
+		);
+
+		const taggedEdge = canvasElement.querySelector('[data-edge-id="e0"]') as HTMLElement;
+		const plainEdge = canvasElement.querySelector('[data-edge-id="e1"]') as HTMLElement;
+		expect(taggedEdge.style.getPropertyValue('--edge-background').trim()).toBe('#0000ff');
+		expect(plainEdge.style.getPropertyValue('--edge-background').trim()).toBe('#888888');
+	}}
+/>
+
+<Story
+	name="UserChangesTagColorFromLegend"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [{ id: 'n0', title: 'Topic', description: '', tags: ['topic'] }],
+			tagColorConfig: { nodeTags: { topic: '#ff0000' }, edgeTags: {} }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const canvas = within(canvasElement);
+		canvas.getByRole('button', { name: 'Tag colors' }).click();
+		await sleep();
+
+		const colorInput = canvas.getByLabelText('Color for node tag topic') as HTMLInputElement;
+		colorInput.value = '#00ff00';
+		colorInput.dispatchEvent(new Event('input', { bubbles: true }));
+		await sleep();
+
+		expect(lastChangedGraph(args).tagColorConfig.nodeTags.topic).toBe('#00ff00');
+	}}
+/>
+
+<Story
+	name="UserDeletesTagsFromLegend"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'n0', title: 'Topic', description: '', tags: ['topic'] },
+				{ id: 'n1', title: 'Other', description: '', tags: ['topic'] }
+			],
+			edges: [{ source: 'n0', target: 'n1', tags: ['rel', 'rel'] }],
+			tagColorConfig: {
+				nodeTags: { topic: '#ff0000', unused: '#00ff00' },
+				edgeTags: { rel: '#0000ff' }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const canvas = within(canvasElement);
+		canvas.getByRole('button', { name: 'Tag colors' }).click();
+		await sleep();
+
+		canvas.getByRole('button', { name: 'Delete node tag unused' }).click();
+		await sleep();
+		expect(lastChangedGraph(args).tagColorConfig.nodeTags.unused).toBeUndefined();
+
+		const originalConfirm = window.confirm;
+		let confirmMessage = '';
+		window.confirm = (message?: string) => {
+			confirmMessage = String(message);
+			return true;
+		};
+		try {
+			canvas.getByRole('button', { name: 'Delete edge tag rel' }).click();
+			await sleep();
+		} finally {
+			window.confirm = originalConfirm;
+		}
+
+		expect(confirmMessage).toContain('2 uses');
+		const changedGraph = lastChangedGraph(args);
+		expect(changedGraph.tagColorConfig.edgeTags.rel).toBeUndefined();
+		expect(changedGraph.edges[0].tags).toEqual([]);
+	}}
+/>
+
+<Story
+	name="UserReordersEdgeTagsAndChangesStrokeColor"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 2,
+			pinned: [0],
+			edges: [{ source: 0, target: 1, tags: ['rel', 'strong'] }],
+			posByNodeId: { n0: { x: -180, y: 0 }, n1: { x: 180, y: 0 } },
+			tagColorConfig: {
+				nodeTags: {},
+				edgeTags: { rel: '#0000ff', strong: '#ff0000' }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { relaxIterations: 0 },
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const edge = canvasElement.querySelector('[data-edge-id="e0"]') as HTMLElement;
+		expect(edge.style.getPropertyValue('--edge-background').trim()).toBe('#0000ff');
+
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+		dispatchPointer(circle, 'pointerdown', center.x, center.y);
+		await sleep(LONG_PRESS_MS + 20);
+
+		const canvas = within(canvasElement);
+		canvas.getByRole('menuitem', { name: 'Edit' }).click();
+		await sleep();
+		canvas.getByRole('tab', { name: 'Edges' }).click();
+		await sleep();
+
+		canvas.getByRole('button', { name: 'Move edge tag strong earlier' }).click();
+		await sleep();
+
+		expect(lastChangedGraph(args).edges[0].tags).toEqual(['strong', 'rel']);
+		expect(edge.style.getPropertyValue('--edge-background').trim()).toBe('#ff0000');
 	}}
 />

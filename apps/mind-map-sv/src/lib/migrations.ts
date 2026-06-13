@@ -1,8 +1,13 @@
 import type { EdgeData } from './components/ui/types/edge';
-import type { MultigraphData, Point } from './components/ui/types/multigraph';
+import type { MultigraphData, Point, TagColorConfig } from './components/ui/types/multigraph';
 import type { NodeData } from './components/ui/types/node';
 
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
+
+const EMPTY_TAG_COLOR_CONFIG: TagColorConfig = {
+	nodeTags: {},
+	edgeTags: {}
+};
 
 export type ViewState = {
 	panX: number;
@@ -44,10 +49,28 @@ export function unwrapPersistedGraph(payload: unknown): MultigraphData {
 	}
 
 	if (payload.schemaVersion === 1) {
-		if (!isMultigraphData(payload.data, { allowLegacyTags: true })) {
+		if (
+			!isMultigraphData(payload.data, {
+				allowLegacyTags: true,
+				allowLegacyEdgeColor: true,
+				allowMissingTagColorConfig: true
+			})
+		) {
 			throw new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload');
 		}
-		return migrateV1GraphData(payload.data);
+		return migrateLegacyGraphData(payload.data, { allowMissingTags: true });
+	}
+
+	if (payload.schemaVersion === 2) {
+		if (
+			!isMultigraphData(payload.data, {
+				allowLegacyEdgeColor: true,
+				allowMissingTagColorConfig: true
+			})
+		) {
+			throw new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload');
+		}
+		return migrateLegacyGraphData(payload.data);
 	}
 
 	if (payload.schemaVersion !== CURRENT_SCHEMA_VERSION) {
@@ -73,21 +96,28 @@ export function parsePersistedGraph(json: string): MultigraphData {
 	}
 }
 
-function migrateV1GraphData(data: MultigraphData): MultigraphData {
+function migrateLegacyGraphData(
+	data: MultigraphData,
+	options: { allowMissingTags?: boolean } = {}
+): MultigraphData {
 	return {
 		...data,
-		nodes: data.nodes.map((node) => ({ ...node, tags: node.tags ?? [] })),
-		edges: data.edges.map((edge) => ({
-			...edge,
-			tags: edge.tags ?? [],
-			directed: edge.directed ?? false
-		}))
+		nodes: data.nodes.map((node) => ({
+			...node,
+			tags: options.allowMissingTags ? (node.tags ?? []) : node.tags
+		})),
+		edges: data.edges.map(migrateLegacyEdge),
+		tagColorConfig: { ...EMPTY_TAG_COLOR_CONFIG }
 	};
 }
 
 function isMultigraphData(
 	value: unknown,
-	options: { allowLegacyTags?: boolean } = {}
+	options: {
+		allowLegacyTags?: boolean;
+		allowLegacyEdgeColor?: boolean;
+		allowMissingTagColorConfig?: boolean;
+	} = {}
 ): value is MultigraphData {
 	if (!isRecord(value)) return false;
 	if (!Array.isArray(value.nodes) || !Array.isArray(value.edges) || !isRecord(value.posByNodeId)) {
@@ -97,7 +127,10 @@ function isMultigraphData(
 	return (
 		value.nodes.every((node) => isNodeData(node, options)) &&
 		value.edges.every((edge) => isEdgeData(edge, options)) &&
-		Object.values(value.posByNodeId).every(isPoint)
+		Object.values(value.posByNodeId).every(isPoint) &&
+		(options.allowMissingTagColorConfig
+			? value.tagColorConfig === undefined || isTagColorConfig(value.tagColorConfig)
+			: isTagColorConfig(value.tagColorConfig))
 	);
 }
 
@@ -119,19 +152,31 @@ function isNodeData(
 
 function isEdgeData(
 	value: unknown,
-	options: { allowLegacyTags?: boolean } = {}
+	options: { allowLegacyTags?: boolean; allowLegacyEdgeColor?: boolean } = {}
 ): value is EdgeData {
 	return (
 		isRecord(value) &&
 		typeof value.id === 'string' &&
 		typeof value.sourceNodeId === 'string' &&
 		typeof value.targetNodeId === 'string' &&
-		typeof value.color === 'string' &&
+		(options.allowLegacyEdgeColor
+			? value.color === undefined || typeof value.color === 'string'
+			: true) &&
 		(options.allowLegacyTags
 			? value.tags === undefined || isStringArray(value.tags)
 			: isStringArray(value.tags)) &&
 		(value.directed === undefined || typeof value.directed === 'boolean')
 	);
+}
+
+function migrateLegacyEdge(edge: EdgeData): EdgeData {
+	return {
+		id: edge.id,
+		sourceNodeId: edge.sourceNodeId,
+		targetNodeId: edge.targetNodeId,
+		tags: edge.tags ?? [],
+		directed: edge.directed ?? false
+	};
 }
 
 function isPoint(value: unknown): value is Point {
@@ -140,6 +185,14 @@ function isPoint(value: unknown): value is Point {
 
 function isStringArray(value: unknown): value is string[] {
 	return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+function isTagColorConfig(value: unknown): value is TagColorConfig {
+	return isRecord(value) && isStringRecord(value.nodeTags) && isStringRecord(value.edgeTags);
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+	return isRecord(value) && Object.values(value).every((item) => typeof item === 'string');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

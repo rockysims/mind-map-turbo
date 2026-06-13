@@ -8,16 +8,21 @@
 
 import type { NodeData } from '../../types/node';
 import type { EdgeData } from '../../types/edge';
-import type { MultigraphData, Point } from '../../types/multigraph';
+import type { MultigraphData, Point, TagColorConfig } from '../../types/multigraph';
 
 type MakeNodeInput = Omit<NodeData, 'tags'> & Partial<Pick<NodeData, 'tags'>>;
 type MakeEdgeInput =
 	| [number, number]
 	| [string, string]
-	| (Partial<Pick<EdgeData, 'id' | 'color' | 'tags' | 'directed'>> & {
+	| (Partial<Pick<EdgeData, 'id' | 'tags' | 'directed'>> & {
 			source: number | string;
 			target: number | string;
 	  });
+
+export const EMPTY_TAG_COLOR_CONFIG: TagColorConfig = {
+	nodeTags: {},
+	edgeTags: {}
+};
 
 export interface MakeGraphInput {
 	/** Number of nodes to generate (with ids 'n0', 'n1', ...). Ignored if `nodes` is provided. */
@@ -30,6 +35,8 @@ export interface MakeGraphInput {
 	pinned?: Array<number | string>;
 	/** Optional explicit positions, keyed by node id. Defaults to (0, 0). */
 	posByNodeId?: Record<string, Point>;
+	/** Optional graph-level tag colors. Defaults to empty node/edge maps. */
+	tagColorConfig?: TagColorConfig;
 }
 
 /**
@@ -57,7 +64,6 @@ export function makeGraph(input: MakeGraphInput = {}): MultigraphData {
 			id: Array.isArray(edge) ? `e${i}` : (edge.id ?? `e${i}`),
 			sourceNodeId: idAt(source),
 			targetNodeId: idAt(target),
-			color: Array.isArray(edge) ? '#888' : (edge.color ?? '#888'),
 			tags: Array.isArray(edge) ? [] : (edge.tags ?? []),
 			directed: Array.isArray(edge) ? false : (edge.directed ?? false)
 		};
@@ -66,7 +72,15 @@ export function makeGraph(input: MakeGraphInput = {}): MultigraphData {
 	const posByNodeId =
 		input.posByNodeId ?? Object.fromEntries(nodes.map((n) => [n.id, { x: 0, y: 0 }]));
 
-	return { nodes, edges, posByNodeId };
+	return {
+		nodes,
+		edges,
+		posByNodeId,
+		tagColorConfig: input.tagColorConfig ?? {
+			nodeTags: {},
+			edgeTags: {}
+		}
+	};
 }
 
 function defaultNodes(count: number): NodeData[] {

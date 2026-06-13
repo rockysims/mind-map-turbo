@@ -12,6 +12,7 @@ describe('makeGraph', () => {
 		expect(g.nodes).toEqual([]);
 		expect(g.edges).toEqual([]);
 		expect(g.posByNodeId).toEqual({});
+		expect(g.tagColorConfig).toEqual({ nodeTags: {}, edgeTags: {} });
 	});
 
 	it('generates nodes by count with default ids and titles', () => {
@@ -59,6 +60,20 @@ describe('makeGraph', () => {
 			targetNodeId: 'n1',
 			tags: ['rel'],
 			directed: true
+		});
+	});
+
+	it('accepts tag color config', () => {
+		const g = makeGraph({
+			tagColorConfig: {
+				nodeTags: { abc: '#112233' },
+				edgeTags: { rel: '#445566' }
+			}
+		});
+
+		expect(g.tagColorConfig).toEqual({
+			nodeTags: { abc: '#112233' },
+			edgeTags: { rel: '#445566' }
 		});
 	});
 

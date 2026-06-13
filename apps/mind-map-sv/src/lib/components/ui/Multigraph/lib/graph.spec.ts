@@ -3,6 +3,7 @@ import {
 	addEdge,
 	addNode,
 	commitInlineTitleSyntax,
+	deleteTagEverywhere,
 	findExistingEdge,
 	moveNode,
 	neighborsOf,
@@ -10,6 +11,7 @@ import {
 	normalizeNodeTitle,
 	removeEdge,
 	removeNode,
+	setTagColor,
 	togglePinned,
 	updateEdge,
 	updateNodeContent
@@ -94,7 +96,6 @@ describe('graph mutations', () => {
 				id: 'e1',
 				sourceNodeId: 'n1',
 				targetNodeId: 'n0',
-				color: '#888',
 				tags: [],
 				directed: false
 			});
@@ -104,8 +105,8 @@ describe('graph mutations', () => {
 			const graph = {
 				...makeGraph({ nodeCount: 2 }),
 				edges: [
-					{ id: 'e0', sourceNodeId: 'n0', targetNodeId: 'n1', color: '#888', tags: [] },
-					{ id: 'e2', sourceNodeId: 'n1', targetNodeId: 'n0', color: '#888', tags: [] }
+					{ id: 'e0', sourceNodeId: 'n0', targetNodeId: 'n1', tags: [] },
+					{ id: 'e2', sourceNodeId: 'n1', targetNodeId: 'n0', tags: [] }
 				]
 			};
 
@@ -114,12 +115,11 @@ describe('graph mutations', () => {
 			expect(next.edges.at(-1)?.id).toBe('e1');
 		});
 
-		it('preserves explicit edge ids, color, tags, and direction', () => {
+		it('preserves explicit edge ids, tags, and direction', () => {
 			const graph = makeGraph({ nodeCount: 2 });
 
 			const next = addEdge(graph, 'n0', 'n1', {
 				id: 'external-edge',
-				color: '#f00',
 				tags: ['rel'],
 				directed: true
 			});
@@ -128,18 +128,9 @@ describe('graph mutations', () => {
 				id: 'external-edge',
 				sourceNodeId: 'n0',
 				targetNodeId: 'n1',
-				color: '#f00',
 				tags: ['rel'],
 				directed: true
 			});
-		});
-
-		it('accepts color as the fourth argument', () => {
-			const graph = makeGraph({ nodeCount: 2 });
-
-			const next = addEdge(graph, 'n0', 'n1', '#0f0');
-
-			expect(next.edges.at(-1)?.color).toBe('#0f0');
 		});
 
 		it('is a no-op when either endpoint is missing', () => {
@@ -276,6 +267,63 @@ describe('graph mutations', () => {
 			const graph = makeGraph({ nodeCount: 2, edges: [[0, 1]] });
 
 			expect(updateEdge(graph, 'missing', { tags: ['rel'] })).toBe(graph);
+		});
+	});
+
+	describe('tag color config', () => {
+		it('sets node tag colors without mutating the original graph', () => {
+			const graph = makeGraph({
+				nodeCount: 1,
+				tagColorConfig: { nodeTags: { old: '#111111' }, edgeTags: {} }
+			});
+
+			const next = setTagColor(graph, 'nodeTags', 'topic', '#abcdef');
+
+			expect(next).not.toBe(graph);
+			expect(next.tagColorConfig.nodeTags).toEqual({ old: '#111111', topic: '#abcdef' });
+			expect(graph.tagColorConfig.nodeTags).toEqual({ old: '#111111' });
+		});
+
+		it('sets edge tag colors without mutating the original graph', () => {
+			const graph = makeGraph({ nodeCount: 2, edges: [{ source: 0, target: 1, tags: ['rel'] }] });
+
+			const next = setTagColor(graph, 'edgeTags', 'rel', '#123456');
+
+			expect(next.tagColorConfig.edgeTags).toEqual({ rel: '#123456' });
+			expect(graph.tagColorConfig.edgeTags).toEqual({});
+		});
+
+		it('deletes a node tag from config and every node', () => {
+			const graph = makeGraph({
+				nodes: [
+					{ id: 'n0', title: 'Node 0', description: '', tags: ['topic', 'keep'] },
+					{ id: 'n1', title: 'Node 1', description: '', tags: ['topic'] }
+				],
+				tagColorConfig: { nodeTags: { topic: '#abcdef' }, edgeTags: {} }
+			});
+
+			const next = deleteTagEverywhere(graph, 'nodeTags', 'topic');
+
+			expect(next.nodes.map((node) => node.tags)).toEqual([['keep'], []]);
+			expect(next.tagColorConfig.nodeTags).toEqual({});
+			expect(graph.nodes[0].tags).toEqual(['topic', 'keep']);
+		});
+
+		it('deletes an edge tag from config and every edge', () => {
+			const graph = makeGraph({
+				nodeCount: 3,
+				edges: [
+					{ source: 0, target: 1, tags: ['rel', 'keep'] },
+					{ source: 1, target: 2, tags: ['rel'] }
+				],
+				tagColorConfig: { nodeTags: {}, edgeTags: { rel: '#abcdef' } }
+			});
+
+			const next = deleteTagEverywhere(graph, 'edgeTags', 'rel');
+
+			expect(next.edges.map((edge) => edge.tags)).toEqual([['keep'], []]);
+			expect(next.tagColorConfig.edgeTags).toEqual({});
+			expect(graph.edges[0].tags).toEqual(['rel', 'keep']);
 		});
 	});
 

@@ -2,6 +2,7 @@
 	import { NODE_RADIUS } from '$lib/constants';
 	import SquareText from '$lib/components/ui/SquareText/SquareText.svelte';
 	import type { NodeData } from '$lib/components/ui/types/node';
+	import type { TagColorSegment } from '$lib/components/ui/Multigraph/lib/tagColors';
 
 	let descriptionRef = $state<HTMLElement | null>(null);
 	let titleInputRef = $state<HTMLInputElement | null>(null);
@@ -15,13 +16,25 @@
 		},
 		isOpen = false,
 		isTitleEditing = false,
+		borderSegments = [],
 		onTitleCommit
 	} = $props<{
 		nodeData: NodeData;
 		isOpen: boolean;
 		isTitleEditing?: boolean;
+		borderSegments?: TagColorSegment[];
 		onTitleCommit?: (title: string) => void;
 	}>();
+
+	const borderBackground = $derived(
+		borderSegments.length === 0 ? 'transparent' : borderGradient(borderSegments)
+	);
+
+	function borderGradient(segments: TagColorSegment[]): string {
+		return `conic-gradient(${segments
+			.map((segment) => `${segment.color} ${segment.startTurn}turn ${segment.endTurn}turn`)
+			.join(', ')})`;
+	}
 
 	function updateVerticalScrollClass() {
 		if (!descriptionRef) return;
@@ -53,7 +66,8 @@
 	class:open={isOpen}
 	data-node-id={nodeData.id}
 	data-pinned={nodeData.pinned ? 'true' : undefined}
-	style="--node-diameter: {NODE_RADIUS * 2}px"
+	data-tag-border={borderSegments.length > 0 ? 'true' : undefined}
+	style="--node-diameter: {NODE_RADIUS * 2}px; --node-tag-border: {borderBackground};"
 >
 	<div class="circle">
 		<!-- closed -->
@@ -113,6 +127,13 @@
 		border-width: 4px;
 		border-color: #555555;
 		box-shadow: 0 0 0 2px #ffffff;
+	}
+
+	.node[data-tag-border='true'] .circle {
+		border-color: transparent;
+		background:
+			linear-gradient(#ccc, #ccc) padding-box,
+			var(--node-tag-border) border-box;
 	}
 
 	.node .square {

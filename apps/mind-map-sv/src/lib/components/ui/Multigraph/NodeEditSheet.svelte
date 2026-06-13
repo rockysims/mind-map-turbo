@@ -65,6 +65,24 @@
 		onSaveEdge(edge.id, { tags: normalizeTagList(edgeTagTextById[edge.id] ?? '') });
 	}
 
+	function edgeTagsFor(edge: EdgeData): string[] {
+		return normalizeTagList(edgeTagTextById[edge.id] ?? '');
+	}
+
+	function moveEdgeTag(edge: EdgeData, index: number, direction: -1 | 1) {
+		const tags = edgeTagsFor(edge);
+		const nextIndex = index + direction;
+		if (nextIndex < 0 || nextIndex >= tags.length) return;
+
+		const reordered = [...tags];
+		[reordered[index], reordered[nextIndex]] = [reordered[nextIndex], reordered[index]];
+		edgeTagTextById = {
+			...edgeTagTextById,
+			[edge.id]: reordered.join(' ')
+		};
+		onSaveEdge(edge.id, { tags: reordered });
+	}
+
 	function saveEdgeDirection(edge: EdgeData, direction: DirectionChoice) {
 		const neighborId = otherEndpoint(edge);
 		if (!neighborId) return;
@@ -227,6 +245,36 @@
 								/>
 							</label>
 
+							{#if edgeTagsFor(edge).length > 0}
+								<ol class="edge-tag-list" aria-label={`Ordered edge tags for ${neighbor}`}>
+									{#each edgeTagsFor(edge) as tag, index (`${edge.id}:${tag}:${index}`)}
+										<li>
+											<span>{tag}</span>
+											<div class="edge-tag-actions">
+												<button
+													type="button"
+													class="secondary"
+													disabled={index === 0}
+													aria-label={`Move edge tag ${tag} earlier`}
+													onclick={() => moveEdgeTag(edge, index, -1)}
+												>
+													Up
+												</button>
+												<button
+													type="button"
+													class="secondary"
+													disabled={index === edgeTagsFor(edge).length - 1}
+													aria-label={`Move edge tag ${tag} later`}
+													onclick={() => moveEdgeTag(edge, index, 1)}
+												>
+													Down
+												</button>
+											</div>
+										</li>
+									{/each}
+								</ol>
+							{/if}
+
 							<button
 								type="button"
 								class="secondary edge-save"
@@ -365,6 +413,32 @@
 
 	.edge-neighbor {
 		color: #0f172a;
+		font-weight: 700;
+	}
+
+	.edge-tag-list {
+		display: grid;
+		gap: 0.5rem;
+		padding: 0;
+		margin: 0;
+		list-style: none;
+	}
+
+	.edge-tag-list li,
+	.edge-tag-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.edge-tag-list li {
+		justify-content: space-between;
+		padding: 0.5rem;
+		border: 1px solid #e2e8f0;
+		border-radius: 0.75rem;
+	}
+
+	.edge-tag-list span {
 		font-weight: 700;
 	}
 

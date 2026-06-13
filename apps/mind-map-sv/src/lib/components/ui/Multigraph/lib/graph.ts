@@ -1,5 +1,5 @@
 import type { EdgeData } from '../../types/edge';
-import type { MultigraphData, Point } from '../../types/multigraph';
+import type { MultigraphData, Point, TagColorNamespace } from '../../types/multigraph';
 import type { NodeData } from '../../types/node';
 import { parseTitleSyntax } from './titleSyntax';
 
@@ -14,7 +14,6 @@ export interface AddNodeInput {
 
 export interface AddEdgeInput {
 	id?: string;
-	color?: string;
 	tags?: string[];
 	directed?: boolean;
 }
@@ -24,7 +23,6 @@ export type EdgePatch = Partial<
 >;
 
 const DEFAULT_NODE_POSITION: Point = { x: 0, y: 0 };
-const DEFAULT_EDGE_COLOR = '#888';
 
 export const NEW_NODE_TITLE = 'New Node';
 
@@ -97,23 +95,21 @@ export function addEdge(
 	data: MultigraphData,
 	sourceNodeId: string,
 	targetNodeId: string,
-	input: AddEdgeInput | string = {}
+	input: AddEdgeInput = {}
 ): MultigraphData {
 	if (!hasNode(data, sourceNodeId) || !hasNode(data, targetNodeId)) return data;
 
-	const edgeInput = typeof input === 'string' ? { color: input } : input;
 	const edge: EdgeData = {
 		id:
-			edgeInput.id ??
+			input.id ??
 			nextId(
 				'e',
 				data.edges.map((existingEdge) => existingEdge.id)
 			),
 		sourceNodeId,
 		targetNodeId,
-		color: edgeInput.color ?? DEFAULT_EDGE_COLOR,
-		tags: edgeInput.tags ?? [],
-		directed: edgeInput.directed ?? false
+		tags: input.tags ?? [],
+		directed: input.directed ?? false
 	};
 
 	return {
@@ -163,6 +159,55 @@ export function updateNodeContent(
 		nodes: data.nodes.map((node) =>
 			node.id === nodeId ? { ...node, ...content, title: normalizeNodeTitle(content.title) } : node
 		)
+	};
+}
+
+export function setTagColor(
+	data: MultigraphData,
+	namespace: TagColorNamespace,
+	tag: string,
+	color: string
+): MultigraphData {
+	return {
+		...data,
+		tagColorConfig: {
+			...data.tagColorConfig,
+			[namespace]: {
+				...data.tagColorConfig[namespace],
+				[tag]: color
+			}
+		}
+	};
+}
+
+export function deleteTagEverywhere(
+	data: MultigraphData,
+	namespace: TagColorNamespace,
+	tag: string
+): MultigraphData {
+	const nextConfig = { ...data.tagColorConfig[namespace] };
+	delete nextConfig[tag];
+
+	return {
+		...data,
+		nodes:
+			namespace === 'nodeTags'
+				? data.nodes.map((node) => ({
+						...node,
+						tags: node.tags.filter((candidate) => candidate !== tag)
+					}))
+				: data.nodes,
+		edges:
+			namespace === 'edgeTags'
+				? data.edges.map((edge) => ({
+						...edge,
+						tags: edge.tags.filter((candidate) => candidate !== tag)
+					}))
+				: data.edges,
+		tagColorConfig: {
+			...data.tagColorConfig,
+			[namespace]: nextConfig
+		}
 	};
 }
 

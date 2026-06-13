@@ -11,7 +11,8 @@
 		tags: [],
 		argTypes: {
 			nodeData: { control: 'object' },
-			isOpen: { control: 'boolean' }
+			isOpen: { control: 'boolean' },
+			borderSegments: { control: 'object' }
 		},
 		args: {
 			nodeData: {
@@ -20,7 +21,8 @@
 				description: 'Node description',
 				tags: []
 			},
-			isOpen: false
+			isOpen: false,
+			borderSegments: []
 		}
 	});
 
@@ -247,6 +249,27 @@
 		isOpen: true
 	}}
 	play={(ctx) => playHandler(ctx, { short: true, open: true })}
+/>
+
+<Story
+	name="MultiTagBorder"
+	args={{
+		nodeData: {
+			id: 'node id multi tag',
+			title: 'Tagged node',
+			description: 'Tagged node description',
+			tags: ['topic', 'urgent']
+		},
+		isOpen: false,
+		borderSegments: [
+			{ color: '#ff0000', startTurn: 0, endTurn: 0.5 },
+			{ color: '#00ff00', startTurn: 0.5, endTurn: 1 }
+		]
+	}}
+	play={async ({ canvasElement }) => {
+		const node = canvasElement.querySelector('.node');
+		expect(node).toHaveAttribute('data-tag-border', 'true');
+	}}
 />
 
 <Story

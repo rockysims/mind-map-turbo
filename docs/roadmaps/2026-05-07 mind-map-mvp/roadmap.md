@@ -45,7 +45,7 @@ individual PR-sized tasks.
 | 04c | JSON file import/export                            | complete    | [milestone](milestones/04c-json-file-import-export.md), [plan](plans/2026-05-30%20json-file-import-export.md)                               |
 | 04d | Edge toggle and inline node creation               | complete    | [milestone](milestones/04d-edge-toggle-and-inline-node-creation.md), [plan](plans/2026-06-12%20edge-toggle-and-inline-node-creation.md)     |
 | 04e | Title syntax for direction and tags                | complete    | [milestone](milestones/04e-title-syntax-for-direction-and-tags.md), [plan](plans/2026-06-12%20title-syntax-for-direction-and-tags.md)       |
-| 04f | Tag colors and graph tag config                    | not started | [milestones/04f-tag-colors-and-graph-tag-config.md](milestones/04f-tag-colors-and-graph-tag-config.md)                                      |
+| 04f | Tag colors and graph tag config                    | complete    | [milestone](milestones/04f-tag-colors-and-graph-tag-config.md), [plan](plans/2026-06-12%20node-and-edge-tag-colors.md)                      |
 | 04g | Layout settle: eliminate endless drift/rotation    | not started | [milestone](milestones/04g-layout-settle-eliminate-drift.md), [plan](plans/2026-06-13%20layout-settle-rigid-motion.md)                      |
 | 04h | Thin the Multigraph component (refactor)           | not started | [milestone](milestones/04h-multigraph-thin-component-refactor.md), [plan](plans/2026-06-13%20multigraph-thin-component-refactor.md)         |
 | 05  | Multiplayer                                        | not started | [milestones/05-multiplayer.md](milestones/05-multiplayer.md)                                                                                |

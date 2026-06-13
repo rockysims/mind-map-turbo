@@ -4,19 +4,22 @@
 	import NodeActionMenu from './NodeActionMenu.svelte';
 	import NodeEditSheet from './NodeEditSheet.svelte';
 	import Stage from './Stage.svelte';
+	import TagColorLegend from './TagColorLegend.svelte';
 	import type { NodeData } from '../types/node';
-	import type { MultigraphData, Point } from '../types/multigraph';
+	import type { MultigraphData, Point, TagColorNamespace } from '../types/multigraph';
 	import { effectiveHitRadius, isPointInCircle } from './lib/hitTest.js';
 	import { trimSegmentToNodeBorders } from './lib/edgeRender.js';
 	import {
 		addEdge,
 		addNode,
 		commitInlineTitleSyntax,
+		deleteTagEverywhere,
 		findExistingEdge,
 		moveNode,
 		normalizeNodeTitle,
 		removeEdge,
 		removeNode,
+		setTagColor,
 		togglePinned,
 		updateEdge,
 		updateNodeContent
@@ -58,6 +61,12 @@
 	} from './lib/scaleChangeSettle.js';
 	import { externalGraphSyncToken } from './lib/graphSync.js';
 	import {
+		collectLegendTags,
+		edgeStrokeColor,
+		nodeBorderSegments,
+		tagUsageCount
+	} from './lib/tagColors.js';
+	import {
 		EDGE_ARROW_HALF_HEIGHT,
 		EDGE_ARROW_LENGTH,
 		EDGE_ARROW_REFERENCE_NODE_SCALE,
@@ -71,7 +80,12 @@
 	type RenderableEdgeVisibility = Exclude<EdgeVisibility, { kind: 'hidden' }>;
 
 	let {
-		multigraphData = { nodes: [], edges: [], posByNodeId: {} },
+		multigraphData = {
+			nodes: [],
+			edges: [],
+			posByNodeId: {},
+			tagColorConfig: { nodeTags: {}, edgeTags: {} }
+		},
 		graphGeneration = 0,
 		defaultPrimaryNodeId = '',
 		layoutSettings = {},
@@ -88,13 +102,19 @@
 		onViewStateChange?: (state: ViewState) => void;
 	} = $props();
 
-	let graph = $state<MultigraphData>({ nodes: [], edges: [], posByNodeId: {} });
+	let graph = $state<MultigraphData>({
+		nodes: [],
+		edges: [],
+		posByNodeId: {},
+		tagColorConfig: { nodeTags: {}, edgeTags: {} }
+	});
 	let primaryNodeId = $state('');
 	let activeDragNodeId = $state<string | null>(null);
 	let editNodeId = $state<string | null>(null);
 	let actionMenu = $state<{ nodeId: string; position: Point } | null>(null);
 	let duplicateEdgeConfirm = $state<{ edgeId: string } | null>(null);
 	let titleEditContext = $state<{ nodeId: string; edgeId?: string } | null>(null);
+	let tagColorLegendOpen = $state(false);
 	let graphRef = $state<HTMLElement | null>(null);
 	let relaxationFrameId: number | null = null;
 	let scaleAnimations = $state<Record<string, NodeScaleAnimation>>({});
@@ -128,6 +148,7 @@
 			(visibility): visibility is RenderableEdgeVisibility => visibility.kind !== 'hidden'
 		)
 	);
+	const legendTags = $derived(collectLegendTags(graph));
 	const scaleChangeSettleState = $derived({
 		pendingPostScaleSettle,
 		settleFramesRemaining,
@@ -302,6 +323,7 @@
 		editNodeId = null;
 		duplicateEdgeConfirm = null;
 		titleEditContext = null;
+		tagColorLegendOpen = false;
 	}
 
 	function toggleNodePinned(nodeId: string) {
@@ -334,6 +356,23 @@
 
 	function saveEdgeContent(edgeId: string, patch: Parameters<typeof updateEdge>[2]) {
 		commitUserGraph(updateEdge(graph, edgeId, patch));
+	}
+
+	function updateTagColor(namespace: TagColorNamespace, tag: string, color: string) {
+		commitUserGraph(setTagColor(graph, namespace, tag, color));
+	}
+
+	function deleteLegendTag(namespace: TagColorNamespace, tag: string) {
+		const usageCount = tagUsageCount(graph, namespace, tag);
+		if (usageCount > 0) {
+			const tagKind = namespace === 'nodeTags' ? 'node tag' : 'edge tag';
+			const confirmed = window.confirm(
+				`Delete ${tagKind} "${tag}" from ${usageCount} ${usageCount === 1 ? 'use' : 'uses'}?`
+			);
+			if (!confirmed) return;
+		}
+
+		commitUserGraph(deleteTagEverywhere(graph, namespace, tag));
 	}
 
 	function commitUserGraph(nextGraph: MultigraphData) {
@@ -429,9 +468,9 @@
 		};
 	}
 
-	function edgeBackground(visibility: RenderableEdgeVisibility): string {
-		if (visibility.kind === 'visible') return visibility.edge.color;
-		return `linear-gradient(to right, ${visibility.edge.color}, transparent)`;
+	function edgeBackground(visibility: RenderableEdgeVisibility, color: string): string {
+		if (visibility.kind === 'visible') return color;
+		return `linear-gradient(to right, ${color}, transparent)`;
 	}
 
 	function edgeArrowScale(visibility: RenderableEdgeVisibility): number {
@@ -677,6 +716,19 @@
 	data-layered-relayout-active={layeredRelayoutState?.active ? 'true' : undefined}
 	data-layered-relayout-state={lastRelayoutStateKey ?? undefined}
 >
+	<button
+		type="button"
+		class="tag-color-button"
+		aria-haspopup="dialog"
+		aria-expanded={tagColorLegendOpen}
+		onclick={() => {
+			closeOverlays();
+			tagColorLegendOpen = true;
+		}}
+	>
+		Tag colors
+	</button>
+
 	<Stage
 		{getNodeAt}
 		initialScale={initialViewState?.scale}
@@ -697,6 +749,7 @@
 				{@const edgePoints = edgeRenderPoints(visibility)}
 				{@const arrowScale = edgeArrowScale(visibility)}
 				{@const strokeScale = edgeStrokeScale(visibility)}
+				{@const edgeColor = edgeStrokeColor(edge, graph.tagColorConfig.edgeTags)}
 				<div
 					class="edge"
 					class:directed={edge.directed === true && visibility.kind === 'visible'}
@@ -719,7 +772,7 @@
 						? arrowScale
 						: undefined}
 					data-edge-stroke-scale={strokeScale}
-					style={`${edgeStyle(edgePoints.source, edgePoints.target)} --edge-background: ${edgeBackground(visibility)}; color: ${edge.color}; --edge-arrow-length: ${EDGE_ARROW_LENGTH * arrowScale}px; --edge-arrow-half-height: ${EDGE_ARROW_HALF_HEIGHT * arrowScale}px; --edge-stroke-width: ${EDGE_STROKE_WIDTH * strokeScale}px;`}
+					style={`${edgeStyle(edgePoints.source, edgePoints.target)} --edge-background: ${edgeBackground(visibility, edgeColor)}; color: ${edgeColor}; --edge-arrow-length: ${EDGE_ARROW_LENGTH * arrowScale}px; --edge-arrow-half-height: ${EDGE_ARROW_HALF_HEIGHT * arrowScale}px; --edge-stroke-width: ${EDGE_STROKE_WIDTH * strokeScale}px;`}
 				></div>
 			{/each}
 		</div>
@@ -740,6 +793,7 @@
 					nodeData={node}
 					isOpen={false}
 					isTitleEditing={titleEditContext?.nodeId === node.id}
+					borderSegments={nodeBorderSegments(node, graph.tagColorConfig.nodeTags)}
 					onTitleCommit={(title) => {
 						const createdEdgeId = titleEditContext?.edgeId;
 						titleEditContext = null;
@@ -820,6 +874,15 @@
 			</div>
 		</div>
 	{/if}
+
+	{#if tagColorLegendOpen}
+		<TagColorLegend
+			tags={legendTags}
+			onColorChange={updateTagColor}
+			onDelete={deleteLegendTag}
+			onClose={() => (tagColorLegendOpen = false)}
+		/>
+	{/if}
 </div>
 
 <style>
@@ -833,6 +896,20 @@
 
 	.node-wrapper {
 		position: absolute;
+	}
+
+	.tag-color-button {
+		position: absolute;
+		z-index: 25;
+		right: 0.75rem;
+		bottom: 0.75rem;
+		border: 0;
+		border-radius: 999px;
+		padding: 0.625rem 0.875rem;
+		background: #0f172a;
+		color: #ffffff;
+		font: inherit;
+		box-shadow: 0 8px 24px rgb(15 23 42 / 18%);
 	}
 
 	.edges {

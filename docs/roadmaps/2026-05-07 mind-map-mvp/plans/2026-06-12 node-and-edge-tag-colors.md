@@ -3,7 +3,7 @@
 **Created:** 2026-06-12
 **Author:** Cursor agent
 **Milestone:** [milestones/04f-tag-colors-and-graph-tag-config.md](../milestones/04f-tag-colors-and-graph-tag-config.md)
-**Status:** draft
+**Status:** done
 **Total estimated effort:** L
 
 ## Summary
@@ -60,7 +60,7 @@ removes the legacy per-edge color field in the same schema step.
 > logical commit, split it. The PR title is drafted up front so reviewers (and
 > the model writing the commit) start aligned.
 
-### T01 — Add tag color config and remove edge colors from the schema
+### T01 done — Add tag color config and remove edge colors from the schema
 
 |                |                                                                                                                                                                                                                                                                                                                       |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -89,7 +89,7 @@ ignored rather than translated.
 - New/default graphs and `makeGraph` include empty tag color config.
 - Import/export and persistence specs cover the v3 payload shape.
 
-### T02 — Add pure tag color lookup and render-model helpers
+### T02 done — Add pure tag color lookup and render-model helpers
 
 |                |                                                                                                     |
 | -------------- | --------------------------------------------------------------------------------------------------- |
@@ -116,7 +116,7 @@ segments, first-edge-tag stroke selection, and neutral untagged edge color.
 - Specs cover edge stroke color for no tags, unknown first tag, configured
   first tag, and multiple tags.
 
-### T03 — Render tag-derived node borders and edge strokes
+### T03 done — Render tag-derived node borders and edge strokes
 
 |                |                                                                                                  |
 | -------------- | ------------------------------------------------------------------------------------------------ |
@@ -141,7 +141,7 @@ rendering.
   gradient.
 - Existing pinned-node visual treatment remains distinguishable.
 
-### T04 — Build the global tag color legend panel
+### T04 done — Build the global tag color legend panel
 
 |                |                                                                                        |
 | -------------- | -------------------------------------------------------------------------------------- |
@@ -171,7 +171,7 @@ without integrating the panel into `Multigraph.svelte`.
 - The component story proves clicking delete emits the tag namespace and tag
   name without mutating local fixture data.
 
-### T05 — Integrate legend color editing with graph updates
+### T05 done — Integrate legend color editing with graph updates
 
 |                |                                                                                                             |
 | -------------- | ----------------------------------------------------------------------------------------------------------- |
@@ -206,7 +206,7 @@ removes its explicit config entry.
 - The panel works on mobile-sized viewports and has dialog/panel labeling that
   screen readers can announce.
 
-### T06 — Add accessible edge tag reordering
+### T06 done — Add accessible edge tag reordering
 
 |                |                                                                                                                           |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------- |

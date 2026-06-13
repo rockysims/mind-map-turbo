@@ -28,7 +28,8 @@ describe('persisted graph migrations', () => {
 		expect(unwrapPersistedGraph({ schemaVersion: 1, data: graph })).toEqual({
 			nodes: [{ ...graph.nodes[0], tags: [] }],
 			edges: [],
-			posByNodeId: graph.posByNodeId
+			posByNodeId: graph.posByNodeId,
+			tagColorConfig: { nodeTags: {}, edgeTags: {} }
 		});
 	});
 
@@ -43,9 +44,43 @@ describe('persisted graph migrations', () => {
 		};
 
 		expect(unwrapPersistedGraph({ schemaVersion: 1, data: graph }).edges[0]).toEqual({
-			...graph.edges[0],
+			id: 'e0',
+			sourceNodeId: 'n0',
+			targetNodeId: 'n1',
 			tags: [],
 			directed: false
+		});
+	});
+
+	it('migrates version 2 payloads to empty tag config and drops edge colors', () => {
+		const graph = {
+			nodes: [{ id: 'n0', title: 'Node 0', description: 'Description for node 0', tags: ['abc'] }],
+			edges: [
+				{
+					id: 'e0',
+					sourceNodeId: 'n0',
+					targetNodeId: 'n0',
+					color: '#f00',
+					tags: ['rel'],
+					directed: false
+				}
+			],
+			posByNodeId: { n0: { x: 0, y: 0 } }
+		};
+
+		expect(unwrapPersistedGraph({ schemaVersion: 2, data: graph })).toEqual({
+			nodes: graph.nodes,
+			edges: [
+				{
+					id: 'e0',
+					sourceNodeId: 'n0',
+					targetNodeId: 'n0',
+					tags: ['rel'],
+					directed: false
+				}
+			],
+			posByNodeId: graph.posByNodeId,
+			tagColorConfig: { nodeTags: {}, edgeTags: {} }
 		});
 	});
 
@@ -62,8 +97,8 @@ describe('persisted graph migrations', () => {
 	});
 
 	it('rejects unsupported schema versions with a typed error', () => {
-		expect(() => unwrapPersistedGraph({ schemaVersion: 3, data: makeGraph() })).toThrow(
-			new PersistedGraphError('Unsupported graph schema version: 3', 'unsupported-version')
+		expect(() => unwrapPersistedGraph({ schemaVersion: 4, data: makeGraph() })).toThrow(
+			new PersistedGraphError('Unsupported graph schema version: 4', 'unsupported-version')
 		);
 	});
 
@@ -96,6 +131,17 @@ describe('persisted graph migrations', () => {
 			unwrapPersistedGraph({
 				schemaVersion: CURRENT_SCHEMA_VERSION,
 				data: { ...graph, edges: [{ ...graph.edges[0], directed: 'yes' }] }
+			})
+		).toThrow(new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload'));
+	});
+
+	it('rejects current-version graphs with malformed tag color config', () => {
+		const graph = makeGraph({ nodeCount: 1 });
+
+		expect(() =>
+			unwrapPersistedGraph({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data: { ...graph, tagColorConfig: { nodeTags: { abc: 123 }, edgeTags: {} } }
 			})
 		).toThrow(new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload'));
 	});
