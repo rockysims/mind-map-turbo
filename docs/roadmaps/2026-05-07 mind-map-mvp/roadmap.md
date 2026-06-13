@@ -47,11 +47,13 @@ individual PR-sized tasks.
 | 04e | Title syntax for direction and tags                | complete    | [milestone](milestones/04e-title-syntax-for-direction-and-tags.md), [plan](plans/2026-06-12%20title-syntax-for-direction-and-tags.md)       |
 | 04f | Tag colors and graph tag config                    | not started | [milestones/04f-tag-colors-and-graph-tag-config.md](milestones/04f-tag-colors-and-graph-tag-config.md)                                      |
 | 04g | Layout settle: eliminate endless drift/rotation    | not started | [milestone](milestones/04g-layout-settle-eliminate-drift.md), [plan](plans/2026-06-13%20layout-settle-rigid-motion.md)                      |
+| 04h | Thin the Multigraph component (refactor)           | not started | [milestone](milestones/04h-multigraph-thin-component-refactor.md), [plan](plans/2026-06-13%20multigraph-thin-component-refactor.md)         |
 | 05  | Multiplayer                                        | not started | [milestones/05-multiplayer.md](milestones/05-multiplayer.md)                                                                                |
 | 06  | Search                                             | not started | [milestones/06-search.md](milestones/06-search.md)                                                                                          |
 
-Milestones 04a-04f sit between persistence and multiplayer. Milestone 04b
-intentionally supersedes 04a's Fibonacci reveal and dimming behavior.
+Milestones 04a-04h sit between persistence and multiplayer. Milestone 04b
+intentionally supersedes 04a's Fibonacci reveal and dimming behavior. Milestone
+04h is a behavior-preserving refactor, not new product scope.
 
 ## How this directory is organized
 
