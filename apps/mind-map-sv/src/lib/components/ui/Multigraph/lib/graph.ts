@@ -52,6 +52,20 @@ export function findExistingEdge(
 	);
 }
 
+export function duplicateEdgeIdentifier(data: MultigraphData, edgeId: string): string {
+	const edge = data.edges.find((candidate) => candidate.id === edgeId);
+	if (!edge) return 'Unknown edge';
+
+	const sourceTitle = normalizeNodeTitle(
+		data.nodes.find((node) => node.id === edge.sourceNodeId)?.title ?? ''
+	);
+	const targetTitle = normalizeNodeTitle(
+		data.nodes.find((node) => node.id === edge.targetNodeId)?.title ?? ''
+	);
+
+	return `${sourceTitle} -- ${targetTitle}`;
+}
+
 export function addNode(data: MultigraphData, input: AddNodeInput = {}): MultigraphData {
 	const id =
 		input.id ??

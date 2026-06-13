@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import Node from '$lib/components/ui/Node/Node.svelte';
+	import DuplicateEdgeDialog from './DuplicateEdgeDialog.svelte';
 	import NodeActionMenu from './NodeActionMenu.svelte';
 	import NodeEditSheet from './NodeEditSheet.svelte';
 	import Stage from './Stage.svelte';
@@ -21,9 +22,9 @@
 		addNode,
 		commitInlineTitleSyntax,
 		deleteTagEverywhere,
+		duplicateEdgeIdentifier,
 		findExistingEdge,
 		moveNode,
-		normalizeNodeTitle,
 		removeEdge,
 		removeNode,
 		setTagColor,
@@ -421,20 +422,6 @@
 		animationNowMs = nowMs;
 	}
 
-	function duplicateEdgeIdentifier(edgeId: string): string {
-		const edge = graph.edges.find((candidate) => candidate.id === edgeId);
-		if (!edge) return 'Unknown edge';
-
-		const sourceTitle = normalizeNodeTitle(
-			graph.nodes.find((node) => node.id === edge.sourceNodeId)?.title ?? ''
-		);
-		const targetTitle = normalizeNodeTitle(
-			graph.nodes.find((node) => node.id === edge.targetNodeId)?.title ?? ''
-		);
-
-		return `${sourceTitle} -- ${targetTitle}`;
-	}
-
 	function withRelaxedPositions(
 		nextGraph: MultigraphData,
 		dragNodeId: string | null = activeDragNodeId,
@@ -755,45 +742,14 @@
 
 	{#if duplicateEdgeConfirm}
 		{@const confirmEdgeId = duplicateEdgeConfirm.edgeId}
-		{@const edgeIdentifier = duplicateEdgeIdentifier(confirmEdgeId)}
-		<div
-			class="duplicate-edge-dialog-backdrop"
-			role="presentation"
-			onclick={() => (duplicateEdgeConfirm = null)}
-			onkeydown={() => {}}
-		>
-			<div
-				role="dialog"
-				aria-modal="true"
-				aria-labelledby="duplicate-edge-dialog-title"
-				tabindex="-1"
-				class="duplicate-edge-dialog"
-				onclick={(e) => e.stopPropagation()}
-				onkeydown={() => {}}
-			>
-				<p id="duplicate-edge-dialog-title" class="duplicate-edge-dialog-message">
-					<span>Remove edge?</span>
-					<span class="duplicate-edge-dialog-edge">{edgeIdentifier}</span>
-				</p>
-				<div class="duplicate-edge-dialog-actions">
-					<button
-						class="duplicate-edge-dialog-cancel"
-						onclick={() => (duplicateEdgeConfirm = null)}
-					>
-						Cancel
-					</button>
-					<button
-						class="duplicate-edge-dialog-confirm"
-						onclick={() => {
-							commitUserGraph(withRelaxedPositions(removeEdge(graph, confirmEdgeId)));
-							duplicateEdgeConfirm = null;
-						}}
-					>
-						Remove
-					</button>
-				</div>
-			</div>
-		</div>
+		<DuplicateEdgeDialog
+			edgeIdentifier={duplicateEdgeIdentifier(graph, confirmEdgeId)}
+			onCancel={() => (duplicateEdgeConfirm = null)}
+			onConfirm={() => {
+				commitUserGraph(withRelaxedPositions(removeEdge(graph, confirmEdgeId)));
+				duplicateEdgeConfirm = null;
+			}}
+		/>
 	{/if}
 
 	{#if tagColorLegendOpen}
@@ -870,68 +826,5 @@
 		color: inherit;
 		content: '';
 		transform: translateY(-50%);
-	}
-
-	.duplicate-edge-dialog-backdrop {
-		position: absolute;
-		inset: 0;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		background: rgba(0, 0, 0, 0.4);
-		z-index: 100;
-	}
-
-	.duplicate-edge-dialog {
-		background: white;
-		border-radius: 8px;
-		padding: 24px;
-		max-width: 280px;
-		width: 100%;
-		display: flex;
-		flex-direction: column;
-		gap: 16px;
-	}
-
-	.duplicate-edge-dialog-message {
-		margin: 0;
-		font-size: 1rem;
-		text-align: center;
-	}
-
-	.duplicate-edge-dialog-message span {
-		display: block;
-	}
-
-	.duplicate-edge-dialog-edge {
-		margin-top: 4px;
-		font-weight: 600;
-	}
-
-	.duplicate-edge-dialog-actions {
-		display: flex;
-		gap: 12px;
-		justify-content: center;
-	}
-
-	.duplicate-edge-dialog-confirm,
-	.duplicate-edge-dialog-cancel {
-		padding: 10px 20px;
-		border-radius: 6px;
-		border: none;
-		font-size: 0.9rem;
-		cursor: pointer;
-		min-width: 80px;
-		min-height: 44px;
-	}
-
-	.duplicate-edge-dialog-confirm {
-		background: #e53935;
-		color: white;
-	}
-
-	.duplicate-edge-dialog-cancel {
-		background: #e0e0e0;
-		color: #333;
 	}
 </style>

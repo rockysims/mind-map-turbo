@@ -4,6 +4,7 @@ import {
 	addNode,
 	commitInlineTitleSyntax,
 	deleteTagEverywhere,
+	duplicateEdgeIdentifier,
 	findExistingEdge,
 	moveNode,
 	neighborsOf,
@@ -476,6 +477,32 @@ describe('graph mutations', () => {
 
 			expect(findExistingEdge(graph, 'n0', 'n2')).toBeUndefined();
 			expect(findExistingEdge(graph, 'n2', 'n0')).toBeUndefined();
+		});
+	});
+
+	describe('duplicateEdgeIdentifier', () => {
+		it('returns source and target titles for an existing edge', () => {
+			const graph = makeGraph({
+				nodes: [
+					{ id: 'source', title: 'Source Title', description: '', tags: [] },
+					{ id: 'target', title: 'Target Title', description: '', tags: [] }
+				],
+				edges: [['source', 'target']]
+			});
+
+			expect(duplicateEdgeIdentifier(graph, 'e0')).toBe('Source Title -- Target Title');
+		});
+
+		it(`falls back to "${NEW_NODE_TITLE}" for empty endpoint titles`, () => {
+			const graph = makeGraph({
+				nodes: [
+					{ id: 'source', title: '', description: '', tags: [] },
+					{ id: 'target', title: '   ', description: '', tags: [] }
+				],
+				edges: [['source', 'target']]
+			});
+
+			expect(duplicateEdgeIdentifier(graph, 'e0')).toBe(`${NEW_NODE_TITLE} -- ${NEW_NODE_TITLE}`);
 		});
 	});
 
