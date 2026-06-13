@@ -1110,7 +1110,12 @@
 
 		const dialog = canvasElement.querySelector('[role="dialog"]');
 		expect(dialog).toBeInTheDocument();
-		expect(dialog).toHaveTextContent('Remove edge Node 0 -- Node 1');
+		expect(dialog?.querySelector('.duplicate-edge-dialog-message')).toHaveTextContent(
+			'Remove edge:'
+		);
+		expect(dialog?.querySelector('.duplicate-edge-dialog-edge')).toHaveTextContent(
+			'Node 0 -- Node 1'
+		);
 		expect(
 			Array.from(dialog!.querySelectorAll('button')).map((button) => button.textContent?.trim())
 		).toEqual(['Cancel', 'Remove']);
@@ -1166,7 +1171,12 @@
 
 		const dialog = canvasElement.querySelector('[role="dialog"]');
 		expect(dialog).toBeInTheDocument();
-		expect(dialog).toHaveTextContent('Remove edge Node 0 -- Node 1');
+		expect(dialog?.querySelector('.duplicate-edge-dialog-message')).toHaveTextContent(
+			'Remove edge:'
+		);
+		expect(dialog?.querySelector('.duplicate-edge-dialog-edge')).toHaveTextContent(
+			'Node 0 -- Node 1'
+		);
 
 		const cancelButton = canvasElement.querySelector(
 			'.duplicate-edge-dialog-cancel'

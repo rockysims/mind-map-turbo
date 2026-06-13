@@ -422,9 +422,9 @@
 		return `linear-gradient(to right, ${visibility.edge.color}, transparent)`;
 	}
 
-	function duplicateEdgeRemoveLabel(edgeId: string): string {
+	function duplicateEdgeIdentifier(edgeId: string): string {
 		const edge = graph.edges.find((candidate) => candidate.id === edgeId);
-		if (!edge) return 'Remove edge';
+		if (!edge) return 'Unknown edge';
 
 		const sourceTitle = normalizeNodeTitle(
 			graph.nodes.find((node) => node.id === edge.sourceNodeId)?.title ?? ''
@@ -433,7 +433,7 @@
 			graph.nodes.find((node) => node.id === edge.targetNodeId)?.title ?? ''
 		);
 
-		return `Remove edge ${sourceTitle} -- ${targetTitle}`;
+		return `${sourceTitle} -- ${targetTitle}`;
 	}
 
 	function withRelaxedPositions(
@@ -730,7 +730,7 @@
 
 	{#if duplicateEdgeConfirm}
 		{@const confirmEdgeId = duplicateEdgeConfirm.edgeId}
-		{@const removeLabel = duplicateEdgeRemoveLabel(confirmEdgeId)}
+		{@const edgeIdentifier = duplicateEdgeIdentifier(confirmEdgeId)}
 		<div
 			class="duplicate-edge-dialog-backdrop"
 			role="presentation"
@@ -747,7 +747,8 @@
 				onkeydown={() => {}}
 			>
 				<p id="duplicate-edge-dialog-title" class="duplicate-edge-dialog-message">
-					{removeLabel}
+					<span>Remove edge:</span>
+					<span class="duplicate-edge-dialog-edge">{edgeIdentifier}</span>
 				</p>
 				<div class="duplicate-edge-dialog-actions">
 					<button
@@ -822,6 +823,15 @@
 		margin: 0;
 		font-size: 1rem;
 		text-align: center;
+	}
+
+	.duplicate-edge-dialog-message span {
+		display: block;
+	}
+
+	.duplicate-edge-dialog-edge {
+		margin-top: 4px;
+		font-weight: 600;
 	}
 
 	.duplicate-edge-dialog-actions {
