@@ -58,3 +58,7 @@ PROBLEMS:
 BUGS:
 
 - Edit dialog background (click to close) has very rounded edges and padding so it doesn't cover the full Stage.
+
+MAYBE:
+
+- Make power of physics reduce by an order of magnitude for each hop from pinned (instead of layer by layer layout process)?
