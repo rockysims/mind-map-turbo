@@ -46,6 +46,9 @@ export const APP_CONFIG = {
 			postDragSettleMaxFrames: 200, // max frames for post-drag physics settle
 			postScaleChangeSettleMaxFrames: 200, // max frames to settle after scale animation
 			scaleAnimationDurationMs: 500, // duration of node scale change animation
+			normalizeRelaxationTranslation: true, // remove whole-graph drift during per-frame settle
+			normalizeRelaxationRotation: true, // remove whole-graph spin during per-frame settle
+			maxRelaxationRotationPerFrameRad: Math.PI / 4, // skip degenerate rotation fits above this
 			layeredRelayoutSettleMaxFrames: 20, // max frames per layered relayout phase
 			layeredRelayoutSettleMaxFramesFinal: 200, // max frames for final layered relayout settle
 			layeredRelayoutSettleEpsilonPx: 0.25 // motion threshold to end layered relayout

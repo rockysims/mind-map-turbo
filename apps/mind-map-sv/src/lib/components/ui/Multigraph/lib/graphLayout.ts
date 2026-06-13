@@ -3,6 +3,7 @@ import { hopsFromPinned, radiusOf, scaleByHops, shortestPathHopsByNodeId } from 
 import type { LayoutSettings } from './layoutSettings';
 import { withDefaultLayoutSettings } from './layoutSettings';
 import { relaxGraphPhysics } from './physics';
+import { normalizeRigidMotion } from './rigidMotion';
 
 const CENTERED_POSITION: Point = { x: 0, y: 0 };
 const MAX_SETTLE_RELAX_ITERATIONS = 500;
@@ -111,16 +112,29 @@ export function relaxGraphPositionsStep(
 	data: MultigraphData,
 	options: GraphLayoutOptions = {}
 ): GraphRelaxationStep {
+	const settings = withDefaultLayoutSettings(options.settings);
 	const nextPositions = relaxGraphPositions(data, options);
+	const shouldNormalize =
+		!options.activeDragNodeId &&
+		(settings.normalizeRelaxationTranslation || settings.normalizeRelaxationRotation);
+	const correctedPositions = shouldNormalize
+		? normalizeRigidMotion(
+				data.posByNodeId,
+				nextPositions,
+				participatingNodeIds(data, options),
+				anchoredNodeIds(data, options),
+				settings
+			)
+		: nextPositions;
 
 	return {
 		data: {
 			...data,
-			posByNodeId: nextPositions
+			posByNodeId: correctedPositions
 		},
 		maxPositionDelta: maxPositionDelta(
 			data.posByNodeId,
-			nextPositions,
+			correctedPositions,
 			options.participatingNodeIds
 		)
 	};
@@ -157,6 +171,13 @@ function anchoredNodeIds(data: MultigraphData, options: GraphLayoutOptions): Set
 		anchoredIds.add(nodeId);
 	}
 	return anchoredIds;
+}
+
+function participatingNodeIds(
+	data: MultigraphData,
+	options: GraphLayoutOptions
+): ReadonlySet<string> {
+	return options.participatingNodeIds ?? new Set(data.nodes.map((node) => node.id));
 }
 
 function maxPositionDelta(

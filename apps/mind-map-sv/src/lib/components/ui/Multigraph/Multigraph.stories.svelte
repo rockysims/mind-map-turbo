@@ -185,6 +185,39 @@
 		);
 	}
 
+	function nodePosition(el: HTMLElement, nodeId: string): Point {
+		const wrapper = getNodeWrapper(el, nodeId);
+		const x = Number(wrapper.dataset.x);
+		const y = Number(wrapper.dataset.y);
+		if (!Number.isFinite(x) || !Number.isFinite(y)) {
+			throw new Error(`Node ${nodeId} position is not finite`);
+		}
+		return { x, y };
+	}
+
+	function nodePositions(el: HTMLElement, nodeIds: readonly string[]): Record<string, Point> {
+		return Object.fromEntries(nodeIds.map((nodeId) => [nodeId, nodePosition(el, nodeId)]));
+	}
+
+	function centroidOf(positions: Record<string, Point>): Point {
+		const points = Object.values(positions);
+		return points.reduce(
+			(sum, point) => ({
+				x: sum.x + point.x / points.length,
+				y: sum.y + point.y / points.length
+			}),
+			{ x: 0, y: 0 }
+		);
+	}
+
+	function maxPositionDelta(before: Record<string, Point>, after: Record<string, Point>): number {
+		return Object.keys(after).reduce((maxDelta, nodeId) => {
+			const previous = before[nodeId];
+			const next = after[nodeId];
+			return Math.max(maxDelta, distanceBetween(previous, next));
+		}, 0);
+	}
+
 	async function dispatchDoubleClick(target: HTMLElement, x: number, y: number): Promise<void> {
 		dispatchPointer(target, 'pointerdown', x, y);
 		dispatchPointer(target, 'pointerup', x, y);
@@ -911,6 +944,66 @@
 		await waitForFrames(8);
 
 		expect(canvasElement.querySelector('.graph')).not.toHaveAttribute('data-settling');
+	}}
+/>
+
+<Story
+	name="UnpinnedGraphSettlesWithoutRigidDrift"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 4,
+			edges: [
+				[0, 1],
+				[1, 2],
+				[2, 3],
+				[3, 0],
+				[0, 2]
+			],
+			posByNodeId: {
+				n0: { x: 260, y: -140 },
+				n1: { x: 380, y: -20 },
+				n2: { x: 260, y: 100 },
+				n3: { x: 140, y: -20 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: {
+			baseRadius: 80,
+			minScale: 1,
+			relaxIterations: 1,
+			hopRepulsionStrength: 0,
+			edgeSpringStrength: 0.6,
+			postDragSettleMaxFrames: 80
+		}
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const nodeIds = ['n0', 'n1', 'n2', 'n3'];
+		const stage = getStage(canvasElement);
+		const sourceCircle = getCircle(canvasElement, 'n0');
+		const sourceCenter = getCenter(sourceCircle);
+
+		dispatchPointer(sourceCircle, 'pointerdown', sourceCenter.x, sourceCenter.y);
+		dispatchPointer(stage, 'pointermove', sourceCenter.x + 70, sourceCenter.y + 35);
+		dispatchPointer(stage, 'pointerup', sourceCenter.x + 70, sourceCenter.y + 35);
+		await sleep();
+
+		const settlingStartPositions = nodePositions(canvasElement, nodeIds);
+		const settlingStartCentroid = centroidOf(settlingStartPositions);
+		expect(canvasElement.querySelector('.graph')).toHaveAttribute('data-settling', 'true');
+
+		await waitForFrames(30);
+
+		const settledPositions = nodePositions(canvasElement, nodeIds);
+		const settledCentroid = centroidOf(settledPositions);
+		expect(canvasElement.querySelector('.graph')).not.toHaveAttribute('data-settling');
+		expect(distanceBetween(settlingStartCentroid, settledCentroid)).toBeLessThan(0.5);
+
+		await waitForFrames(4);
+
+		expect(maxPositionDelta(settledPositions, nodePositions(canvasElement, nodeIds))).toBeLessThan(
+			0.01
+		);
 	}}
 />
 

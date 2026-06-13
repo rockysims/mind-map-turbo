@@ -223,6 +223,86 @@ describe('graphLayout', () => {
 		expect(step.maxPositionDelta).toBe(20);
 	});
 
+	it('normalizes unanchored per-frame drift and measures the corrected delta', () => {
+		const graph = makeGraph({
+			nodeCount: 2,
+			edges: [[0, 1]],
+			posByNodeId: {
+				n0: { x: 0, y: 0 },
+				n1: { x: 80, y: 0 }
+			}
+		});
+		const settings = {
+			baseRadius: 50,
+			minScale: 1,
+			edgeGapMinRadiusFactor: 0.2,
+			edgeGapMaxRadiusFactor: 0.4,
+			edgeSpringStrength: 1,
+			hopRepulsionStrength: 0
+		};
+
+		const step = relaxGraphPositionsStep(graph, {
+			settings,
+			relaxIterations: 1,
+			mobilityByNodeId: { n0: 0.25, n1: 1 }
+		});
+		const unnormalizedStep = relaxGraphPositionsStep(graph, {
+			settings: {
+				...settings,
+				normalizeRelaxationTranslation: false,
+				normalizeRelaxationRotation: false
+			},
+			relaxIterations: 1,
+			mobilityByNodeId: { n0: 0.25, n1: 1 }
+		});
+
+		expect(step.data.posByNodeId).toEqual({ n0: { x: -20, y: 0 }, n1: { x: 100, y: 0 } });
+		expect(step.maxPositionDelta).toBe(20);
+		expect(unnormalizedStep.data.posByNodeId).toEqual({
+			n0: { x: -8, y: 0 },
+			n1: { x: 112, y: 0 }
+		});
+		expect(unnormalizedStep.maxPositionDelta).toBe(32);
+	});
+
+	it('does not normalize per-frame movement while a node is actively dragged', () => {
+		const graph = makeGraph({
+			nodeCount: 2,
+			edges: [[0, 1]],
+			posByNodeId: {
+				n0: { x: 0, y: 0 },
+				n1: { x: 80, y: 0 }
+			}
+		});
+		const settings = {
+			baseRadius: 50,
+			minScale: 1,
+			edgeGapMinRadiusFactor: 0.2,
+			edgeGapMaxRadiusFactor: 0.4,
+			edgeSpringStrength: 1,
+			hopRepulsionStrength: 0
+		};
+
+		const step = relaxGraphPositionsStep(graph, {
+			activeDragNodeId: 'dragging-node',
+			settings,
+			relaxIterations: 1,
+			mobilityByNodeId: { n0: 0.25, n1: 1 }
+		});
+		const normalizationDisabledStep = relaxGraphPositionsStep(graph, {
+			activeDragNodeId: 'dragging-node',
+			settings: {
+				...settings,
+				normalizeRelaxationTranslation: false,
+				normalizeRelaxationRotation: false
+			},
+			relaxIterations: 1,
+			mobilityByNodeId: { n0: 0.25, n1: 1 }
+		});
+
+		expect(step).toEqual(normalizationDisabledStep);
+	});
+
 	it('settles larger graphs beyond the per-frame relaxation budget', () => {
 		const nodeCount = 100;
 		const graph = makeGraph({

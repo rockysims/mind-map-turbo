@@ -3,7 +3,7 @@
 **Created:** 2026-06-13
 **Author:** Cursor agent
 **Milestone:** [milestones/04g-layout-settle-eliminate-drift.md](../milestones/04g-layout-settle-eliminate-drift.md)
-**Status:** draft
+**Status:** done
 **Total estimated effort:** M
 
 ## Summary
@@ -221,3 +221,5 @@ The plan is done when:
   already commits `step.data.posByNodeId` and consumes `step.maxPositionDelta`
   for both post-drag settle and layered-relayout advance, so routing the
   correction through `relaxGraphPositionsStep` covers every automatic path.
+- 2026-06-13: Implemented rigid-motion normalization, wired the per-frame step,
+  added story coverage, and validated with lint, check, and unit/story tests.

@@ -17,6 +17,9 @@ export interface LayoutSettings {
 	postDragSettleMaxFrames: number;
 	postScaleChangeSettleMaxFrames: number;
 	scaleAnimationDurationMs: number;
+	normalizeRelaxationTranslation: boolean;
+	normalizeRelaxationRotation: boolean;
+	maxRelaxationRotationPerFrameRad: number;
 	layeredRelayoutSettleMaxFrames: number;
 	layeredRelayoutSettleMaxFramesFinal: number;
 	layeredRelayoutSettleEpsilonPx: number;
