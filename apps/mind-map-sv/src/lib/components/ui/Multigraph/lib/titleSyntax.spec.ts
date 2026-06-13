@@ -26,9 +26,9 @@ describe('parseTitleSyntax', () => {
 	});
 
 	it('parses multiple leading node tags', () => {
-		expect(parseTitleSyntax(':alpha :beta Tagged title')).toEqual({
+		expect(parseTitleSyntax(':alpha :beta:gamma Tagged title')).toEqual({
 			displayTitle: 'Tagged title',
-			nodeTags: ['alpha', 'beta'],
+			nodeTags: ['alpha', 'beta', 'gamma'],
 			edgeTags: [],
 			direction: 'undirected'
 		});
@@ -44,7 +44,7 @@ describe('parseTitleSyntax', () => {
 	});
 
 	it('parses mixed node and edge tags after a direction marker', () => {
-		expect(parseTitleSyntax('>:abc ;rel :urgent The displayed title')).toEqual({
+		expect(parseTitleSyntax('>:abc;rel:urgent The displayed title')).toEqual({
 			displayTitle: 'The displayed title',
 			nodeTags: ['abc', 'urgent'],
 			edgeTags: ['rel'],
@@ -52,9 +52,18 @@ describe('parseTitleSyntax', () => {
 		});
 	});
 
+	it('parses compact edge and node tags after a child-to-parent marker', () => {
+		expect(parseTitleSyntax('<;e:n Test')).toEqual({
+			displayTitle: 'Test',
+			nodeTags: ['n'],
+			edgeTags: ['e'],
+			direction: 'child-to-parent'
+		});
+	});
+
 	it('stops parsing when a malformed tag-like token appears', () => {
-		expect(parseTitleSyntax(':good :bad:name Title')).toEqual({
-			displayTitle: ':bad:name Title',
+		expect(parseTitleSyntax(':good : Title')).toEqual({
+			displayTitle: ': Title',
 			nodeTags: ['good'],
 			edgeTags: [],
 			direction: 'undirected'

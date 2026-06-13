@@ -354,6 +354,20 @@ describe('graph mutations', () => {
 			});
 		});
 
+		it('commits compact edge and node tags without leaking syntax into the title', () => {
+			const graph = makeGraph({ nodeCount: 2, edges: [[0, 1]] });
+
+			const next = commitInlineTitleSyntax(graph, 'n1', '<;e:n Test', 'e0');
+
+			expect(next.nodes[1]).toMatchObject({ title: 'Test', tags: ['n'] });
+			expect(next.edges[0]).toMatchObject({
+				sourceNodeId: 'n1',
+				targetNodeId: 'n0',
+				tags: ['e'],
+				directed: true
+			});
+		});
+
 		it('keeps a connected edge undirected when no marker is present', () => {
 			const graph = makeGraph({ nodeCount: 2, edges: [[0, 1]] });
 

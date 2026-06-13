@@ -23,12 +23,12 @@ export function parseTitleSyntax(rawTitle: string): ParsedTitleSyntax {
 	const edgeTags: string[] = [];
 
 	while (remaining.length > 0) {
-		const tokenMatch = remaining.match(/^\S+/);
-		const token = tokenMatch?.[0] ?? '';
-		const marker = token[0];
+		remaining = remaining.trimStart();
+		const marker = remaining[0];
 		if (marker !== ':' && marker !== ';') break;
 
-		const tagName = token.slice(1);
+		const tagNameEnd = findTagNameEnd(remaining, 1);
+		const tagName = remaining.slice(1, tagNameEnd);
 		if (!isValidTagName(tagName)) break;
 
 		if (marker === ':') {
@@ -36,7 +36,7 @@ export function parseTitleSyntax(rawTitle: string): ParsedTitleSyntax {
 		} else {
 			edgeTags.push(tagName);
 		}
-		remaining = remaining.slice(token.length).trimStart();
+		remaining = remaining.slice(tagNameEnd);
 	}
 
 	return {
@@ -45,6 +45,14 @@ export function parseTitleSyntax(rawTitle: string): ParsedTitleSyntax {
 		edgeTags,
 		direction
 	};
+}
+
+function findTagNameEnd(input: string, startIndex: number): number {
+	for (let index = startIndex; index < input.length; index += 1) {
+		if (/[\s:;]/.test(input[index])) return index;
+	}
+
+	return input.length;
 }
 
 export function normalizeTagList(rawTags: string): string[] {
