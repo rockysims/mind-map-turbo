@@ -42,6 +42,8 @@
 	import { withDefaultLayoutSettings } from './lib/layoutSettings.js';
 	import {
 		edgeVisibilityForPinnedNeighborhood,
+		graphWithVisibleNodes,
+		pinnedNodeIds,
 		visibleNodeIdsForPinnedNeighborhood
 	} from './lib/boundedVisibility.js';
 	import {
@@ -406,23 +408,6 @@
 			scaleByNodeId: overrides.scaleByNodeId ?? animatedScaleByNodeId,
 			participatingNodeIds: relayoutParticipating,
 			mobilityByNodeId: overrides.mobilityByNodeId
-		};
-	}
-
-	function pinnedNodeIds(data: MultigraphData = graph): Set<string> {
-		return new Set(data.nodes.filter((node) => node.pinned).map((node) => node.id));
-	}
-
-	function graphWithVisibleNodes(
-		data: MultigraphData,
-		nodeIds: ReadonlySet<string>
-	): MultigraphData {
-		return {
-			...data,
-			nodes: data.nodes.filter((node) => nodeIds.has(node.id)),
-			edges: data.edges.filter(
-				(edge) => nodeIds.has(edge.sourceNodeId) && nodeIds.has(edge.targetNodeId)
-			)
 		};
 	}
 

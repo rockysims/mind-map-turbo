@@ -76,6 +76,23 @@ export function edgeVisibilityForPinnedNeighborhood(
 	});
 }
 
+export function graphWithVisibleNodes(
+	data: MultigraphData,
+	nodeIds: ReadonlySet<string>
+): MultigraphData {
+	return {
+		...data,
+		nodes: data.nodes.filter((node) => nodeIds.has(node.id)),
+		edges: data.edges.filter(
+			(edge) => nodeIds.has(edge.sourceNodeId) && nodeIds.has(edge.targetNodeId)
+		)
+	};
+}
+
+export function pinnedNodeIds(data: MultigraphData): Set<string> {
+	return new Set(data.nodes.filter((node) => node.pinned).map((node) => node.id));
+}
+
 function hasPinnedNodes(data: MultigraphData): boolean {
 	return data.nodes.some((node) => node.pinned === true);
 }

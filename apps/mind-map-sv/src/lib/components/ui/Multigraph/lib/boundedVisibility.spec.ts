@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { hopsFromPinned } from './layout';
 import {
 	edgeVisibilityForPinnedNeighborhood,
+	graphWithVisibleNodes,
+	pinnedNodeIds,
 	visibleNodeIdsForPinnedNeighborhood
 } from './boundedVisibility';
 import { makeGraph } from './testFixtures';
@@ -84,6 +86,35 @@ describe('boundedVisibility', () => {
 		expect([
 			...visibleNodeIdsForPinnedNeighborhood(graph, hopsFromPinned(graph), { displayedLayers: 3 })
 		]).toEqual(['n0', 'n1']);
+	});
+
+	it('returns a graph with only visible nodes and edges between visible endpoints', () => {
+		const graph = makeGraph({
+			nodeCount: 4,
+			edges: [
+				[0, 1],
+				[1, 2],
+				[2, 3],
+				[0, 3]
+			]
+		});
+
+		const visibleGraph = graphWithVisibleNodes(graph, new Set(['n0', 'n1', 'n3']));
+
+		expect(visibleGraph.nodes.map((node) => node.id)).toEqual(['n0', 'n1', 'n3']);
+		expect(visibleGraph.edges.map((edge) => edge.id)).toEqual(['e0', 'e3']);
+	});
+
+	it('returns pinned node ids', () => {
+		const graph = makeGraph({ nodeCount: 4, pinned: [1, 3] });
+
+		expect([...pinnedNodeIds(graph)]).toEqual(['n1', 'n3']);
+	});
+
+	it('returns an empty set when no nodes are pinned', () => {
+		const graph = makeGraph({ nodeCount: 3 });
+
+		expect(pinnedNodeIds(graph)).toEqual(new Set());
 	});
 
 	it('classifies visible-visible edges as full visible edges', () => {
