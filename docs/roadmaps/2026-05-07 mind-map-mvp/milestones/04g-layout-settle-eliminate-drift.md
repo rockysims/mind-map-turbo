@@ -3,7 +3,7 @@
 **Status:** not started
 **Depends on:** milestones 02 (physics relaxation loop) and 04a/04b (layered
 relayout and post-drag/scale settle frames).
-**Plan:** [plans/2026-06-13 layout-settle-rigid-motion.md](../plans/2026-06-13%20layout-settle-rigid-motion.md)
+**Plan:** [2026-06-13 04g-layout-settle-rigid-motion.md](../plans/2026-06-13%2004g-layout-settle-rigid-motion.md)
 
 ## Goal
 

@@ -3,7 +3,7 @@
 **Status:** complete
 **Depends on:** milestone 01 (needs the pinned flag and immutable
 `moveNode`).
-**Plan:** [2026-05-15 layout and repulsion](../plans/2026-05-15 layout-and-repulsion.md)
+**Plan:** [2026-05-15 02-layout-and-repulsion.md](../plans/2026-05-15 02-layout-and-repulsion.md)
 
 ## Goal
 

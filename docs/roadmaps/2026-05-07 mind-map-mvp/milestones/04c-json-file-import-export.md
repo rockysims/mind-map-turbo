@@ -2,7 +2,7 @@
 
 **Status:** complete
 **Depends on:** milestone 04 (persistence).
-**Plan:** [2026-05-30 json-file-import-export.md](../plans/2026-05-30%20json-file-import-export.md)
+**Plan:** [2026-05-30 04c-json-file-import-export.md](../plans/2026-05-30%2004c-json-file-import-export.md)
 
 ## Goal
 

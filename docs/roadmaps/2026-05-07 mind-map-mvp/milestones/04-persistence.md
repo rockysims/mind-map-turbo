@@ -5,8 +5,8 @@
 against).
 **Plans:**
 
-- [plans/2026-05-17 persistence.md](../plans/2026-05-17%20persistence.md) — original delivery (status: done).
-- [plans/2026-05-17 persistence-architecture.md](../plans/2026-05-17%20persistence-architecture.md) — follow-up
+- [2026-05-17 04-persistence.md](../plans/2026-05-17%2004-persistence.md) — original delivery (status: done).
+- [2026-05-17 04-persistence-architecture.md](../plans/2026-05-17%2004-persistence-architecture.md) — follow-up
   architectural refactor extracting the controller from `+page.svelte` (status: executing).
 
 ## Goal

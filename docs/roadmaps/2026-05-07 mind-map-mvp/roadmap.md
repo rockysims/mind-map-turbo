@@ -34,22 +34,22 @@ scope, acceptance criteria, and risks. When work on a milestone is about
 to start, we write a dated **plan** in `plans/` that breaks it into
 individual PR-sized tasks.
 
-| #   | Milestone                                          | Status      | Doc                                                                                                                                         |
-| --- | -------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| 01  | Graph mutations and pinning                        | complete    | [milestone](milestones/01-graph-mutations-and-pinning.md), [plan](plans/2026-05-15 graph-mutations-and-pinning.md)                          |
-| 02  | Layout: hop-distance scaling and overlap repulsion | complete    | [milestone](milestones/02-layout-and-repulsion.md), [plan](plans/2026-05-15 layout-and-repulsion.md)                                        |
-| 03  | Mobile polish and node editing UX                  | in progress | [milestone](milestones/03-mobile-polish-and-editing.md), [plan](plans/2026-05-17%20mobile-polish-and-editing.md)                            |
-| 04  | Persistence (local-first → server)                 | complete    | [milestone](milestones/04-persistence.md), [plan](plans/2026-05-17%20persistence.md)                                                        |
-| 04a | Layered pin relayout                               | complete    | [milestone](milestones/04a-layered-pin-relayout.md), [plan](plans/2026-05-25%20layered-pin-relayout.md)                                     |
-| 04b | Bounded pinned-neighborhood visibility             | complete    | [milestone](milestones/04b-bounded-pinned-neighborhood-visibility.md), [plan](plans/2026-05-30%20bounded-pinned-neighborhood-visibility.md) |
-| 04c | JSON file import/export                            | complete    | [milestone](milestones/04c-json-file-import-export.md), [plan](plans/2026-05-30%20json-file-import-export.md)                               |
-| 04d | Edge toggle and inline node creation               | complete    | [milestone](milestones/04d-edge-toggle-and-inline-node-creation.md), [plan](plans/2026-06-12%20edge-toggle-and-inline-node-creation.md)     |
-| 04e | Title syntax for direction and tags                | complete    | [milestone](milestones/04e-title-syntax-for-direction-and-tags.md), [plan](plans/2026-06-12%20title-syntax-for-direction-and-tags.md)       |
-| 04f | Tag colors and graph tag config                    | complete    | [milestone](milestones/04f-tag-colors-and-graph-tag-config.md), [plan](plans/2026-06-12%20node-and-edge-tag-colors.md)                      |
-| 04g | Layout settle: eliminate endless drift/rotation    | not started | [milestone](milestones/04g-layout-settle-eliminate-drift.md), [plan](plans/2026-06-13%20layout-settle-rigid-motion.md)                      |
-| 04h | Thin the Multigraph component (refactor)           | not started | [milestone](milestones/04h-multigraph-thin-component-refactor.md), [plan](plans/2026-06-13%20multigraph-thin-component-refactor.md)         |
-| 05  | Multiplayer                                        | not started | [milestones/05-multiplayer.md](milestones/05-multiplayer.md)                                                                                |
-| 06  | Search                                             | not started | [milestones/06-search.md](milestones/06-search.md)                                                                                          |
+| #   | Milestone                                          | Status      | Doc                                                                                                                                             |
+| --- | -------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| 01  | Graph mutations and pinning                        | complete    | [milestone](milestones/01-graph-mutations-and-pinning.md), [plan](plans/2026-05-15 01-graph-mutations-and-pinning.md)                           |
+| 02  | Layout: hop-distance scaling and overlap repulsion | complete    | [milestone](milestones/02-layout-and-repulsion.md), [plan](plans/2026-05-15 02-layout-and-repulsion.md)                                         |
+| 03  | Mobile polish and node editing UX                  | in progress | [milestone](milestones/03-mobile-polish-and-editing.md), [plan](plans/2026-05-17%2003-mobile-polish-and-editing.md)                             |
+| 04  | Persistence (local-first → server)                 | complete    | [milestone](milestones/04-persistence.md), [plan](plans/2026-05-17%2004-persistence.md)                                                         |
+| 04a | Layered pin relayout                               | complete    | [milestone](milestones/04a-layered-pin-relayout.md), [plan](plans/2026-05-25%2004a-layered-pin-relayout.md)                                     |
+| 04b | Bounded pinned-neighborhood visibility             | complete    | [milestone](milestones/04b-bounded-pinned-neighborhood-visibility.md), [plan](plans/2026-05-30%2004b-bounded-pinned-neighborhood-visibility.md) |
+| 04c | JSON file import/export                            | complete    | [milestone](milestones/04c-json-file-import-export.md), [plan](plans/2026-05-30%2004c-json-file-import-export.md)                               |
+| 04d | Edge toggle and inline node creation               | complete    | [milestone](milestones/04d-edge-toggle-and-inline-node-creation.md), [plan](plans/2026-06-12%2004d-edge-toggle-and-inline-node-creation.md)     |
+| 04e | Title syntax for direction and tags                | complete    | [milestone](milestones/04e-title-syntax-for-direction-and-tags.md), [plan](plans/2026-06-12%2004e-title-syntax-for-direction-and-tags.md)       |
+| 04f | Tag colors and graph tag config                    | complete    | [milestone](milestones/04f-tag-colors-and-graph-tag-config.md), [plan](plans/2026-06-12%2004f-node-and-edge-tag-colors.md)                      |
+| 04g | Layout settle: eliminate endless drift/rotation    | not started | [milestone](milestones/04g-layout-settle-eliminate-drift.md), [plan](plans/2026-06-13%2004g-layout-settle-rigid-motion.md)                      |
+| 04h | Thin the Multigraph component (refactor)           | not started | [milestone](milestones/04h-multigraph-thin-component-refactor.md), [plan](plans/2026-06-13%2004h-multigraph-thin-component-refactor.md)         |
+| 05  | Multiplayer                                        | not started | [milestones/05-multiplayer.md](milestones/05-multiplayer.md)                                                                                    |
+| 06  | Search                                             | not started | [milestones/06-search.md](milestones/06-search.md)                                                                                              |
 
 Milestones 04a-04h sit between persistence and multiplayer. Milestone 04b
 intentionally supersedes 04a's Fibonacci reveal and dimming behavior. Milestone

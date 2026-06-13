@@ -1,6 +1,6 @@
 <!--
 This is the canonical template for milestone plans. Copy it to
-  docs/roadmaps/<roadmap>/plans/<YYYY-MM-DD> <plan-name>.md
+  docs/roadmaps/<roadmap>/plans/<YYYY-MM-DD> <milestone-id>-<plan-name>.md
 and replace the placeholder content with your milestone's specifics.
 
 A plan answers HOW we deliver a milestone (the milestone doc says WHAT
@@ -20,7 +20,7 @@ Delete this comment block when filling in the template.
 
 **Created:** <YYYY-MM-DD>
 **Author:** <name or "Cursor agent">
-**Milestone:** [milestones/<NN>-<name>.md](../milestones/<NN>-<name>.md)
+**Milestone:** [milestones/<milestone-id>-<name>.md](../milestones/<milestone-id>-<name>.md)
 **Status:** draft / executing / done
 **Total estimated effort:** <S / M / L>
 
@@ -64,7 +64,7 @@ code. Use this section to head off scope creep.
 | -------------- | ------------------------------------------------------------------ |
 | **Depends on** | —                                                                  |
 | **Wave**       | 1                                                                  |
-| **Agent**      | fast/cheap (composer-2-fast or kimi-k2.5)                          |
+| **Agent**      | fast/cheap (composer-2.5-fast or kimi-k2.5)                        |
 | **Effort**     | XS                                                                 |
 | **Files**      | `types/node.ts`, `lib/testFixtures.ts`, `lib/testFixtures.spec.ts` |
 | **PR title**   | `feat(graph): add pinned flag to NodeData and fixtures`            |
@@ -86,7 +86,7 @@ accordingly. Add a fixture spec covering `pinned: [0]` and
 | -------------- | ------------------------------------------------------------------- |
 | **Depends on** | T01                                                                 |
 | **Wave**       | 2                                                                   |
-| **Agent**      | default (claude-4.6-sonnet)                                         |
+| **Agent**      | default (claude-4.6-sonnet-medium-thinking)                         |
 | **Effort**     | M                                                                   |
 | **Files**      | new `lib/graph.ts`, new `lib/graph.spec.ts`                         |
 | **PR title**   | `feat(graph): add pure mutation API (add/remove/move/togglePinned)` |
@@ -109,7 +109,7 @@ a new `MultigraphData`.
 | -------------- | ------------------------------------------------------------ |
 | **Depends on** | T02                                                          |
 | **Wave**       | 3                                                            |
-| **Agent**      | default (claude-4.6-sonnet)                                  |
+| **Agent**      | default (claude-4.6-sonnet-medium-thinking)                  |
 | **Effort**     | M                                                            |
 | **Files**      | `Multigraph.svelte`, `Multigraph.stories.svelte`             |
 | **PR title**   | `refactor(multigraph): route state changes through graph.ts` |
@@ -130,7 +130,7 @@ offsets around the primary). Pinned nodes get a thicker border.
 | -------------- | --------------------------------------------------- |
 | **Depends on** | T02                                                 |
 | **Wave**       | 3 (parallel with T03)                               |
-| **Agent**      | default (claude-4.6-sonnet)                         |
+| **Agent**      | default (claude-4.6-sonnet-medium-thinking)         |
 | **Effort**     | S                                                   |
 | **Files**      | `Multigraph.svelte`, `Stage.stories.svelte`         |
 | **PR title**   | `feat(multigraph): map double-tap to toggle pinned` |
@@ -152,7 +152,7 @@ final behavior.
 | -------------- | ------------------------------------------------------------------- |
 | **Depends on** | T02, T03                                                            |
 | **Wave**       | 4                                                                   |
-| **Agent**      | default (claude-4.6-sonnet)                                         |
+| **Agent**      | default (claude-4.6-sonnet-medium-thinking)                         |
 | **Effort**     | S                                                                   |
 | **Files**      | `Multigraph.svelte`, `Multigraph.stories.svelte`                    |
 | **PR title**   | `feat(multigraph): add edges via double-tap-drag onto another node` |

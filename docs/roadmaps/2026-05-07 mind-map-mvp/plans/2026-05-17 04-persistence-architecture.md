@@ -16,7 +16,7 @@ shell that conforms to `core.mdc`. No user-visible behavior changes.
 ## Open questions resolved
 
 Milestone 04's persistence behavior shipped in
-[plans/2026-05-17 persistence.md](2026-05-17%20persistence.md). This
+[2026-05-17 04-persistence.md](2026-05-17%2004-persistence.md). This
 follow-up plan owns its own (architecture-level) decisions:
 
 - **Should the controller be a class or a function returning a

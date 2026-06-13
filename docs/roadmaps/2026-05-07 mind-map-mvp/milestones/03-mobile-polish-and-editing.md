@@ -2,7 +2,7 @@
 
 **Status:** in progress
 **Depends on:** milestones 01 + 02 (graph data, all-node rendering).
-**Plan:** [2026-05-17 mobile-polish-and-editing.md](../plans/2026-05-17%20mobile-polish-and-editing.md)
+**Plan:** [2026-05-17 03-mobile-polish-and-editing.md](../plans/2026-05-17%2003-mobile-polish-and-editing.md)
 
 ## Goal
 

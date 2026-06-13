@@ -2,7 +2,7 @@
 
 **Status:** complete
 **Depends on:** milestones 04c (JSON import/export) and 04e (tag data).
-**Plan:** [2026-06-12 node and edge tag colors](../plans/2026-06-12%20node-and-edge-tag-colors.md)
+**Plan:** [2026-06-12 04f-node-and-edge-tag-colors.md](../plans/2026-06-12%2004f-node-and-edge-tag-colors.md)
 
 ## Goal
 

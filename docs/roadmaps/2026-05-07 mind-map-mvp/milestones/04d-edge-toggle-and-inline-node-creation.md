@@ -2,7 +2,7 @@
 
 **Status:** complete
 **Depends on:** milestones 01 (graph mutation API) and 03 (editing UX).
-**Plan:** [plans/2026-06-12 edge-toggle-and-inline-node-creation.md](../plans/2026-06-12%20edge-toggle-and-inline-node-creation.md)
+**Plan:** [2026-06-12 04d-edge-toggle-and-inline-node-creation.md](../plans/2026-06-12%2004d-edge-toggle-and-inline-node-creation.md)
 
 ## Goal
 

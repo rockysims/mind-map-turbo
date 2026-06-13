@@ -4,7 +4,7 @@
 **Depends on:** milestone 04g (its in-flight `Multigraph.svelte` / `graphLayout.ts`
 relaxation-loop changes should land first so this refactor rebases onto the final
 loop, not a moving target).
-**Plan:** [plans/2026-06-13 multigraph-thin-component-refactor.md](../plans/2026-06-13%20multigraph-thin-component-refactor.md)
+**Plan:** [2026-06-13 04h-multigraph-thin-component-refactor.md](../plans/2026-06-13%2004h-multigraph-thin-component-refactor.md)
 
 ## Goal
 
