@@ -2,7 +2,7 @@
 
 **Status:** not started
 **Depends on:** milestones 04c (JSON import/export) and 04e (tag data).
-**Plan:** _none yet._
+**Plan:** [2026-06-12 node and edge tag colors](../plans/2026-06-12%20node-and-edge-tag-colors.md)
 
 ## Goal
 
@@ -55,8 +55,11 @@ part of the multigraph and included in local saves and exported JSON.
 - Use a native `<input type="color">` per tag for color assignment (hex,
   mobile-friendly). Editing a color writes to the relevant node-tag or
   edge-tag config map.
-- Keep the first version scoped to color assignment only: no tag rename,
-  merge, or delete workflow unless the plan finds a cheap local pattern.
+- Include a delete action for each legend tag. Deleting an unused configured
+  tag removes its config entry immediately; deleting a used tag confirms first
+  and includes how many node/edge tag uses will be removed.
+- Keep the first version scoped to color assignment and deletion only: no tag
+  rename or merge workflow unless the plan finds a cheap local pattern.
 
 ## Acceptance Criteria
 
@@ -73,6 +76,9 @@ part of the multigraph and included in local saves and exported JSON.
   updates when edge tags are reordered in the Edges tab.
 - Story coverage shows the legend lists in-use tags that have no config entry
   at their fallback color and lets the user assign a color.
+- Story coverage shows deleting an unused configured tag removes it without
+  confirmation, while deleting a used tag confirms with its usage count and
+  removes it from all nodes/edges in that namespace.
 - Lint, check, and unit tests pass.
 
 ## Non-goals
