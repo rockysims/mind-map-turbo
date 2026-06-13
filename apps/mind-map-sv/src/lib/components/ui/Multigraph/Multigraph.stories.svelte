@@ -1163,3 +1163,140 @@
 		expect(spy?.mock.calls.length ?? 0).toBe(0);
 	}}
 />
+
+<Story
+	name="UserCreatesNodeAndNamesItInline"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 1,
+			pinned: [0],
+			edges: []
+		}),
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: { panX: 0, panY: 0, scale: 0.5 },
+		layoutSettings: { relaxIterations: 1 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const stageRect = stage.getBoundingClientRect();
+		const sourceCircle = getCircle(canvasElement, 'n0');
+		const sourceCenter = getCenter(sourceCircle);
+		// Pick a background point well past the node hit radius (node is at center, hit radius = 100px at scale 0.5)
+		const bgX = stageRect.right - 20;
+		const bgY = stageRect.top + stageRect.height / 2;
+
+		await dispatchDoubleClickDrag(sourceCircle, sourceCenter.x, sourceCenter.y, stage, bgX, bgY);
+		await sleep();
+		await waitForLayout();
+
+		const titleInput = canvasElement.querySelector('.title-input') as HTMLInputElement | null;
+		expect(titleInput).toBeInTheDocument();
+		expect(document.activeElement).toBe(titleInput);
+
+		titleInput!.value = 'My New Node';
+		titleInput!.dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+		);
+		await sleep();
+
+		expect(canvasElement.querySelector('.title-input')).not.toBeInTheDocument();
+		expect(canvasElement).toHaveTextContent('My New Node');
+	}}
+/>
+
+<Story
+	name="UserLeavesInlineTitleEmpty"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 1,
+			pinned: [0],
+			edges: []
+		}),
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: { panX: 0, panY: 0, scale: 0.5 },
+		layoutSettings: { relaxIterations: 1 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const stageRect = stage.getBoundingClientRect();
+		const sourceCircle = getCircle(canvasElement, 'n0');
+		const sourceCenter = getCenter(sourceCircle);
+		const bgX = stageRect.right - 20;
+		const bgY = stageRect.top + stageRect.height / 2;
+
+		await dispatchDoubleClickDrag(sourceCircle, sourceCenter.x, sourceCenter.y, stage, bgX, bgY);
+		await sleep();
+		await waitForLayout();
+
+		const titleInput = canvasElement.querySelector('.title-input') as HTMLInputElement | null;
+		expect(titleInput).toBeInTheDocument();
+
+		// Clear the pre-filled title and commit — expects fallback to 'New Node'
+		titleInput!.value = '';
+		titleInput!.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
+		await sleep();
+
+		expect(canvasElement.querySelector('.title-input')).not.toBeInTheDocument();
+		expect(canvasElement).toHaveTextContent('New Node');
+	}}
+/>
+
+<Story
+	name="InlineTitleInputDoesNotStartStageDrag"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 1,
+			pinned: [0],
+			edges: []
+		}),
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: { panX: 0, panY: 0, scale: 0.5 },
+		layoutSettings: {
+			relaxIterations: 0,
+			scaleAnimationDurationMs: 0,
+			postDragSettleMaxFrames: 0,
+			postScaleChangeSettleMaxFrames: 0,
+			layeredRelayoutSettleMaxFrames: 1,
+			layeredRelayoutSettleMaxFramesFinal: 1
+		}
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const stageRect = stage.getBoundingClientRect();
+		const sourceCircle = getCircle(canvasElement, 'n0');
+		const sourceCenter = getCenter(sourceCircle);
+		const bgX = stageRect.right - 20;
+		const bgY = stageRect.top + stageRect.height / 2;
+
+		await dispatchDoubleClickDrag(sourceCircle, sourceCenter.x, sourceCenter.y, stage, bgX, bgY);
+		await sleep();
+		// Wait for the single relayout frame to finish so positions are stable
+		await waitForFrames(4);
+
+		const titleInput = canvasElement.querySelector('.title-input') as HTMLInputElement | null;
+		expect(titleInput).toBeInTheDocument();
+
+		const newNodeWrapper = titleInput!.closest('.node-wrapper') as HTMLElement;
+		const xBefore = newNodeWrapper.dataset.x;
+		const yBefore = newNodeWrapper.dataset.y;
+
+		// Dispatch a pointer drag on the input exceeding the 5px drag threshold
+		const inputRect = titleInput!.getBoundingClientRect();
+		const cx = inputRect.left + inputRect.width / 2;
+		const cy = inputRect.top + inputRect.height / 2;
+		dispatchPointer(titleInput!, 'pointerdown', cx, cy);
+		dispatchPointer(titleInput!, 'pointermove', cx + 20, cy + 20);
+		dispatchPointer(titleInput!, 'pointerup', cx + 20, cy + 20);
+		await sleep();
+
+		// stopPropagation on the input prevents Stage from seeing the events — node must not move
+		expect(newNodeWrapper.dataset.x).toBe(xBefore);
+		expect(newNodeWrapper.dataset.y).toBe(yBefore);
+		// No extra nodes or edges created by the input interaction
+		expect(canvasElement.querySelectorAll('.node-wrapper')).toHaveLength(2);
+		expect(canvasElement.querySelectorAll('.edge')).toHaveLength(1);
+	}}
+/>
