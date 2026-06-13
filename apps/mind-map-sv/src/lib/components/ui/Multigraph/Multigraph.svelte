@@ -84,6 +84,7 @@
 	let editNodeId = $state<string | null>(null);
 	let actionMenu = $state<{ nodeId: string; position: Point } | null>(null);
 	let duplicateEdgeConfirm = $state<{ edgeId: string } | null>(null);
+	let titleEditNodeId = $state<string | null>(null);
 	let graphRef = $state<HTMLElement | null>(null);
 	let relaxationFrameId: number | null = null;
 	let scaleAnimations = $state<Record<string, NodeScaleAnimation>>({});
@@ -270,6 +271,10 @@
 				newNode ? addEdge(graphWithNode, sourceNode.id, newNode.id) : graphWithNode
 			)
 		);
+
+		if (newNode) {
+			titleEditNodeId = newNode.id;
+		}
 	}
 
 	function handleNodeLongPress(node: NodeData, point: Point) {
@@ -286,6 +291,7 @@
 		actionMenu = null;
 		editNodeId = null;
 		duplicateEdgeConfirm = null;
+		titleEditNodeId = null;
 	}
 
 	function toggleNodePinned(nodeId: string) {
@@ -665,7 +671,20 @@
 				data-y={nodePos.y}
 				style={`left: calc(50% + ${nodePos.x}px); top: calc(50% + ${nodePos.y}px); transform: translate(-50%, -50%) scale(${nodeScale});`}
 			>
-				<Node nodeData={node} isOpen={false} />
+				<Node
+					nodeData={node}
+					isOpen={false}
+					isTitleEditing={titleEditNodeId === node.id}
+					onTitleCommit={(title) => {
+						titleEditNodeId = null;
+						commitUserGraph(
+							updateNodeContent(graph, node.id, {
+								title,
+								description: node.description ?? ''
+							})
+						);
+					}}
+				/>
 			</div>
 		{/each}
 	</Stage>

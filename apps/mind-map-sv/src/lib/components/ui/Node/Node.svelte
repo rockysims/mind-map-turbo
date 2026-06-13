@@ -4,6 +4,7 @@
 	import type { NodeData } from '$lib/components/ui/types/node';
 
 	let descriptionRef = $state<HTMLElement | null>(null);
+	let titleInputRef = $state<HTMLInputElement | null>(null);
 
 	const {
 		nodeData = {
@@ -11,10 +12,14 @@
 			title: 'title_fallback',
 			description: 'description_fallback'
 		},
-		isOpen = false
+		isOpen = false,
+		isTitleEditing = false,
+		onTitleCommit
 	} = $props<{
 		nodeData: NodeData;
 		isOpen: boolean;
+		isTitleEditing?: boolean;
+		onTitleCommit?: (title: string) => void;
 	}>();
 
 	function updateVerticalScrollClass() {
@@ -31,6 +36,15 @@
 		if (!isOpen) return;
 		updateVerticalScrollClass();
 	});
+
+	$effect(() => {
+		if (!isTitleEditing || !titleInputRef) return;
+		const el = titleInputRef;
+		requestAnimationFrame(() => {
+			el.focus();
+			el.select();
+		});
+	});
 </script>
 
 <div
@@ -44,7 +58,25 @@
 		<!-- closed -->
 		{#if !isOpen}
 			<div class="square">
-				<SquareText classList={['title']} text={nodeData.title} />
+				{#if isTitleEditing}
+					<input
+						bind:this={titleInputRef}
+						class="title-input"
+						type="text"
+						value={nodeData.title}
+						onblur={(e) => onTitleCommit?.(e.currentTarget.value)}
+						onkeydown={(e) => {
+							if (e.key === 'Enter') {
+								e.preventDefault();
+								onTitleCommit?.(e.currentTarget.value);
+							}
+						}}
+						onclick={(e) => e.stopPropagation()}
+						onpointerdown={(e) => e.stopPropagation()}
+					/>
+				{:else}
+					<SquareText classList={['title']} text={nodeData.title} />
+				{/if}
 			</div>
 		{/if}
 
@@ -96,6 +128,21 @@
 		font-weight: bold;
 		padding-bottom: 15px;
 		text-align: center;
+	}
+
+	.node .title-input {
+		width: 100%;
+		font-weight: bold;
+		text-align: center;
+		font-size: inherit;
+		font-family: inherit;
+		border: none;
+		outline: 2px solid #4a90e2;
+		border-radius: 3px;
+		background: rgba(255, 255, 255, 0.85);
+		padding: 4px 6px;
+		box-sizing: border-box;
+		touch-action: none;
 	}
 
 	.node .description {
