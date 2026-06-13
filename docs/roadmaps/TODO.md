@@ -40,6 +40,7 @@ More TODO:
 - - - Scale into and out of existence (or fade into and out of existence if scale doesn't work well such as for edges).
 - - Add node & edge / remove edge currently appear instantly.
 - - When a node is pinned and, as a result, new nodes appear they currently appear instantly.
+- - - SOLUTION?: Imagine a path from the upscaled (pinned) node to the other node in question (one of the dis/appearing nodes due to un/pin). Reveal stuff along that path such that the fraction of the path that is revealed matches the fraction of the rescaling during any given frame. The revealing wave front should have a thickness where the opacity goes from 0 to 1 quickly but not instantly so the reveal wave front is not abrupt.
 - - Give new nodes lots of friction when first created (reduce to normal friction over a few seconds). Then make new nodes unpinned by default. Should solve issue where new node moved immediately to new position and the user's eye couldn't follow it.
 
 IMPROVEMENTS:
@@ -52,6 +53,7 @@ IMPROVEMENTS:
 - Find a more elegant way to view/edit/delete tags (plain text doesn't immediately suggest its tags nor make it visually clear at a glance where one tag starts and another begins).
 - Allow tags at the end of the title too when creating a node.
 - New, Load, Save, and Settings (no need for delete graph. Note: Load and Save are just new names for import and export). "New" should require confirmation. Settings can be the place to adjust tag colors and it can be a catch all place for future settings (such as how fast node size drops off due to distance from pinned node, font size, border width, etc.).
+- When a node un/pins, trans
 
 PROBLEMS:
 
