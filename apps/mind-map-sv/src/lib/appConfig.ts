@@ -21,6 +21,10 @@ export const APP_CONFIG = {
 			halfHeightPx: 6, // arrowhead half-height from edge centerline
 			referenceNodeScale: 0.25 // node scale where the configured arrow size applies
 		},
+		edgeStroke: {
+			widthPx: 2, // edge line width at the reference node scale
+			referenceNodeScale: 0.25 // node scale where the configured stroke width applies
+		},
 		zoom: {
 			minScale: 0.05, // minimum stage zoom scale
 			maxScale: 4 // maximum stage zoom scale

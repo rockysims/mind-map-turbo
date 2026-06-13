@@ -62,6 +62,8 @@
 		EDGE_ARROW_HALF_HEIGHT,
 		EDGE_ARROW_LENGTH,
 		EDGE_ARROW_REFERENCE_NODE_SCALE,
+		EDGE_STROKE_REFERENCE_NODE_SCALE,
+		EDGE_STROKE_WIDTH,
 		MIN_NODE_HIT_RADIUS
 	} from '$lib/constants.js';
 	import type { ViewState } from '$lib/migrations.js';
@@ -447,6 +449,27 @@
 		return targetScale / EDGE_ARROW_REFERENCE_NODE_SCALE;
 	}
 
+	function edgeStrokeScale(visibility: RenderableEdgeVisibility): number {
+		if (visibility.kind === 'boundary') {
+			return nodeScale(visibility.visibleNodeId) / EDGE_STROKE_REFERENCE_NODE_SCALE;
+		}
+
+		const edge = visibility.edge;
+		if (edge.directed === true) {
+			return nodeScale(edge.targetNodeId) / EDGE_STROKE_REFERENCE_NODE_SCALE;
+		}
+
+		return (
+			(nodeScale(edge.sourceNodeId) + nodeScale(edge.targetNodeId)) /
+			2 /
+			EDGE_STROKE_REFERENCE_NODE_SCALE
+		);
+	}
+
+	function nodeScale(nodeId: string): number {
+		return graphLayout.scaleByNodeId[nodeId] ?? 1;
+	}
+
 	function duplicateEdgeIdentifier(edgeId: string): string {
 		const edge = graph.edges.find((candidate) => candidate.id === edgeId);
 		if (!edge) return 'Unknown edge';
@@ -682,6 +705,7 @@
 				{@const edge = visibility.edge}
 				{@const edgePoints = edgeRenderPoints(visibility)}
 				{@const arrowScale = edgeArrowScale(visibility)}
+				{@const strokeScale = edgeStrokeScale(visibility)}
 				<div
 					class="edge"
 					class:directed={edge.directed === true && visibility.kind === 'visible'}
@@ -703,7 +727,8 @@
 					data-edge-arrow-scale={edge.directed === true && visibility.kind === 'visible'
 						? arrowScale
 						: undefined}
-					style={`${edgeStyle(edgePoints.source, edgePoints.target)} --edge-background: ${edgeBackground(visibility)}; color: ${edge.color}; --edge-arrow-length: ${EDGE_ARROW_LENGTH * arrowScale}px; --edge-arrow-half-height: ${EDGE_ARROW_HALF_HEIGHT * arrowScale}px;`}
+					data-edge-stroke-scale={strokeScale}
+					style={`${edgeStyle(edgePoints.source, edgePoints.target)} --edge-background: ${edgeBackground(visibility)}; color: ${edge.color}; --edge-arrow-length: ${EDGE_ARROW_LENGTH * arrowScale}px; --edge-arrow-half-height: ${EDGE_ARROW_HALF_HEIGHT * arrowScale}px; --edge-stroke-width: ${EDGE_STROKE_WIDTH * strokeScale}px;`}
 				></div>
 			{/each}
 		</div>
@@ -828,7 +853,7 @@
 
 	.edge {
 		position: absolute;
-		height: 2px;
+		height: var(--edge-stroke-width);
 		transform-origin: left center;
 	}
 

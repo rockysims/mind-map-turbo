@@ -396,6 +396,9 @@
 		expect(Number(initialEdge.getAttribute('data-edge-arrow-scale'))).toBeCloseTo(
 			0.7 / APP_CONFIG.multigraph.edgeArrow.referenceNodeScale
 		);
+		expect(Number(initialEdge.getAttribute('data-edge-stroke-scale'))).toBeCloseTo(
+			0.7 / APP_CONFIG.multigraph.edgeStroke.referenceNodeScale
+		);
 		const initialEdgeRect = initialEdge.getBoundingClientRect();
 		const sourceCircleRect = getCircle(canvasElement, 'n0').getBoundingClientRect();
 		const targetCircleRect = getCircle(canvasElement, 'n1').getBoundingClientRect();
@@ -434,6 +437,9 @@
 		expect(flippedEdge).toHaveAttribute('data-arrow-target-node-id', 'n0');
 		expect(Number(flippedEdge.getAttribute('data-edge-arrow-scale'))).toBeCloseTo(
 			1 / APP_CONFIG.multigraph.edgeArrow.referenceNodeScale
+		);
+		expect(Number(flippedEdge.getAttribute('data-edge-stroke-scale'))).toBeCloseTo(
+			1 / APP_CONFIG.multigraph.edgeStroke.referenceNodeScale
 		);
 		expect((canvas.getByLabelText('Edge tags for Node 1') as HTMLInputElement).value).toBe(
 			'rel strong'
