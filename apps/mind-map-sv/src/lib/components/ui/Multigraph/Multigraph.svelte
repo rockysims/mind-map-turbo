@@ -32,42 +32,16 @@
 		updateEdge,
 		updateNodeContent
 	} from './lib/graph.js';
-	import {
-		deriveGraphLayout,
-		relaxGraphPositionsStep,
-		withRelaxedGraphPositions,
-		withSettledGraphPositions
-	} from './lib/graphLayout.js';
+	import { deriveGraphLayout, withSettledGraphPositions } from './lib/graphLayout.js';
 	import { hopsFromPinned } from './lib/layout.js';
 	import type { LayoutSettings } from './lib/layoutSettings.js';
 	import { withDefaultLayoutSettings } from './lib/layoutSettings.js';
 	import {
 		edgeVisibilityForPinnedNeighborhood,
 		graphWithVisibleNodes,
-		pinnedNodeIds,
 		visibleNodeIdsForPinnedNeighborhood
 	} from './lib/boundedVisibility.js';
-	import {
-		advanceLayeredRelayout,
-		initialLayeredRelayoutState,
-		participatingNodeIds,
-		type LayeredRelayoutState,
-		relayoutStateKey,
-		shouldClearLayeredRelayoutState
-	} from './lib/layeredRelayout.js';
-	import {
-		animatedScalesAt,
-		createScaleAnimations,
-		hasActiveScaleAnimations,
-		pruneFinishedScaleAnimations,
-		type NodeScaleAnimation
-	} from './lib/scaleAnimation.js';
-	import {
-		scaleChangeLayoutAnchoredNodeIds,
-		settleStateAfterScaleAnimationsEnd,
-		settleStateForScaleChange,
-		shouldClearScaleChangeFocalNode
-	} from './lib/scaleChangeSettle.js';
+	import { LayoutRuntime } from './lib/layoutRuntime.svelte.js';
 	import { externalGraphSyncToken } from './lib/graphSync.js';
 	import {
 		collectLegendTags,
@@ -122,19 +96,19 @@
 	let titleEditContext = $state<{ nodeId: string; edgeId?: string } | null>(null);
 	let tagColorLegendOpen = $state(false);
 	let graphRef = $state<HTMLElement | null>(null);
-	let relaxationFrameId: number | null = null;
-	let scaleAnimations = $state<Record<string, NodeScaleAnimation>>({});
-	let animationNowMs = $state(0);
-	let settleFramesRemaining = $state(0);
-	let pendingPostScaleSettle = $state(false);
-	let scaleChangeFocalNodeId = $state<string | null>(null);
-	let layeredRelayoutState = $state<LayeredRelayoutState | null>(null);
-	let lastRelayoutStateKey = $state<string | null>(null);
 	let lastPinnedNodeId = $state<string | null>(null);
 	let lastSyncedGeneration = $state(-1);
+	const layoutRuntime = new LayoutRuntime({
+		getGraph: () => graph,
+		getLayoutSettings: () => layoutSettings,
+		getActiveDragNodeId: () => activeDragNodeId,
+		getFallbackAnchorNodeId: () => lastPinnedNodeId,
+		applyGraph: (nextGraph) => {
+			graph = nextGraph;
+		}
+	});
 
 	const resolvedLayoutSettings = $derived(withDefaultLayoutSettings(layoutSettings));
-	const animatedScaleByNodeId = $derived(animatedScalesAt(scaleAnimations, animationNowMs));
 	const hopsByNodeId = $derived(hopsFromPinned(graph));
 	const visibleNodeIds = $derived(
 		visibleNodeIdsForPinnedNeighborhood(graph, hopsByNodeId, {
@@ -155,16 +129,11 @@
 		)
 	);
 	const legendTags = $derived(collectLegendTags(graph));
-	const scaleChangeSettleState = $derived({
-		pendingPostScaleSettle,
-		settleFramesRemaining,
-		hasActiveScaleAnimations: hasActiveScaleAnimations(scaleAnimations, animationNowMs)
-	});
-	const scaleAnchoredNodeIds = $derived(
-		scaleChangeLayoutAnchoredNodeIds(scaleChangeFocalNodeId, scaleChangeSettleState)
-	);
 	const graphLayout = $derived(
-		deriveGraphLayout(visibleGraph, graphLayoutOptions(visibleGraph, { relaxIterations: 0 }))
+		deriveGraphLayout(
+			visibleGraph,
+			layoutRuntime.layoutOptions(visibleGraph, { relaxIterations: 0 })
+		)
 	);
 	const editNode = $derived(graph.nodes.find((node) => node.id === editNodeId) ?? null);
 	const actionMenuNode = $derived.by(() => {
@@ -180,14 +149,7 @@
 		const incoming = untrack(() => multigraphData);
 		const primary = untrack(() => defaultPrimaryNodeId);
 		const settings = untrack(() => layoutSettings);
-		stopRelaxationLoop();
-		scaleAnimations = {};
-		animationNowMs = 0;
-		settleFramesRemaining = 0;
-		pendingPostScaleSettle = false;
-		scaleChangeFocalNodeId = null;
-		layeredRelayoutState = null;
-		lastRelayoutStateKey = null;
+		layoutRuntime.reset();
 		graph = withSettledGraphPositions(incoming, { settings });
 		primaryNodeId = primary;
 		lastPinnedNodeId =
@@ -211,7 +173,7 @@
 
 	$effect(() => {
 		return () => {
-			if (relaxationFrameId !== null) cancelAnimationFrame(relaxationFrameId);
+			layoutRuntime.stop();
 		};
 	});
 
@@ -248,33 +210,31 @@
 
 	function handleNodeMoved(node: NodeData, point: Point) {
 		const movedGraph = moveNode(graph, node.id, point);
-		commitUserGraph(withRelaxedPositions(movedGraph, node.id, 1));
+		commitUserGraph(layoutRuntime.relaxAfterMutation(movedGraph, node.id, 1));
 	}
 
 	function handleNodeDragStart(node: NodeData) {
 		activeDragNodeId = node.id;
-		settleFramesRemaining = 0;
-		startRelaxationLoop();
+		layoutRuntime.beginDrag();
 	}
 
 	function handleNodeDragEnd(node: NodeData) {
 		activeDragNodeId = null;
 
 		if (node.pinned) {
-			commitUserGraph(withScaleAnimation(graph, node.id));
+			commitUserGraph(layoutRuntime.beginScaleChange(graph, node.id));
 			return;
 		}
 
-		commitUserGraph(withRelaxedPositions(graph, null, 1));
-		settleFramesRemaining = resolvedLayoutSettings.postDragSettleMaxFrames;
-		startRelaxationLoop();
+		commitUserGraph(layoutRuntime.relaxAfterMutation(graph, null, 1));
+		layoutRuntime.settleAfterDrag();
 	}
 
 	function handleNodeMakePrimary(node: NodeData) {
 		closeOverlays();
 		const wasPinned = node.pinned === true;
 		lastPinnedNodeId = node.id;
-		commitUserGraph(withScaleAnimation(togglePinned(graph, node.id), node.id));
+		commitUserGraph(layoutRuntime.beginScaleChange(togglePinned(graph, node.id), node.id));
 
 		if (!wasPinned) {
 			primaryNodeId = node.id;
@@ -294,7 +254,9 @@
 		if (existing) {
 			duplicateEdgeConfirm = { edgeId: existing.id };
 		} else {
-			commitUserGraph(withRelaxedPositions(addEdge(graph, sourceNode.id, targetNode.id)));
+			commitUserGraph(
+				layoutRuntime.relaxAfterMutation(addEdge(graph, sourceNode.id, targetNode.id))
+			);
 		}
 	}
 
@@ -307,7 +269,7 @@
 			: graphWithNode;
 		const newEdge = graphWithEdge.edges[graphWithEdge.edges.length - 1] ?? null;
 
-		commitUserGraph(withRelaxedPositions(graphWithEdge));
+		commitUserGraph(layoutRuntime.relaxAfterMutation(graphWithEdge));
 
 		if (newNode) {
 			titleEditContext = { nodeId: newNode.id, edgeId: newEdge?.id };
@@ -334,11 +296,11 @@
 
 	function toggleNodePinned(nodeId: string) {
 		lastPinnedNodeId = nodeId;
-		commitUserGraph(withScaleAnimation(togglePinned(graph, nodeId), nodeId));
+		commitUserGraph(layoutRuntime.beginScaleChange(togglePinned(graph, nodeId), nodeId));
 	}
 
 	function deleteNode(nodeId: string) {
-		commitUserGraph(withRelaxedPositions(removeNode(graph, nodeId)));
+		commitUserGraph(layoutRuntime.relaxAfterMutation(removeNode(graph, nodeId)));
 		if (lastPinnedNodeId === nodeId) {
 			lastPinnedNodeId = graph.nodes.find((candidate) => candidate.id !== nodeId)?.id ?? null;
 		}
@@ -385,244 +347,16 @@
 		graph = nextGraph;
 		onMultigraphChange?.(nextGraph);
 	}
-
-	function graphLayoutOptions(
-		layoutGraph: MultigraphData,
-		overrides: {
-			activeDragNodeId?: string | null;
-			relaxIterations?: number;
-			scaleByNodeId?: Record<string, number>;
-			scaleAnchoredNodeIds?: readonly string[];
-			participatingNodeIds?: ReadonlySet<string>;
-			mobilityByNodeId?: Record<string, number>;
-		} = {}
-	) {
-		const nodeIds = layoutGraph.nodes.map((node) => node.id);
-		const relayoutParticipating =
-			overrides.participatingNodeIds ?? participatingNodeIds(nodeIds, layeredRelayoutState);
-
-		return {
-			settings: layoutSettings,
-			activeDragNodeId: overrides.activeDragNodeId ?? activeDragNodeId,
-			scaleAnchoredNodeIds: overrides.scaleAnchoredNodeIds ?? scaleAnchoredNodeIds,
-			relaxIterations: overrides.relaxIterations,
-			scaleByNodeId: overrides.scaleByNodeId ?? animatedScaleByNodeId,
-			participatingNodeIds: relayoutParticipating,
-			mobilityByNodeId: overrides.mobilityByNodeId
-		};
-	}
-
-	function startLayeredRelayout(nextGraph: MultigraphData, nowMs: number): void {
-		const pinnedIds = pinnedNodeIds(nextGraph);
-		layeredRelayoutState = initialLayeredRelayoutState(
-			pinnedIds,
-			resolvedLayoutSettings.layeredRelayoutSettleMaxFrames
-		);
-		lastRelayoutStateKey = relayoutStateKey(layeredRelayoutState);
-		animationNowMs = nowMs;
-	}
-
-	function withRelaxedPositions(
-		nextGraph: MultigraphData,
-		dragNodeId: string | null = activeDragNodeId,
-		relaxIterations = layoutSettings.relaxIterations
-	): MultigraphData {
-		const nextVisibleNodeIds = visibleNodeIdsForPinnedNeighborhood(
-			nextGraph,
-			hopsFromPinned(nextGraph),
-			{
-				displayedLayers: resolvedLayoutSettings.displayedLayers,
-				fallbackAnchorNodeId: lastPinnedNodeId
-			}
-		);
-		const nextVisibleGraph = graphWithVisibleNodes(nextGraph, nextVisibleNodeIds);
-		const relaxedVisibleGraph = withRelaxedGraphPositions(
-			nextVisibleGraph,
-			graphLayoutOptions(nextVisibleGraph, {
-				activeDragNodeId: dragNodeId,
-				relaxIterations
-			})
-		);
-		return {
-			...nextGraph,
-			posByNodeId: {
-				...nextGraph.posByNodeId,
-				...relaxedVisibleGraph.posByNodeId
-			}
-		};
-	}
-
-	function withScaleAnimation(nextGraph: MultigraphData, focalNodeId: string): MultigraphData {
-		scaleChangeFocalNodeId = focalNodeId;
-		const nextVisibleNodeIds = visibleNodeIdsForPinnedNeighborhood(
-			nextGraph,
-			hopsFromPinned(nextGraph),
-			{
-				displayedLayers: resolvedLayoutSettings.displayedLayers,
-				fallbackAnchorNodeId: lastPinnedNodeId
-			}
-		);
-		const nextVisibleGraph = graphWithVisibleNodes(nextGraph, nextVisibleNodeIds);
-		const fromLayout = deriveGraphLayout(
-			visibleGraph,
-			graphLayoutOptions(visibleGraph, { relaxIterations: 0 })
-		);
-		const targetLayout = deriveGraphLayout(
-			nextVisibleGraph,
-			graphLayoutOptions(nextVisibleGraph, { relaxIterations: 0 })
-		);
-		const nowMs = performance.now();
-		const nextAnimations =
-			resolvedLayoutSettings.scaleAnimationDurationMs > 0
-				? createScaleAnimations(
-						fromLayout.scaleByNodeId,
-						targetLayout.scaleByNodeId,
-						nowMs,
-						resolvedLayoutSettings.scaleAnimationDurationMs
-					)
-				: {};
-
-		scaleAnimations = nextAnimations;
-		animationNowMs = nowMs;
-		startLayeredRelayout(nextGraph, nowMs);
-		const settleState = settleStateForScaleChange(
-			Object.keys(nextAnimations).length > 0,
-			resolvedLayoutSettings.postScaleChangeSettleMaxFrames
-		);
-		pendingPostScaleSettle = settleState.pendingPostScaleSettle;
-		settleFramesRemaining = settleState.settleFramesRemaining;
-
-		if (
-			Object.keys(nextAnimations).length > 0 ||
-			settleFramesRemaining > 0 ||
-			layeredRelayoutState?.active
-		) {
-			startRelaxationLoop();
-		}
-
-		const relaxedVisibleGraph = withRelaxedGraphPositions(
-			nextVisibleGraph,
-			graphLayoutOptions(nextVisibleGraph, {
-				relaxIterations: layoutSettings.relaxIterations,
-				scaleByNodeId: animatedScalesAt(nextAnimations, nowMs),
-				scaleAnchoredNodeIds: [focalNodeId]
-			})
-		);
-		return {
-			...nextGraph,
-			posByNodeId: {
-				...nextGraph.posByNodeId,
-				...relaxedVisibleGraph.posByNodeId
-			}
-		};
-	}
-
-	function startRelaxationLoop() {
-		if (relaxationFrameId !== null) return;
-		relaxationFrameId = requestAnimationFrame(relaxationStep);
-	}
-
-	function stopRelaxationLoop() {
-		if (relaxationFrameId === null) return;
-		cancelAnimationFrame(relaxationFrameId);
-		relaxationFrameId = null;
-	}
-
-	function relaxationStep(nowMs: number) {
-		relaxationFrameId = null;
-		animationNowMs = nowMs;
-
-		const nextScaleByNodeId = animatedScalesAt(scaleAnimations, nowMs);
-		const shouldRelax =
-			activeDragNodeId !== null ||
-			settleFramesRemaining > 0 ||
-			Object.keys(nextScaleByNodeId).length > 0 ||
-			layeredRelayoutState?.active === true;
-
-		if (shouldRelax) {
-			const currentVisibleGraph = visibleGraph;
-			const step = relaxGraphPositionsStep(
-				currentVisibleGraph,
-				graphLayoutOptions(currentVisibleGraph, {
-					relaxIterations: 1,
-					scaleByNodeId: nextScaleByNodeId
-				})
-			);
-			graph = {
-				...graph,
-				posByNodeId: {
-					...graph.posByNodeId,
-					...step.data.posByNodeId
-				}
-			};
-
-			if (activeDragNodeId === null && settleFramesRemaining > 0) {
-				settleFramesRemaining -= 1;
-				if (step.maxPositionDelta <= resolvedLayoutSettings.postDragSettleEpsilonPx) {
-					settleFramesRemaining = 0;
-				}
-			}
-
-			if (activeDragNodeId === null && layeredRelayoutState?.active) {
-				const previousStateKey = lastRelayoutStateKey;
-				layeredRelayoutState = advanceLayeredRelayout(layeredRelayoutState, {
-					maxPositionDelta: step.maxPositionDelta,
-					settleEpsilonPx: resolvedLayoutSettings.layeredRelayoutSettleEpsilonPx
-				});
-				const nextStateKey = relayoutStateKey(layeredRelayoutState);
-				if (nextStateKey !== previousStateKey) {
-					lastRelayoutStateKey = nextStateKey;
-				}
-			}
-		}
-
-		scaleAnimations = pruneFinishedScaleAnimations(scaleAnimations, nowMs);
-
-		const postScaleSettle = settleStateAfterScaleAnimationsEnd(
-			pendingPostScaleSettle,
-			resolvedLayoutSettings.postScaleChangeSettleMaxFrames
-		);
-		if (postScaleSettle !== null) {
-			pendingPostScaleSettle = postScaleSettle.pendingPostScaleSettle;
-			settleFramesRemaining = postScaleSettle.settleFramesRemaining;
-		}
-
-		if (
-			shouldClearScaleChangeFocalNode(scaleChangeFocalNodeId, {
-				pendingPostScaleSettle,
-				settleFramesRemaining,
-				hasActiveScaleAnimations: hasActiveScaleAnimations(scaleAnimations, nowMs)
-			})
-		) {
-			scaleChangeFocalNodeId = null;
-		}
-
-		if (shouldClearLayeredRelayoutState(layeredRelayoutState)) {
-			layeredRelayoutState = null;
-			lastRelayoutStateKey = null;
-		}
-
-		if (
-			activeDragNodeId !== null ||
-			settleFramesRemaining > 0 ||
-			hasActiveScaleAnimations(scaleAnimations, nowMs) ||
-			layeredRelayoutState?.active
-		) {
-			startRelaxationLoop();
-		}
-	}
 </script>
 
 <div
 	class="graph"
 	bind:this={graphRef}
-	data-settling={settleFramesRemaining > 0 ? 'true' : undefined}
-	data-scale-change-focal={scaleAnchoredNodeIds[0]}
-	data-scale-animation-active={hasActiveScaleAnimations(scaleAnimations, animationNowMs)
-		? 'true'
-		: undefined}
-	data-layered-relayout-active={layeredRelayoutState?.active ? 'true' : undefined}
-	data-layered-relayout-state={lastRelayoutStateKey ?? undefined}
+	data-settling={layoutRuntime.isSettling ? 'true' : undefined}
+	data-scale-change-focal={layoutRuntime.scaleAnchoredNodeIds[0]}
+	data-scale-animation-active={layoutRuntime.hasActiveScaleAnimations ? 'true' : undefined}
+	data-layered-relayout-active={layoutRuntime.isLayeredRelayoutActive ? 'true' : undefined}
+	data-layered-relayout-state={layoutRuntime.relayoutStateKey ?? undefined}
 >
 	<button
 		type="button"
@@ -746,7 +480,7 @@
 			edgeIdentifier={duplicateEdgeIdentifier(graph, confirmEdgeId)}
 			onCancel={() => (duplicateEdgeConfirm = null)}
 			onConfirm={() => {
-				commitUserGraph(withRelaxedPositions(removeEdge(graph, confirmEdgeId)));
+				commitUserGraph(layoutRuntime.relaxAfterMutation(removeEdge(graph, confirmEdgeId)));
 				duplicateEdgeConfirm = null;
 			}}
 		/>

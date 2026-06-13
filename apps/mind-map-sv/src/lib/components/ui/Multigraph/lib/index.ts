@@ -10,6 +10,7 @@ export * from './hitTest.js';
 export * from './layout.js';
 export * from './layoutSettings.js';
 export * from './layeredRelayout.js';
+export * from './layoutRuntime.svelte.js';
 export * from './longPress.js';
 export * from './physics.js';
 export * from './scaleAnimation.js';
