@@ -20,8 +20,6 @@ export interface LayoutSettings {
 	layeredRelayoutSettleMaxFrames: number;
 	layeredRelayoutSettleMaxFramesFinal: number;
 	layeredRelayoutSettleEpsilonPx: number;
-	layeredRelayoutMobilityStep: number;
-	layeredRelayoutMobilityFloor: number;
 }
 
 export const DEFAULT_LAYOUT_SETTINGS: LayoutSettings = {

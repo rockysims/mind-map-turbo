@@ -48,9 +48,7 @@ export const APP_CONFIG = {
 			scaleAnimationDurationMs: 500, // duration of node scale change animation
 			layeredRelayoutSettleMaxFrames: 20, // max frames per layered relayout phase
 			layeredRelayoutSettleMaxFramesFinal: 200, // max frames for final layered relayout settle
-			layeredRelayoutSettleEpsilonPx: 0.25, // motion threshold to end layered relayout
-			layeredRelayoutMobilityStep: 0.2, // per-phase mobility reduction during relayout
-			layeredRelayoutMobilityFloor: 0.05 // minimum node mobility during relayout
+			layeredRelayoutSettleEpsilonPx: 0.25 // motion threshold to end layered relayout
 		}
 	}
 } as const;

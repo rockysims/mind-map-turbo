@@ -41,7 +41,6 @@
 		participatingNodeIds,
 		type LayeredRelayoutState,
 		relayoutStateKey,
-		relayoutMobilityByNodeId,
 		shouldClearLayeredRelayoutState
 	} from './lib/layeredRelayout.js';
 	import {
@@ -356,14 +355,6 @@
 		const nodeIds = layoutGraph.nodes.map((node) => node.id);
 		const relayoutParticipating =
 			overrides.participatingNodeIds ?? participatingNodeIds(nodeIds, layeredRelayoutState);
-		const relayoutMobility =
-			overrides.mobilityByNodeId ??
-			relayoutMobilityByNodeId(
-				nodeIds,
-				pinnedNodeIds(layoutGraph),
-				layeredRelayoutState,
-				resolvedLayoutSettings
-			);
 
 		return {
 			settings: layoutSettings,
@@ -372,7 +363,7 @@
 			relaxIterations: overrides.relaxIterations,
 			scaleByNodeId: overrides.scaleByNodeId ?? animatedScaleByNodeId,
 			participatingNodeIds: relayoutParticipating,
-			mobilityByNodeId: relayoutMobility
+			mobilityByNodeId: overrides.mobilityByNodeId
 		};
 	}
 
