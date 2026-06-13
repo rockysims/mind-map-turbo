@@ -50,6 +50,8 @@ IMPROVEMENTS:
 - Scale arrow size with node.
 - Tabs look like buttons. UI should visually indicate its a tab by giving it a flat bottom and perhaps drawing an outline or adding a background to the contents of the tab.
 - Find a more elegant way to view/edit/delete tags (plain text doesn't immediately suggest its tags nor make it visually clear at a glance where one tag starts and another begins).
+- Allow tags at the end of the title too when creating a node.
+- New, Load, Save, and Settings (no need for dropdown to select graph nor delete graph. Note: Load and Save are just new names for import and export).
 
 PROBLEMS:
 
