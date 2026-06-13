@@ -686,15 +686,22 @@
 		);
 		await sleep();
 
+		const changedGraph = lastChangedGraph(args);
+		const createdNode = changedGraph.nodes.find((node) => node.id === 'n1');
+		const createdPosition = changedGraph.posByNodeId.n1;
+		const sourcePosition = args.multigraphData.posByNodeId.n0;
 		const newCircle = getCircle(canvasElement, 'n1');
 		const newCenter = getCenter(newCircle);
 		expect(Number.isFinite(newCenter.x)).toBe(true);
-		expect(newCenter.y).toBeCloseTo(dropY);
-		expect(distanceBetween(sourceCenter, newCenter)).toBeLessThan(
-			distanceBetween(sourceCenter, { x: dropX, y: dropY })
+		expect(createdPosition.x).toBeCloseTo(sourcePosition.x + 560);
+		expect(createdPosition.y).toBeCloseTo(sourcePosition.y);
+		expect(canvasElement.querySelector('[data-node-id="n1"] .node')).toHaveAttribute(
+			'data-pinned',
+			'true'
 		);
 		expect(canvasElement.querySelector('[data-edge-id="e0"]')).toBeInTheDocument();
-		expect(lastChangedGraph(args).nodes.map((node) => node.id)).toEqual(['n0', 'n1']);
+		expect(changedGraph.nodes.map((node) => node.id)).toEqual(['n0', 'n1']);
+		expect(createdNode?.pinned).toBe(true);
 	}}
 />
 
@@ -1178,9 +1185,10 @@
 		}),
 		defaultPrimaryNodeId: 'n0',
 		initialViewState: { panX: 0, panY: 0, scale: 0.5 },
-		layoutSettings: { relaxIterations: 1 }
+		layoutSettings: { relaxIterations: 1 },
+		onMultigraphChange: fn()
 	}}
-	play={async ({ canvasElement }: PlayContext) => {
+	play={async ({ canvasElement, args }: PlayContext) => {
 		await waitForLayout();
 		const stage = getStage(canvasElement);
 		const stageRect = stage.getBoundingClientRect();
@@ -1197,6 +1205,11 @@
 		const titleInput = canvasElement.querySelector('.title-input') as HTMLInputElement | null;
 		expect(titleInput).toBeInTheDocument();
 		expect(document.activeElement).toBe(titleInput);
+		expect(canvasElement.querySelector('[data-node-id="n1"] .node')).toHaveAttribute(
+			'data-pinned',
+			'true'
+		);
+		expect(lastChangedGraph(args).nodes.find((node) => node.id === 'n1')?.pinned).toBe(true);
 
 		titleInput!.value = 'My New Node';
 		titleInput!.dispatchEvent(

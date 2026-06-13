@@ -263,7 +263,7 @@
 
 	function handleNodeDoubleClickDropOntoBackground(sourceNode: NodeData, point: Point) {
 		closeOverlays();
-		const graphWithNode = addNode(graph, { position: point });
+		const graphWithNode = addNode(graph, { pinned: true, position: point });
 		const newNode = graphWithNode.nodes[graphWithNode.nodes.length - 1] ?? null;
 
 		commitUserGraph(
