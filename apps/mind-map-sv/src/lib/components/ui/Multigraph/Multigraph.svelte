@@ -747,7 +747,7 @@
 				onkeydown={() => {}}
 			>
 				<p id="duplicate-edge-dialog-title" class="duplicate-edge-dialog-message">
-					<span>Remove edge:</span>
+					<span>Remove edge?</span>
 					<span class="duplicate-edge-dialog-edge">{edgeIdentifier}</span>
 				</p>
 				<div class="duplicate-edge-dialog-actions">

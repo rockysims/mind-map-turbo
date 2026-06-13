@@ -1111,7 +1111,7 @@
 		const dialog = canvasElement.querySelector('[role="dialog"]');
 		expect(dialog).toBeInTheDocument();
 		expect(dialog?.querySelector('.duplicate-edge-dialog-message')).toHaveTextContent(
-			'Remove edge:'
+			'Remove edge?'
 		);
 		expect(dialog?.querySelector('.duplicate-edge-dialog-edge')).toHaveTextContent(
 			'Node 0 -- Node 1'
@@ -1172,7 +1172,7 @@
 		const dialog = canvasElement.querySelector('[role="dialog"]');
 		expect(dialog).toBeInTheDocument();
 		expect(dialog?.querySelector('.duplicate-edge-dialog-message')).toHaveTextContent(
-			'Remove edge:'
+			'Remove edge?'
 		);
 		expect(dialog?.querySelector('.duplicate-edge-dialog-edge')).toHaveTextContent(
 			'Node 0 -- Node 1'
