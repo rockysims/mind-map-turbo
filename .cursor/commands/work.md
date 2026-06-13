@@ -1,25 +1,41 @@
----
-description: The /work directive — run a task in a parallel git worktree and offer to merge back when done
-alwaysApply: true
----
-
 # `/work`: parallel worktree workflow
 
-When the user's prompt contains `/work` (typically as the first token), do
-the task in a **fresh git worktree on a fresh branch** instead of editing
-the current one. This lets the user run multiple tasks in parallel without
-the worktrees stepping on each other, and keeps the active branch clean
-until the work is reviewed and merged.
+Use this command when the user wants a task done in a **fresh git worktree on
+a fresh branch** instead of editing the current one. This lets the user run
+multiple tasks in parallel without the worktrees stepping on each other, and
+keeps the active branch clean until the work is reviewed and merged.
 
-## Trigger
+`/work` is purely about *where* the work happens, not *how*. Follow all the
+normal repo rules (`core.mdc`, `commits.mdc`, `plans.mdc`, and the language
+conventions) while inside the worktree.
 
-Activates when the user prompt:
+## Delegating the plumbing (optional, recommended for non-trivial tasks)
 
-- starts with `/work` (e.g. `/work fix the pinch zoom jitter`), or
-- contains `/work` as a standalone token followed by a task description.
+The setup/teardown steps are deterministic git/shell plumbing. Their verbose
+instructions and command back-and-forth don't need to sit in this (expensive)
+agent's context. For any non-trivial task, hand the plumbing to a `shell`
+subagent (Task tool, `subagent_type: "shell"`) running a cheap, fast model
+(prefer `composer-2.5-fast`). For a tiny task, just run it inline — the
+subagent round-trip can cost more than it saves.
 
-Do **not** activate on incidental matches like the word "work" inside a
-sentence — only the literal `/work` directive.
+**Delegate (mechanical):** Step 2 (create worktree + collision `-2`/`-3`),
+Step 3 (install deps), Step 5b (detach HEAD), and the command-running inside
+Step 5 (dry-run merge) and Step 7 (merge + cleanup).
+
+**Keep on this agent (judgment):** Step 1 (derive `<type>`/`<slug>` from the
+prompt), Step 4 (the actual work), interpreting Step 5's conflict output, the
+Step 6 report, parsing the user's merge reply, and the Step 7 `git branch -d`
+failure escalation.
+
+When you delegate:
+
+- Pass the subagent everything it needs (`<type>`, `<slug>`, `<BASE>`, repo
+  root path) — subagents don't share this agent's context.
+- Have it **return the facts** you need back (worktree path, branch name,
+  base branch, install outcome, raw merge/clean output).
+- Tell it to **stop and report, never improvise**, on any edge case (worktree
+  already exists, dirty source, slug collision, `git branch -d` failure).
+  Subagents can't ask the user; decisions come back here.
 
 ## Plan the run with a TodoWrite list
 
