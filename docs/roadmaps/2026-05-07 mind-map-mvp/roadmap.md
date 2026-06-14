@@ -49,6 +49,7 @@ individual PR-sized tasks.
 | 04g | Layout settle: eliminate endless drift/rotation    | complete    | [milestone](milestones/04g-layout-settle-eliminate-drift.md), [plan](plans/2026-06-13%2004g-layout-settle-rigid-motion.md)                      |
 | 04h | Thin the Multigraph component (refactor)           | complete    | [milestone](milestones/04h-multigraph-thin-component-refactor.md), [plan](plans/2026-06-13%2004h-multigraph-thin-component-refactor.md)         |
 | 04i | Eliminate appearance/disappearance abruptness      | complete    | [milestone](milestones/04i-eliminate-appearance-abruptness.md), [plan](plans/2026-06-13%2004i-enter-exit-and-reveal-wave.md)                    |
+| 04j | Edge occlusion fade near unrelated nodes           | not started | [milestone](milestones/04j-edge-occlusion-fade.md), [plan](plans/2026-06-13%2004j-edge-occlusion-fade.md)                                       |
 | 05  | Multiplayer                                        | not started | [milestones/05-multiplayer.md](milestones/05-multiplayer.md)                                                                                    |
 | 06  | Search                                             | not started | [milestones/06-search.md](milestones/06-search.md)                                                                                              |
 
@@ -56,7 +57,9 @@ Milestones 04a-04i sit between persistence and multiplayer. Milestone 04b
 intentionally supersedes 04a's Fibonacci reveal and dimming behavior. Milestone
 04h is a behavior-preserving refactor, not new product scope. Milestone 04i adds
 enter/exit and pin reveal-wave animation as pure modules so 04h can absorb the
-wiring; if 04h lands first, 04i targets the post-split files.
+wiring; if 04h lands first, 04i targets the post-split files. Milestone 04j adds
+edge-local fade windows for visual underpasses without changing graph
+connectivity or layout routing.
 
 ## How this directory is organized
 
