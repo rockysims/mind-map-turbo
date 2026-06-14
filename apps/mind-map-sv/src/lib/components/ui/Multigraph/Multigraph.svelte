@@ -603,7 +603,8 @@
 				{@const effectiveEdgeOcclusionParameters = edgeOcclusionParametersForZoom(
 					{
 						clearancePx: resolvedLayoutSettings.edgeOcclusionClearancePx,
-						fadeWidthPx: resolvedLayoutSettings.edgeOcclusionFadeWidthPx
+						fadeWidthPx: resolvedLayoutSettings.edgeOcclusionFadeWidthPx,
+						zoomScaleExponent: resolvedLayoutSettings.edgeOcclusionZoomScaleExponent
 					},
 					stageScale
 				)}

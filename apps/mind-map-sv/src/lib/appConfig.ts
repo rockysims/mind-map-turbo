@@ -56,6 +56,7 @@ export const APP_CONFIG = {
 			revealFrontWidthHops: 1, // reveal-wave front width in hops for pin/unpin transitions
 			edgeOcclusionClearancePx: 6, // extra edge fade clearance around unrelated nodes
 			edgeOcclusionFadeWidthPx: 12, // width of the soft fade on each side of an occlusion
+			edgeOcclusionZoomScaleExponent: 0.5, // lower values make occlusion scale more gently with zoom
 			edgeOcclusionMinOpacity: 0.16 // minimum edge opacity where a node crosses over it
 		}
 	}

@@ -3,6 +3,7 @@ import type { Point } from '../../types/multigraph';
 export const DEFAULT_EDGE_OCCLUSION_CLEARANCE_PX = 6;
 export const DEFAULT_EDGE_OCCLUSION_FADE_WIDTH_PX = 12;
 export const DEFAULT_EDGE_OCCLUSION_MIN_OPACITY = 0.16;
+export const DEFAULT_EDGE_OCCLUSION_ZOOM_SCALE_EXPONENT = 0.5;
 export const DEFAULT_EDGE_OCCLUSION_ZOOM_MIN_MULTIPLIER = 0.5;
 export const DEFAULT_EDGE_OCCLUSION_ZOOM_MAX_MULTIPLIER = 4;
 
@@ -32,6 +33,7 @@ export interface EdgeOcclusionOptions {
 export interface EdgeOcclusionZoomBaseParameters {
 	clearancePx: number;
 	fadeWidthPx: number;
+	zoomScaleExponent?: number;
 }
 
 export interface EdgeOcclusionZoomParameters {
@@ -62,6 +64,9 @@ export function edgeOcclusionParametersForZoom(
 		!Number.isFinite(baseParameters.clearancePx) ||
 		!Number.isFinite(baseParameters.fadeWidthPx) ||
 		!Number.isFinite(zoomScale) ||
+		!Number.isFinite(
+			baseParameters.zoomScaleExponent ?? DEFAULT_EDGE_OCCLUSION_ZOOM_SCALE_EXPONENT
+		) ||
 		!Number.isFinite(minMultiplier) ||
 		!Number.isFinite(maxMultiplier) ||
 		baseParameters.clearancePx < 0 ||
@@ -73,7 +78,8 @@ export function edgeOcclusionParametersForZoom(
 
 	const min = Math.min(minMultiplier, maxMultiplier);
 	const max = Math.max(minMultiplier, maxMultiplier);
-	const multiplier = clamp(1 / zoomScale, min, max);
+	const exponent = baseParameters.zoomScaleExponent ?? DEFAULT_EDGE_OCCLUSION_ZOOM_SCALE_EXPONENT;
+	const multiplier = clamp((1 / zoomScale) ** exponent, min, max);
 	return {
 		edgeOcclusionClearancePx: baseParameters.clearancePx * multiplier,
 		edgeOcclusionFadeWidthPx: baseParameters.fadeWidthPx * multiplier

@@ -77,8 +77,8 @@ describe('computeEdgeOcclusionWindows', () => {
 
 		expect(scaleOne.coreStart).toBeCloseTo(0.36);
 		expect(scaleOne.coreEnd).toBeCloseTo(0.64);
-		expect(zoomedOut.coreStart).toBeCloseTo(0.32);
-		expect(zoomedOut.coreEnd).toBeCloseTo(0.68);
+		expect(zoomedOut.coreStart).toBeCloseTo((50 - 10 - 4 * Math.SQRT2) / 100);
+		expect(zoomedOut.coreEnd).toBeCloseTo((50 + 10 + 4 * Math.SQRT2) / 100);
 	});
 
 	it('clamps projection windows to the segment ends without occluding a node beyond reach', () => {
@@ -292,17 +292,26 @@ describe('edgeOcclusionParametersForZoom', () => {
 		});
 	});
 
-	it('widens clearance and fades in graph space when zoomed out', () => {
-		expect(edgeOcclusionParametersForZoom({ clearancePx: 6, fadeWidthPx: 30 }, 0.5)).toEqual({
-			edgeOcclusionClearancePx: 12,
-			edgeOcclusionFadeWidthPx: 60
-		});
+	it('widens clearance and fades gently in graph space when zoomed out', () => {
+		const params = edgeOcclusionParametersForZoom({ clearancePx: 6, fadeWidthPx: 30 }, 0.5);
+
+		expect(params.edgeOcclusionClearancePx).toBeCloseTo(6 * Math.SQRT2);
+		expect(params.edgeOcclusionFadeWidthPx).toBeCloseTo(30 * Math.SQRT2);
 	});
 
-	it('narrows clearance and fades in graph space when zoomed in', () => {
-		expect(edgeOcclusionParametersForZoom({ clearancePx: 6, fadeWidthPx: 30 }, 2)).toEqual({
-			edgeOcclusionClearancePx: 3,
-			edgeOcclusionFadeWidthPx: 15
+	it('narrows clearance and fades gently in graph space when zoomed in', () => {
+		const params = edgeOcclusionParametersForZoom({ clearancePx: 6, fadeWidthPx: 30 }, 2);
+
+		expect(params.edgeOcclusionClearancePx).toBeCloseTo(6 / Math.SQRT2);
+		expect(params.edgeOcclusionFadeWidthPx).toBeCloseTo(30 / Math.SQRT2);
+	});
+
+	it('accepts an explicit zoom exponent for stronger or weaker response', () => {
+		expect(
+			edgeOcclusionParametersForZoom({ clearancePx: 6, fadeWidthPx: 30, zoomScaleExponent: 1 }, 0.5)
+		).toEqual({
+			edgeOcclusionClearancePx: 12,
+			edgeOcclusionFadeWidthPx: 60
 		});
 	});
 

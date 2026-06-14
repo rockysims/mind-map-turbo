@@ -27,6 +27,7 @@ export interface LayoutSettings {
 	revealFrontWidthHops: number;
 	edgeOcclusionClearancePx: number;
 	edgeOcclusionFadeWidthPx: number;
+	edgeOcclusionZoomScaleExponent: number;
 	edgeOcclusionMinOpacity: number;
 }
 

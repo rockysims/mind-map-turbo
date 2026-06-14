@@ -2035,7 +2035,7 @@
 		const occludedEdge = canvasElement.querySelector('[data-edge-id="e0"]') as HTMLElement;
 		expect(occludedEdge).toBeInTheDocument();
 		expect(occludedEdge).toHaveAttribute('data-edge-occlusion-count', '1');
-		expect(occludedEdge).toHaveAttribute('data-edge-occlusion-fade-width', '24');
+		expect(Number(occludedEdge.dataset.edgeOcclusionFadeWidth)).toBeCloseTo(12 * Math.SQRT2);
 		expect(occludedEdge.style.getPropertyValue('--edge-background')).toContain('linear-gradient');
 	}}
 />
