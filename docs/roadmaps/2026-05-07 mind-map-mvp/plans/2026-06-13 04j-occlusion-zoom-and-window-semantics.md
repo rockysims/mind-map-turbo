@@ -3,7 +3,7 @@
 **Created:** 2026-06-13
 **Author:** Cursor agent
 **Milestone:** [milestones/04j-edge-occlusion-fade.md](../milestones/04j-edge-occlusion-fade.md)
-**Status:** draft
+**Status:** executing
 **Total estimated effort:** S (3 tasks; one pure-geometry fix, one zoom-behavior
 change, one focused story pass)
 
@@ -54,7 +54,7 @@ keeping the fade ramp constant on screen.
 > Each task is one PR. T01 and T02 both touch `edgeOcclusion.ts`, so they are
 > sequenced even though they are conceptually independent.
 
-### T01 - Preserve full-opacity gaps between separate occlusion cores
+### ✓ T01 - Preserve full-opacity gaps between separate occlusion cores
 
 |                |                                                                                                      |
 | -------------- | ---------------------------------------------------------------------------------------------------- |
