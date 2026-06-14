@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeEdgeOcclusionWindows } from './edgeOcclusion';
+import { computeEdgeOcclusionWindows, edgeOcclusionFadeWidthForZoom } from './edgeOcclusion';
 import type { EdgeOcclusionNode, EdgeOcclusionSegment } from './edgeOcclusion';
 
 const horizontalSegment = {
@@ -192,6 +192,30 @@ describe('computeEdgeOcclusionWindows', () => {
 
 		expect(segment).toEqual(originalSegment);
 		expect(nodes).toEqual(originalNodes);
+	});
+});
+
+describe('edgeOcclusionFadeWidthForZoom', () => {
+	it('keeps the base fade width at scale 1', () => {
+		expect(edgeOcclusionFadeWidthForZoom(30, 1)).toBe(30);
+	});
+
+	it('widens fades in graph space when zoomed out', () => {
+		expect(edgeOcclusionFadeWidthForZoom(30, 0.5)).toBe(60);
+	});
+
+	it('narrows fades in graph space when zoomed in', () => {
+		expect(edgeOcclusionFadeWidthForZoom(30, 2)).toBe(15);
+	});
+
+	it('clamps extreme zoom multipliers', () => {
+		expect(edgeOcclusionFadeWidthForZoom(30, 0.05)).toBe(120);
+		expect(edgeOcclusionFadeWidthForZoom(30, 10)).toBe(15);
+	});
+
+	it('leaves invalid inputs unchanged', () => {
+		expect(edgeOcclusionFadeWidthForZoom(30, 0)).toBe(30);
+		expect(edgeOcclusionFadeWidthForZoom(-1, 0.5)).toBe(-1);
 	});
 });
 

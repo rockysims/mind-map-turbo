@@ -3,6 +3,8 @@ import type { Point } from '../../types/multigraph';
 export const DEFAULT_EDGE_OCCLUSION_CLEARANCE_PX = 6;
 export const DEFAULT_EDGE_OCCLUSION_FADE_WIDTH_PX = 12;
 export const DEFAULT_EDGE_OCCLUSION_MIN_OPACITY = 0.16;
+export const DEFAULT_EDGE_OCCLUSION_ZOOM_MIN_MULTIPLIER = 0.5;
+export const DEFAULT_EDGE_OCCLUSION_ZOOM_MAX_MULTIPLIER = 4;
 
 const MIN_EDGE_OCCLUSION_SEGMENT_LENGTH_PX = 1;
 const EDGE_OCCLUSION_TOUCH_EPSILON_PX = 1e-6;
@@ -33,6 +35,29 @@ export interface EdgeOcclusionWindow {
 	coreEnd: number;
 	fadeEnd: number;
 	occludingNodeIds: readonly string[];
+}
+
+export function edgeOcclusionFadeWidthForZoom(
+	baseFadeWidthPx: number,
+	zoomScale: number,
+	minMultiplier = DEFAULT_EDGE_OCCLUSION_ZOOM_MIN_MULTIPLIER,
+	maxMultiplier = DEFAULT_EDGE_OCCLUSION_ZOOM_MAX_MULTIPLIER
+): number {
+	if (
+		!Number.isFinite(baseFadeWidthPx) ||
+		!Number.isFinite(zoomScale) ||
+		!Number.isFinite(minMultiplier) ||
+		!Number.isFinite(maxMultiplier) ||
+		baseFadeWidthPx < 0 ||
+		zoomScale <= 0
+	) {
+		return baseFadeWidthPx;
+	}
+
+	const min = Math.min(minMultiplier, maxMultiplier);
+	const max = Math.max(minMultiplier, maxMultiplier);
+	const multiplier = clamp(1 / zoomScale, min, max);
+	return baseFadeWidthPx * multiplier;
 }
 
 interface WindowInPixels {

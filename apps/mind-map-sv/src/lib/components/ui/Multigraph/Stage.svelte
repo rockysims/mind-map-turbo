@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Snippet } from 'svelte';
+	import { untrack, type Snippet } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import type { NodeData } from '../types/node';
 	import type { Point } from '../types/multigraph';
@@ -46,6 +46,8 @@
 		onNodeDoubleClickDropOntoBackground?: (node: NodeData, point: Point) => void;
 		/** Callback when user holds a node without dragging. */
 		onNodeLongPress?: (node: NodeData, point: Point) => void;
+		/** Fired whenever the internal pan/zoom state changes, including initial mount. */
+		onViewStateLiveChange?: (state: ViewStateSnapshot) => void;
 		/**
 		 * Fired after a user pan/zoom gesture completes (pointer-up after pan, wheel event,
 		 * or pinch end). Moving camera does not mutate graph data, so this callback is kept
@@ -67,6 +69,7 @@
 		onNodeDoubleClickDropOntoNode,
 		onNodeDoubleClickDropOntoBackground,
 		onNodeLongPress,
+		onViewStateLiveChange,
 		onViewStateChange,
 		children
 	}: Props & { children?: Snippet } = $props();
@@ -87,6 +90,11 @@
 	// svelte-ignore state_referenced_locally
 	let scale = $state(clampScale(initialScale));
 	let pinchStart = $state<{ distance: number; scale: number } | null>(null);
+
+	$effect(() => {
+		const state = { panX, panY, scale };
+		untrack(() => onViewStateLiveChange?.(state));
+	});
 
 	// Node drag
 	let dragNode = $state<NodeData | null>(null);

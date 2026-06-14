@@ -17,7 +17,11 @@
 		edgeStyle,
 		type RenderableEdgeVisibility
 	} from './lib/edgeStyle.js';
-	import { computeEdgeOcclusionWindows, type EdgeOcclusionNode } from './lib/edgeOcclusion.js';
+	import {
+		computeEdgeOcclusionWindows,
+		edgeOcclusionFadeWidthForZoom,
+		type EdgeOcclusionNode
+	} from './lib/edgeOcclusion.js';
 	import {
 		addEdge,
 		addNode,
@@ -130,6 +134,7 @@
 	let graphRef = $state<HTMLElement | null>(null);
 	let lastPinnedNodeId = $state<string | null>(null);
 	let lastSyncedGeneration = $state(-1);
+	let stageScale = $state(1);
 
 	/** Internal enter animations for nodes added by the user (scale 0 → target). */
 	let nodeEnterAnimations = $state<Record<string, NodeEnterAnimation>>({});
@@ -578,6 +583,9 @@
 		onNodeDoubleClickDropOntoNode={handleNodeDoubleClickDropOntoNode}
 		onNodeDoubleClickDropOntoBackground={handleNodeDoubleClickDropOntoBackground}
 		onNodeLongPress={handleNodeLongPress}
+		onViewStateLiveChange={(state) => {
+			stageScale = state.scale;
+		}}
 		{onViewStateChange}
 	>
 		<div class="edges" aria-hidden="true">
@@ -592,6 +600,10 @@
 					visibility.kind === 'boundary'
 						? (graphLayout.radiusByNodeId[visibility.visibleNodeId] ?? 0)
 						: undefined}
+				{@const effectiveEdgeOcclusionFadeWidthPx = edgeOcclusionFadeWidthForZoom(
+					resolvedLayoutSettings.edgeOcclusionFadeWidthPx,
+					stageScale
+				)}
 				{@const edgeOcclusionWindows =
 					visibility.kind === 'visible'
 						? computeEdgeOcclusionWindows(
@@ -605,7 +617,7 @@
 								visibleEdgeOcclusionNodes,
 								{
 									edgeOcclusionClearancePx: resolvedLayoutSettings.edgeOcclusionClearancePx,
-									edgeOcclusionFadeWidthPx: resolvedLayoutSettings.edgeOcclusionFadeWidthPx,
+									edgeOcclusionFadeWidthPx: effectiveEdgeOcclusionFadeWidthPx,
 									edgeOcclusionMinOpacity: resolvedLayoutSettings.edgeOcclusionMinOpacity
 								}
 							)
@@ -646,6 +658,9 @@
 					data-edge-opacity={edgeOpacity}
 					data-edge-occlusion-count={visibility.kind === 'visible'
 						? edgeOcclusionWindows.length
+						: undefined}
+					data-edge-occlusion-fade-width={visibility.kind === 'visible'
+						? effectiveEdgeOcclusionFadeWidthPx
 						: undefined}
 					style={`${edgeStyle(edgePoints.source, edgePoints.target)} --edge-background: ${edgeBackground(
 						visibility,
