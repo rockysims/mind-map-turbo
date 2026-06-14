@@ -80,7 +80,7 @@ cores when only their ramps overlap.
 - No `edgeOcclusionMinOpacity` wash across a B-C span when only B and C occlude
   an A-D edge.
 
-### T02 - Make occlusion pullback and ramp respond visibly to zoom
+### ✓ T02 - Make occlusion pullback and ramp respond visibly to zoom
 
 |                |                                                                                                                |
 | -------------- | -------------------------------------------------------------------------------------------------------------- |
