@@ -3,7 +3,7 @@
 **Created:** 2026-06-13
 **Author:** Cursor agent
 **Milestone:** [milestones/04j-edge-occlusion-fade.md](../milestones/04j-edge-occlusion-fade.md)
-**Status:** executing
+**Status:** done
 **Total estimated effort:** M (4 tasks; pure geometry first, then serialized render
 wiring)
 
@@ -127,7 +127,7 @@ behavior unchanged in this task.
 - Multiple windows produce sorted stops without invalid CSS.
 - Boundary visibility still returns the existing far-end fade gradient.
 
-### T03 - Add settings and wire occlusion into `Multigraph`
+### ✓ T03 - Add settings and wire occlusion into `Multigraph`
 
 |                |                                                                                            |
 | -------------- | ------------------------------------------------------------------------------------------ |
@@ -155,7 +155,7 @@ as the whole-edge animation multiplier, not the per-segment fade.
   existing opacity style/data attrs.
 - Existing layout-settings specs pin or accept the new defaults deliberately.
 
-### T04 - Add behavior stories and dense-graph guardrails
+### ✓ T04 - Add behavior stories and dense-graph guardrails
 
 |                |                                                                     |
 | -------------- | ------------------------------------------------------------------- |

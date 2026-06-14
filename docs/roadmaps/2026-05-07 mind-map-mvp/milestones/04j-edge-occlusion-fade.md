@@ -1,6 +1,6 @@
 # Milestone 04j: Edge occlusion fade near unrelated nodes
 
-**Status:** not started
+**Status:** complete
 **Depends on:** milestones 04f (edge tag colors feed the edge background) and 04h
 (thin component refactor), plus the current rotated-div edge render. Occlusion
 rides the edge **background gradient**, not the 04i `data-edge-opacity` channel,
