@@ -1,6 +1,7 @@
 export * from './graph.js';
 export * from './titleSyntax.js';
 export * from './tagColors.js';
+export * from './edgeOcclusion.js';
 export * from './edgeRender.js';
 export * from './edgeStyle.js';
 export * from './graphMath.js';
