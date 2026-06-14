@@ -6,7 +6,7 @@ import {
 import type { EdgeVisibility } from './boundedVisibility';
 import { DEFAULT_EDGE_OCCLUSION_MIN_OPACITY, type EdgeOcclusionWindow } from './edgeOcclusion';
 import type { GraphLayout } from './graphLayout';
-import { trimSegmentToNodeBorders } from './edgeRender';
+import { EDGE_NODE_GAP_PX, trimSegmentToNodeBorders } from './edgeRender';
 
 const CENTERED_POSITION: Point = { x: 0, y: 0 };
 const PERCENT_PRECISION_FACTOR = 10_000;
@@ -44,7 +44,9 @@ export function edgeRenderPoints(
 			source,
 			target,
 			layout.radiusByNodeId[visibility.edge.sourceNodeId] ?? 0,
-			layout.radiusByNodeId[visibility.edge.targetNodeId] ?? 0
+			layout.radiusByNodeId[visibility.edge.targetNodeId] ?? 0,
+			0,
+			visibility.edge.directed === true ? EDGE_NODE_GAP_PX : 0
 		);
 	}
 

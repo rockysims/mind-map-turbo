@@ -1240,11 +1240,13 @@
 		const visibleUndirectedEdge = canvasElement.querySelector('[data-edge-id="e0"]');
 		expect(visibleUndirectedEdge).toHaveAttribute('data-edge-visibility', 'visible');
 		expect(visibleUndirectedEdge).not.toHaveAttribute('data-arrow-target-node-id');
-		const boundaryEdge = canvasElement.querySelector('[data-edge-id="e2"]');
+		const boundaryEdge = canvasElement.querySelector('[data-edge-id="e2"]') as HTMLElement;
 		expect(boundaryEdge).toHaveAttribute('data-edge-visibility', 'boundary');
 		expect(boundaryEdge).toHaveAttribute('data-visible-node-id', 'n2');
 		expect(boundaryEdge).toHaveAttribute('data-hidden-node-id', 'n3');
 		expect(boundaryEdge).toHaveAttribute('data-boundary-fade-ratio', '0.5');
+		expect(boundaryEdge).toHaveClass('boundary');
+		expect(boundaryEdge).toHaveAttribute('data-edge-boundary-dashed', 'true');
 		expect(boundaryEdge).not.toHaveAttribute('data-arrow-target-node-id');
 		expect(canvasElement.querySelector('[data-edge-id="e3"]')).not.toBeInTheDocument();
 	}}
@@ -1947,6 +1949,41 @@
 		const endpointOnlyEdge = canvasElement.querySelector('[data-edge-id="e1"]') as HTMLElement;
 		expect(endpointOnlyEdge).toBeInTheDocument();
 		expect(endpointOnlyEdge).toHaveAttribute('data-edge-occlusion-count', '0');
+	}}
+/>
+
+<Story
+	name="VisibleEdgeNearMissStaysSolid"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 3,
+			pinned: [0],
+			edges: [
+				{ source: 0, target: 1 },
+				{ source: 0, target: 2 }
+			],
+			posByNodeId: {
+				n0: { x: -200, y: 0 },
+				n1: { x: 200, y: 0 },
+				n2: { x: 0, y: 17 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: {
+			baseRadius: 20,
+			relaxIterations: 0,
+			edgeOcclusionClearancePx: 6,
+			edgeOcclusionFadeWidthPx: 12
+		}
+	}}
+	play={async ({ canvasElement }) => {
+		await waitForLayout();
+
+		const nearMissEdge = canvasElement.querySelector('[data-edge-id="e0"]') as HTMLElement;
+		expect(nearMissEdge).toBeInTheDocument();
+		expect(nearMissEdge).toHaveAttribute('data-edge-visibility', 'visible');
+		expect(nearMissEdge).toHaveAttribute('data-edge-occlusion-count', '0');
+		expect(nearMissEdge.style.getPropertyValue('--edge-background').trim()).toBe('#888888');
 	}}
 />
 

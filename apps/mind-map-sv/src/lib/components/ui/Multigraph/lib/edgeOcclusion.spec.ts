@@ -27,20 +27,20 @@ describe('computeEdgeOcclusionWindows', () => {
 		expect((window.coreEnd - window.coreStart) * 100).toBeCloseTo(expectedHalfLength * 2);
 	});
 
-	it('gates on the radius plus clearance boundary', () => {
-		const justInside = computeEdgeOcclusionWindows(
+	it('gates on the node radius, not the clearance-expanded fade area', () => {
+		const touchingBorder = computeEdgeOcclusionWindows(
 			horizontalSegment,
-			[node('inside', { x: 50, y: 13.99 }, 10)],
+			[node('touching-border', { x: 50, y: 10 }, 10)],
 			baseOptions
 		);
-		const justOutside = computeEdgeOcclusionWindows(
+		const insideClearanceButNotTouching = computeEdgeOcclusionWindows(
 			horizontalSegment,
-			[node('outside', { x: 50, y: 14.01 }, 10)],
+			[node('near-miss', { x: 50, y: 10.01 }, 10)],
 			baseOptions
 		);
 
-		expect(justInside).toHaveLength(1);
-		expect(justOutside).toEqual([]);
+		expect(touchingBorder).toHaveLength(1);
+		expect(insideClearanceButNotTouching).toEqual([]);
 	});
 
 	it('clamps projection windows to the segment ends without occluding a node beyond reach', () => {
@@ -82,7 +82,7 @@ describe('computeEdgeOcclusionWindows', () => {
 		]);
 	});
 
-	it('keeps near-but-outside and far nodes from creating windows', () => {
+	it('keeps near-but-outside-clearance and far nodes from creating windows', () => {
 		const windows = computeEdgeOcclusionWindows(
 			horizontalSegment,
 			[node('near-outside', { x: 50, y: 14 }, 10), node('far', { x: 50, y: 60 }, 10)],

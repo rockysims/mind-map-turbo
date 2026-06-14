@@ -44,14 +44,26 @@ describe('edgeRenderPoints', () => {
 		}
 	} satisfies Pick<GraphLayout, 'posByNodeId' | 'radiusByNodeId'>;
 
-	it('trims a fully visible edge to the node borders', () => {
+	it('trims a fully visible undirected edge to the node borders without a gap', () => {
 		const visibility = {
 			kind: 'visible',
 			edge: undirectedEdge
 		} satisfies EdgeVisibility;
 
 		expect(edgeRenderPoints(visibility, layout, {})).toEqual({
-			source: { x: 14, y: 0 },
+			source: { x: 10, y: 0 },
+			target: { x: 80, y: 0 }
+		});
+	});
+
+	it('keeps the arrow gap only on the directed target end', () => {
+		const visibility = {
+			kind: 'visible',
+			edge: directedEdge
+		} satisfies EdgeVisibility;
+
+		expect(edgeRenderPoints(visibility, layout, {})).toEqual({
+			source: { x: 10, y: 0 },
 			target: { x: 76, y: 0 }
 		});
 	});

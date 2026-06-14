@@ -5,6 +5,7 @@ export const DEFAULT_EDGE_OCCLUSION_FADE_WIDTH_PX = 12;
 export const DEFAULT_EDGE_OCCLUSION_MIN_OPACITY = 0.16;
 
 const MIN_EDGE_OCCLUSION_SEGMENT_LENGTH_PX = 1;
+const EDGE_OCCLUSION_TOUCH_EPSILON_PX = 1e-6;
 
 export interface EdgeOcclusionSegment {
 	sourceNodeId: string;
@@ -108,7 +109,7 @@ function windowForNode(
 	};
 	const distance = Math.hypot(node.position.x - closestPoint.x, node.position.y - closestPoint.y);
 
-	if (distance >= occlusionRadius) return [];
+	if (distance > node.radius + EDGE_OCCLUSION_TOUCH_EPSILON_PX) return [];
 
 	const coreHalfLength = Math.sqrt(Math.max(0, node.radius * node.radius - distance * distance));
 	const widenedCoreHalfLength = coreHalfLength + clearance;

@@ -20,15 +20,9 @@ describe('layoutSettings', () => {
 		});
 	});
 
-	it('pins the edge occlusion defaults used by edge rendering helpers', () => {
-		expect(DEFAULT_LAYOUT_SETTINGS.edgeOcclusionClearancePx).toBe(
-			DEFAULT_EDGE_OCCLUSION_CLEARANCE_PX
-		);
-		expect(DEFAULT_LAYOUT_SETTINGS.edgeOcclusionFadeWidthPx).toBe(
-			DEFAULT_EDGE_OCCLUSION_FADE_WIDTH_PX
-		);
-		expect(DEFAULT_LAYOUT_SETTINGS.edgeOcclusionMinOpacity).toBe(
-			DEFAULT_EDGE_OCCLUSION_MIN_OPACITY
-		);
+	it('pins the pure edge occlusion helper defaults independently from app tuning', () => {
+		expect(DEFAULT_EDGE_OCCLUSION_CLEARANCE_PX).toBe(6);
+		expect(DEFAULT_EDGE_OCCLUSION_FADE_WIDTH_PX).toBe(12);
+		expect(DEFAULT_EDGE_OCCLUSION_MIN_OPACITY).toBe(0.16);
 	});
 });

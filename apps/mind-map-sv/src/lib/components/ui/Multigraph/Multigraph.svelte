@@ -617,6 +617,7 @@
 				<div
 					class="edge"
 					class:directed={edge.directed === true && visibility.kind === 'visible'}
+					class:boundary={visibility.kind === 'boundary'}
 					data-edge-id={edge.id}
 					data-source-node-id={edge.sourceNodeId}
 					data-target-node-id={edge.targetNodeId}
@@ -632,6 +633,7 @@
 					data-boundary-fade-ratio={visibility.kind === 'boundary'
 						? visibility.fadeRatio
 						: undefined}
+					data-edge-boundary-dashed={visibility.kind === 'boundary' ? 'true' : undefined}
 					data-edge-arrow-scale={edge.directed === true && visibility.kind === 'visible'
 						? arrowScale
 						: undefined}
@@ -663,6 +665,7 @@
 				<div
 					class="edge"
 					class:directed={edge.directed === true && visibility.kind === 'visible'}
+					class:boundary={visibility.kind === 'boundary'}
 					data-edge-id={edge.id}
 					data-source-node-id={edge.sourceNodeId}
 					data-target-node-id={edge.targetNodeId}
@@ -678,6 +681,7 @@
 					data-boundary-fade-ratio={visibility.kind === 'boundary'
 						? visibility.fadeRatio
 						: undefined}
+					data-edge-boundary-dashed={visibility.kind === 'boundary' ? 'true' : undefined}
 					data-edge-arrow-scale={edge.directed === true && visibility.kind === 'visible'
 						? arrowScale
 						: undefined}
@@ -910,6 +914,17 @@
 
 	.edge.directed::before {
 		width: calc(100% - var(--edge-arrow-length) / 2);
+	}
+
+	.edge.boundary::before {
+		--edge-dash-length: 8px;
+		--edge-dash-gap: 6px;
+
+		mask-image: repeating-linear-gradient(
+			to right,
+			#000 0 var(--edge-dash-length),
+			transparent var(--edge-dash-length) calc(var(--edge-dash-length) + var(--edge-dash-gap))
+		);
 	}
 
 	.edge.directed::after {

@@ -7,7 +7,8 @@ export function trimSegmentToNodeBorders(
 	target: Point,
 	sourceRadius: number,
 	targetRadius: number,
-	gap = EDGE_NODE_GAP_PX
+	sourceGap = 0,
+	targetGap = sourceGap
 ): { source: Point; target: Point } {
 	const dx = target.x - source.x;
 	const dy = target.y - source.y;
@@ -16,8 +17,8 @@ export function trimSegmentToNodeBorders(
 
 	const unitX = dx / length;
 	const unitY = dy / length;
-	const sourceOffset = Math.min(sourceRadius + gap, length / 2);
-	const targetOffset = Math.min(targetRadius + gap, length - sourceOffset);
+	const sourceOffset = Math.min(sourceRadius + sourceGap, length / 2);
+	const targetOffset = Math.min(targetRadius + targetGap, length - sourceOffset);
 
 	return {
 		source: {
