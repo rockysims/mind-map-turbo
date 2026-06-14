@@ -3,7 +3,7 @@
 **Created:** 2026-06-13
 **Author:** Cursor agent
 **Milestone:** [milestones/04j-edge-occlusion-fade.md](../milestones/04j-edge-occlusion-fade.md)
-**Status:** draft
+**Status:** executing
 **Total estimated effort:** M (4 tasks; pure geometry first, then serialized render
 wiring)
 
@@ -65,7 +65,7 @@ attached) while connected endpoints still touch the node boundary.
 > Each task is one PR. T03 and T04 both touch `Multigraph.svelte`, so they run
 > in separate waves.
 
-### T01 - Add pure edge occlusion geometry
+### ✓ T01 - Add pure edge occlusion geometry
 
 |                |                                                                                   |
 | -------------- | --------------------------------------------------------------------------------- |
