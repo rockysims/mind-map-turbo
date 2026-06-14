@@ -98,7 +98,7 @@ fractions of segment length, and treat zero-length segments as no-op.
   `edgeOcclusionFadeWidthPx`, `edgeOcclusionMinOpacity` (`1` ⇒ no windows).
 - Original input objects are not mutated.
 
-### T02 - Compose occlusion windows into edge backgrounds
+### ✓ T02 - Compose occlusion windows into edge backgrounds
 
 |                |                                                                   |
 | -------------- | ----------------------------------------------------------------- |
