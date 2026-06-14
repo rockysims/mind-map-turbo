@@ -215,6 +215,54 @@
 		return edge;
 	}
 
+	type EdgeGradientStop = {
+		color: string;
+		position: number;
+	};
+
+	function splitGradientStops(stops: string): string[] {
+		const parts: string[] = [];
+		let startIndex = 0;
+		let depth = 0;
+
+		for (let index = 0; index < stops.length; index += 1) {
+			const char = stops[index];
+			if (char === '(') depth += 1;
+			if (char === ')') depth -= 1;
+			if (char === ',' && depth === 0) {
+				parts.push(stops.slice(startIndex, index).trim());
+				startIndex = index + 1;
+			}
+		}
+
+		parts.push(stops.slice(startIndex).trim());
+		return parts;
+	}
+
+	function edgeGradientStops(edge: HTMLElement): EdgeGradientStop[] {
+		const background = edge.style.getPropertyValue('--edge-background').trim();
+		const match = background.match(/^linear-gradient\(to right, (.*)\)$/);
+		if (!match) throw new Error(`Expected edge gradient background, got ${background}`);
+
+		return splitGradientStops(match[1]).map((stop) => {
+			const stopMatch = stop.match(/^(.*) ([\d.]+)%$/);
+			if (!stopMatch) throw new Error(`Could not parse gradient stop: ${stop}`);
+			return {
+				color: stopMatch[1],
+				position: Number(stopMatch[2])
+			};
+		});
+	}
+
+	function minOpacityStops(
+		stops: readonly EdgeGradientStop[],
+		color: string,
+		opacity: number
+	): number[] {
+		const fadedColor = `color-mix(in srgb, ${color} ${opacity * 100}%, transparent)`;
+		return stops.filter((stop) => stop.color === fadedColor).map((stop) => stop.position);
+	}
+
 	function nodePositions(el: HTMLElement, nodeIds: readonly string[]): Record<string, Point> {
 		return Object.fromEntries(nodeIds.map((nodeId) => [nodeId, nodePosition(el, nodeId)]));
 	}
@@ -1989,6 +2037,115 @@
 		expect(occludedEdge).toHaveAttribute('data-edge-occlusion-count', '1');
 		expect(occludedEdge).toHaveAttribute('data-edge-occlusion-fade-width', '24');
 		expect(occludedEdge.style.getPropertyValue('--edge-background')).toContain('linear-gradient');
+	}}
+/>
+
+<Story
+	name="VisibleEdgeKeepsFullColorBetweenSeparateOccluders"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'a', title: 'A', description: '', tags: [] },
+				{ id: 'b', title: 'B', description: '', tags: [] },
+				{ id: 'c', title: 'C', description: '', tags: [] },
+				{ id: 'd', title: 'D', description: '', tags: [] }
+			],
+			pinned: ['a', 'b', 'c', 'd'],
+			edges: [{ source: 'a', target: 'd' }],
+			posByNodeId: {
+				a: { x: -800, y: 0 },
+				b: { x: -280, y: 0 },
+				c: { x: 280, y: 0 },
+				d: { x: 800, y: 0 }
+			}
+		}),
+		defaultPrimaryNodeId: 'a',
+		layoutSettings: {
+			baseRadius: 20,
+			relaxIterations: 0,
+			edgeOcclusionClearancePx: 6,
+			edgeOcclusionFadeWidthPx: 24,
+			edgeOcclusionMinOpacity: 0.2
+		}
+	}}
+	play={async ({ canvasElement }) => {
+		await waitForLayout();
+
+		const crossedEdge = getEdge(canvasElement, 'e0');
+		expect(crossedEdge).toHaveAttribute('data-edge-visibility', 'visible');
+		expect(crossedEdge).toHaveAttribute('data-edge-occlusion-count', '2');
+
+		const stops = edgeGradientStops(crossedEdge);
+		const fadedPositions = minOpacityStops(stops, '#888888', 0.2);
+		expect(fadedPositions).toHaveLength(4);
+		expect(
+			stops.some(
+				(stop) =>
+					stop.color === '#888888' &&
+					stop.position > fadedPositions[1] &&
+					stop.position < fadedPositions[2]
+			)
+		).toBe(true);
+	}}
+/>
+
+<Story
+	name="VisibleEdgeZeroFadeCutoffWidensWhenZoomedOut"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'a', title: 'A', description: '', tags: [] },
+				{ id: 'b', title: 'B', description: '', tags: [] },
+				{ id: 'd', title: 'D', description: '', tags: [] }
+			],
+			pinned: ['a', 'b', 'd'],
+			edges: [{ source: 'a', target: 'd' }],
+			posByNodeId: {
+				a: { x: -800, y: 0 },
+				b: { x: 0, y: 0 },
+				d: { x: 800, y: 0 }
+			}
+		}),
+		defaultPrimaryNodeId: 'a',
+		initialViewState: { panX: 0, panY: 0, scale: 1 },
+		layoutSettings: {
+			baseRadius: 20,
+			relaxIterations: 0,
+			edgeOcclusionClearancePx: 6,
+			edgeOcclusionFadeWidthPx: 0,
+			edgeOcclusionMinOpacity: 0.2
+		}
+	}}
+	play={async ({ canvasElement }) => {
+		await waitForLayout();
+
+		const stage = getStage(canvasElement);
+		const edgeAtScaleOne = getEdge(canvasElement, 'e0');
+		expect(edgeAtScaleOne).toHaveAttribute('data-edge-occlusion-count', '1');
+		expect(edgeAtScaleOne).toHaveAttribute('data-edge-occlusion-fade-width', '0');
+		const initialFadedPositions = minOpacityStops(
+			edgeGradientStops(edgeAtScaleOne),
+			'#888888',
+			0.2
+		);
+		expect(initialFadedPositions).toHaveLength(2);
+
+		dispatchWheel(stage, 250);
+		await waitFor(() => {
+			expect(getStageTransform(canvasElement)).toContain('scale(0.5)');
+		});
+
+		const zoomedOutEdge = getEdge(canvasElement, 'e0');
+		expect(zoomedOutEdge).toHaveAttribute('data-edge-occlusion-count', '1');
+		expect(zoomedOutEdge).toHaveAttribute('data-edge-occlusion-fade-width', '0');
+		const zoomedOutFadedPositions = minOpacityStops(
+			edgeGradientStops(zoomedOutEdge),
+			'#888888',
+			0.2
+		);
+		expect(zoomedOutFadedPositions).toHaveLength(2);
+		expect(zoomedOutFadedPositions[0]).toBeLessThan(initialFadedPositions[0]);
+		expect(zoomedOutFadedPositions[1]).toBeGreaterThan(initialFadedPositions[1]);
 	}}
 />
 
