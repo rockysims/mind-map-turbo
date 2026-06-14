@@ -209,6 +209,12 @@
 		return Number(edge.dataset.edgeOpacity);
 	}
 
+	function getEdge(el: HTMLElement, edgeId: string): HTMLElement {
+		const edge = el.querySelector(`[data-edge-id="${edgeId}"]`) as HTMLElement | null;
+		if (!edge) throw new Error(`Edge not found for ${edgeId}`);
+		return edge;
+	}
+
 	function nodePositions(el: HTMLElement, nodeIds: readonly string[]): Record<string, Point> {
 		return Object.fromEntries(nodeIds.map((nodeId) => [nodeId, nodePosition(el, nodeId)]));
 	}
@@ -1190,6 +1196,11 @@
 		const stage = getStage(canvasElement);
 		expect(canvasElement.querySelectorAll('.node-wrapper')).toHaveLength(100);
 		expect(canvasElement.querySelectorAll('.edge')).toHaveLength(300);
+		expect(
+			Array.from(canvasElement.querySelectorAll('.edge')).some(
+				(edge) => Number((edge as HTMLElement).dataset.edgeOcclusionCount) > 0
+			)
+		).toBe(true);
 		expect(Number(getNodeWrapper(canvasElement, 'n0').dataset.scale)).toBe(1);
 		expect(maxCircleOverlap(stage)).toBeLessThan(1);
 	}}
@@ -1936,6 +1947,58 @@
 		const endpointOnlyEdge = canvasElement.querySelector('[data-edge-id="e1"]') as HTMLElement;
 		expect(endpointOnlyEdge).toBeInTheDocument();
 		expect(endpointOnlyEdge).toHaveAttribute('data-edge-occlusion-count', '0');
+	}}
+/>
+
+<Story
+	name="DraggingUnrelatedNodeUpdatesEdgeOcclusion"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 3,
+			pinned: [0],
+			edges: [
+				{ source: 0, target: 1 },
+				{ source: 0, target: 2 }
+			],
+			posByNodeId: {
+				n0: { x: -200, y: 0 },
+				n1: { x: 200, y: 0 },
+				n2: { x: 0, y: 140 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { baseRadius: 20, relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }) => {
+		await waitForLayout();
+
+		const stage = getStage(canvasElement);
+		const draggedCircle = getCircle(canvasElement, 'n2');
+		const startCenter = getCenter(draggedCircle);
+		const edge = getEdge(canvasElement, 'e0');
+		const edgeCenter = getCenter(edge);
+
+		expect(edge).toHaveAttribute('data-edge-occlusion-count', '0');
+		expect(edge.style.getPropertyValue('--edge-background').trim()).toBe('#888888');
+
+		dispatchPointer(draggedCircle, 'pointerdown', startCenter.x, startCenter.y);
+		dispatchPointer(stage, 'pointermove', edgeCenter.x, edgeCenter.y);
+
+		await waitFor(() => {
+			const occludedEdge = getEdge(canvasElement, 'e0');
+			expect(occludedEdge).toHaveAttribute('data-edge-occlusion-count', '1');
+			expect(occludedEdge.style.getPropertyValue('--edge-background')).toContain('linear-gradient');
+		});
+
+		dispatchPointer(stage, 'pointermove', edgeCenter.x, edgeCenter.y - 140);
+
+		await waitFor(() => {
+			const clearedEdge = getEdge(canvasElement, 'e0');
+			expect(clearedEdge).toHaveAttribute('data-edge-occlusion-count', '0');
+			expect(clearedEdge.style.getPropertyValue('--edge-background').trim()).toBe('#888888');
+		});
+
+		dispatchPointer(stage, 'pointerup', edgeCenter.x, edgeCenter.y - 140);
 	}}
 />
 
