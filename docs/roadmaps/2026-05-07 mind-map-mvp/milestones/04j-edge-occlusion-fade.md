@@ -6,6 +6,8 @@
 rides the edge **background gradient**, not the 04i `data-edge-opacity` channel,
 so 04i is related but not a hard dependency.
 **Plan:** [2026-06-13 04j-edge-occlusion-fade.md](../plans/2026-06-13%2004j-edge-occlusion-fade.md)
+**Follow-up plan:**
+[2026-06-13 04j-occlusion-zoom-and-window-semantics.md](../plans/2026-06-13%2004j-occlusion-zoom-and-window-semantics.md)
 
 ## Goal
 
