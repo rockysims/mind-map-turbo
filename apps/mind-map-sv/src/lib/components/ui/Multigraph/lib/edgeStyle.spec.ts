@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { EdgeVisibility } from './boundedVisibility';
 import type { GraphLayout } from './graphLayout';
-import { edgeArrowScale, edgeRenderPoints, edgeStrokeScale, edgeStyle } from './edgeStyle';
+import {
+	edgeArrowScale,
+	edgeBackground,
+	edgeRenderPoints,
+	edgeStrokeScale,
+	edgeStyle
+} from './edgeStyle';
 
 const directedEdge = {
 	id: 'edge-1',
@@ -65,6 +71,125 @@ describe('edgeRenderPoints', () => {
 			source: { x: 0, y: 0 },
 			target: { x: 25, y: 50 }
 		});
+	});
+});
+
+describe('edgeBackground', () => {
+	it('keeps visible edges without occlusion windows on the current solid color string', () => {
+		const visibility = {
+			kind: 'visible',
+			edge: undirectedEdge
+		} satisfies EdgeVisibility;
+
+		expect(edgeBackground(visibility, '#888888')).toBe('#888888');
+		expect(edgeBackground(visibility, '#112233', { occlusionWindows: [] })).toBe('#112233');
+	});
+
+	it('composes one soft full-to-min-to-full occlusion gradient for visible edges', () => {
+		const visibility = {
+			kind: 'visible',
+			edge: undirectedEdge
+		} satisfies EdgeVisibility;
+
+		expect(
+			edgeBackground(visibility, '#888888', {
+				edgeOcclusionMinOpacity: 0.2,
+				occlusionWindows: [
+					{
+						fadeStart: 0.26,
+						coreStart: 0.36,
+						coreEnd: 0.64,
+						fadeEnd: 0.74,
+						occludingNodeIds: ['centered']
+					}
+				]
+			})
+		).toBe(
+			'linear-gradient(to right, #888888 0%, #888888 26%, color-mix(in srgb, #888888 20%, transparent) 36%, color-mix(in srgb, #888888 20%, transparent) 64%, #888888 74%, #888888 100%)'
+		);
+	});
+
+	it('maps directed edge stops against the rendered before width', () => {
+		const visibility = {
+			kind: 'visible',
+			edge: directedEdge
+		} satisfies EdgeVisibility;
+
+		expect(
+			edgeBackground(visibility, '#123456', {
+				edgeLengthPx: 100,
+				edgeArrowLengthPx: 20,
+				edgeOcclusionMinOpacity: 0.25,
+				occlusionWindows: [
+					{
+						fadeStart: 0.45,
+						coreStart: 0.5,
+						coreEnd: 0.55,
+						fadeEnd: 0.6,
+						occludingNodeIds: ['centered']
+					}
+				]
+			})
+		).toBe(
+			'linear-gradient(to right, #123456 0%, #123456 50%, color-mix(in srgb, #123456 25%, transparent) 55.5556%, color-mix(in srgb, #123456 25%, transparent) 61.1111%, #123456 66.6667%, #123456 100%)'
+		);
+	});
+
+	it('sorts multiple windows into valid increasing gradient stops', () => {
+		const visibility = {
+			kind: 'visible',
+			edge: undirectedEdge
+		} satisfies EdgeVisibility;
+
+		expect(
+			edgeBackground(visibility, '#abcdef', {
+				edgeOcclusionMinOpacity: 0.16,
+				occlusionWindows: [
+					{
+						fadeStart: 0.7,
+						coreStart: 0.72,
+						coreEnd: 0.78,
+						fadeEnd: 0.8,
+						occludingNodeIds: ['later']
+					},
+					{
+						fadeStart: 0.2,
+						coreStart: 0.25,
+						coreEnd: 0.35,
+						fadeEnd: 0.4,
+						occludingNodeIds: ['earlier']
+					}
+				]
+			})
+		).toBe(
+			'linear-gradient(to right, #abcdef 0%, #abcdef 20%, color-mix(in srgb, #abcdef 16%, transparent) 25%, color-mix(in srgb, #abcdef 16%, transparent) 35%, #abcdef 40%, #abcdef 70%, color-mix(in srgb, #abcdef 16%, transparent) 72%, color-mix(in srgb, #abcdef 16%, transparent) 78%, #abcdef 80%, #abcdef 100%)'
+		);
+	});
+
+	it('keeps boundary edge backgrounds on the existing far-end fade gradient', () => {
+		const visibility = {
+			kind: 'boundary',
+			edge: directedEdge,
+			visibleNodeId: 'source',
+			hiddenNodeId: 'target',
+			visibleEndpoint: 'source',
+			hiddenEndpoint: 'target',
+			fadeRatio: 0.5
+		} satisfies EdgeVisibility;
+
+		expect(
+			edgeBackground(visibility, '#888888', {
+				occlusionWindows: [
+					{
+						fadeStart: 0.25,
+						coreStart: 0.3,
+						coreEnd: 0.7,
+						fadeEnd: 0.75,
+						occludingNodeIds: ['ignored']
+					}
+				]
+			})
+		).toBe('linear-gradient(to right, #888888, transparent)');
 	});
 });
 

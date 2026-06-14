@@ -4,12 +4,21 @@ import {
 	EDGE_STROKE_REFERENCE_NODE_SCALE
 } from '$lib/constants.js';
 import type { EdgeVisibility } from './boundedVisibility';
+import { DEFAULT_EDGE_OCCLUSION_MIN_OPACITY, type EdgeOcclusionWindow } from './edgeOcclusion';
 import type { GraphLayout } from './graphLayout';
 import { trimSegmentToNodeBorders } from './edgeRender';
 
 const CENTERED_POSITION: Point = { x: 0, y: 0 };
+const PERCENT_PRECISION_FACTOR = 10_000;
 
 export type RenderableEdgeVisibility = Exclude<EdgeVisibility, { kind: 'hidden' }>;
+
+export interface EdgeBackgroundOptions {
+	occlusionWindows?: readonly EdgeOcclusionWindow[];
+	edgeLengthPx?: number;
+	edgeArrowLengthPx?: number;
+	edgeOcclusionMinOpacity?: number;
+}
 
 export function edgeStyle(sourcePos: Point, targetPos: Point): string {
 	const dx = targetPos.x - sourcePos.x;
@@ -50,9 +59,115 @@ export function edgeRenderPoints(
 	};
 }
 
-export function edgeBackground(visibility: RenderableEdgeVisibility, color: string): string {
-	if (visibility.kind === 'visible') return color;
+export function edgeBackground(
+	visibility: RenderableEdgeVisibility,
+	color: string,
+	options: EdgeBackgroundOptions = {}
+): string {
+	if (visibility.kind === 'visible') {
+		const windows = normalizedOcclusionWindows(options.occlusionWindows ?? []);
+		if (windows.length === 0) return color;
+
+		const minOpacity = options.edgeOcclusionMinOpacity ?? DEFAULT_EDGE_OCCLUSION_MIN_OPACITY;
+		if (!Number.isFinite(minOpacity) || minOpacity >= 1) return color;
+
+		const percentageScale = edgeBackgroundPercentageScale(visibility, options);
+		const fullColorStops = [gradientStop(color, 0)];
+		const fadedColor = fadedEdgeColor(color, minOpacity);
+		const occlusionStops = windows.flatMap((window) => [
+			gradientStop(color, window.fadeStart * percentageScale),
+			gradientStop(fadedColor, window.coreStart * percentageScale),
+			gradientStop(fadedColor, window.coreEnd * percentageScale),
+			gradientStop(color, window.fadeEnd * percentageScale)
+		]);
+		const stops = [...fullColorStops, ...occlusionStops, gradientStop(color, 1)].sort(
+			(a, b) => a.position - b.position
+		);
+
+		return `linear-gradient(to right, ${stops.map(formatGradientStop).join(', ')})`;
+	}
 	return `linear-gradient(to right, ${color}, transparent)`;
+}
+
+function normalizedOcclusionWindows(
+	windows: readonly EdgeOcclusionWindow[]
+): EdgeOcclusionWindow[] {
+	return windows
+		.filter(
+			(window) =>
+				Number.isFinite(window.fadeStart) &&
+				Number.isFinite(window.coreStart) &&
+				Number.isFinite(window.coreEnd) &&
+				Number.isFinite(window.fadeEnd) &&
+				window.fadeStart <= window.coreStart &&
+				window.coreStart <= window.coreEnd &&
+				window.coreEnd <= window.fadeEnd &&
+				window.fadeEnd >= 0 &&
+				window.fadeStart <= 1
+		)
+		.map((window) => ({
+			...window,
+			fadeStart: clamp(window.fadeStart, 0, 1),
+			coreStart: clamp(window.coreStart, 0, 1),
+			coreEnd: clamp(window.coreEnd, 0, 1),
+			fadeEnd: clamp(window.fadeEnd, 0, 1)
+		}))
+		.sort(
+			(a, b) =>
+				a.fadeStart - b.fadeStart ||
+				a.coreStart - b.coreStart ||
+				a.coreEnd - b.coreEnd ||
+				a.fadeEnd - b.fadeEnd
+		);
+}
+
+function edgeBackgroundPercentageScale(
+	visibility: Extract<RenderableEdgeVisibility, { kind: 'visible' }>,
+	options: EdgeBackgroundOptions
+): number {
+	if (visibility.edge.directed !== true) return 1;
+
+	const edgeLength = options.edgeLengthPx;
+	const arrowLength = options.edgeArrowLengthPx;
+	if (
+		edgeLength === undefined ||
+		arrowLength === undefined ||
+		!Number.isFinite(edgeLength) ||
+		!Number.isFinite(arrowLength)
+	) {
+		return 1;
+	}
+
+	const renderedLineLength = edgeLength - arrowLength / 2;
+	if (edgeLength <= 0 || renderedLineLength <= 0) return 1;
+
+	return edgeLength / renderedLineLength;
+}
+
+interface GradientStop {
+	color: string;
+	position: number;
+}
+
+function gradientStop(color: string, position: number): GradientStop {
+	return { color, position: clamp(position, 0, 1) };
+}
+
+function formatGradientStop(stop: GradientStop): string {
+	return `${stop.color} ${formatPercentage(stop.position)}`;
+}
+
+function fadedEdgeColor(color: string, opacity: number): string {
+	const opacityPercentage = formatNumber(clamp(opacity, 0, 1) * 100);
+	return `color-mix(in srgb, ${color} ${opacityPercentage}%, transparent)`;
+}
+
+function formatPercentage(position: number): string {
+	return `${formatNumber(position * 100)}%`;
+}
+
+function formatNumber(value: number): string {
+	return `${Math.round(value * PERCENT_PRECISION_FACTOR) / PERCENT_PRECISION_FACTOR}`;
 }
 
 export function edgeArrowScale(
@@ -86,4 +201,8 @@ export function edgeStrokeScale(
 
 function nodeScale(scaleByNodeId: Record<string, number>, nodeId: string): number {
 	return scaleByNodeId[nodeId] ?? 1;
+}
+
+function clamp(value: number, min: number, max: number): number {
+	return Math.min(Math.max(value, min), max);
 }
