@@ -179,4 +179,80 @@ describe('LayoutRuntime', () => {
 		expect(scaleFixture.runtime.settleFramesRemaining).toBe(0);
 		expect(scaleFixture.runtime.scaleAnchoredNodeIds).toEqual([]);
 	});
+
+	it('exposes previous-only reveal entries during unpin and clears them at p=1', () => {
+		const graph = makeGraph({
+			nodeCount: 6,
+			pinned: [1, 4],
+			edges: [
+				[0, 1],
+				[1, 2],
+				[2, 3],
+				[3, 4],
+				[4, 5]
+			]
+		});
+		const { runtime, scheduler, setGraph, getGraph } = createRuntimeFixture(graph, {
+			displayedLayers: 1,
+			scaleAnimationDurationMs: 100,
+			postScaleChangeSettleMaxFrames: 0,
+			relaxIterations: 0
+		});
+		scheduler.nowMs = 10;
+
+		const graphAfterScaleChange = runtime.beginScaleChange(togglePinned(getGraph(), 'n4'), 'n4');
+		setGraph(graphAfterScaleChange);
+
+		expect(runtime.revealWavePreviousOnlyNodeIds).toEqual(['n3', 'n4', 'n5']);
+		runtime.step(60);
+		expect(runtime.revealWaveNodeOpacityByNodeId.n4).toBeGreaterThan(
+			runtime.revealWaveNodeOpacityByNodeId.n3
+		);
+		expect(runtime.revealWavePreviousOnlyEdgeVisibility.map((entry) => entry.edge.id)).toEqual([
+			'e3',
+			'e4'
+		]);
+
+		runtime.step(110);
+
+		expect(runtime.revealWavePreviousOnlyNodeIds).toEqual([]);
+		expect(runtime.revealWavePreviousOnlyEdgeVisibility).toEqual([]);
+		expect(runtime.revealWaveNodeOpacityByNodeId).toEqual({});
+		expect(runtime.revealWaveEdgeOpacityByEdgeId).toEqual({});
+	});
+
+	it('restarts reveal-wave state when a second pin happens mid-flight', () => {
+		const graph = makeGraph({
+			nodeCount: 6,
+			pinned: [0],
+			edges: [
+				[0, 1],
+				[1, 2],
+				[2, 3],
+				[3, 4],
+				[4, 5]
+			]
+		});
+		const { runtime, scheduler, setGraph, getGraph } = createRuntimeFixture(graph, {
+			displayedLayers: 1,
+			scaleAnimationDurationMs: 120,
+			postScaleChangeSettleMaxFrames: 0,
+			relaxIterations: 0
+		});
+		scheduler.nowMs = 0;
+
+		const firstGraph = runtime.beginScaleChange(togglePinned(getGraph(), 'n1'), 'n1');
+		setGraph(firstGraph);
+		runtime.step(60);
+		expect(runtime.revealWaveProgress).toBeCloseTo(0.5);
+
+		scheduler.nowMs = 60;
+		const secondGraph = runtime.beginScaleChange(togglePinned(getGraph(), 'n4'), 'n4');
+		setGraph(secondGraph);
+
+		expect(runtime.scaleChangeFocalNodeId).toBe('n4');
+		expect(runtime.revealWaveProgress).toBe(0);
+		expect(runtime.revealWaveNodeOpacityByNodeId.n4).toBeGreaterThan(0);
+		expect(runtime.revealWaveNodeOpacityByNodeId.n5 ?? 1).toBeLessThan(1);
+	});
 });

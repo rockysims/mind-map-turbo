@@ -23,6 +23,8 @@ export interface LayoutSettings {
 	layeredRelayoutSettleMaxFrames: number;
 	layeredRelayoutSettleMaxFramesFinal: number;
 	layeredRelayoutSettleEpsilonPx: number;
+	enterExitDurationMs: number;
+	revealFrontWidthHops: number;
 }
 
 export const DEFAULT_LAYOUT_SETTINGS: LayoutSettings = {

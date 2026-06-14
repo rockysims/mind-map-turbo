@@ -1,6 +1,6 @@
 # Milestone 04i: Eliminate appearance/disappearance abruptness
 
-**Status:** not started
+**Status:** complete
 **Depends on:** milestones 02 (hop-distance scale + relaxation loop), 04a/04b
 (bounded pinned-neighborhood visibility, boundary-edge fade, and the existing
 scale-animation/settle machinery in `Multigraph.svelte`).

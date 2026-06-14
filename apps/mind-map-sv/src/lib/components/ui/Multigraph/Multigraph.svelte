@@ -56,6 +56,28 @@
 		MIN_NODE_HIT_RADIUS
 	} from '$lib/constants.js';
 	import type { ViewState } from '$lib/migrations.js';
+	import {
+		EMPTY_EXITING_BUFFER,
+		addExitingEdge,
+		addExitingNode,
+		cancelExitingEdge,
+		cancelExitingNode,
+		createEdgeEnterAnimation,
+		createNodeEnterAnimation,
+		edgeOpacityAt,
+		exitingEdgeOpacityAt,
+		exitingNodeScaleAt,
+		hasActiveEdgeEnterAnimations,
+		hasActiveExiting,
+		hasActiveNodeEnterAnimations,
+		nodeEnterScaleAt,
+		pruneFinishedEdgeEnterAnimations,
+		pruneFinishedExiting,
+		pruneFinishedNodeEnterAnimations,
+		type EdgeOpacityAnimation,
+		type ExitingBuffer,
+		type NodeEnterAnimation
+	} from './lib/elementTransitions.js';
 
 	const CENTERED_POSITION: Point = { x: 0, y: 0 };
 
@@ -71,7 +93,10 @@
 		layoutSettings = {},
 		initialViewState,
 		onMultigraphChange,
-		onViewStateChange
+		onViewStateChange,
+		nodeRenderOverrides,
+		edgeRenderOverrides,
+		exitingBuffer
 	}: {
 		multigraphData: MultigraphData;
 		graphGeneration?: number;
@@ -80,6 +105,12 @@
 		initialViewState?: ViewState;
 		onMultigraphChange?: (data: MultigraphData) => void;
 		onViewStateChange?: (state: ViewState) => void;
+		/** Static per-node opacity override; used by stories and T04/T05 animation wiring. Default 1. */
+		nodeRenderOverrides?: Record<string, { opacity?: number }>;
+		/** Static per-edge opacity override; used by stories and T04/T05 animation wiring. Default 1. */
+		edgeRenderOverrides?: Record<string, { opacity?: number }>;
+		/** Elements that have left the visible set but are still animating out. Rendered but non-interactive. */
+		exitingBuffer?: ExitingBuffer;
 	} = $props();
 
 	let graph = $state<MultigraphData>({
@@ -98,13 +129,34 @@
 	let graphRef = $state<HTMLElement | null>(null);
 	let lastPinnedNodeId = $state<string | null>(null);
 	let lastSyncedGeneration = $state(-1);
-	const layoutRuntime = new LayoutRuntime({
+
+	/** Internal enter animations for nodes added by the user (scale 0 → target). */
+	let nodeEnterAnimations = $state<Record<string, NodeEnterAnimation>>({});
+	/** Internal enter/exit opacity animations for edges added/removed by the user. */
+	let edgeEnterAnimations = $state<Record<string, EdgeOpacityAnimation>>({});
+	/** Render-only buffer for elements removed by the user that are still animating out. */
+	let internalExitingBuffer = $state<ExitingBuffer>(EMPTY_EXITING_BUFFER);
+
+	const layoutRuntime: LayoutRuntime = new LayoutRuntime({
 		getGraph: () => graph,
 		getLayoutSettings: () => layoutSettings,
 		getActiveDragNodeId: () => activeDragNodeId,
 		getFallbackAnchorNodeId: () => lastPinnedNodeId,
 		applyGraph: (nextGraph) => {
 			graph = nextGraph;
+		},
+		getHasActiveTransitions: (): boolean => {
+			const now: number = layoutRuntime.animationNowMs;
+			return (
+				hasActiveExiting(internalExitingBuffer, now) ||
+				hasActiveNodeEnterAnimations(nodeEnterAnimations, now) ||
+				hasActiveEdgeEnterAnimations(edgeEnterAnimations, now)
+			);
+		},
+		onFrame: (nowMs) => {
+			internalExitingBuffer = pruneFinishedExiting(internalExitingBuffer, nowMs);
+			nodeEnterAnimations = pruneFinishedNodeEnterAnimations(nodeEnterAnimations, nowMs);
+			edgeEnterAnimations = pruneFinishedEdgeEnterAnimations(edgeEnterAnimations, nowMs);
 		}
 	});
 
@@ -135,10 +187,55 @@
 			layoutRuntime.layoutOptions(visibleGraph, { relaxIterations: 0 })
 		)
 	);
+	const nodeById = $derived(Object.fromEntries(graph.nodes.map((node) => [node.id, node])));
+	const revealWaveNodeOpacityByNodeId = $derived(layoutRuntime.revealWaveNodeOpacityByNodeId);
+	const revealWaveEdgeOpacityByEdgeId = $derived(layoutRuntime.revealWaveEdgeOpacityByEdgeId);
+	const revealWavePreviousScaleByNodeId = $derived(layoutRuntime.revealWavePreviousScaleByNodeId);
+	const combinedScaleByNodeId = $derived({
+		...graphLayout.scaleByNodeId,
+		...revealWavePreviousScaleByNodeId
+	});
+	const revealWavePreviousRadiusByNodeId = $derived.by(() =>
+		Object.fromEntries(
+			Object.entries(revealWavePreviousScaleByNodeId).map(([nodeId, scale]) => [
+				nodeId,
+				resolvedLayoutSettings.baseRadius * scale
+			])
+		)
+	);
+	const combinedRadiusByNodeId = $derived({
+		...graphLayout.radiusByNodeId,
+		...revealWavePreviousRadiusByNodeId
+	});
+	const combinedEdgeLayout = $derived({
+		posByNodeId: graphLayout.posByNodeId,
+		radiusByNodeId: combinedRadiusByNodeId
+	});
 	const editNode = $derived(graph.nodes.find((node) => node.id === editNodeId) ?? null);
 	const actionMenuNode = $derived.by(() => {
 		const menu = actionMenu;
 		return menu ? (graph.nodes.find((node) => node.id === menu.nodeId) ?? null) : null;
+	});
+
+	/** Merged exiting buffer: external prop (stories/T03 testing) + internal (user actions). */
+	const effectiveExitingBuffer = $derived.by((): ExitingBuffer => {
+		const ext = exitingBuffer ?? EMPTY_EXITING_BUFFER;
+		return {
+			nodes: { ...ext.nodes, ...internalExitingBuffer.nodes },
+			edges: { ...ext.edges, ...internalExitingBuffer.edges }
+		};
+	});
+
+	/** Exiting buffer nodes that are not currently in the visible set (avoid double-render). */
+	const exitingOnlyNodes = $derived.by(() => {
+		const visibleIds = new Set(visibleGraph.nodes.map((n) => n.id));
+		return Object.entries(effectiveExitingBuffer.nodes).filter(([id]) => !visibleIds.has(id));
+	});
+
+	/** Exiting buffer edges that are not currently in the renderable visible set. */
+	const exitingOnlyEdges = $derived.by(() => {
+		const renderableIds = new Set(renderableEdgeVisibility.map((v) => v.edge.id));
+		return Object.entries(effectiveExitingBuffer.edges).filter(([id]) => !renderableIds.has(id));
 	});
 
 	$effect(() => {
@@ -156,6 +253,9 @@
 			incoming.nodes.find((node) => node.pinned)?.id ??
 			incoming.nodes.find((node) => node.id === primary)?.id ??
 			null;
+		internalExitingBuffer = EMPTY_EXITING_BUFFER;
+		nodeEnterAnimations = {};
+		edgeEnterAnimations = {};
 	});
 
 	$effect(() => {
@@ -233,8 +333,8 @@
 	function handleNodeMakePrimary(node: NodeData) {
 		closeOverlays();
 		const wasPinned = node.pinned === true;
-		lastPinnedNodeId = node.id;
 		commitUserGraph(layoutRuntime.beginScaleChange(togglePinned(graph, node.id), node.id));
+		lastPinnedNodeId = node.id;
 
 		if (!wasPinned) {
 			primaryNodeId = node.id;
@@ -254,9 +354,20 @@
 		if (existing) {
 			duplicateEdgeConfirm = { edgeId: existing.id };
 		} else {
-			commitUserGraph(
-				layoutRuntime.relaxAfterMutation(addEdge(graph, sourceNode.id, targetNode.id))
-			);
+			const graphWithEdge = addEdge(graph, sourceNode.id, targetNode.id);
+			const newEdge = graphWithEdge.edges[graphWithEdge.edges.length - 1] ?? null;
+			commitUserGraph(layoutRuntime.relaxAfterMutation(graphWithEdge));
+
+			const durationMs = resolvedLayoutSettings.enterExitDurationMs;
+			if (newEdge && durationMs > 0) {
+				const nowMs = layoutRuntime.now();
+				internalExitingBuffer = cancelExitingEdge(internalExitingBuffer, newEdge.id);
+				edgeEnterAnimations = {
+					...edgeEnterAnimations,
+					[newEdge.id]: createEdgeEnterAnimation(nowMs, durationMs)
+				};
+				layoutRuntime.start();
+			}
 		}
 	}
 
@@ -270,6 +381,29 @@
 		const newEdge = graphWithEdge.edges[graphWithEdge.edges.length - 1] ?? null;
 
 		commitUserGraph(layoutRuntime.relaxAfterMutation(graphWithEdge));
+
+		const durationMs = resolvedLayoutSettings.enterExitDurationMs;
+		if (durationMs > 0) {
+			const nowMs = layoutRuntime.now();
+			if (newNode) {
+				internalExitingBuffer = cancelExitingNode(internalExitingBuffer, newNode.id);
+				const targetScale = graphLayout.scaleByNodeId[newNode.id] ?? 1;
+				nodeEnterAnimations = {
+					...nodeEnterAnimations,
+					[newNode.id]: createNodeEnterAnimation(targetScale, nowMs, durationMs)
+				};
+			}
+			if (newEdge) {
+				internalExitingBuffer = cancelExitingEdge(internalExitingBuffer, newEdge.id);
+				edgeEnterAnimations = {
+					...edgeEnterAnimations,
+					[newEdge.id]: createEdgeEnterAnimation(nowMs, durationMs)
+				};
+			}
+			if (newNode || newEdge) {
+				layoutRuntime.start();
+			}
+		}
 
 		if (newNode) {
 			titleEditContext = { nodeId: newNode.id, edgeId: newEdge?.id };
@@ -295,12 +429,64 @@
 	}
 
 	function toggleNodePinned(nodeId: string) {
-		lastPinnedNodeId = nodeId;
 		commitUserGraph(layoutRuntime.beginScaleChange(togglePinned(graph, nodeId), nodeId));
+		lastPinnedNodeId = nodeId;
 	}
 
 	function deleteNode(nodeId: string) {
+		const durationMs = resolvedLayoutSettings.enterExitDurationMs;
+		const nowMs = layoutRuntime.now();
+
+		// Capture final-known render data before mutating graph.
+		const nodeToRemove = graph.nodes.find((n) => n.id === nodeId) ?? null;
+		const nodePos = graph.posByNodeId[nodeId] ?? CENTERED_POSITION;
+		const nodeScaleAtDelete = graphLayout.scaleByNodeId[nodeId] ?? 1;
+		const affectedEdgeData = renderableEdgeVisibility
+			.filter((v) => v.edge.sourceNodeId === nodeId || v.edge.targetNodeId === nodeId)
+			.map((v) => v.edge);
+
 		commitUserGraph(layoutRuntime.relaxAfterMutation(removeNode(graph, nodeId)));
+
+		if (durationMs > 0) {
+			let nextBuffer = internalExitingBuffer;
+
+			if (nodeToRemove) {
+				// Cancel any enter animation and start exit.
+				nodeEnterAnimations = Object.fromEntries(
+					Object.entries(nodeEnterAnimations).filter(([k]) => k !== nodeId)
+				);
+				nextBuffer = cancelExitingNode(nextBuffer, nodeId);
+				nextBuffer = addExitingNode(nextBuffer, nodeId, {
+					nodeData: nodeToRemove,
+					x: nodePos.x,
+					y: nodePos.y,
+					fromScale: nodeScaleAtDelete,
+					startedAtMs: nowMs,
+					durationMs
+				});
+			}
+
+			for (const edge of affectedEdgeData) {
+				const enterAnim = edgeEnterAnimations[edge.id];
+				const fromOpacity = enterAnim ? edgeOpacityAt(enterAnim, nowMs) : 1;
+				edgeEnterAnimations = Object.fromEntries(
+					Object.entries(edgeEnterAnimations).filter(([k]) => k !== edge.id)
+				);
+				nextBuffer = cancelExitingEdge(nextBuffer, edge.id);
+				nextBuffer = addExitingEdge(nextBuffer, edge.id, {
+					edgeData: edge,
+					fromOpacity,
+					startedAtMs: nowMs,
+					durationMs
+				});
+			}
+
+			internalExitingBuffer = nextBuffer;
+			if (nodeToRemove || affectedEdgeData.length > 0) {
+				layoutRuntime.start();
+			}
+		}
+
 		if (lastPinnedNodeId === nodeId) {
 			lastPinnedNodeId = graph.nodes.find((candidate) => candidate.id !== nodeId)?.id ?? null;
 		}
@@ -392,6 +578,11 @@
 				{@const arrowScale = edgeArrowScale(visibility, graphLayout.scaleByNodeId)}
 				{@const strokeScale = edgeStrokeScale(visibility, graphLayout.scaleByNodeId)}
 				{@const edgeColor = edgeStrokeColor(edge, graph.tagColorConfig.edgeTags)}
+				{@const edgeEnterAnim = edgeEnterAnimations[edge.id]}
+				{@const baseEdgeOpacity =
+					edgeRenderOverrides?.[edge.id]?.opacity ??
+					(edgeEnterAnim ? edgeOpacityAt(edgeEnterAnim, layoutRuntime.animationNowMs) : 1)}
+				{@const edgeOpacity = baseEdgeOpacity * (revealWaveEdgeOpacityByEdgeId[edge.id] ?? 1)}
 				<div
 					class="edge"
 					class:directed={edge.directed === true && visibility.kind === 'visible'}
@@ -414,22 +605,84 @@
 						? arrowScale
 						: undefined}
 					data-edge-stroke-scale={strokeScale}
-					style={`${edgeStyle(edgePoints.source, edgePoints.target)} --edge-background: ${edgeBackground(visibility, edgeColor)}; color: ${edgeColor}; --edge-arrow-length: ${EDGE_ARROW_LENGTH * arrowScale}px; --edge-arrow-half-height: ${EDGE_ARROW_HALF_HEIGHT * arrowScale}px; --edge-stroke-width: ${EDGE_STROKE_WIDTH * strokeScale}px;`}
+					data-edge-opacity={edgeOpacity}
+					style={`${edgeStyle(edgePoints.source, edgePoints.target)} --edge-background: ${edgeBackground(visibility, edgeColor)}; color: ${edgeColor}; --edge-arrow-length: ${EDGE_ARROW_LENGTH * arrowScale}px; --edge-arrow-half-height: ${EDGE_ARROW_HALF_HEIGHT * arrowScale}px; --edge-stroke-width: ${EDGE_STROKE_WIDTH * strokeScale}px; opacity: ${edgeOpacity};`}
 				></div>
+			{/each}
+			{#each layoutRuntime.revealWavePreviousOnlyEdgeVisibility as visibility (visibility.edge.id)}
+				{@const edge = visibility.edge}
+				{@const edgePoints = edgeRenderPoints(visibility, combinedEdgeLayout, graph.posByNodeId)}
+				{@const arrowScale = edgeArrowScale(visibility, combinedScaleByNodeId)}
+				{@const strokeScale = edgeStrokeScale(visibility, combinedScaleByNodeId)}
+				{@const edgeColor = edgeStrokeColor(edge, graph.tagColorConfig.edgeTags)}
+				{@const baseEdgeOpacity = edgeRenderOverrides?.[edge.id]?.opacity ?? 1}
+				{@const edgeOpacity = baseEdgeOpacity * (revealWaveEdgeOpacityByEdgeId[edge.id] ?? 1)}
+				<div
+					class="edge"
+					class:directed={edge.directed === true && visibility.kind === 'visible'}
+					data-edge-id={edge.id}
+					data-source-node-id={edge.sourceNodeId}
+					data-target-node-id={edge.targetNodeId}
+					data-directed={edge.directed === true ? 'true' : undefined}
+					data-arrow-target-node-id={edge.directed === true && visibility.kind === 'visible'
+						? edge.targetNodeId
+						: undefined}
+					data-edge-visibility={visibility.kind}
+					data-visible-node-id={visibility.kind === 'boundary'
+						? visibility.visibleNodeId
+						: undefined}
+					data-hidden-node-id={visibility.kind === 'boundary' ? visibility.hiddenNodeId : undefined}
+					data-boundary-fade-ratio={visibility.kind === 'boundary'
+						? visibility.fadeRatio
+						: undefined}
+					data-edge-arrow-scale={edge.directed === true && visibility.kind === 'visible'
+						? arrowScale
+						: undefined}
+					data-edge-stroke-scale={strokeScale}
+					data-edge-opacity={edgeOpacity}
+					data-edge-reveal-buffer="true"
+					style={`${edgeStyle(edgePoints.source, edgePoints.target)} --edge-background: ${edgeBackground(visibility, edgeColor)}; color: ${edgeColor}; --edge-arrow-length: ${EDGE_ARROW_LENGTH * arrowScale}px; --edge-arrow-half-height: ${EDGE_ARROW_HALF_HEIGHT * arrowScale}px; --edge-stroke-width: ${EDGE_STROKE_WIDTH * strokeScale}px; opacity: ${edgeOpacity}; pointer-events: none;`}
+				></div>
+			{/each}
+			{#each exitingOnlyEdges as [id, entry] (id)}
+				{@const sourcePos = graph.posByNodeId[entry.edgeData.sourceNodeId]}
+				{@const targetPos = graph.posByNodeId[entry.edgeData.targetNodeId]}
+				{#if sourcePos && targetPos}
+					{@const edgeOpacity =
+						edgeRenderOverrides?.[id]?.opacity ??
+						exitingEdgeOpacityAt(entry, layoutRuntime.animationNowMs)}
+					{@const edgeColor = edgeStrokeColor(entry.edgeData, graph.tagColorConfig.edgeTags)}
+					<div
+						class="edge"
+						data-edge-id={id}
+						data-source-node-id={entry.edgeData.sourceNodeId}
+						data-target-node-id={entry.edgeData.targetNodeId}
+						data-edge-exiting="true"
+						data-edge-opacity={edgeOpacity}
+						style={`${edgeStyle(sourcePos, targetPos)} --edge-background: ${edgeColor}; color: ${edgeColor}; --edge-stroke-width: ${EDGE_STROKE_WIDTH}px; opacity: ${edgeOpacity}; pointer-events: none;`}
+					></div>
+				{/if}
 			{/each}
 		</div>
 
 		{#each visibleGraph.nodes as node (node.id)}
 			{@const nodePos = graphLayout.posByNodeId[node.id] ?? CENTERED_POSITION}
-			{@const nodeScale = graphLayout.scaleByNodeId[node.id] ?? 1}
+			{@const nodeTargetScale = graphLayout.scaleByNodeId[node.id] ?? 1}
+			{@const nodeEnterAnim = nodeEnterAnimations[node.id]}
+			{@const nodeScale = nodeEnterAnim
+				? nodeEnterScaleAt(nodeEnterAnim, layoutRuntime.animationNowMs)
+				: nodeTargetScale}
+			{@const baseNodeOpacity = nodeRenderOverrides?.[node.id]?.opacity ?? 1}
+			{@const nodeOpacity = baseNodeOpacity * (revealWaveNodeOpacityByNodeId[node.id] ?? 1)}
 			<div
 				class="node-wrapper"
 				class:primary={primaryNodeId === node.id}
 				data-node-id={node.id}
 				data-scale={nodeScale}
+				data-node-opacity={nodeOpacity}
 				data-x={nodePos.x}
 				data-y={nodePos.y}
-				style={`left: calc(50% + ${nodePos.x}px); top: calc(50% + ${nodePos.y}px); transform: translate(-50%, -50%) scale(${nodeScale});`}
+				style={`left: calc(50% + ${nodePos.x}px); top: calc(50% + ${nodePos.y}px); transform: translate(-50%, -50%) scale(${nodeScale}); opacity: ${nodeOpacity};`}
 			>
 				<Node
 					nodeData={node}
@@ -441,6 +694,54 @@
 						titleEditContext = null;
 						commitUserGraph(commitInlineTitleSyntax(graph, node.id, title, createdEdgeId));
 					}}
+				/>
+			</div>
+		{/each}
+		{#each layoutRuntime.revealWavePreviousOnlyNodeIds as nodeId (nodeId)}
+			{@const bufferedNode = nodeById[nodeId]}
+			{#if bufferedNode}
+				{@const nodePos = graph.posByNodeId[nodeId] ?? CENTERED_POSITION}
+				{@const nodeScale =
+					revealWavePreviousScaleByNodeId[nodeId] ?? resolvedLayoutSettings.minScale}
+				{@const baseNodeOpacity = nodeRenderOverrides?.[nodeId]?.opacity ?? 1}
+				{@const nodeOpacity = baseNodeOpacity * (revealWaveNodeOpacityByNodeId[nodeId] ?? 1)}
+				<div
+					class="node-wrapper"
+					data-node-id={nodeId}
+					data-scale={nodeScale}
+					data-node-opacity={nodeOpacity}
+					data-node-reveal-buffer="true"
+					data-x={nodePos.x}
+					data-y={nodePos.y}
+					style={`left: calc(50% + ${nodePos.x}px); top: calc(50% + ${nodePos.y}px); transform: translate(-50%, -50%) scale(${nodeScale}); opacity: ${nodeOpacity}; pointer-events: none;`}
+				>
+					<Node
+						nodeData={bufferedNode}
+						isOpen={false}
+						isTitleEditing={false}
+						borderSegments={nodeBorderSegments(bufferedNode, graph.tagColorConfig.nodeTags)}
+					/>
+				</div>
+			{/if}
+		{/each}
+		{#each exitingOnlyNodes as [id, entry] (id)}
+			{@const exitScale = exitingNodeScaleAt(entry, layoutRuntime.animationNowMs)}
+			{@const nodeOpacity = nodeRenderOverrides?.[id]?.opacity ?? 1}
+			<div
+				class="node-wrapper"
+				data-node-id={id}
+				data-scale={exitScale}
+				data-node-opacity={nodeOpacity}
+				data-node-exiting="true"
+				data-x={entry.x}
+				data-y={entry.y}
+				style={`left: calc(50% + ${entry.x}px); top: calc(50% + ${entry.y}px); transform: translate(-50%, -50%) scale(${exitScale}); opacity: ${nodeOpacity}; pointer-events: none;`}
+			>
+				<Node
+					nodeData={entry.nodeData}
+					isOpen={false}
+					isTitleEditing={false}
+					borderSegments={nodeBorderSegments(entry.nodeData, graph.tagColorConfig.nodeTags)}
 				/>
 			</div>
 		{/each}
@@ -480,6 +781,26 @@
 			edgeIdentifier={duplicateEdgeIdentifier(graph, confirmEdgeId)}
 			onCancel={() => (duplicateEdgeConfirm = null)}
 			onConfirm={() => {
+				const durationMs = resolvedLayoutSettings.enterExitDurationMs;
+				if (durationMs > 0) {
+					const edgeToRemove = graph.edges.find((e) => e.id === confirmEdgeId) ?? null;
+					if (edgeToRemove) {
+						const nowMs = layoutRuntime.now();
+						const enterAnim = edgeEnterAnimations[confirmEdgeId];
+						const fromOpacity = enterAnim ? edgeOpacityAt(enterAnim, nowMs) : 1;
+						edgeEnterAnimations = Object.fromEntries(
+							Object.entries(edgeEnterAnimations).filter(([k]) => k !== confirmEdgeId)
+						);
+						internalExitingBuffer = cancelExitingEdge(internalExitingBuffer, confirmEdgeId);
+						internalExitingBuffer = addExitingEdge(internalExitingBuffer, confirmEdgeId, {
+							edgeData: edgeToRemove,
+							fromOpacity,
+							startedAtMs: nowMs,
+							durationMs
+						});
+						layoutRuntime.start();
+					}
+				}
 				commitUserGraph(layoutRuntime.relaxAfterMutation(removeEdge(graph, confirmEdgeId)));
 				duplicateEdgeConfirm = null;
 			}}

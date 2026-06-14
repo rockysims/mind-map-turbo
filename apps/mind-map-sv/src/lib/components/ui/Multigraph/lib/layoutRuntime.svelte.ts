@@ -1,16 +1,18 @@
 import type { MultigraphData } from '../../types/multigraph';
 import {
+	edgeVisibilityForPinnedNeighborhood,
 	graphWithVisibleNodes,
 	pinnedNodeIds,
 	visibleNodeIdsForPinnedNeighborhood
 } from './boundedVisibility';
+import type { EdgeVisibility } from './boundedVisibility';
 import {
 	deriveGraphLayout,
 	relaxGraphPositionsStep,
 	withRelaxedGraphPositions,
 	type GraphLayoutOptions
 } from './graphLayout';
-import { hopsFromPinned } from './layout';
+import { hopsFromPinned, scaleByHops } from './layout';
 import {
 	advanceLayeredRelayout,
 	initialLayeredRelayoutState,
@@ -34,6 +36,23 @@ import {
 	settleStateForScaleChange,
 	shouldClearScaleChangeFocalNode
 } from './scaleChangeSettle';
+import {
+	revealWaveEdgeOpacity,
+	revealWaveNodeOpacities,
+	revealWaveProgressFromFocalAnimation
+} from './revealWave';
+
+type RenderableEdgeVisibility = Exclude<EdgeVisibility, { kind: 'hidden' }>;
+
+interface ScaleChangeRevealState {
+	previousHopsByNodeId: Record<string, number>;
+	nextHopsByNodeId: Record<string, number>;
+	previousVisibleNodeIds: readonly string[];
+	nextVisibleNodeIds: readonly string[];
+	previousRenderableEdges: readonly RenderableEdgeVisibility[];
+	nextRenderableEdges: readonly RenderableEdgeVisibility[];
+	nextRenderableEdgeIds: readonly string[];
+}
 
 export interface LayoutRuntimeScheduler {
 	requestFrame(callback: (nowMs: number) => void): number;
@@ -48,6 +67,10 @@ export interface LayoutRuntimeOptions {
 	getFallbackAnchorNodeId: () => string | null;
 	applyGraph: (data: MultigraphData) => void;
 	scheduler?: LayoutRuntimeScheduler;
+	/** Returns true while enter/exit animations are active; keeps the frame loop running. */
+	getHasActiveTransitions?: () => boolean;
+	/** Called at the start of each frame tick (after animationNowMs is updated). */
+	onFrame?: (nowMs: number) => void;
 }
 
 export class LayoutRuntime {
@@ -58,6 +81,7 @@ export class LayoutRuntime {
 	scaleChangeFocalNodeId = $state<string | null>(null);
 	layeredRelayoutState = $state<LayeredRelayoutState | null>(null);
 	lastRelayoutStateKey = $state<string | null>(null);
+	scaleChangeRevealState = $state<ScaleChangeRevealState | null>(null);
 
 	#frameId: number | null = null;
 	#options: LayoutRuntimeOptions;
@@ -105,6 +129,11 @@ export class LayoutRuntime {
 		this.scaleChangeFocalNodeId = null;
 		this.layeredRelayoutState = null;
 		this.lastRelayoutStateKey = null;
+		this.scaleChangeRevealState = null;
+	}
+
+	now(): number {
+		return this.#scheduler.now();
 	}
 
 	start(): void {
@@ -147,8 +176,10 @@ export class LayoutRuntime {
 
 	beginScaleChange(nextGraph: MultigraphData, focalNodeId: string): MultigraphData {
 		this.scaleChangeFocalNodeId = focalNodeId;
-		const currentVisibleGraph = this.#visibleGraphFor(this.#options.getGraph());
+		const currentGraph = this.#options.getGraph();
+		const currentVisibleGraph = this.#visibleGraphFor(currentGraph);
 		const nextVisibleGraph = this.#visibleGraphFor(nextGraph);
+		this.scaleChangeRevealState = this.#createScaleChangeRevealState(currentGraph, nextGraph);
 		const fromLayout = deriveGraphLayout(
 			currentVisibleGraph,
 			this.layoutOptions(currentVisibleGraph, { relaxIterations: 0 })
@@ -158,15 +189,29 @@ export class LayoutRuntime {
 			this.layoutOptions(nextVisibleGraph, { relaxIterations: 0 })
 		);
 		const nowMs = this.#scheduler.now();
-		const nextAnimations =
-			this.#resolvedSettings().scaleAnimationDurationMs > 0
+		const scaleAnimationDurationMs = this.#resolvedSettings().scaleAnimationDurationMs;
+		let nextAnimations =
+			scaleAnimationDurationMs > 0
 				? createScaleAnimations(
 						fromLayout.scaleByNodeId,
 						targetLayout.scaleByNodeId,
 						nowMs,
-						this.#resolvedSettings().scaleAnimationDurationMs
+						scaleAnimationDurationMs
 					)
 				: {};
+		if (scaleAnimationDurationMs > 0 && !nextAnimations[focalNodeId]) {
+			const focalScale =
+				fromLayout.scaleByNodeId[focalNodeId] ?? targetLayout.scaleByNodeId[focalNodeId] ?? 1;
+			nextAnimations = {
+				...nextAnimations,
+				[focalNodeId]: {
+					fromScale: focalScale,
+					toScale: focalScale,
+					startedAtMs: nowMs,
+					durationMs: scaleAnimationDurationMs
+				}
+			};
+		}
 
 		this.scaleAnimations = nextAnimations;
 		this.animationNowMs = nowMs;
@@ -237,6 +282,7 @@ export class LayoutRuntime {
 	step(nowMs: number): void {
 		this.#frameId = null;
 		this.animationNowMs = nowMs;
+		this.#options.onFrame?.(nowMs);
 
 		const nextScaleByNodeId = animatedScalesAt(this.scaleAnimations, nowMs);
 		const shouldRelax =
@@ -296,6 +342,7 @@ export class LayoutRuntime {
 			})
 		) {
 			this.scaleChangeFocalNodeId = null;
+			this.scaleChangeRevealState = null;
 		}
 
 		if (shouldClearLayeredRelayoutState(this.layeredRelayoutState)) {
@@ -307,7 +354,8 @@ export class LayoutRuntime {
 			this.#options.getActiveDragNodeId() !== null ||
 			this.settleFramesRemaining > 0 ||
 			hasActiveScaleAnimations(this.scaleAnimations, nowMs) ||
-			this.layeredRelayoutState?.active
+			this.layeredRelayoutState?.active ||
+			this.#options.getHasActiveTransitions?.()
 		) {
 			this.start();
 		}
@@ -321,8 +369,184 @@ export class LayoutRuntime {
 		return graphWithVisibleNodes(graph, visibleNodeIds);
 	}
 
+	get revealWaveProgress(): number {
+		return revealWaveProgressFromFocalAnimation(
+			this.scaleAnimations,
+			this.scaleChangeFocalNodeId,
+			this.animationNowMs
+		);
+	}
+
+	get revealWaveNodeOpacityByNodeId(): Record<string, number> {
+		const revealState = this.scaleChangeRevealState;
+		if (!revealState) return {};
+		const progress = this.revealWaveProgress;
+		if (progress >= 1) return {};
+		const settings = this.#resolvedSettings();
+		const revealNodeOpacityByNodeId = revealWaveNodeOpacities(
+			revealState.nextHopsByNodeId,
+			settings.displayedLayers,
+			progress,
+			{ frontWidthHops: settings.revealFrontWidthHops }
+		);
+		const hideNodeOpacityByNodeId = revealWaveNodeOpacities(
+			revealState.previousHopsByNodeId,
+			settings.displayedLayers,
+			progress,
+			{ frontWidthHops: settings.revealFrontWidthHops, direction: 'hide' }
+		);
+		const previousVisibleNodeIdLookup = Object.fromEntries(
+			revealState.previousVisibleNodeIds.map((nodeId) => [nodeId, true])
+		);
+		const nextVisibleNodeIdLookup = Object.fromEntries(
+			revealState.nextVisibleNodeIds.map((nodeId) => [nodeId, true])
+		);
+		const combinedNodeIdLookup = {
+			...previousVisibleNodeIdLookup,
+			...nextVisibleNodeIdLookup
+		};
+
+		return Object.fromEntries(
+			Object.keys(combinedNodeIdLookup).map((nodeId) => {
+				if (previousVisibleNodeIdLookup[nodeId] && nextVisibleNodeIdLookup[nodeId]) {
+					return [nodeId, 1];
+				}
+				if (nextVisibleNodeIdLookup[nodeId])
+					return [nodeId, revealNodeOpacityByNodeId[nodeId] ?? 0];
+				return [nodeId, hideNodeOpacityByNodeId[nodeId] ?? 0];
+			})
+		);
+	}
+
+	get revealWaveEdgeOpacityByEdgeId(): Record<string, number> {
+		const revealState = this.scaleChangeRevealState;
+		if (!revealState) return {};
+		const progress = this.revealWaveProgress;
+		if (progress >= 1) return {};
+		const settings = this.#resolvedSettings();
+		const revealNodeOpacityByNodeId = revealWaveNodeOpacities(
+			revealState.nextHopsByNodeId,
+			settings.displayedLayers,
+			progress,
+			{ frontWidthHops: settings.revealFrontWidthHops }
+		);
+		const hideNodeOpacityByNodeId = revealWaveNodeOpacities(
+			revealState.previousHopsByNodeId,
+			settings.displayedLayers,
+			progress,
+			{ frontWidthHops: settings.revealFrontWidthHops, direction: 'hide' }
+		);
+		const previousEdgesById = Object.fromEntries(
+			revealState.previousRenderableEdges.map((visibility) => [visibility.edge.id, visibility])
+		) as Record<string, RenderableEdgeVisibility>;
+		const nextEdgesById = Object.fromEntries(
+			revealState.nextRenderableEdges.map((visibility) => [visibility.edge.id, visibility])
+		) as Record<string, RenderableEdgeVisibility>;
+		const nextEdgeIdLookup = Object.fromEntries(
+			revealState.nextRenderableEdgeIds.map((edgeId) => [edgeId, true])
+		);
+		const opacityByEdgeId: Record<string, number> = {};
+
+		for (const [edgeId, previousVisibility] of Object.entries(previousEdgesById)) {
+			if (nextEdgeIdLookup[edgeId]) {
+				opacityByEdgeId[edgeId] = 1;
+				continue;
+			}
+
+			opacityByEdgeId[edgeId] = revealWaveEdgeOpacity(
+				previousVisibility.edge,
+				revealState.previousHopsByNodeId,
+				hideNodeOpacityByNodeId,
+				settings.displayedLayers
+			);
+		}
+
+		for (const [edgeId, nextVisibility] of Object.entries(nextEdgesById)) {
+			if (previousEdgesById[edgeId]) continue;
+			opacityByEdgeId[edgeId] = revealWaveEdgeOpacity(
+				nextVisibility.edge,
+				revealState.nextHopsByNodeId,
+				revealNodeOpacityByNodeId,
+				settings.displayedLayers
+			);
+		}
+
+		return opacityByEdgeId;
+	}
+
+	get revealWavePreviousOnlyNodeIds(): readonly string[] {
+		const revealState = this.scaleChangeRevealState;
+		if (!revealState || this.revealWaveProgress >= 1) return [];
+		const nextVisibleNodeIdLookup = Object.fromEntries(
+			revealState.nextVisibleNodeIds.map((nodeId) => [nodeId, true])
+		);
+		return revealState.previousVisibleNodeIds.filter((nodeId) => !nextVisibleNodeIdLookup[nodeId]);
+	}
+
+	get revealWavePreviousOnlyEdgeVisibility(): readonly RenderableEdgeVisibility[] {
+		const revealState = this.scaleChangeRevealState;
+		if (!revealState || this.revealWaveProgress >= 1) return [];
+		const nextEdgeIdLookup = Object.fromEntries(
+			revealState.nextRenderableEdgeIds.map((edgeId) => [edgeId, true])
+		);
+		return revealState.previousRenderableEdges.filter(
+			(visibility) => !nextEdgeIdLookup[visibility.edge.id]
+		);
+	}
+
+	get revealWavePreviousScaleByNodeId(): Record<string, number> {
+		const revealState = this.scaleChangeRevealState;
+		if (!revealState || this.revealWaveProgress >= 1) return {};
+		return scaleByHops(revealState.previousHopsByNodeId, this.#resolvedSettings());
+	}
+
 	#resolvedSettings(): LayoutSettings {
 		return withDefaultLayoutSettings(this.#options.getLayoutSettings());
+	}
+
+	#createScaleChangeRevealState(
+		currentGraph: MultigraphData,
+		nextGraph: MultigraphData
+	): ScaleChangeRevealState {
+		const settings = this.#resolvedSettings();
+		const fallbackAnchorNodeId = this.#options.getFallbackAnchorNodeId();
+		const previousHopsByNodeId = hopsFromPinned(currentGraph);
+		const nextHopsByNodeId = hopsFromPinned(nextGraph);
+		const previousVisibleNodeIds = Array.from(
+			visibleNodeIdsForPinnedNeighborhood(currentGraph, previousHopsByNodeId, {
+				displayedLayers: settings.displayedLayers,
+				fallbackAnchorNodeId
+			})
+		);
+		const nextVisibleNodeIds = Array.from(
+			visibleNodeIdsForPinnedNeighborhood(nextGraph, nextHopsByNodeId, {
+				displayedLayers: settings.displayedLayers,
+				fallbackAnchorNodeId
+			})
+		);
+		const previousRenderableEdges = edgeVisibilityForPinnedNeighborhood(
+			currentGraph,
+			previousHopsByNodeId,
+			{
+				displayedLayers: settings.displayedLayers,
+				fallbackAnchorNodeId
+			}
+		).filter((visibility): visibility is RenderableEdgeVisibility => visibility.kind !== 'hidden');
+		const nextRenderableEdges = edgeVisibilityForPinnedNeighborhood(nextGraph, nextHopsByNodeId, {
+			displayedLayers: settings.displayedLayers,
+			fallbackAnchorNodeId
+		}).filter((visibility): visibility is RenderableEdgeVisibility => visibility.kind !== 'hidden');
+		const nextRenderableEdgeIds = nextRenderableEdges.map((visibility) => visibility.edge.id);
+
+		return {
+			previousHopsByNodeId,
+			nextHopsByNodeId,
+			previousVisibleNodeIds,
+			nextVisibleNodeIds,
+			previousRenderableEdges,
+			nextRenderableEdges,
+			nextRenderableEdgeIds
+		};
 	}
 }
 

@@ -3,7 +3,7 @@
 **Created:** 2026-06-13
 **Author:** Cursor agent
 **Milestone:** [milestones/04i-eliminate-appearance-abruptness.md](../milestones/04i-eliminate-appearance-abruptness.md)
-**Status:** draft
+**Status:** done
 **Total estimated effort:** L (5 tasks; 2 pure modules can run in parallel,
 then a serial chain through `Multigraph.svelte`)
 
@@ -38,6 +38,16 @@ resting `boundedVisibility` render (including the static boundary-edge half-fade
   terminal snap.
 - **Disabling transitions.** **Duration `0` ⇒ instant**, reusing the existing
   `scaleAnimationDurationMs > 0` convention for reduced-motion and tests.
+- **Default animation tunings.** **Use `enterExitDurationMs = 180`, keep the
+  reveal wave on the existing `scaleAnimationDurationMs` clock, and default
+  `revealFrontWidthHops = 1`.** This keeps single-element mutations quick while
+  preserving the slower pin/unpin scale choreography.
+- **Integration order.** **Wire user enter/exit before pin/unpin reveal.** This
+  proves the render opacity/scale channel on smaller interactions before the
+  more complex wave orchestration.
+- **Post-04h target files.** **Treat `layoutRuntime.svelte.ts` as the scale and
+  settle orchestration boundary.** `Multigraph.svelte` still owns UI wiring, but
+  scale-animation clock integration belongs in the extracted runtime.
 
 ## Out of scope (for this plan)
 
@@ -53,7 +63,7 @@ resting `boundedVisibility` render (including the static boundary-edge half-fade
 > Each task is one PR. T03–T05 all touch `Multigraph.svelte`, so they run in
 > separate waves by design (the monolith serializes them until 04h splits it).
 
-### T01 — Pure `revealWave.ts` module
+### ✓ T01 — Pure `revealWave.ts` module
 
 |                |                                                                             |
 | -------------- | --------------------------------------------------------------------------- |
@@ -81,7 +91,7 @@ parameters with defaults.
 - `hide` direction is the time-reverse of `reveal`.
 - Edge helper keyed off the in-range endpoint ⇒ boundary edge reaches `1`.
 
-### T02 — Pure `elementTransitions.ts` (enter/exit + exiting buffer)
+### ✓ T02 — Pure `elementTransitions.ts` (enter/exit + exiting buffer)
 
 |                |                                                                                             |
 | -------------- | ------------------------------------------------------------------------------------------- |
@@ -106,7 +116,7 @@ scale/opacity at `now`, and prune once complete. Duration `0` ⇒ instant.
 - Duration `0` collapses to the end state immediately.
 - Immutable: reducers return new objects.
 
-### T03 — Render opacity/scale channel + data attrs
+### ✓ T03 — Render opacity/scale channel + data attrs
 
 |                |                                                                                  |
 | -------------- | -------------------------------------------------------------------------------- |
@@ -129,15 +139,15 @@ prove the channel works in isolation.
 - Existing node/edge stories still pass (default opacity `1`, scale unchanged).
 - Exiting-buffer elements render even when absent from the visible set.
 
-### T04 — Wire user add/remove through enter/exit
+### ✓ T04 — Wire user add/remove through enter/exit
 
-|                |                                                            |
-| -------------- | ---------------------------------------------------------- |
-| **Depends on** | T02, T03                                                   |
-| **Wave**       | 3                                                          |
-| **Agent**      | default (claude-4.6-sonnet-medium-thinking)                |
-| **Files**      | `Multigraph.svelte`, `Multigraph.stories.svelte`           |
-| **PR title**   | `feat(multigraph): animate node/edge add and edge removal` |
+|                |                                                                                 |
+| -------------- | ------------------------------------------------------------------------------- |
+| **Depends on** | T02, T03                                                                        |
+| **Wave**       | 3                                                                               |
+| **Agent**      | default (claude-4.6-sonnet-medium-thinking)                                     |
+| **Files**      | `Multigraph.svelte`, `Multigraph.stories.svelte`, `lib/layoutRuntime.svelte.ts` |
+| **PR title**   | `feat(multigraph): animate node/edge add and edge removal`                      |
 
 Route `addNode`/`addEdge` through an enter animation (new node scale 0→target at
 its drop point; new edge fade in) and `removeEdge` / node delete through the
@@ -153,23 +163,23 @@ transitions are active, reusing the existing `startRelaxationLoop` gate.
 - Removed elements are never editable/draggable mid-exit.
 - Existing add/remove stories updated to assert via `data-*`, not instant state.
 
-### T05 — Wire pin/unpin reveal wave + end-state continuity
+### ✓ T05 — Wire pin/unpin reveal wave + end-state continuity
 
-|                |                                                                                       |
-| -------------- | ------------------------------------------------------------------------------------- |
-| **Depends on** | T01, T03                                                                              |
-| **Wave**       | 4                                                                                     |
-| **Agent**      | high-reasoning (claude-opus-4-8-thinking-high or gpt-5.3-codex)                       |
-| **Files**      | `Multigraph.svelte`, `layoutSettings.ts`, `appConfig.ts`, `Multigraph.stories.svelte` |
-| **PR title**   | `feat(multigraph): sweep a reveal wave on pin/unpin`                                  |
+|                |                                                                                                                                                   |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Depends on** | T01, T03                                                                                                                                          |
+| **Wave**       | 4                                                                                                                                                 |
+| **Agent**      | high-reasoning (claude-opus-4-8-thinking-high or gpt-5.3-codex)                                                                                   |
+| **Files**      | `Multigraph.svelte`, `lib/layoutRuntime.svelte.ts`, `lib/layoutRuntime.spec.ts`, `layoutSettings.ts`, `appConfig.ts`, `Multigraph.stories.svelte` |
+| **PR title**   | `feat(multigraph): sweep a reveal wave on pin/unpin`                                                                                              |
 
-In `withScaleAnimation` / the relaxation loop, compute per-element opacity from
-`revealWave` using the focal scale-animation progress, feeding the render
-channel from T03. Add `enterExitDurationMs` and `revealFrontWidthHops` to
-`LayoutSettings` + `appConfig.multigraph.layout`, pinning existing specs to the
-new defaults. Guarantee `p = 1` equals the resting render (boundary edges show
-their resting half-gradient). Handle a second pin mid-flight by restarting the
-wave cleanly.
+In `LayoutRuntime.beginScaleChange` / the frame loop, compute per-element
+opacity from `revealWave` using the focal scale-animation progress, feeding the
+render channel from T03. Add `enterExitDurationMs` (default `180`) and
+`revealFrontWidthHops` (default `1`) to `LayoutSettings` +
+`appConfig.multigraph.layout`, pinning existing specs to the new defaults.
+Guarantee `p = 1` equals the resting render (boundary edges show their resting
+half-gradient). Handle a second pin mid-flight by restarting the wave cleanly.
 
 **Acceptance**
 
@@ -224,6 +234,6 @@ shared file; sequence T04 → T05 (or swap, either order works) and rebase.
   exiting buffer (T02) and the hop-front orchestration (T01/T05). Consider
   whether T02 should extend `scaleAnimation.ts` rather than add a sibling once
   T01/T02 land.
-- 2026-06-13: Ordering vs. 04h — building as pure modules now keeps 04h's later
-  split clean; if 04h lands first, T03–T05 wiring targets the post-split files
-  instead.
+- 2026-06-13: 04h has landed; T03–T05 should keep UI state in
+  `Multigraph.svelte` but put scale-clock / frame-loop behavior in
+  `lib/layoutRuntime.svelte.ts` where possible.

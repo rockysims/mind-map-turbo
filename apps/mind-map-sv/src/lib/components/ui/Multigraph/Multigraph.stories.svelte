@@ -7,6 +7,7 @@
 	import { makeClusteredRandomEdges, makeGraph, makeRandomEdges } from './lib/testFixtures';
 	import type { MultigraphData, Point } from '../types/multigraph';
 	import type { ViewState } from '$lib/migrations';
+	import type { ExitingBuffer } from './lib/elementTransitions';
 
 	const { Story } = defineMeta({
 		title: 'Components/Multigraph',
@@ -18,7 +19,10 @@
 			layoutSettings: { control: 'object' },
 			initialViewState: { control: 'object' },
 			onMultigraphChange: { control: false },
-			onViewStateChange: { control: false }
+			onViewStateChange: { control: false },
+			nodeRenderOverrides: { control: false },
+			edgeRenderOverrides: { control: false },
+			exitingBuffer: { control: false }
 		},
 		parameters: {
 			viewport: {
@@ -193,6 +197,16 @@
 			throw new Error(`Node ${nodeId} position is not finite`);
 		}
 		return { x, y };
+	}
+
+	function nodeOpacity(el: HTMLElement, nodeId: string): number {
+		return Number(getNodeWrapper(el, nodeId).dataset.nodeOpacity);
+	}
+
+	function edgeOpacity(el: HTMLElement, edgeId: string): number {
+		const edge = el.querySelector(`[data-edge-id="${edgeId}"]`) as HTMLElement | null;
+		if (!edge) throw new Error(`Edge not found for ${edgeId}`);
+		return Number(edge.dataset.edgeOpacity);
 	}
 
 	function nodePositions(el: HTMLElement, nodeIds: readonly string[]): Record<string, Point> {
@@ -541,6 +555,7 @@
 	args={{
 		multigraphData: makeGraph({ nodeCount: 2, edges: [[0, 1]] }),
 		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { enterExitDurationMs: 0 },
 		onMultigraphChange: fn()
 	}}
 	play={async ({ canvasElement, args }: PlayContext) => {
@@ -1276,6 +1291,113 @@
 />
 
 <Story
+	name="PinRevealWaveArrivesNearerFirstAndEndsAtRestingRender"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 6,
+			edges: chainEdges(6),
+			posByNodeId: {
+				n0: { x: -600, y: 0 },
+				n1: { x: -360, y: 0 },
+				n2: { x: -120, y: 0 },
+				n3: { x: 120, y: 0 },
+				n4: { x: 360, y: 0 },
+				n5: { x: 600, y: 0 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: {
+			displayedLayers: 2,
+			relaxIterations: 0,
+			scaleAnimationDurationMs: 120,
+			revealFrontWidthHops: 1,
+			postScaleChangeSettleMaxFrames: 0
+		}
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const circle = getCircle(canvasElement, 'n2');
+		const center = getCenter(circle);
+		await dispatchDoubleClick(circle, center.x, center.y);
+		await waitForFrames(2);
+
+		await waitFor(() => {
+			expect(nodeOpacity(canvasElement, 'n4')).toBeGreaterThan(0);
+			expect(nodeOpacity(canvasElement, 'n4')).toBeLessThan(1);
+			expect(edgeOpacity(canvasElement, 'e4')).toBeGreaterThan(0);
+			expect(edgeOpacity(canvasElement, 'e4')).toBeLessThan(1);
+		});
+
+		await sleep(160);
+		await waitForLayout();
+
+		for (const nodeId of ['n0', 'n1', 'n2', 'n3', 'n4']) {
+			expect(nodeOpacity(canvasElement, nodeId)).toBe(1);
+		}
+		expect(canvasElement.querySelector('[data-node-id="n5"].node-wrapper')).not.toBeInTheDocument();
+
+		const boundaryEdge = canvasElement.querySelector('[data-edge-id="e4"]') as HTMLElement;
+		expect(boundaryEdge).toBeInTheDocument();
+		expect(boundaryEdge).toHaveAttribute('data-edge-visibility', 'boundary');
+		expect(boundaryEdge.dataset.edgeOpacity).toBe('1');
+	}}
+/>
+
+<Story
+	name="UnpinRevealWaveReversesToSmallerNeighborhood"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 6,
+			pinned: [1, 4],
+			edges: chainEdges(6),
+			posByNodeId: {
+				n0: { x: -600, y: 0 },
+				n1: { x: -360, y: 0 },
+				n2: { x: -120, y: 0 },
+				n3: { x: 120, y: 0 },
+				n4: { x: 360, y: 0 },
+				n5: { x: 600, y: 0 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n1',
+		layoutSettings: {
+			displayedLayers: 1,
+			relaxIterations: 0,
+			scaleAnimationDurationMs: 120,
+			revealFrontWidthHops: 1,
+			postScaleChangeSettleMaxFrames: 0
+		}
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const circle = getCircle(canvasElement, 'n4');
+		const center = getCenter(circle);
+		await dispatchDoubleClick(circle, center.x, center.y);
+		await waitForFrames(2);
+
+		const waveBufferedNode = getNodeWrapper(canvasElement, 'n4');
+		expect(waveBufferedNode.dataset.nodeRevealBuffer).toBe('true');
+		expect(nodeOpacity(canvasElement, 'n4')).toBeGreaterThan(nodeOpacity(canvasElement, 'n3'));
+		expect(nodeOpacity(canvasElement, 'n3')).toBeGreaterThan(0);
+		expect(nodeOpacity(canvasElement, 'n3')).toBeLessThan(1);
+
+		await sleep(160);
+		await waitForLayout();
+
+		expect(canvasElement.querySelector('[data-node-id="n3"].node-wrapper')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-node-id="n4"].node-wrapper')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-node-id="n5"].node-wrapper')).not.toBeInTheDocument();
+		for (const nodeId of ['n0', 'n1', 'n2']) {
+			expect(nodeOpacity(canvasElement, nodeId)).toBe(1);
+		}
+		const boundaryEdge = canvasElement.querySelector('[data-edge-id="e2"]') as HTMLElement;
+		expect(boundaryEdge).toBeInTheDocument();
+		expect(boundaryEdge).toHaveAttribute('data-edge-visibility', 'boundary');
+		expect(boundaryEdge.dataset.edgeOpacity).toBe('1');
+	}}
+/>
+
+<Story
 	name="UserConfirmsDuplicateEdgeRemoval"
 	args={{
 		multigraphData: makeGraph({
@@ -1288,7 +1410,7 @@
 			}
 		}),
 		defaultPrimaryNodeId: 'n0',
-		layoutSettings: { relaxIterations: 1, edgeSpringStrength: 1 },
+		layoutSettings: { relaxIterations: 1, edgeSpringStrength: 1, enterExitDurationMs: 0 },
 		onMultigraphChange: fn()
 	}}
 	play={async ({ canvasElement, args }: PlayContext) => {
@@ -1708,5 +1830,185 @@
 
 		expect(lastChangedGraph(args).edges[0].tags).toEqual(['strong', 'rel']);
 		expect(edge.style.getPropertyValue('--edge-background').trim()).toBe('#ff0000');
+	}}
+/>
+
+<Story
+	name="StaticRenderChannel"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 3,
+			pinned: [0],
+			edges: [
+				{ source: 0, target: 1 },
+				{ source: 0, target: 2 }
+			],
+			posByNodeId: { n0: { x: 0, y: 0 }, n1: { x: 200, y: 0 }, n2: { x: -200, y: 0 } }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { relaxIterations: 0 },
+		nodeRenderOverrides: { n1: { opacity: 0.4 } },
+		edgeRenderOverrides: { e0: { opacity: 0.3 } },
+		exitingBuffer: {
+			nodes: {
+				n_exiting: {
+					nodeData: { id: 'n_exiting', title: 'Exiting Node', description: '', tags: [] },
+					x: 100,
+					y: 100,
+					fromScale: 1,
+					startedAtMs: 0,
+					durationMs: 0
+				}
+			},
+			edges: {}
+		} satisfies ExitingBuffer
+	}}
+	play={async ({ canvasElement }) => {
+		await waitForLayout();
+
+		// n1 should reflect the override opacity
+		const n1Wrapper = getNodeWrapper(canvasElement, 'n1');
+		expect(n1Wrapper.dataset.nodeOpacity).toBe('0.4');
+		expect(n1Wrapper.style.opacity).toBe('0.4');
+
+		// n0 has no override → default opacity 1
+		const n0Wrapper = getNodeWrapper(canvasElement, 'n0');
+		expect(n0Wrapper.dataset.nodeOpacity).toBe('1');
+
+		// n2 has no override → default opacity 1
+		const n2Wrapper = getNodeWrapper(canvasElement, 'n2');
+		expect(n2Wrapper.dataset.nodeOpacity).toBe('1');
+
+		// Existing data-scale attr is preserved
+		expect(n0Wrapper.dataset.scale).toBeTruthy();
+
+		// edge e0 should reflect the override opacity
+		const edge0 = canvasElement.querySelector('[data-edge-id="e0"]') as HTMLElement;
+		expect(edge0).toBeInTheDocument();
+		expect(edge0.dataset.edgeOpacity).toBe('0.3');
+		expect(edge0.style.opacity).toBe('0.3');
+
+		// edge e1 has no override → default opacity 1
+		const edge1 = canvasElement.querySelector('[data-edge-id="e1"]') as HTMLElement;
+		expect(edge1).toBeInTheDocument();
+		expect(edge1.dataset.edgeOpacity).toBe('1');
+
+		// The exiting buffer node must render even though it is not in the visible set
+		const exitingWrapper = canvasElement.querySelector('[data-node-id="n_exiting"]') as HTMLElement;
+		expect(exitingWrapper).toBeInTheDocument();
+		expect(exitingWrapper.dataset.nodeExiting).toBe('true');
+		// It must not accept pointer events (non-interactive mid-exit)
+		expect(exitingWrapper.style.pointerEvents).toBe('none');
+	}}
+/>
+
+<Story
+	name="NewNodeScalesInOnBackgroundDrop"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 1,
+			posByNodeId: { n0: { x: -280, y: 0 } }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const sourceCircle = getCircle(canvasElement, 'n0');
+		const sourceCenter = getCenter(sourceCircle);
+		const dropX = sourceCenter.x + 400;
+		const dropY = sourceCenter.y;
+
+		await dispatchDoubleClickDrag(
+			sourceCircle,
+			sourceCenter.x,
+			sourceCenter.y,
+			stage,
+			dropX,
+			dropY
+		);
+
+		// Immediately after the drop, new node and edge enter animations start.
+		// Check mid-animation state (before animation completes).
+		await waitForFrames(2);
+
+		const newNodeWrapper = canvasElement.querySelector(
+			'[data-node-id="n1"].node-wrapper'
+		) as HTMLElement | null;
+		expect(newNodeWrapper).toBeInTheDocument();
+
+		const newNodeScale = Number(newNodeWrapper!.dataset.scale);
+		expect(newNodeScale).toBeGreaterThan(0);
+		expect(newNodeScale).toBeLessThan(1);
+
+		const newEdge = canvasElement.querySelector(
+			'.edge[data-source-node-id="n0"][data-target-node-id="n1"]'
+		) as HTMLElement | null;
+		expect(newEdge).toBeInTheDocument();
+
+		const newEdgeOpacity = Number(newEdge!.dataset.edgeOpacity);
+		expect(newEdgeOpacity).toBeGreaterThan(0);
+		expect(newEdgeOpacity).toBeLessThan(1);
+	}}
+/>
+
+<Story
+	name="RemovedEdgeFadesOutAfterDuplicateConfirm"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 2,
+			pinned: [0],
+			edges: [[0, 1]],
+			posByNodeId: {
+				n0: { x: -200, y: 0 },
+				n1: { x: 200, y: 0 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { relaxIterations: 0 },
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const sourceCircle = getCircle(canvasElement, 'n0');
+		const targetCircle = getCircle(canvasElement, 'n1');
+		const sourceCenter = getCenter(sourceCircle);
+		const targetCenter = getCenter(targetCircle);
+
+		// Create duplicate edge to trigger the confirm dialog.
+		await dispatchDoubleClickDrag(
+			sourceCircle,
+			sourceCenter.x,
+			sourceCenter.y,
+			stage,
+			targetCenter.x,
+			targetCenter.y
+		);
+		await sleep();
+
+		const confirmButton = canvasElement.querySelector(
+			'.duplicate-edge-dialog-confirm'
+		) as HTMLElement;
+		expect(confirmButton).toBeInTheDocument();
+		confirmButton.click();
+
+		// Mid-exit: edge is still in the DOM (exiting buffer) but fading out.
+		await waitForFrames(2);
+
+		const exitingEdge = canvasElement.querySelector('[data-edge-id="e0"]') as HTMLElement | null;
+		expect(exitingEdge).toBeInTheDocument();
+		expect(exitingEdge!.dataset.edgeExiting).toBe('true');
+		const midOpacity = Number(exitingEdge!.dataset.edgeOpacity);
+		expect(midOpacity).toBeGreaterThan(0);
+		expect(midOpacity).toBeLessThan(1);
+
+		// After the exit animation completes, the edge is pruned from the buffer.
+		await sleep(APP_CONFIG.multigraph.layout.enterExitDurationMs + 40);
+		await waitForLayout();
+
+		expect(canvasElement.querySelector('[data-edge-id="e0"]')).not.toBeInTheDocument();
+		expect(lastChangedGraph(args).edges).toEqual([]);
 	}}
 />

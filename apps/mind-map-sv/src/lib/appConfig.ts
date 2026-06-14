@@ -51,7 +51,9 @@ export const APP_CONFIG = {
 			maxRelaxationRotationPerFrameRad: Math.PI / 4, // skip degenerate rotation fits above this
 			layeredRelayoutSettleMaxFrames: 20, // max frames per layered relayout phase
 			layeredRelayoutSettleMaxFramesFinal: 200, // max frames for final layered relayout settle
-			layeredRelayoutSettleEpsilonPx: 0.25 // motion threshold to end layered relayout
+			layeredRelayoutSettleEpsilonPx: 0.25, // motion threshold to end layered relayout
+			enterExitDurationMs: 180, // duration of add/remove enter-exit animation (0 = instant)
+			revealFrontWidthHops: 1 // reveal-wave front width in hops for pin/unpin transitions
 		}
 	}
 } as const;
