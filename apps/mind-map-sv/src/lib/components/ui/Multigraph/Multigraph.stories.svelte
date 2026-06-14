@@ -1903,6 +1903,43 @@
 />
 
 <Story
+	name="VisibleEdgeFadesBehindUnrelatedNode"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 3,
+			pinned: [0],
+			edges: [
+				{ source: 0, target: 1 },
+				{ source: 0, target: 2 }
+			],
+			posByNodeId: {
+				n0: { x: -200, y: 0 },
+				n1: { x: 200, y: 0 },
+				n2: { x: 0, y: 0 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { baseRadius: 20, relaxIterations: 0 },
+		edgeRenderOverrides: { e0: { opacity: 0.3 } }
+	}}
+	play={async ({ canvasElement }) => {
+		await waitForLayout();
+
+		const occludedEdge = canvasElement.querySelector('[data-edge-id="e0"]') as HTMLElement;
+		expect(occludedEdge).toBeInTheDocument();
+		expect(occludedEdge).toHaveAttribute('data-edge-visibility', 'visible');
+		expect(occludedEdge).toHaveAttribute('data-edge-occlusion-count', '1');
+		expect(occludedEdge.dataset.edgeOpacity).toBe('0.3');
+		expect(occludedEdge.style.opacity).toBe('0.3');
+		expect(occludedEdge.style.getPropertyValue('--edge-background')).toContain('linear-gradient');
+
+		const endpointOnlyEdge = canvasElement.querySelector('[data-edge-id="e1"]') as HTMLElement;
+		expect(endpointOnlyEdge).toBeInTheDocument();
+		expect(endpointOnlyEdge).toHaveAttribute('data-edge-occlusion-count', '0');
+	}}
+/>
+
+<Story
 	name="NewNodeScalesInOnBackgroundDrop"
 	args={{
 		multigraphData: makeGraph({

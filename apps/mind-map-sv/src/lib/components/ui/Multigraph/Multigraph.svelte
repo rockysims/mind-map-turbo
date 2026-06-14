@@ -17,6 +17,7 @@
 		edgeStyle,
 		type RenderableEdgeVisibility
 	} from './lib/edgeStyle.js';
+	import { computeEdgeOcclusionWindows, type EdgeOcclusionNode } from './lib/edgeOcclusion.js';
 	import {
 		addEdge,
 		addNode,
@@ -186,6 +187,14 @@
 			visibleGraph,
 			layoutRuntime.layoutOptions(visibleGraph, { relaxIterations: 0 })
 		)
+	);
+	const visibleEdgeOcclusionNodes = $derived.by((): EdgeOcclusionNode[] =>
+		visibleGraph.nodes.flatMap((node) => {
+			const position = graphLayout.posByNodeId[node.id];
+			const radius = graphLayout.radiusByNodeId[node.id];
+			if (!position || radius === undefined) return [];
+			return [{ nodeId: node.id, position, radius }];
+		})
 	);
 	const nodeById = $derived(Object.fromEntries(graph.nodes.map((node) => [node.id, node])));
 	const revealWaveNodeOpacityByNodeId = $derived(layoutRuntime.revealWaveNodeOpacityByNodeId);
@@ -575,6 +584,28 @@
 			{#each renderableEdgeVisibility as visibility (visibility.edge.id)}
 				{@const edge = visibility.edge}
 				{@const edgePoints = edgeRenderPoints(visibility, graphLayout, graph.posByNodeId)}
+				{@const edgeLengthPx = Math.hypot(
+					edgePoints.target.x - edgePoints.source.x,
+					edgePoints.target.y - edgePoints.source.y
+				)}
+				{@const edgeOcclusionWindows =
+					visibility.kind === 'visible'
+						? computeEdgeOcclusionWindows(
+								{
+									sourceNodeId: edge.sourceNodeId,
+									targetNodeId: edge.targetNodeId,
+									source: edgePoints.source,
+									target: edgePoints.target,
+									directed: edge.directed
+								},
+								visibleEdgeOcclusionNodes,
+								{
+									edgeOcclusionClearancePx: resolvedLayoutSettings.edgeOcclusionClearancePx,
+									edgeOcclusionFadeWidthPx: resolvedLayoutSettings.edgeOcclusionFadeWidthPx,
+									edgeOcclusionMinOpacity: resolvedLayoutSettings.edgeOcclusionMinOpacity
+								}
+							)
+						: []}
 				{@const arrowScale = edgeArrowScale(visibility, graphLayout.scaleByNodeId)}
 				{@const strokeScale = edgeStrokeScale(visibility, graphLayout.scaleByNodeId)}
 				{@const edgeColor = edgeStrokeColor(edge, graph.tagColorConfig.edgeTags)}
@@ -606,7 +637,19 @@
 						: undefined}
 					data-edge-stroke-scale={strokeScale}
 					data-edge-opacity={edgeOpacity}
-					style={`${edgeStyle(edgePoints.source, edgePoints.target)} --edge-background: ${edgeBackground(visibility, edgeColor)}; color: ${edgeColor}; --edge-arrow-length: ${EDGE_ARROW_LENGTH * arrowScale}px; --edge-arrow-half-height: ${EDGE_ARROW_HALF_HEIGHT * arrowScale}px; --edge-stroke-width: ${EDGE_STROKE_WIDTH * strokeScale}px; opacity: ${edgeOpacity};`}
+					data-edge-occlusion-count={visibility.kind === 'visible'
+						? edgeOcclusionWindows.length
+						: undefined}
+					style={`${edgeStyle(edgePoints.source, edgePoints.target)} --edge-background: ${edgeBackground(
+						visibility,
+						edgeColor,
+						{
+							occlusionWindows: edgeOcclusionWindows,
+							edgeLengthPx,
+							edgeArrowLengthPx: EDGE_ARROW_LENGTH * arrowScale,
+							edgeOcclusionMinOpacity: resolvedLayoutSettings.edgeOcclusionMinOpacity
+						}
+					)}; color: ${edgeColor}; --edge-arrow-length: ${EDGE_ARROW_LENGTH * arrowScale}px; --edge-arrow-half-height: ${EDGE_ARROW_HALF_HEIGHT * arrowScale}px; --edge-stroke-width: ${EDGE_STROKE_WIDTH * strokeScale}px; opacity: ${edgeOpacity};`}
 				></div>
 			{/each}
 			{#each layoutRuntime.revealWavePreviousOnlyEdgeVisibility as visibility (visibility.edge.id)}

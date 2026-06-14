@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { APP_CONFIG } from '../../../../appConfig';
+import {
+	DEFAULT_EDGE_OCCLUSION_CLEARANCE_PX,
+	DEFAULT_EDGE_OCCLUSION_FADE_WIDTH_PX,
+	DEFAULT_EDGE_OCCLUSION_MIN_OPACITY
+} from './edgeOcclusion';
 import { DEFAULT_LAYOUT_SETTINGS, withDefaultLayoutSettings } from './layoutSettings';
 
 describe('layoutSettings', () => {
@@ -13,5 +18,17 @@ describe('layoutSettings', () => {
 			displayedLayers: 4,
 			edgeSpringStrength: 1
 		});
+	});
+
+	it('pins the edge occlusion defaults used by edge rendering helpers', () => {
+		expect(DEFAULT_LAYOUT_SETTINGS.edgeOcclusionClearancePx).toBe(
+			DEFAULT_EDGE_OCCLUSION_CLEARANCE_PX
+		);
+		expect(DEFAULT_LAYOUT_SETTINGS.edgeOcclusionFadeWidthPx).toBe(
+			DEFAULT_EDGE_OCCLUSION_FADE_WIDTH_PX
+		);
+		expect(DEFAULT_LAYOUT_SETTINGS.edgeOcclusionMinOpacity).toBe(
+			DEFAULT_EDGE_OCCLUSION_MIN_OPACITY
+		);
 	});
 });

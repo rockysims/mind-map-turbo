@@ -53,7 +53,10 @@ export const APP_CONFIG = {
 			layeredRelayoutSettleMaxFramesFinal: 200, // max frames for final layered relayout settle
 			layeredRelayoutSettleEpsilonPx: 0.25, // motion threshold to end layered relayout
 			enterExitDurationMs: 180, // duration of add/remove enter-exit animation (0 = instant)
-			revealFrontWidthHops: 1 // reveal-wave front width in hops for pin/unpin transitions
+			revealFrontWidthHops: 1, // reveal-wave front width in hops for pin/unpin transitions
+			edgeOcclusionClearancePx: 6, // extra edge fade clearance around unrelated nodes
+			edgeOcclusionFadeWidthPx: 12, // width of the soft fade on each side of an occlusion
+			edgeOcclusionMinOpacity: 0.16 // minimum edge opacity where a node crosses over it
 		}
 	}
 } as const;

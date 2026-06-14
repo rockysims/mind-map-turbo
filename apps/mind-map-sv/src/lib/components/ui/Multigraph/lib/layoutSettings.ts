@@ -25,6 +25,9 @@ export interface LayoutSettings {
 	layeredRelayoutSettleEpsilonPx: number;
 	enterExitDurationMs: number;
 	revealFrontWidthHops: number;
+	edgeOcclusionClearancePx: number;
+	edgeOcclusionFadeWidthPx: number;
+	edgeOcclusionMinOpacity: number;
 }
 
 export const DEFAULT_LAYOUT_SETTINGS: LayoutSettings = {
