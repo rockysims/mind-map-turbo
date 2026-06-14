@@ -3,7 +3,7 @@
 **Created:** 2026-06-13
 **Author:** Cursor agent
 **Milestone:** [milestones/04j-edge-occlusion-fade.md](../milestones/04j-edge-occlusion-fade.md)
-**Status:** executing
+**Status:** done
 **Total estimated effort:** S (3 tasks; one pure-geometry fix, one zoom-behavior
 change, one focused story pass)
 
@@ -109,7 +109,7 @@ must not make near-miss edges occlude.
 - `Stage` live-scale plumbing remains warning-free under `svelte-check`.
 - Boundary-edge radius fade is unchanged.
 
-### T03 - Add stories for the observed zoom regression
+### ✓ T03 - Add stories for the observed zoom regression
 
 |                |                                                            |
 | -------------- | ---------------------------------------------------------- |
