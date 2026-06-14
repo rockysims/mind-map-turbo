@@ -29,6 +29,16 @@ export interface EdgeOcclusionOptions {
 	edgeOcclusionMinOpacity?: number;
 }
 
+export interface EdgeOcclusionZoomBaseParameters {
+	clearancePx: number;
+	fadeWidthPx: number;
+}
+
+export interface EdgeOcclusionZoomParameters {
+	edgeOcclusionClearancePx: number;
+	edgeOcclusionFadeWidthPx: number;
+}
+
 export interface EdgeOcclusionWindow {
 	fadeStart: number;
 	coreStart: number;
@@ -37,27 +47,37 @@ export interface EdgeOcclusionWindow {
 	occludingNodeIds: readonly string[];
 }
 
-export function edgeOcclusionFadeWidthForZoom(
-	baseFadeWidthPx: number,
+export function edgeOcclusionParametersForZoom(
+	baseParameters: EdgeOcclusionZoomBaseParameters,
 	zoomScale: number,
 	minMultiplier = DEFAULT_EDGE_OCCLUSION_ZOOM_MIN_MULTIPLIER,
 	maxMultiplier = DEFAULT_EDGE_OCCLUSION_ZOOM_MAX_MULTIPLIER
-): number {
+): EdgeOcclusionZoomParameters {
+	const unchangedParameters = {
+		edgeOcclusionClearancePx: baseParameters.clearancePx,
+		edgeOcclusionFadeWidthPx: baseParameters.fadeWidthPx
+	};
+
 	if (
-		!Number.isFinite(baseFadeWidthPx) ||
+		!Number.isFinite(baseParameters.clearancePx) ||
+		!Number.isFinite(baseParameters.fadeWidthPx) ||
 		!Number.isFinite(zoomScale) ||
 		!Number.isFinite(minMultiplier) ||
 		!Number.isFinite(maxMultiplier) ||
-		baseFadeWidthPx < 0 ||
+		baseParameters.clearancePx < 0 ||
+		baseParameters.fadeWidthPx < 0 ||
 		zoomScale <= 0
 	) {
-		return baseFadeWidthPx;
+		return unchangedParameters;
 	}
 
 	const min = Math.min(minMultiplier, maxMultiplier);
 	const max = Math.max(minMultiplier, maxMultiplier);
 	const multiplier = clamp(1 / zoomScale, min, max);
-	return baseFadeWidthPx * multiplier;
+	return {
+		edgeOcclusionClearancePx: baseParameters.clearancePx * multiplier,
+		edgeOcclusionFadeWidthPx: baseParameters.fadeWidthPx * multiplier
+	};
 }
 
 interface WindowInPixels {

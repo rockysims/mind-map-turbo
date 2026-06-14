@@ -19,7 +19,7 @@
 	} from './lib/edgeStyle.js';
 	import {
 		computeEdgeOcclusionWindows,
-		edgeOcclusionFadeWidthForZoom,
+		edgeOcclusionParametersForZoom,
 		type EdgeOcclusionNode
 	} from './lib/edgeOcclusion.js';
 	import {
@@ -600,8 +600,11 @@
 					visibility.kind === 'boundary'
 						? (graphLayout.radiusByNodeId[visibility.visibleNodeId] ?? 0)
 						: undefined}
-				{@const effectiveEdgeOcclusionFadeWidthPx = edgeOcclusionFadeWidthForZoom(
-					resolvedLayoutSettings.edgeOcclusionFadeWidthPx,
+				{@const effectiveEdgeOcclusionParameters = edgeOcclusionParametersForZoom(
+					{
+						clearancePx: resolvedLayoutSettings.edgeOcclusionClearancePx,
+						fadeWidthPx: resolvedLayoutSettings.edgeOcclusionFadeWidthPx
+					},
 					stageScale
 				)}
 				{@const edgeOcclusionWindows =
@@ -616,8 +619,7 @@
 								},
 								visibleEdgeOcclusionNodes,
 								{
-									edgeOcclusionClearancePx: resolvedLayoutSettings.edgeOcclusionClearancePx,
-									edgeOcclusionFadeWidthPx: effectiveEdgeOcclusionFadeWidthPx,
+									...effectiveEdgeOcclusionParameters,
 									edgeOcclusionMinOpacity: resolvedLayoutSettings.edgeOcclusionMinOpacity
 								}
 							)
@@ -660,7 +662,7 @@
 						? edgeOcclusionWindows.length
 						: undefined}
 					data-edge-occlusion-fade-width={visibility.kind === 'visible'
-						? effectiveEdgeOcclusionFadeWidthPx
+						? effectiveEdgeOcclusionParameters.edgeOcclusionFadeWidthPx
 						: undefined}
 					style={`${edgeStyle(edgePoints.source, edgePoints.target)} --edge-background: ${edgeBackground(
 						visibility,

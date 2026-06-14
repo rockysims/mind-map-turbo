@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeEdgeOcclusionWindows, edgeOcclusionFadeWidthForZoom } from './edgeOcclusion';
+import { computeEdgeOcclusionWindows, edgeOcclusionParametersForZoom } from './edgeOcclusion';
 import type { EdgeOcclusionNode, EdgeOcclusionSegment } from './edgeOcclusion';
 
 const horizontalSegment = {
@@ -41,6 +41,44 @@ describe('computeEdgeOcclusionWindows', () => {
 
 		expect(touchingBorder).toHaveLength(1);
 		expect(insideClearanceButNotTouching).toEqual([]);
+	});
+
+	it('keeps zoom-inflated clearance from turning radius near-misses into occlusions', () => {
+		const zoomedInParameters = edgeOcclusionParametersForZoom(
+			{ clearancePx: 32, fadeWidthPx: 0 },
+			0.5
+		);
+
+		expect(
+			computeEdgeOcclusionWindows(horizontalSegment, [node('near-miss', { x: 50, y: 10.01 }, 10)], {
+				...zoomedInParameters,
+				edgeOcclusionMinOpacity: baseOptions.edgeOcclusionMinOpacity
+			})
+		).toEqual([]);
+	});
+
+	it('moves core cutoffs when zoomed out even with no fade ramp', () => {
+		const [scaleOne] = computeEdgeOcclusionWindows(
+			horizontalSegment,
+			[node('centered', { x: 50, y: 0 }, 10)],
+			{
+				...edgeOcclusionParametersForZoom({ clearancePx: 4, fadeWidthPx: 0 }, 1),
+				edgeOcclusionMinOpacity: baseOptions.edgeOcclusionMinOpacity
+			}
+		);
+		const [zoomedOut] = computeEdgeOcclusionWindows(
+			horizontalSegment,
+			[node('centered', { x: 50, y: 0 }, 10)],
+			{
+				...edgeOcclusionParametersForZoom({ clearancePx: 4, fadeWidthPx: 0 }, 0.5),
+				edgeOcclusionMinOpacity: baseOptions.edgeOcclusionMinOpacity
+			}
+		);
+
+		expect(scaleOne.coreStart).toBeCloseTo(0.36);
+		expect(scaleOne.coreEnd).toBeCloseTo(0.64);
+		expect(zoomedOut.coreStart).toBeCloseTo(0.32);
+		expect(zoomedOut.coreEnd).toBeCloseTo(0.68);
 	});
 
 	it('clamps projection windows to the segment ends without occluding a node beyond reach', () => {
@@ -246,27 +284,48 @@ describe('computeEdgeOcclusionWindows', () => {
 	});
 });
 
-describe('edgeOcclusionFadeWidthForZoom', () => {
-	it('keeps the base fade width at scale 1', () => {
-		expect(edgeOcclusionFadeWidthForZoom(30, 1)).toBe(30);
+describe('edgeOcclusionParametersForZoom', () => {
+	it('keeps base parameters at scale 1', () => {
+		expect(edgeOcclusionParametersForZoom({ clearancePx: 6, fadeWidthPx: 30 }, 1)).toEqual({
+			edgeOcclusionClearancePx: 6,
+			edgeOcclusionFadeWidthPx: 30
+		});
 	});
 
-	it('widens fades in graph space when zoomed out', () => {
-		expect(edgeOcclusionFadeWidthForZoom(30, 0.5)).toBe(60);
+	it('widens clearance and fades in graph space when zoomed out', () => {
+		expect(edgeOcclusionParametersForZoom({ clearancePx: 6, fadeWidthPx: 30 }, 0.5)).toEqual({
+			edgeOcclusionClearancePx: 12,
+			edgeOcclusionFadeWidthPx: 60
+		});
 	});
 
-	it('narrows fades in graph space when zoomed in', () => {
-		expect(edgeOcclusionFadeWidthForZoom(30, 2)).toBe(15);
+	it('narrows clearance and fades in graph space when zoomed in', () => {
+		expect(edgeOcclusionParametersForZoom({ clearancePx: 6, fadeWidthPx: 30 }, 2)).toEqual({
+			edgeOcclusionClearancePx: 3,
+			edgeOcclusionFadeWidthPx: 15
+		});
 	});
 
 	it('clamps extreme zoom multipliers', () => {
-		expect(edgeOcclusionFadeWidthForZoom(30, 0.05)).toBe(120);
-		expect(edgeOcclusionFadeWidthForZoom(30, 10)).toBe(15);
+		expect(edgeOcclusionParametersForZoom({ clearancePx: 6, fadeWidthPx: 30 }, 0.05)).toEqual({
+			edgeOcclusionClearancePx: 24,
+			edgeOcclusionFadeWidthPx: 120
+		});
+		expect(edgeOcclusionParametersForZoom({ clearancePx: 6, fadeWidthPx: 30 }, 10)).toEqual({
+			edgeOcclusionClearancePx: 3,
+			edgeOcclusionFadeWidthPx: 15
+		});
 	});
 
 	it('leaves invalid inputs unchanged', () => {
-		expect(edgeOcclusionFadeWidthForZoom(30, 0)).toBe(30);
-		expect(edgeOcclusionFadeWidthForZoom(-1, 0.5)).toBe(-1);
+		expect(edgeOcclusionParametersForZoom({ clearancePx: 6, fadeWidthPx: 30 }, 0)).toEqual({
+			edgeOcclusionClearancePx: 6,
+			edgeOcclusionFadeWidthPx: 30
+		});
+		expect(edgeOcclusionParametersForZoom({ clearancePx: -1, fadeWidthPx: 30 }, 0.5)).toEqual({
+			edgeOcclusionClearancePx: -1,
+			edgeOcclusionFadeWidthPx: 30
+		});
 	});
 });
 
