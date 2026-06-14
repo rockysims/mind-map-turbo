@@ -588,6 +588,10 @@
 					edgePoints.target.x - edgePoints.source.x,
 					edgePoints.target.y - edgePoints.source.y
 				)}
+				{@const boundaryFadeRadiusPx =
+					visibility.kind === 'boundary'
+						? (graphLayout.radiusByNodeId[visibility.visibleNodeId] ?? 0)
+						: undefined}
 				{@const edgeOcclusionWindows =
 					visibility.kind === 'visible'
 						? computeEdgeOcclusionWindows(
@@ -633,6 +637,7 @@
 					data-boundary-fade-ratio={visibility.kind === 'boundary'
 						? visibility.fadeRatio
 						: undefined}
+					data-boundary-fade-radius={boundaryFadeRadiusPx}
 					data-edge-boundary-dashed={visibility.kind === 'boundary' ? 'true' : undefined}
 					data-edge-arrow-scale={edge.directed === true && visibility.kind === 'visible'
 						? arrowScale
@@ -649,7 +654,8 @@
 							occlusionWindows: edgeOcclusionWindows,
 							edgeLengthPx,
 							edgeArrowLengthPx: EDGE_ARROW_LENGTH * arrowScale,
-							edgeOcclusionMinOpacity: resolvedLayoutSettings.edgeOcclusionMinOpacity
+							edgeOcclusionMinOpacity: resolvedLayoutSettings.edgeOcclusionMinOpacity,
+							boundaryFadeRadiusPx
 						}
 					)}; color: ${edgeColor}; --edge-arrow-length: ${EDGE_ARROW_LENGTH * arrowScale}px; --edge-arrow-half-height: ${EDGE_ARROW_HALF_HEIGHT * arrowScale}px; --edge-stroke-width: ${EDGE_STROKE_WIDTH * strokeScale}px; opacity: ${edgeOpacity};`}
 				></div>
@@ -657,6 +663,14 @@
 			{#each layoutRuntime.revealWavePreviousOnlyEdgeVisibility as visibility (visibility.edge.id)}
 				{@const edge = visibility.edge}
 				{@const edgePoints = edgeRenderPoints(visibility, combinedEdgeLayout, graph.posByNodeId)}
+				{@const edgeLengthPx = Math.hypot(
+					edgePoints.target.x - edgePoints.source.x,
+					edgePoints.target.y - edgePoints.source.y
+				)}
+				{@const boundaryFadeRadiusPx =
+					visibility.kind === 'boundary'
+						? (combinedEdgeLayout.radiusByNodeId[visibility.visibleNodeId] ?? 0)
+						: undefined}
 				{@const arrowScale = edgeArrowScale(visibility, combinedScaleByNodeId)}
 				{@const strokeScale = edgeStrokeScale(visibility, combinedScaleByNodeId)}
 				{@const edgeColor = edgeStrokeColor(edge, graph.tagColorConfig.edgeTags)}
@@ -681,6 +695,7 @@
 					data-boundary-fade-ratio={visibility.kind === 'boundary'
 						? visibility.fadeRatio
 						: undefined}
+					data-boundary-fade-radius={boundaryFadeRadiusPx}
 					data-edge-boundary-dashed={visibility.kind === 'boundary' ? 'true' : undefined}
 					data-edge-arrow-scale={edge.directed === true && visibility.kind === 'visible'
 						? arrowScale
@@ -688,7 +703,14 @@
 					data-edge-stroke-scale={strokeScale}
 					data-edge-opacity={edgeOpacity}
 					data-edge-reveal-buffer="true"
-					style={`${edgeStyle(edgePoints.source, edgePoints.target)} --edge-background: ${edgeBackground(visibility, edgeColor)}; color: ${edgeColor}; --edge-arrow-length: ${EDGE_ARROW_LENGTH * arrowScale}px; --edge-arrow-half-height: ${EDGE_ARROW_HALF_HEIGHT * arrowScale}px; --edge-stroke-width: ${EDGE_STROKE_WIDTH * strokeScale}px; opacity: ${edgeOpacity}; pointer-events: none;`}
+					style={`${edgeStyle(edgePoints.source, edgePoints.target)} --edge-background: ${edgeBackground(
+						visibility,
+						edgeColor,
+						{
+							edgeLengthPx,
+							boundaryFadeRadiusPx
+						}
+					)}; color: ${edgeColor}; --edge-arrow-length: ${EDGE_ARROW_LENGTH * arrowScale}px; --edge-arrow-half-height: ${EDGE_ARROW_HALF_HEIGHT * arrowScale}px; --edge-stroke-width: ${EDGE_STROKE_WIDTH * strokeScale}px; opacity: ${edgeOpacity}; pointer-events: none;`}
 				></div>
 			{/each}
 			{#each exitingOnlyEdges as [id, entry] (id)}

@@ -1245,6 +1245,10 @@
 		expect(boundaryEdge).toHaveAttribute('data-visible-node-id', 'n2');
 		expect(boundaryEdge).toHaveAttribute('data-hidden-node-id', 'n3');
 		expect(boundaryEdge).toHaveAttribute('data-boundary-fade-ratio', '0.5');
+		expect(Number(boundaryEdge.dataset.boundaryFadeRadius)).toBeGreaterThan(0);
+		expect(boundaryEdge.style.getPropertyValue('--edge-background')).toMatch(
+			/linear-gradient\(to right, #888888 0%, #888888 [\d.]+%, transparent [\d.]+%\)/
+		);
 		expect(boundaryEdge).toHaveClass('boundary');
 		expect(boundaryEdge).toHaveAttribute('data-edge-boundary-dashed', 'true');
 		expect(boundaryEdge).not.toHaveAttribute('data-arrow-target-node-id');

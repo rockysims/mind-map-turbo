@@ -178,7 +178,7 @@ describe('edgeBackground', () => {
 		);
 	});
 
-	it('keeps boundary edge backgrounds on the existing far-end fade gradient', () => {
+	it('keeps boundary edge backgrounds on the legacy far-end fade without geometry', () => {
 		const visibility = {
 			kind: 'boundary',
 			edge: directedEdge,
@@ -202,6 +202,25 @@ describe('edgeBackground', () => {
 				]
 			})
 		).toBe('linear-gradient(to right, #888888, transparent)');
+	});
+
+	it('fades boundary edge backgrounds over one visible-node radius after the border', () => {
+		const visibility = {
+			kind: 'boundary',
+			edge: directedEdge,
+			visibleNodeId: 'source',
+			hiddenNodeId: 'target',
+			visibleEndpoint: 'source',
+			hiddenEndpoint: 'target',
+			fadeRatio: 0.5
+		} satisfies EdgeVisibility;
+
+		expect(
+			edgeBackground(visibility, '#888888', {
+				edgeLengthPx: 100,
+				boundaryFadeRadiusPx: 20
+			})
+		).toBe('linear-gradient(to right, #888888 0%, #888888 20%, transparent 40%)');
 	});
 });
 

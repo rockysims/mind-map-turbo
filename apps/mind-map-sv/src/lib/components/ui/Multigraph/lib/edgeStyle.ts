@@ -18,6 +18,7 @@ export interface EdgeBackgroundOptions {
 	edgeLengthPx?: number;
 	edgeArrowLengthPx?: number;
 	edgeOcclusionMinOpacity?: number;
+	boundaryFadeRadiusPx?: number;
 }
 
 export function edgeStyle(sourcePos: Point, targetPos: Point): string {
@@ -88,7 +89,28 @@ export function edgeBackground(
 
 		return `linear-gradient(to right, ${stops.map(formatGradientStop).join(', ')})`;
 	}
-	return `linear-gradient(to right, ${color}, transparent)`;
+	return boundaryEdgeBackground(color, options);
+}
+
+function boundaryEdgeBackground(color: string, options: EdgeBackgroundOptions): string {
+	const edgeLength = options.edgeLengthPx;
+	const fadeRadius = options.boundaryFadeRadiusPx;
+	if (
+		edgeLength === undefined ||
+		fadeRadius === undefined ||
+		!Number.isFinite(edgeLength) ||
+		!Number.isFinite(fadeRadius) ||
+		edgeLength <= 0 ||
+		fadeRadius <= 0
+	) {
+		return `linear-gradient(to right, ${color}, transparent)`;
+	}
+
+	const fadeStart = clamp(fadeRadius / edgeLength, 0, 1);
+	const fadeEnd = clamp((fadeRadius * 2) / edgeLength, 0, 1);
+	return `linear-gradient(to right, ${formatGradientStop(gradientStop(color, 0))}, ${formatGradientStop(
+		gradientStop(color, fadeStart)
+	)}, transparent ${formatPercentage(fadeEnd)})`;
 }
 
 function normalizedOcclusionWindows(
