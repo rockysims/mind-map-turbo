@@ -2026,7 +2026,8 @@
 		layoutSettings: {
 			baseRadius: 20,
 			relaxIterations: 0,
-			edgeOcclusionFadeWidthPx: 12
+			edgeOcclusionFadeWidthPx: 12,
+			edgeOcclusionZoomScaleExponent: 0.5
 		}
 	}}
 	play={async ({ canvasElement }) => {
@@ -2113,6 +2114,7 @@
 			relaxIterations: 0,
 			edgeOcclusionClearancePx: 6,
 			edgeOcclusionFadeWidthPx: 0,
+			edgeOcclusionZoomScaleExponent: 0.5,
 			edgeOcclusionMinOpacity: 0.2
 		}
 	}}

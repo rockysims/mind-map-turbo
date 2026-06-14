@@ -178,7 +178,7 @@ describe('edgeBackground', () => {
 		);
 	});
 
-	it('preserves full-opacity stops between separate cores with overlapping fades', () => {
+	it('composes overlapping fades as an opacity envelope between separate cores', () => {
 		const visibility = {
 			kind: 'visible',
 			edge: undirectedEdge
@@ -205,7 +205,7 @@ describe('edgeBackground', () => {
 				]
 			})
 		).toBe(
-			'linear-gradient(to right, #abcdef 0%, #abcdef 15%, color-mix(in srgb, #abcdef 20%, transparent) 30%, color-mix(in srgb, #abcdef 20%, transparent) 40%, #abcdef 45%, #abcdef 55%, color-mix(in srgb, #abcdef 20%, transparent) 60%, color-mix(in srgb, #abcdef 20%, transparent) 70%, #abcdef 85%, #abcdef 100%)'
+			'linear-gradient(to right, #abcdef 0%, #abcdef 15%, color-mix(in srgb, #abcdef 20%, transparent) 30%, color-mix(in srgb, #abcdef 20%, transparent) 40%, color-mix(in srgb, #abcdef 46.6667%, transparent) 45%, color-mix(in srgb, #abcdef 73.3333%, transparent) 50%, color-mix(in srgb, #abcdef 46.6667%, transparent) 55%, color-mix(in srgb, #abcdef 20%, transparent) 60%, color-mix(in srgb, #abcdef 20%, transparent) 70%, #abcdef 85%, #abcdef 100%)'
 		);
 	});
 

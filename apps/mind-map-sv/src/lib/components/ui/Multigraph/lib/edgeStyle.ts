@@ -75,21 +75,42 @@ export function edgeBackground(
 		if (!Number.isFinite(minOpacity) || minOpacity >= 1) return color;
 
 		const percentageScale = edgeBackgroundPercentageScale(visibility, options);
-		const fullColorStops = [gradientStop(color, 0)];
-		const fadedColor = fadedEdgeColor(color, minOpacity);
-		const occlusionStops = windows.flatMap((window) => [
-			gradientStop(color, window.fadeStart * percentageScale),
-			gradientStop(fadedColor, window.coreStart * percentageScale),
-			gradientStop(fadedColor, window.coreEnd * percentageScale),
-			gradientStop(color, window.fadeEnd * percentageScale)
-		]);
-		const stops = [...fullColorStops, ...occlusionStops, gradientStop(color, 1)].sort(
-			(a, b) => a.position - b.position
-		);
+		const stops = occlusionGradientStops(color, windows, minOpacity, percentageScale);
 
 		return `linear-gradient(to right, ${stops.map(formatGradientStop).join(', ')})`;
 	}
 	return boundaryEdgeBackground(color, options);
+}
+
+function occlusionGradientStops(
+	color: string,
+	windows: readonly EdgeOcclusionWindow[],
+	minOpacity: number,
+	percentageScale: number
+): GradientStop[] {
+	const ramps = windows.map((window) => scaledOcclusionRamp(window, percentageScale));
+	const positions = new Set<number>([0, 1]);
+	for (const ramp of ramps) {
+		positions.add(ramp.fadeStart);
+		positions.add(ramp.coreStart);
+		positions.add(ramp.coreEnd);
+		positions.add(ramp.fadeEnd);
+	}
+
+	for (let i = 0; i < ramps.length; i += 1) {
+		for (let j = i + 1; j < ramps.length; j += 1) {
+			for (const position of opacityIntersectionPositions(ramps[i], ramps[j], minOpacity)) {
+				positions.add(position);
+			}
+		}
+	}
+
+	return [...positions]
+		.filter((position) => Number.isFinite(position) && position >= 0 && position <= 1)
+		.sort((a, b) => a - b)
+		.map((position) =>
+			gradientStop(edgeColorAtOpacity(color, opacityAt(position, ramps, minOpacity)), position)
+		);
 }
 
 function boundaryEdgeBackground(color: string, options: EdgeBackgroundOptions): string {
@@ -111,6 +132,84 @@ function boundaryEdgeBackground(color: string, options: EdgeBackgroundOptions): 
 	return `linear-gradient(to right, ${formatGradientStop(gradientStop(color, 0))}, ${formatGradientStop(
 		gradientStop(color, fadeStart)
 	)}, transparent ${formatPercentage(fadeEnd)})`;
+}
+
+interface OcclusionRamp {
+	fadeStart: number;
+	coreStart: number;
+	coreEnd: number;
+	fadeEnd: number;
+}
+
+function scaledOcclusionRamp(window: EdgeOcclusionWindow, percentageScale: number): OcclusionRamp {
+	return {
+		fadeStart: clamp(window.fadeStart * percentageScale, 0, 1),
+		coreStart: clamp(window.coreStart * percentageScale, 0, 1),
+		coreEnd: clamp(window.coreEnd * percentageScale, 0, 1),
+		fadeEnd: clamp(window.fadeEnd * percentageScale, 0, 1)
+	};
+}
+
+function opacityAt(position: number, ramps: readonly OcclusionRamp[], minOpacity: number): number {
+	return Math.min(...ramps.map((ramp) => opacityAtRampPosition(position, ramp, minOpacity)), 1);
+}
+
+function opacityAtRampPosition(position: number, ramp: OcclusionRamp, minOpacity: number): number {
+	if (position >= ramp.coreStart && position <= ramp.coreEnd) return minOpacity;
+	if (position <= ramp.fadeStart || position >= ramp.fadeEnd) return 1;
+	if (position < ramp.coreStart) {
+		return interpolate(1, minOpacity, ramp.fadeStart, ramp.coreStart, position);
+	}
+	return interpolate(minOpacity, 1, ramp.coreEnd, ramp.fadeEnd, position);
+}
+
+function opacityIntersectionPositions(
+	a: OcclusionRamp,
+	b: OcclusionRamp,
+	minOpacity: number
+): number[] {
+	const positions = new Set<number>([
+		a.fadeStart,
+		a.coreStart,
+		a.coreEnd,
+		a.fadeEnd,
+		b.fadeStart,
+		b.coreStart,
+		b.coreEnd,
+		b.fadeEnd
+	]);
+	const sortedPositions = [...positions].sort((left, right) => left - right);
+	const intersections: number[] = [];
+
+	for (let i = 0; i < sortedPositions.length - 1; i += 1) {
+		const start = sortedPositions[i];
+		const end = sortedPositions[i + 1];
+		if (start === end) continue;
+
+		const startDelta =
+			opacityAtRampPosition(start, a, minOpacity) - opacityAtRampPosition(start, b, minOpacity);
+		const endDelta =
+			opacityAtRampPosition(end, a, minOpacity) - opacityAtRampPosition(end, b, minOpacity);
+		if (startDelta === 0) intersections.push(start);
+		if (startDelta * endDelta >= 0) continue;
+
+		const ratio = Math.abs(startDelta) / (Math.abs(startDelta) + Math.abs(endDelta));
+		intersections.push(start + (end - start) * ratio);
+	}
+
+	return intersections;
+}
+
+function interpolate(
+	startValue: number,
+	endValue: number,
+	startPosition: number,
+	endPosition: number,
+	position: number
+): number {
+	if (startPosition === endPosition) return endValue;
+	const ratio = (position - startPosition) / (endPosition - startPosition);
+	return startValue + (endValue - startValue) * ratio;
 }
 
 function normalizedOcclusionWindows(
@@ -179,6 +278,11 @@ function gradientStop(color: string, position: number): GradientStop {
 
 function formatGradientStop(stop: GradientStop): string {
 	return `${stop.color} ${formatPercentage(stop.position)}`;
+}
+
+function edgeColorAtOpacity(color: string, opacity: number): string {
+	if (opacity >= 1) return color;
+	return fadedEdgeColor(color, opacity);
 }
 
 function fadedEdgeColor(color: string, opacity: number): string {
