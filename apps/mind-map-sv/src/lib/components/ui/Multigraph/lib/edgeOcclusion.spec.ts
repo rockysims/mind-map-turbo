@@ -120,6 +120,57 @@ describe('computeEdgeOcclusionWindows', () => {
 		]);
 	});
 
+	it('preserves separate cores when only their fade ramps overlap', () => {
+		const windows = computeEdgeOcclusionWindows(
+			horizontalSegment,
+			[node('b', { x: 35, y: 0 }, 5), node('c', { x: 65, y: 0 }, 5)],
+			{
+				...baseOptions,
+				edgeOcclusionClearancePx: 0,
+				edgeOcclusionFadeWidthPx: 15
+			}
+		);
+
+		expect(windows).toEqual([
+			{
+				fadeStart: 0.15,
+				coreStart: 0.3,
+				coreEnd: 0.4,
+				fadeEnd: 0.55,
+				occludingNodeIds: ['b']
+			},
+			{
+				fadeStart: 0.45,
+				coreStart: 0.6,
+				coreEnd: 0.7,
+				fadeEnd: 0.85,
+				occludingNodeIds: ['c']
+			}
+		]);
+	});
+
+	it('merges touching cores deterministically', () => {
+		const windows = computeEdgeOcclusionWindows(
+			horizontalSegment,
+			[node('b', { x: 55, y: 0 }, 5), node('a', { x: 45, y: 0 }, 5)],
+			{
+				...baseOptions,
+				edgeOcclusionClearancePx: 0,
+				edgeOcclusionFadeWidthPx: 10
+			}
+		);
+
+		expect(windows).toEqual([
+			{
+				fadeStart: 0.3,
+				coreStart: 0.4,
+				coreEnd: 0.6,
+				fadeEnd: 0.7,
+				occludingNodeIds: ['a', 'b']
+			}
+		]);
+	});
+
 	it('returns no windows for zero-length, very short, invalid radius, or disabled opacity inputs', () => {
 		expect(
 			computeEdgeOcclusionWindows(

@@ -178,6 +178,37 @@ describe('edgeBackground', () => {
 		);
 	});
 
+	it('preserves full-opacity stops between separate cores with overlapping fades', () => {
+		const visibility = {
+			kind: 'visible',
+			edge: undirectedEdge
+		} satisfies EdgeVisibility;
+
+		expect(
+			edgeBackground(visibility, '#abcdef', {
+				edgeOcclusionMinOpacity: 0.2,
+				occlusionWindows: [
+					{
+						fadeStart: 0.15,
+						coreStart: 0.3,
+						coreEnd: 0.4,
+						fadeEnd: 0.55,
+						occludingNodeIds: ['b']
+					},
+					{
+						fadeStart: 0.45,
+						coreStart: 0.6,
+						coreEnd: 0.7,
+						fadeEnd: 0.85,
+						occludingNodeIds: ['c']
+					}
+				]
+			})
+		).toBe(
+			'linear-gradient(to right, #abcdef 0%, #abcdef 15%, color-mix(in srgb, #abcdef 20%, transparent) 30%, color-mix(in srgb, #abcdef 20%, transparent) 40%, #abcdef 45%, #abcdef 55%, color-mix(in srgb, #abcdef 20%, transparent) 60%, color-mix(in srgb, #abcdef 20%, transparent) 70%, #abcdef 85%, #abcdef 100%)'
+		);
+	});
+
 	it('keeps boundary edge backgrounds on the legacy far-end fade without geometry', () => {
 		const visibility = {
 			kind: 'boundary',

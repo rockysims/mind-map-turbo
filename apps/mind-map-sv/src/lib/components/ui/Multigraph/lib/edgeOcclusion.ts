@@ -172,7 +172,7 @@ function mergeWindows(windows: readonly WindowInPixels[]): WindowInPixels[] {
 
 	for (const window of windows) {
 		const previous = merged.at(-1);
-		if (!previous || window.fadeStartPx > previous.fadeEndPx) {
+		if (!previous || !coresOverlapOrTouch(previous, window)) {
 			merged.push(window);
 			continue;
 		}
@@ -187,6 +187,10 @@ function mergeWindows(windows: readonly WindowInPixels[]): WindowInPixels[] {
 	}
 
 	return merged;
+}
+
+function coresOverlapOrTouch(a: WindowInPixels, b: WindowInPixels): boolean {
+	return b.coreStartPx <= a.coreEndPx + EDGE_OCCLUSION_TOUCH_EPSILON_PX;
 }
 
 function compareWindowInPixels(a: WindowInPixels, b: WindowInPixels): number {
