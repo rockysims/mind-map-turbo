@@ -45,7 +45,7 @@ export const APP_CONFIG = {
 			postDragSettleEpsilonPx: 0.25, // motion threshold to end post-drag settle
 			postDragSettleMaxFrames: 200, // max frames for post-drag physics settle
 			postScaleChangeSettleMaxFrames: 200, // max frames to settle after scale animation
-			scaleAnimationDurationMs: 500, // duration of node scale change animation
+			scaleAnimationDurationMs: 800, // duration of node scale change animation
 			normalizeRelaxationTranslation: true, // remove whole-graph drift during per-frame settle
 			normalizeRelaxationRotation: true, // remove whole-graph spin during per-frame settle
 			maxRelaxationRotationPerFrameRad: Math.PI / 4, // skip degenerate rotation fits above this
@@ -53,10 +53,10 @@ export const APP_CONFIG = {
 			layeredRelayoutSettleMaxFramesFinal: 200, // max frames for final layered relayout settle
 			layeredRelayoutSettleEpsilonPx: 0.25, // motion threshold to end layered relayout
 			enterExitDurationMs: 180, // duration of add/remove enter-exit animation (0 = instant)
-			revealFrontWidthHops: 1, // reveal-wave front width in hops for pin/unpin transitions
-			edgeOcclusionClearancePx: 6, // extra edge fade clearance around unrelated nodes
-			edgeOcclusionFadeWidthPx: 12, // width of the soft fade on each side of an occlusion
-			edgeOcclusionZoomScaleExponent: 0.5, // lower values make occlusion scale more gently with zoom
+			revealFrontWidthHops: 2, // reveal-wave front width in hops for pin/unpin transitions
+			edgeOcclusionClearancePx: 20, // extra edge fade clearance around unrelated nodes
+			edgeOcclusionFadeWidthPx: 25, // width of the soft fade on each side of an occlusion
+			edgeOcclusionZoomScaleExponent: 0.4, // lower values make occlusion scale more gently with zoom
 			edgeOcclusionMinOpacity: 0.16 // minimum edge opacity where a node crosses over it
 		}
 	}
