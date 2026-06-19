@@ -116,7 +116,7 @@ rendering byte-for-byte close to the current path where practical. Add
 - Boundary, reveal-wave-buffer, and exiting edge loops remain unchanged and
   continue to pass existing stories.
 
-### T03 — Add parallel-edge fixtures and focused unit coverage
+### ✓ T03 — Add parallel-edge fixtures and focused unit coverage
 
 |                |                                                                                                    |
 | -------------- | -------------------------------------------------------------------------------------------------- |
