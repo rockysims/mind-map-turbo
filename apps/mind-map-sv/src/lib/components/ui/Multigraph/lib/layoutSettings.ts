@@ -6,6 +6,7 @@ export interface LayoutSettings {
 	scaleFalloff: number;
 	minScale: number;
 	relaxIterations: number;
+	parallelEdgeMaxOffsetRadiusFactor: number;
 	edgeGapMinRadiusFactor: number;
 	edgeGapMaxRadiusFactor: number;
 	edgeSpringStrength: number;

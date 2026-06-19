@@ -7,6 +7,7 @@ import type { EdgeVisibility } from './boundedVisibility';
 import { DEFAULT_EDGE_OCCLUSION_MIN_OPACITY, type EdgeOcclusionWindow } from './edgeOcclusion';
 import type { GraphLayout } from './graphLayout';
 import { EDGE_NODE_GAP_PX, trimSegmentToNodeBorders } from './edgeRender';
+import { applyParallelEdgeOffset, type ParallelEdgeOffset } from './parallelEdges';
 
 const CENTERED_POSITION: Point = { x: 0, y: 0 };
 const PERCENT_PRECISION_FACTOR = 10_000;
@@ -33,7 +34,8 @@ export function edgeStyle(sourcePos: Point, targetPos: Point): string {
 export function edgeRenderPoints(
 	visibility: RenderableEdgeVisibility,
 	layout: Pick<GraphLayout, 'posByNodeId' | 'radiusByNodeId'>,
-	posByNodeId: Record<string, Point>
+	posByNodeId: Record<string, Point>,
+	parallelOffset?: Pick<ParallelEdgeOffset, 'offsetVector'>
 ): {
 	source: Point;
 	target: Point;
@@ -41,9 +43,12 @@ export function edgeRenderPoints(
 	if (visibility.kind === 'visible') {
 		const source = layout.posByNodeId[visibility.edge.sourceNodeId] ?? CENTERED_POSITION;
 		const target = layout.posByNodeId[visibility.edge.targetNodeId] ?? CENTERED_POSITION;
+		const offsetCenters = parallelOffset
+			? applyParallelEdgeOffset(source, target, parallelOffset)
+			: { source, target };
 		return trimSegmentToNodeBorders(
-			source,
-			target,
+			offsetCenters.source,
+			offsetCenters.target,
 			layout.radiusByNodeId[visibility.edge.sourceNodeId] ?? 0,
 			layout.radiusByNodeId[visibility.edge.targetNodeId] ?? 0,
 			0,

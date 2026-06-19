@@ -83,6 +83,7 @@
 		type ExitingBuffer,
 		type NodeEnterAnimation
 	} from './lib/elementTransitions.js';
+	import { computeParallelEdgeOffsets } from './lib/parallelEdges.js';
 
 	const CENTERED_POSITION: Point = { x: 0, y: 0 };
 
@@ -200,6 +201,17 @@
 			if (!position || radius === undefined) return [];
 			return [{ nodeId: node.id, position, radius }];
 		})
+	);
+	const visibleEdgeParallelOffsets = $derived.by(() =>
+		computeParallelEdgeOffsets(
+			renderableEdgeVisibility.flatMap((visibility) =>
+				visibility.kind === 'visible' ? [visibility.edge] : []
+			),
+			graphLayout,
+			{
+				maxOffsetRadiusFactor: resolvedLayoutSettings.parallelEdgeMaxOffsetRadiusFactor
+			}
+		)
 	);
 	const nodeById = $derived(Object.fromEntries(graph.nodes.map((node) => [node.id, node])));
 	const revealWaveNodeOpacityByNodeId = $derived(layoutRuntime.revealWaveNodeOpacityByNodeId);
@@ -591,7 +603,14 @@
 		<div class="edges" aria-hidden="true">
 			{#each renderableEdgeVisibility as visibility (visibility.edge.id)}
 				{@const edge = visibility.edge}
-				{@const edgePoints = edgeRenderPoints(visibility, graphLayout, graph.posByNodeId)}
+				{@const parallelOffset =
+					visibility.kind === 'visible' ? visibleEdgeParallelOffsets[edge.id] : undefined}
+				{@const edgePoints = edgeRenderPoints(
+					visibility,
+					graphLayout,
+					graph.posByNodeId,
+					parallelOffset
+				)}
 				{@const edgeLengthPx = Math.hypot(
 					edgePoints.target.x - edgePoints.source.x,
 					edgePoints.target.y - edgePoints.source.y
@@ -659,6 +678,13 @@
 						: undefined}
 					data-edge-stroke-scale={strokeScale}
 					data-edge-opacity={edgeOpacity}
+					data-edge-parallel-count={visibility.kind === 'visible'
+						? parallelOffset?.groupCount
+						: undefined}
+					data-edge-parallel-slot={visibility.kind === 'visible' ? parallelOffset?.slot : undefined}
+					data-edge-parallel-offset={visibility.kind === 'visible'
+						? (parallelOffset?.offsetDistance ?? 0)
+						: undefined}
 					data-edge-occlusion-count={visibility.kind === 'visible'
 						? edgeOcclusionWindows.length
 						: undefined}
