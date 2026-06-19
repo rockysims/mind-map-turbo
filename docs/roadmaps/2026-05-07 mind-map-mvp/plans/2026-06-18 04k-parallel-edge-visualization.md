@@ -55,7 +55,7 @@ changing the duplicate-edge UI.
 > Each task is one PR. T03 and T04 both touch stories, so story fixture support
 > lands before the user-facing story assertions.
 
-### T01 — Add pure parallel edge slotting and offset geometry
+### ✓ T01 — Add pure parallel edge slotting and offset geometry
 
 |                |                                                                                   |
 | -------------- | --------------------------------------------------------------------------------- |
