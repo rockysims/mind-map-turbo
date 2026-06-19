@@ -1,6 +1,6 @@
 # Milestone 04k: Parallel edge visualization
 
-**Status:** not started
+**Status:** complete
 **Depends on:** milestones 04f (edge tag colors), 04h (thin component refactor),
 and 04j (edge occlusion fade) so the implementation can build on the current
 edge styling and visibility pipeline.

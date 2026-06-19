@@ -3,7 +3,7 @@
 **Created:** 2026-06-18
 **Author:** Cursor agent
 **Milestone:** [milestones/04k-parallel-edge-visualization.md](../milestones/04k-parallel-edge-visualization.md)
-**Status:** executing
+**Status:** done
 **Total estimated effort:** M (4 tasks; pure geometry first, then render wiring)
 
 ## Summary
@@ -140,7 +140,7 @@ change.
   is preserved rather than deduped.
 - No production graph mutation behavior changes.
 
-### T04 — Add story coverage and visual guardrails
+### ✓ T04 — Add story coverage and visual guardrails
 
 |                |                                                          |
 | -------------- | -------------------------------------------------------- |
