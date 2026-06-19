@@ -1,5 +1,10 @@
 <script lang="ts">
-	import { NODE_RADIUS } from '$lib/constants';
+	import {
+		NODE_BORDER_WIDTH,
+		NODE_RADIUS,
+		NODE_TEXT_FONT_SIZE,
+		PINNED_NODE_BORDER_WIDTH
+	} from '$lib/constants';
 	import SquareText from '$lib/components/ui/SquareText/SquareText.svelte';
 	import type { NodeData } from '$lib/components/ui/types/node';
 	import type { TagColorSegment } from '$lib/components/ui/Multigraph/lib/tagColors';
@@ -67,7 +72,8 @@
 	data-node-id={nodeData.id}
 	data-pinned={nodeData.pinned ? 'true' : undefined}
 	data-tag-border={borderSegments.length > 0 ? 'true' : undefined}
-	style="--node-diameter: {NODE_RADIUS * 2}px; --node-tag-border: {borderBackground};"
+	style="--node-diameter: {NODE_RADIUS *
+		2}px; --node-tag-border: {borderBackground}; --node-text-font-size: {NODE_TEXT_FONT_SIZE}px; --node-border-width: {NODE_BORDER_WIDTH}px; --pinned-node-border-width: {PINNED_NODE_BORDER_WIDTH}px;"
 >
 	<div class="circle">
 		<!-- closed -->
@@ -119,12 +125,12 @@
 		width: var(--node-diameter);
 		height: var(--node-diameter);
 		border-radius: var(--node-diameter);
-		border: 2px solid #aaaaaa;
+		border: var(--node-border-width) solid #aaaaaa;
 		background: #ccc;
 	}
 
 	.node[data-pinned='true'] .circle {
-		border-width: 4px;
+		border-width: var(--pinned-node-border-width);
 		border-color: #555555;
 		box-shadow: 0 0 0 2px #ffffff;
 	}
@@ -146,8 +152,9 @@
 		height: calc(var(--node-diameter) / sqrt(2));
 	}
 
-	.node .title {
+	.node :global(.title) {
 		font-weight: bold;
+		font-size: var(--node-text-font-size);
 		padding-bottom: 15px;
 		text-align: center;
 	}
@@ -156,7 +163,7 @@
 		width: 100%;
 		font-weight: bold;
 		text-align: center;
-		font-size: inherit;
+		font-size: var(--node-text-font-size);
 		font-family: inherit;
 		border: none;
 		outline: 2px solid #4a90e2;
@@ -171,7 +178,7 @@
 		display: none;
 	}
 
-	.node.open .title {
+	.node.open :global(.title) {
 		overflow: clip;
 		text-wrap-mode: nowrap;
 		text-overflow: ellipsis;
@@ -180,6 +187,7 @@
 	}
 
 	.node.open .descriptionContainer {
+		width: 100%;
 		max-height: 80%;
 		border-radius: 5px;
 		overflow: hidden;
@@ -187,7 +195,9 @@
 
 	.node.open .description {
 		display: flex;
+		width: 100%;
 		max-height: 100%;
+		font-size: var(--node-text-font-size);
 		padding: 0 8px;
 		overflow-y: auto;
 		text-align: center;

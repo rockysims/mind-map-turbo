@@ -15,6 +15,9 @@ export const APP_CONFIG = {
 	},
 	multigraph: {
 		nodeRadiusPx: NODE_RADIUS_PX, // default rendered node radius
+		nodeTextFontSizePx: 38, // default title and description font size
+		nodeBorderWidthPx: 8, // default node border width
+		pinnedNodeBorderWidthPx: 8, // border width for pinned nodes
 		minNodeHitRadiusPx: 32, // minimum tap/hit target radius
 		edgeArrow: {
 			lengthPx: 10, // arrowhead length along the edge
