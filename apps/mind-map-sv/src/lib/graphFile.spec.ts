@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { makeGraph } from './components/ui/Multigraph/lib/testFixtures';
+import {
+	makeGraph,
+	SAME_DIRECTION_PARALLEL_EDGES_GRAPH
+} from './components/ui/Multigraph/lib/testFixtures';
 import { parseGraphFile, serializeGraphFile, type GraphFileDocument } from './graphFile';
 import { CURRENT_SCHEMA_VERSION, NEUTRAL_VIEW_STATE, PersistedGraphError } from './migrations';
 
@@ -48,6 +51,18 @@ describe('parseGraphFile: valid payloads', () => {
 		const result = parseGraphFile(serializeGraphFile(doc));
 		expect(result.data).toEqual(doc.data);
 		expect(result.viewState).toEqual(doc.viewState);
+	});
+
+	it('preserves duplicate edge file data without deduping', () => {
+		const doc = makeDoc({ data: SAME_DIRECTION_PARALLEL_EDGES_GRAPH });
+		const result = parseGraphFile(serializeGraphFile(doc));
+
+		expect(result.data.edges).toEqual(SAME_DIRECTION_PARALLEL_EDGES_GRAPH.edges);
+		expect(result.data.edges.map((edge) => edge.id)).toEqual([
+			'parallel-same-01',
+			'parallel-same-02',
+			'parallel-same-03'
+		]);
 	});
 
 	it('defaults viewState to neutral pan/zoom when the envelope has no viewState', () => {

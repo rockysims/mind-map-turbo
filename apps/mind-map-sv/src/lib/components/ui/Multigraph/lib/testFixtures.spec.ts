@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
 	assignNodeGroups,
+	MIXED_DIRECTION_PARALLEL_EDGES_GRAPH,
 	makeClusteredRandomEdges,
 	makeGraph,
-	makeRandomEdges
+	makeRandomEdges,
+	OPPOSITE_DIRECTION_PARALLEL_EDGES_GRAPH,
+	SAME_DIRECTION_PARALLEL_EDGES_GRAPH
 } from './testFixtures';
 
 describe('makeGraph', () => {
@@ -98,6 +101,56 @@ describe('makeGraph', () => {
 	it('marks generated nodes pinned by id', () => {
 		const g = makeGraph({ nodeCount: 2, pinned: ['n1'] });
 		expect(g.nodes.map((node) => node.pinned)).toEqual([undefined, true]);
+	});
+});
+
+describe('parallel edge graph fixtures', () => {
+	it('exposes three tagged same-direction edges with stable distinct ids', () => {
+		const edges = SAME_DIRECTION_PARALLEL_EDGES_GRAPH.edges;
+
+		expect(edges.map((edge) => edge.id)).toEqual([
+			'parallel-same-01',
+			'parallel-same-02',
+			'parallel-same-03'
+		]);
+		expect(new Set(edges.map((edge) => edge.id)).size).toBe(edges.length);
+		expect(edges.map((edge) => [edge.sourceNodeId, edge.targetNodeId, edge.directed])).toEqual([
+			['parallel-a', 'parallel-b', true],
+			['parallel-a', 'parallel-b', true],
+			['parallel-a', 'parallel-b', true]
+		]);
+		expect(edges.map((edge) => edge.tags)).toEqual([['supports'], ['blocks'], ['references']]);
+	});
+
+	it('exposes opposite-direction parallel edges with stable distinct ids', () => {
+		const edges = OPPOSITE_DIRECTION_PARALLEL_EDGES_GRAPH.edges;
+
+		expect(edges.map((edge) => edge.id)).toEqual([
+			'parallel-opposite-a-to-b',
+			'parallel-opposite-b-to-a'
+		]);
+		expect(new Set(edges.map((edge) => edge.id)).size).toBe(edges.length);
+		expect(edges.map((edge) => [edge.sourceNodeId, edge.targetNodeId, edge.directed])).toEqual([
+			['parallel-a', 'parallel-b', true],
+			['parallel-b', 'parallel-a', true]
+		]);
+	});
+
+	it('exposes a mixed directed and undirected parallel edge group', () => {
+		const edges = MIXED_DIRECTION_PARALLEL_EDGES_GRAPH.edges;
+
+		expect(edges.map((edge) => edge.id)).toEqual([
+			'parallel-mixed-directed-a-to-b',
+			'parallel-mixed-directed-b-to-a',
+			'parallel-mixed-undirected'
+		]);
+		expect(new Set(edges.map((edge) => edge.id)).size).toBe(edges.length);
+		expect(edges.map((edge) => [edge.sourceNodeId, edge.targetNodeId, edge.directed])).toEqual([
+			['parallel-a', 'parallel-b', true],
+			['parallel-b', 'parallel-a', true],
+			['parallel-a', 'parallel-b', false]
+		]);
+		expect(edges.map((edge) => edge.tags)).toEqual([['causes'], ['responds'], ['related']]);
 	});
 });
 
