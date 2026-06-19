@@ -3,7 +3,13 @@
 	import Multigraph from '$lib/components/ui/Multigraph/Multigraph.svelte';
 	import { expect, fn, waitFor, within } from 'storybook/test';
 	import { APP_CONFIG } from '$lib/appConfig';
-	import { DBL_CLICK_MS, LONG_PRESS_MS, MIN_NODE_HIT_RADIUS, NODE_RADIUS } from '$lib/constants';
+	import {
+		DBL_CLICK_MS,
+		EDGE_ARROW_HALF_HEIGHT,
+		LONG_PRESS_MS,
+		MIN_NODE_HIT_RADIUS,
+		NODE_RADIUS
+	} from '$lib/constants';
 	import {
 		makeClusteredRandomEdges,
 		makeGraph,
@@ -1998,6 +2004,10 @@
 		expectParallelEdgeMetadata(middleEdge, 3, 0);
 		expectParallelEdgeMetadata(lastEdge, 3, 1);
 		expectParallelEdgeMetadata(unrelatedEdge, 1, 0);
+		const arrowHalfHeight = EDGE_ARROW_HALF_HEIGHT * Number(firstEdge.dataset.edgeArrowScale);
+		expect(Math.abs(Number(firstEdge.dataset.edgeParallelOffset))).toBeGreaterThanOrEqual(
+			arrowHalfHeight * 2 + APP_CONFIG.multigraph.layout.parallelEdgeClearancePx
+		);
 
 		expect(firstEdge).toHaveAttribute('data-arrow-target-node-id', 'parallel-b');
 		expect(middleEdge).toHaveAttribute('data-arrow-target-node-id', 'parallel-b');

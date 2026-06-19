@@ -3,12 +3,15 @@ import type { Point } from '../../types/multigraph';
 
 export const DEFAULT_PARALLEL_EDGE_SPACING_PX = 12;
 export const DEFAULT_PARALLEL_EDGE_MAX_OFFSET_RADIUS_FACTOR = 0.5;
+export const DEFAULT_PARALLEL_EDGE_CLEARANCE_PX = 4;
 
 const ZERO_OFFSET: Point = { x: 0, y: 0 };
 
 export interface ParallelEdgeOptions {
 	spacingPx?: number;
 	maxOffsetRadiusFactor?: number;
+	clearancePx?: number;
+	visualHalfWidthByEdgeId?: Readonly<Record<string, number | undefined>>;
 }
 
 export interface ParallelEdgeGeometry {
@@ -35,12 +38,22 @@ export function computeParallelEdgeOffsets(
 		options.maxOffsetRadiusFactor,
 		DEFAULT_PARALLEL_EDGE_MAX_OFFSET_RADIUS_FACTOR
 	);
+	const clearancePx = nonNegativeFiniteOrDefault(
+		options.clearancePx,
+		DEFAULT_PARALLEL_EDGE_CLEARANCE_PX
+	);
 	const groups = groupParallelEdges(edges);
 	const offsets: Record<string, ParallelEdgeOffset> = {};
 
 	for (const [groupKey, groupEdges] of groups) {
 		const sortedEdges = [...groupEdges].sort((left, right) => compareStableIds(left.id, right.id));
 		const groupCount = sortedEdges.length;
+		const groupSpacingPx = parallelGroupSpacing(
+			sortedEdges,
+			spacingPx,
+			clearancePx,
+			options.visualHalfWidthByEdgeId
+		);
 
 		sortedEdges.forEach((edge, index) => {
 			const slot = centeredSlot(index, groupCount);
@@ -48,7 +61,7 @@ export function computeParallelEdgeOffsets(
 				edge,
 				geometry,
 				slot,
-				spacingPx,
+				groupSpacingPx,
 				maxOffsetRadiusFactor
 			);
 			const offsetVector = parallelOffsetVector(edge, geometry, offsetDistance);
@@ -103,6 +116,21 @@ function groupParallelEdges(edges: readonly EdgeData[]): Map<string, EdgeData[]>
 
 function centeredSlot(index: number, count: number): number {
 	return index - (count - 1) / 2;
+}
+
+function parallelGroupSpacing(
+	edges: readonly EdgeData[],
+	spacingPx: number,
+	clearancePx: number,
+	visualHalfWidthByEdgeId: Readonly<Record<string, number | undefined>> | undefined
+): number {
+	const maxVisualHalfWidth = edges.reduce(
+		(max, edge) => Math.max(max, nonNegativeFiniteOrDefault(visualHalfWidthByEdgeId?.[edge.id], 0)),
+		0
+	);
+	if (maxVisualHalfWidth === 0) return spacingPx;
+
+	return Math.max(spacingPx, maxVisualHalfWidth * 2 + clearancePx);
 }
 
 function clampedOffsetDistance(

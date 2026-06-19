@@ -7,6 +7,7 @@
 	import Stage from './Stage.svelte';
 	import TagColorLegend from './TagColorLegend.svelte';
 	import type { NodeData } from '../types/node';
+	import type { EdgeData } from '../types/edge';
 	import type { MultigraphData, Point, TagColorNamespace } from '../types/multigraph';
 	import { effectiveHitRadius, isPointInCircle } from './lib/hitTest.js';
 	import {
@@ -202,17 +203,30 @@
 			return [{ nodeId: node.id, position, radius }];
 		})
 	);
-	const visibleEdgeParallelOffsets = $derived.by(() =>
-		computeParallelEdgeOffsets(
-			renderableEdgeVisibility.flatMap((visibility) =>
-				visibility.kind === 'visible' ? [visibility.edge] : []
-			),
-			graphLayout,
-			{
-				maxOffsetRadiusFactor: resolvedLayoutSettings.parallelEdgeMaxOffsetRadiusFactor
-			}
-		)
-	);
+	const visibleEdgeParallelOffsets = $derived.by(() => {
+		const visibleEdges: EdgeData[] = [];
+		const visualHalfWidthByEdgeId: Record<string, number> = {};
+
+		for (const visibility of renderableEdgeVisibility) {
+			if (visibility.kind !== 'visible') continue;
+
+			const edge = visibility.edge;
+			const strokeHalfWidth =
+				(EDGE_STROKE_WIDTH * edgeStrokeScale(visibility, graphLayout.scaleByNodeId)) / 2;
+			const arrowHalfHeight =
+				edge.directed === true
+					? EDGE_ARROW_HALF_HEIGHT * edgeArrowScale(visibility, graphLayout.scaleByNodeId)
+					: 0;
+			visibleEdges.push(edge);
+			visualHalfWidthByEdgeId[edge.id] = Math.max(strokeHalfWidth, arrowHalfHeight);
+		}
+
+		return computeParallelEdgeOffsets(visibleEdges, graphLayout, {
+			clearancePx: resolvedLayoutSettings.parallelEdgeClearancePx,
+			maxOffsetRadiusFactor: resolvedLayoutSettings.parallelEdgeMaxOffsetRadiusFactor,
+			visualHalfWidthByEdgeId
+		});
+	});
 	const nodeById = $derived(Object.fromEntries(graph.nodes.map((node) => [node.id, node])));
 	const revealWaveNodeOpacityByNodeId = $derived(layoutRuntime.revealWaveNodeOpacityByNodeId);
 	const revealWaveEdgeOpacityByEdgeId = $derived(layoutRuntime.revealWaveEdgeOpacityByEdgeId);

@@ -39,6 +39,7 @@ export const APP_CONFIG = {
 			minScale: 0.1, // minimum node scale in layout
 			relaxIterations: 12, // physics relax iterations per layout pass
 			parallelEdgeMaxOffsetRadiusFactor: 0.5, // max parallel-edge offset as fraction of smaller endpoint radius
+			parallelEdgeClearancePx: 4, // extra gap between parallel edge strokes/arrowheads
 			edgeGapMinRadiusFactor: 0.2, // min edge gap as fraction of node radius
 			edgeGapMaxRadiusFactor: 0.4, // max edge gap as fraction of node radius
 			edgeSpringStrength: 0.5, // how strongly edges pull nodes together

@@ -71,6 +71,36 @@ describe('parallelEdges', () => {
 		expect(offsets.z.offsetVector).toEqual({ x: 0, y: 10 });
 	});
 
+	it('uses uniform group spacing from the largest visual edge footprint', () => {
+		const roomyGeometry: ParallelEdgeGeometry = {
+			...BASE_GEOMETRY,
+			radiusByNodeId: {
+				a: 120,
+				b: 120,
+				c: 120
+			}
+		};
+		const offsets = computeParallelEdgeOffsets(
+			[edge('thin', 'a', 'b'), edge('arrow', 'a', 'b'), edge('stroke', 'a', 'b')],
+			roomyGeometry,
+			{
+				spacingPx: 10,
+				clearancePx: 4,
+				visualHalfWidthByEdgeId: {
+					thin: 1,
+					arrow: 24,
+					stroke: 8
+				}
+			}
+		);
+
+		expect(offsets.arrow.offsetDistance).toBe(-52);
+		expect(offsets.stroke.offsetDistance).toBe(0);
+		expect(offsets.thin.offsetDistance).toBe(52);
+		expect(offsets.arrow.offsetVector).toEqual({ x: 0, y: -52 });
+		expect(offsets.thin.offsetVector).toEqual({ x: 0, y: 52 });
+	});
+
 	it('groups opposite-direction edges by unordered node pair', () => {
 		const offsets = computeParallelEdgeOffsets(
 			[edge('forward', 'a', 'b'), edge('reverse', 'b', 'a')],
@@ -157,6 +187,35 @@ describe('parallelEdges', () => {
 		expect(offsets.right.offsetDistance).toBe(2);
 		expect(Math.abs(offsets.left.offsetVector.x)).toBeLessThanOrEqual(2);
 		expect(Math.abs(offsets.right.offsetVector.x)).toBeLessThanOrEqual(2);
+	});
+
+	it('still clamps visual footprint spacing to the configured radius fraction', () => {
+		const geometry: ParallelEdgeGeometry = {
+			posByNodeId: {
+				a: { x: 0, y: 0 },
+				b: { x: 100, y: 0 }
+			},
+			radiusByNodeId: {
+				a: 20,
+				b: 20
+			}
+		};
+
+		const offsets = computeParallelEdgeOffsets(
+			[edge('wide-a', 'a', 'b'), edge('wide-b', 'a', 'b')],
+			geometry,
+			{
+				clearancePx: 4,
+				maxOffsetRadiusFactor: 0.25,
+				visualHalfWidthByEdgeId: {
+					'wide-a': 24,
+					'wide-b': 24
+				}
+			}
+		);
+
+		expect(offsets['wide-a'].offsetDistance).toBe(-5);
+		expect(offsets['wide-b'].offsetDistance).toBe(5);
 	});
 
 	it('applies a straight offset to both source and target centers', () => {
