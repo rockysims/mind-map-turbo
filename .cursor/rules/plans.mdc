@@ -9,7 +9,9 @@ alwaysApply: false
 A **plan** says *how* to deliver one milestone. Milestones say *what*
 and *why*; plans decompose the work into PR-sized tasks, resolve the
 milestone's open questions, annotate every task with the right kind of
-AI agent, and lay out which tasks can run in parallel.
+AI agent, and lay out which tasks can run in parallel. Avoid copying
+milestone scope or acceptance criteria into the plan; link to the
+milestone and only add task-specific checks where the plan needs more detail.
 
 Canonical template: [`docs/roadmaps/PLAN_TEMPLATE.md`](../../docs/roadmaps/PLAN_TEMPLATE.md).
 Copy it; don't reinvent the structure.
@@ -17,12 +19,15 @@ Copy it; don't reinvent the structure.
 ## Where plans live
 
 ```
-docs/roadmaps/<YYYY-MM-DD> <roadmap-name>/plans/<YYYY-MM-DD> <plan-name>.md
+docs/roadmaps/<YYYY-MM-DD> <roadmap-name>/plans/<YYYY-MM-DD> <milestone-id>-<plan-name>.md
 ```
 
 Plans are **dated** so multiple plans against the same milestone (e.g.
 when an approach gets replaced mid-stream) coexist as historical
-record. Old plans stay; new plans link back.
+record. Include the milestone identifier from the linked milestone filename
+(e.g. `04f` from `04f-tag-colors-and-graph-tag-config.md`) after the date so
+plan files stay chronologically sorted while remaining easy to match to their
+milestone. Old plans stay; new plans link back.
 
 ## Required sections
 
@@ -82,9 +87,9 @@ work that actually needs it.
 
 | Agent class | Best for | Concrete examples (substitute what you have) |
 |---|---|---|
-| **Fast / cheap** | Mechanical edits, formatting, doc tweaks, find-and-replace, trivial type additions | `composer-2-fast`, `kimi-k2.5` |
+| **Fast / cheap** | Mechanical edits, formatting, doc tweaks, find-and-replace, trivial type additions | `composer-2.5-fast`, `kimi-k2.5` |
 | **Default workhorse** | Typical feature implementation with tests, normal refactors | `claude-4.6-sonnet-medium-thinking` |
-| **High-reasoning** | Architectural decisions, hard debugging, layered refactors, novel algorithms | `claude-opus-4-7-thinking-xhigh`, `gpt-5.3-codex` |
+| **High-reasoning** | Architectural decisions, hard debugging, layered refactors, novel algorithms | `claude-opus-4-8-thinking-high`, `gpt-5.3-codex` |
 | **Read-only `explore` subagent** | "Survey how X is used", "find all places that mutate Y" — exploration that informs but doesn't write code | Spawn before writing the plan; results inform task decomposition |
 | **`generalPurpose` subagent** | Multi-step research that mixes exploration with edits | Use sparingly; usually a focused single-agent run is cleaner |
 | **`best-of-n-runner`** | When multiple algorithm choices are plausible and a small benchmark or comparison would settle it | Try 2–3 implementations of `relaxOverlaps` in parallel worktrees, compare outputs |
@@ -128,6 +133,14 @@ When writing a plan from scratch:
 
 ## Executing a plan
 
+**You are the orchestrator, not the implementer.** When asked to execute,
+run, or "do" a plan, do not write task code yourself. For each task, spawn a
+`Task` subagent whose `subagent_type`/`model` matches the task's **Agent**
+field, passing the task's Files, Acceptance, and PR title as its brief. Launch
+every task in the same **Wave** as parallel subagents (one message, multiple
+`Task` calls); only advance to the next wave once the prior wave's tasks are
+merged. Reserve hands-on edits for trivial fixups a subagent leaves behind.
+
 1. Set status to `executing` when wave 1 starts.
 2. Open one PR per task. PR title = the task's `PR title` field. PR
    body links the task ID and milestone.
@@ -136,8 +149,13 @@ When writing a plan from scratch:
 4. If a task discovers a missed dependency or design issue, update the
    plan in the same PR (or a small follow-up commit). Don't let the
    plan diverge from reality.
-5. When the last task lands, update milestone status in the roadmap and
-   set this plan's status to `done`.
+5. When the last task lands and validation passes, close the loop in one
+   final docs/status update:
+   - set this plan's `**Status:**` to `done`;
+   - set the associated milestone's `**Status:**` to `complete`;
+   - set the milestone row in the roadmap to `complete` and keep the plan link;
+   - commit the completed logical change unless the user explicitly asked not
+     to commit yet.
 
 ## When the model is asked to "write a plan"
 
@@ -147,7 +165,7 @@ If the user says something like *"write a plan for milestone 01"* or
 1. Read the relevant milestone doc.
 2. Read this rule and `PLAN_TEMPLATE.md`.
 3. Copy the template to
-   `docs/roadmaps/<active roadmap>/plans/<today> <slug>.md`.
+   `docs/roadmaps/<active roadmap>/plans/<today> <milestone-id>-<slug>.md`.
 4. Fill it in. Resolve open questions; if a question genuinely needs
    user input, **leave it blank with a `❓ ASK USER:` marker** and
    surface it in the chat reply rather than guessing.

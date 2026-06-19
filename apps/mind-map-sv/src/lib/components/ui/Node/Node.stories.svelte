@@ -2,6 +2,7 @@
 	import { defineMeta } from '@storybook/addon-svelte-csf';
 	import { expect, within } from 'storybook/test';
 
+	import { APP_CONFIG } from '$lib/appConfig';
 	import Node from '$lib/components/ui/Node/Node.svelte';
 	import type { NodeData } from '$lib/components/ui/types/node';
 
@@ -11,15 +12,18 @@
 		tags: [],
 		argTypes: {
 			nodeData: { control: 'object' },
-			isOpen: { control: 'boolean' }
+			isOpen: { control: 'boolean' },
+			borderSegments: { control: 'object' }
 		},
 		args: {
 			nodeData: {
 				id: 'node id',
 				title: 'Node title',
-				description: 'Node description'
+				description: 'Node description',
+				tags: []
 			},
-			isOpen: false
+			isOpen: false,
+			borderSegments: []
 		}
 	});
 
@@ -48,6 +52,8 @@
 		const titleEl = canvasElement.querySelector('.node .title');
 		expect(titleEl).toBeInTheDocument();
 		const titleElement = titleEl as HTMLElement;
+		const expectedNodeTextFontSize = `${APP_CONFIG.multigraph.nodeTextFontSizePx}px`;
+		expect(window.getComputedStyle(titleElement).fontSize).toBe(expectedNodeTextFontSize);
 		if (!options.open || options.short) {
 			expect(titleElement.textContent).toBe(args.nodeData.title);
 		} else {
@@ -109,6 +115,7 @@
 			const descriptionStyles = window.getComputedStyle(descriptionElement);
 			const marginRight = parseFloat(descriptionStyles.marginRight);
 			const descriptionEffectiveRight = descriptionRect.right + marginRight;
+			expect(descriptionStyles.fontSize).toBe(expectedNodeTextFontSize);
 			expect(descriptionRect.left).toBeGreaterThanOrEqual(squareRect.left);
 			expect(descriptionEffectiveRight).toBeLessThanOrEqual(squareRect.right);
 			expect(descriptionRect.top).toBeGreaterThanOrEqual(squareRect.top);
@@ -153,6 +160,10 @@
 		const width = parseFloat(circleStyles.width);
 		const radiusValue = parseFloat(borderRadius);
 		const radiusPercent = radiusValue / width;
+		const expectedBorderWidth = args.nodeData.pinned
+			? APP_CONFIG.multigraph.pinnedNodeBorderWidthPx
+			: APP_CONFIG.multigraph.nodeBorderWidthPx;
+		expect(parseFloat(circleStyles.borderWidth)).toBe(expectedBorderWidth);
 		expect(radiusPercent).toBeGreaterThanOrEqual(0.5);
 
 		// Test 5–7: Description scrollbar, styling, and title-above-description (open only)
@@ -173,6 +184,20 @@
 			expect(titleRect.bottom).toBeLessThanOrEqual(descriptionRect.top);
 		}
 	}
+
+	async function pinnedClosedPlayHandler(ctx: PlayArgs) {
+		await playHandler(ctx, { short: true, open: false });
+
+		const node = ctx.canvasElement.querySelector('.node');
+		expect(node).toHaveAttribute('data-pinned', 'true');
+
+		const circle = ctx.canvasElement.querySelector('.node .circle');
+		expect(circle).toBeInTheDocument();
+		const circleStyles = window.getComputedStyle(circle as HTMLElement);
+		expect(parseFloat(circleStyles.borderWidth)).toBe(
+			APP_CONFIG.multigraph.pinnedNodeBorderWidthPx
+		);
+	}
 </script>
 
 <Story
@@ -182,7 +207,8 @@
 			id: 'node id short title',
 			title: 'Short node title goes here.',
 			description:
-				'Node description and of course the description is probably going to be fairly long. Certainly multiple sentences. Maybe more.'
+				'Node description and of course the description is probably going to be fairly long. Certainly multiple sentences. Maybe more.',
+			tags: []
 		},
 		isOpen: false
 	}}
@@ -198,11 +224,27 @@
 			description:
 				'Node description and of course the description is probably going to be fairly long. Likely multiple sentences long. Maybe even more. '.repeat(
 					10
-				)
+				),
+			tags: []
 		},
 		isOpen: false
 	}}
 	play={(ctx) => playHandler(ctx, { short: false, open: false })}
+/>
+
+<Story
+	name="PinnedClosed"
+	args={{
+		nodeData: {
+			id: 'node id pinned closed',
+			title: 'Pinned node title',
+			description: 'Pinned node description',
+			tags: [],
+			pinned: true
+		},
+		isOpen: false
+	}}
+	play={pinnedClosedPlayHandler}
 />
 
 <Story
@@ -211,12 +253,33 @@
 		nodeData: {
 			id: 'node id short open',
 			title: 'Node title short open',
-			description:
-				'Node description and of course the description is probably going to be fairly long. Likely multiple sentences long. Maybe even more.'
+			description: 'Short description.',
+			tags: []
 		},
 		isOpen: true
 	}}
 	play={(ctx) => playHandler(ctx, { short: true, open: true })}
+/>
+
+<Story
+	name="MultiTagBorder"
+	args={{
+		nodeData: {
+			id: 'node id multi tag',
+			title: 'Tagged node',
+			description: 'Tagged node description',
+			tags: ['topic', 'urgent']
+		},
+		isOpen: false,
+		borderSegments: [
+			{ color: '#ff0000', startTurn: 0, endTurn: 0.5 },
+			{ color: '#00ff00', startTurn: 0.5, endTurn: 1 }
+		]
+	}}
+	play={async ({ canvasElement }) => {
+		const node = canvasElement.querySelector('.node');
+		expect(node).toHaveAttribute('data-tag-border', 'true');
+	}}
 />
 
 <Story
@@ -228,7 +291,8 @@
 			description:
 				'Node description and of course the description is probably going to be fairly long. Likely multiple sentences long. Maybe even more. '.repeat(
 					10
-				)
+				),
+			tags: []
 		},
 		isOpen: true
 	}}

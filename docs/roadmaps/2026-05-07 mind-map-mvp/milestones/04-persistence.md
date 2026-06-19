@@ -1,9 +1,13 @@
 # Milestone 04: Persistence
 
-**Status:** not started
+**Status:** complete
 **Depends on:** milestone 01 (canonical mutation API to persist
 against).
-**Plan:** _none yet._
+**Plans:**
+
+- [2026-05-17 04-persistence.md](../plans/2026-05-17%2004-persistence.md) — original delivery (status: done).
+- [2026-05-17 04-persistence-architecture.md](../plans/2026-05-17%2004-persistence-architecture.md) — follow-up
+  architectural refactor extracting the controller from `+page.svelte` (status: executing).
 
 ## Goal
 

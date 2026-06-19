@@ -3,14 +3,15 @@
 	import { expect, within } from 'storybook/test';
 	import StageHarness from './StageHarness.svelte';
 	import type { NodeData } from '../types/node';
-	import { DBL_CLICK_MS, DRAG_THRESHOLD, NODE_RADIUS } from '$lib/constants';
+	import { DBL_CLICK_MS, DRAG_THRESHOLD, LONG_PRESS_MS, NODE_RADIUS } from '$lib/constants';
 
 	const NODES: NodeData[] = [];
 	for (let i = 0; i < 10; i++) {
 		NODES.push({
 			id: `node-${i}`,
 			title: `Node ${i}`,
-			description: `Node ${i} description`
+			description: `Node ${i} description`,
+			tags: []
 		});
 	}
 
@@ -20,7 +21,15 @@
 		tags: [],
 		argTypes: {
 			nodes: { control: 'object' },
-			positions: { control: 'object' }
+			positions: { control: 'object' },
+			initialScale: { control: 'number' },
+			initialPanX: { control: 'number' },
+			initialPanY: { control: 'number' }
+		},
+		parameters: {
+			viewport: {
+				defaultViewport: 'phone'
+			}
 		}
 	});
 
@@ -30,13 +39,19 @@
 		return stage as HTMLElement;
 	}
 
+	function getStageContent(el: HTMLElement): HTMLElement {
+		const content = el.querySelector('.stage-content');
+		if (!content) throw new Error('Stage content not found');
+		return content as HTMLElement;
+	}
+
 	function getStageTransform(el: HTMLElement): string {
-		return getStage(el).style.transform || '';
+		return getStageContent(el).style.transform || '';
 	}
 
 	function dispatchPointer(
 		target: HTMLElement,
-		type: 'pointerdown' | 'pointermove' | 'pointerup',
+		type: 'pointerdown' | 'pointermove' | 'pointerup' | 'pointercancel',
 		clientX: number,
 		clientY: number,
 		pointerId = 1
@@ -52,9 +67,12 @@
 		);
 	}
 
-	function dispatchWheel(target: HTMLElement, deltaY: number) {
+	function dispatchWheel(target: HTMLElement, deltaY: number, clientX?: number, clientY?: number) {
+		const center = getCenter(target);
 		target.dispatchEvent(
 			new WheelEvent('wheel', {
+				clientX: clientX ?? center.x,
+				clientY: clientY ?? center.y,
 				deltaY,
 				bubbles: true,
 				cancelable: true
@@ -65,6 +83,25 @@
 	function getCenter(el: HTMLElement): { x: number; y: number } {
 		const r = el.getBoundingClientRect();
 		return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+	}
+
+	function getGraphPoint(
+		stage: HTMLElement,
+		clientX: number,
+		clientY: number
+	): { x: number; y: number } {
+		const center = getCenter(stage);
+		return { x: clientX - center.x, y: clientY - center.y };
+	}
+
+	function parsePointCallback(value: string): { nodeId: string; x: number; y: number } {
+		const [nodeId, x, y] = value.split(',');
+		return { nodeId, x: Number(x), y: Number(y) };
+	}
+
+	function parseViewStateCallback(value: string): { panX: number; panY: number; scale: number } {
+		const [panX, panY, scale] = value.split(',');
+		return { panX: Number(panX), panY: Number(panY), scale: Number(scale) };
 	}
 
 	function sleep(ms: number = 0) {
@@ -105,6 +142,91 @@
 </script>
 
 <Story name="Summary" args={{ nodes: NODES.slice(0, 3) }} />
+
+<Story
+	name="StartsAtInitialScale"
+	args={{ nodes: NODES.slice(0, 3), initialScale: 0.5 }}
+	play={async ({ canvasElement }) => {
+		await waitForLayout();
+		expect(getStageTransform(canvasElement)).toContain('scale(0.5)');
+	}}
+/>
+
+<Story
+	name="StartsAtInitialPan"
+	args={{ nodes: NODES.slice(0, 3), initialPanX: 80, initialPanY: -40 }}
+	play={async ({ canvasElement }) => {
+		await waitForLayout();
+		expect(getStageTransform(canvasElement)).toContain('translate(80px, -40px)');
+	}}
+/>
+
+<Story
+	name="StartsAtInitialPanAndScale"
+	args={{ nodes: NODES.slice(0, 3), initialPanX: 50, initialPanY: 30, initialScale: 1.5 }}
+	play={async ({ canvasElement }) => {
+		await waitForLayout();
+		const transform = getStageTransform(canvasElement);
+		expect(transform).toContain('translate(50px, 30px)');
+		expect(transform).toContain('scale(1.5)');
+	}}
+/>
+
+<Story
+	name="PanEmitsViewStateChange"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = canvasElement.querySelector('[data-testid="stage-callbacks"]') as HTMLElement;
+		const stage = getStage(canvasElement);
+
+		await waitForLayout();
+
+		expect(wrapper.dataset.lastViewState).toBe('');
+
+		const center = getCenter(stage);
+		dispatchPointer(stage, 'pointerdown', center.x, center.y);
+		dispatchPointer(stage, 'pointermove', center.x + 60, center.y + 40);
+		dispatchPointer(stage, 'pointerup', center.x + 60, center.y + 40);
+
+		await sleep();
+
+		const parts = (wrapper.dataset.lastViewState ?? '').split(',');
+		expect(parts).toHaveLength(3);
+		expect(Number(parts[0])).toBeCloseTo(60);
+		expect(Number(parts[1])).toBeCloseTo(40);
+		expect(Number(parts[2])).toBeCloseTo(1);
+	}}
+/>
+
+<Story
+	name="WheelZoomEmitsViewStateChange"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = canvasElement.querySelector('[data-testid="stage-callbacks"]') as HTMLElement;
+		const stage = getStage(canvasElement);
+
+		await waitForLayout();
+
+		const center = getCenter(stage);
+		dispatchWheel(stage, -200, center.x + 80, center.y + 40);
+
+		await sleep();
+
+		const viewState = parseViewStateCallback(wrapper.dataset.lastViewState ?? '');
+		expect(viewState.scale).toBeGreaterThan(1);
+		expect(viewState.panX).toBeCloseTo(80 - 80 * viewState.scale);
+		expect(viewState.panY).toBeCloseTo(40 - 40 * viewState.scale);
+	}}
+/>
+
+<Story
+	name="StartsAtInitialPanAndZoom"
+	args={{ nodes: NODES.slice(0, 3), initialScale: 1.5, initialPanX: 32, initialPanY: -24 }}
+	play={async ({ canvasElement }) => {
+		await waitForLayout();
+		expect(getStageTransform(canvasElement)).toContain('translate(32px, -24px) scale(1.5)');
+	}}
+/>
 
 <Story
 	name="Empty"
@@ -174,14 +296,17 @@
 			nodeCenter.y + (NODE_RADIUS + 10)
 		);
 		await sleep();
-		expect(wrapper.dataset.lastDoubleClickDropBg).toBe(NODES[0].id);
+		const backgroundDrop = parsePointCallback(wrapper.dataset.lastDoubleClickDropBg ?? '');
+		const expectedBackgroundPoint = getGraphPoint(
+			stage,
+			nodeCenter.x + (NODE_RADIUS + 10),
+			nodeCenter.y + (NODE_RADIUS + 10)
+		);
+		expect(backgroundDrop.nodeId).toBe(NODES[0].id);
+		expect(backgroundDrop.x).toBeCloseTo(expectedBackgroundPoint.x);
+		expect(backgroundDrop.y).toBeCloseTo(expectedBackgroundPoint.y);
 
-		// Double-click then drag node 1 onto itself.
-		// TODO(milestone-01): decide the canonical semantics of drop-onto-self.
-		// Today Stage routes self-drops to onNodeDoubleClickDropOntoBackground (treating
-		// "drop on yourself" the same as "drop on empty space"). This may change to a
-		// no-op or a self-loop edge when graph mutation semantics are finalized.
-		// See docs/roadmaps/2026-05-07 mind-map-mvp/milestones/01-graph-mutations-and-pinning.md
+		// Self-drops intentionally follow the background-drop path.
 		await dispatchDoubleClickDrag(
 			circle,
 			nodeCenter.x,
@@ -191,14 +316,22 @@
 			nodeCenter.y + DRAG_THRESHOLD * 2
 		);
 		await sleep();
-		expect(wrapper.dataset.lastDoubleClickDropBg).toBe(NODES[0].id);
+		const selfDrop = parsePointCallback(wrapper.dataset.lastDoubleClickDropBg ?? '');
+		const expectedSelfDropPoint = getGraphPoint(
+			stage,
+			nodeCenter.x + DRAG_THRESHOLD * 2,
+			nodeCenter.y + DRAG_THRESHOLD * 2
+		);
+		expect(selfDrop.nodeId).toBe(NODES[0].id);
+		expect(selfDrop.x).toBeCloseTo(expectedSelfDropPoint.x);
+		expect(selfDrop.y).toBeCloseTo(expectedSelfDropPoint.y);
 		expect(wrapper.dataset.lastDoubleClickDropNode).toBe('');
 
-		// Single-click with no drag
+		// Long-press fires once without interfering with later gestures.
 		dispatchPointer(circle, 'pointerdown', nodeCenter.x, nodeCenter.y);
+		await sleep(LONG_PRESS_MS + 20);
+		expect(wrapper.dataset.lastNodeLongPress?.startsWith(NODES[0].id)).toBe(true);
 		dispatchPointer(circle, 'pointerup', nodeCenter.x, nodeCenter.y);
-		await sleep(DBL_CLICK_MS);
-		expect(wrapper.dataset.lastNodeClick).toBe(NODES[0].id);
 
 		// Single-click drag to move node
 		const moveToX = nodeCenter.x + (NODE_RADIUS + 10);
@@ -208,9 +341,13 @@
 		dispatchPointer(stage, 'pointerup', moveToX, moveToY);
 		await sleep();
 		const moved = wrapper.dataset.lastNodeMoved ?? '';
-		expect(moved.startsWith(NODES[0].id)).toBe(true);
-		expect(moved).toContain(String(Math.round(moveToX)));
-		expect(moved).toContain(String(Math.round(moveToY)));
+		const movedPoint = parsePointCallback(moved);
+		const expectedMovedPoint = getGraphPoint(stage, moveToX, moveToY);
+		expect(movedPoint.nodeId).toBe(NODES[0].id);
+		expect(movedPoint.x).toBeCloseTo(expectedMovedPoint.x);
+		expect(movedPoint.y).toBeCloseTo(expectedMovedPoint.y);
+		expect(wrapper.dataset.lastNodeDragStart).toBe(NODES[0].id);
+		expect(wrapper.dataset.lastNodeDragEnd).toBe(NODES[0].id);
 	}}
 />
 
@@ -219,8 +356,8 @@
 	args={{
 		nodes: [NODES[0], NODES[1]],
 		positions: {
-			[NODES[0].id]: { left: '30%', top: '50%' },
-			[NODES[1].id]: { left: '70%', top: '50%' }
+			[NODES[0].id]: { left: '5%', top: '50%' },
+			[NODES[1].id]: { left: '95%', top: '50%' }
 		}
 	}}
 	play={async ({ canvasElement }) => {
@@ -247,8 +384,11 @@
 		dispatchPointer(stage, 'pointermove', moveToX, moveToY);
 		dispatchPointer(stage, 'pointerup', moveToX, moveToY);
 		await sleep();
-		const moved = wrapper.dataset.lastNodeMoved ?? '';
-		expect(moved.startsWith(NODES[0].id)).toBe(true);
+		const moved = parsePointCallback(wrapper.dataset.lastNodeMoved ?? '');
+		const expectedMovedPoint = getGraphPoint(stage, moveToX, moveToY);
+		expect(moved.nodeId).toBe(NODES[0].id);
+		expect(moved.x).toBeCloseTo(expectedMovedPoint.x);
+		expect(moved.y).toBeCloseTo(expectedMovedPoint.y);
 
 		// Double-click node 1 to make primary
 		await dispatchDoubleClick(firstCircle, fromCenter.x, fromCenter.y);
@@ -273,6 +413,7 @@
 	name="PanAndZoom"
 	args={{ nodes: [] }}
 	play={async ({ canvasElement }) => {
+		const wrapper = canvasElement.querySelector('[data-testid="stage-callbacks"]') as HTMLElement;
 		const stage = getStage(canvasElement);
 
 		await waitForLayout();
@@ -286,10 +427,45 @@
 		await sleep();
 		const afterPan = getStageTransform(canvasElement);
 		expect(afterPan).toContain('translate(20px, 20px)');
+		let viewState = parseViewStateCallback(wrapper.dataset.lastViewState ?? '');
+		expect(viewState.panX).toBe(20);
+		expect(viewState.panY).toBe(20);
+		expect(viewState.scale).toBe(1);
 
 		// Zoom in (negative deltaY)
 		dispatchWheel(stage, -200);
+		await sleep();
 		const afterZoom = getStageTransform(canvasElement);
 		expect(afterZoom).toMatch(/scale\([1-9]/);
+		viewState = parseViewStateCallback(wrapper.dataset.lastViewState ?? '');
+		expect(viewState.scale).toBeGreaterThan(1);
+		expect(viewState.panX).toBeCloseTo(20 * viewState.scale);
+		expect(viewState.panY).toBeCloseTo(20 * viewState.scale);
+	}}
+/>
+
+<Story
+	name="PanAfterZoomOutAtViewportEdge"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const stage = getStage(canvasElement);
+
+		await waitForLayout();
+
+		const rect = stage.getBoundingClientRect();
+		const edge = { x: rect.left + rect.width * 0.1, y: rect.top + rect.height * 0.1 };
+
+		dispatchWheel(stage, 400);
+		await sleep();
+		const afterZoomOut = getStageTransform(canvasElement);
+		expect(afterZoomOut).toMatch(/scale\(0\./);
+
+		dispatchPointer(stage, 'pointerdown', edge.x, edge.y);
+		dispatchPointer(stage, 'pointermove', edge.x + 30, edge.y + 20);
+		dispatchPointer(stage, 'pointerup', edge.x + 30, edge.y + 20);
+		await sleep();
+
+		const afterPan = getStageTransform(canvasElement);
+		expect(afterPan).toContain('translate(30px, 20px)');
 	}}
 />

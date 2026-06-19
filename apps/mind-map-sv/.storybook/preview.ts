@@ -1,6 +1,8 @@
 import type { Preview } from '@storybook/sveltekit';
 import '../src/routes/layout.css';
 
+export const MOBILE_VIEWPORT = 'phone';
+
 const preview: Preview = {
 	parameters: {
 		controls: {
@@ -15,6 +17,18 @@ const preview: Preview = {
 			// 'error' - fail CI on a11y violations
 			// 'off' - skip a11y checks entirely
 			test: 'todo'
+		},
+
+		viewport: {
+			viewports: {
+				[MOBILE_VIEWPORT]: {
+					name: 'Phone',
+					styles: {
+						width: '390px',
+						height: '844px'
+					}
+				}
+			}
 		}
 	}
 };

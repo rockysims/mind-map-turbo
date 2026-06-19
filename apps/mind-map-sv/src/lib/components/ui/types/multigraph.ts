@@ -6,8 +6,16 @@ export type Point = {
 	y: number;
 };
 
+export interface TagColorConfig {
+	nodeTags: Record<string, string>;
+	edgeTags: Record<string, string>;
+}
+
+export type TagColorNamespace = keyof TagColorConfig;
+
 export interface MultigraphData {
 	nodes: NodeData[];
 	edges: EdgeData[];
 	posByNodeId: Record<string, Point>;
+	tagColorConfig: TagColorConfig;
 }

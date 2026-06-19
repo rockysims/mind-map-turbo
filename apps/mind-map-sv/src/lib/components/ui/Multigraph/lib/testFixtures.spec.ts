@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { makeGraph } from './testFixtures';
+import {
+	assignNodeGroups,
+	MIXED_DIRECTION_PARALLEL_EDGES_GRAPH,
+	makeClusteredRandomEdges,
+	makeGraph,
+	makeRandomEdges,
+	OPPOSITE_DIRECTION_PARALLEL_EDGES_GRAPH,
+	SAME_DIRECTION_PARALLEL_EDGES_GRAPH
+} from './testFixtures';
 
 describe('makeGraph', () => {
 	it('produces an empty graph by default', () => {
@@ -7,6 +15,7 @@ describe('makeGraph', () => {
 		expect(g.nodes).toEqual([]);
 		expect(g.edges).toEqual([]);
 		expect(g.posByNodeId).toEqual({});
+		expect(g.tagColorConfig).toEqual({ nodeTags: {}, edgeTags: {} });
 	});
 
 	it('generates nodes by count with default ids and titles', () => {
@@ -14,6 +23,7 @@ describe('makeGraph', () => {
 		expect(g.nodes).toHaveLength(3);
 		expect(g.nodes.map((n) => n.id)).toEqual(['n0', 'n1', 'n2']);
 		expect(g.nodes[0].title).toBe('Node 0');
+		expect(g.nodes[0].tags).toEqual([]);
 	});
 
 	it('creates edges from index pairs and assigns ids', () => {
@@ -34,6 +44,42 @@ describe('makeGraph', () => {
 		expect(g.edges[0]).toMatchObject({ sourceNodeId: 'n0', targetNodeId: 'n1' });
 	});
 
+	it('accepts tagged nodes', () => {
+		const g = makeGraph({
+			nodes: [{ id: 'topic', title: 'Topic', description: '', tags: ['abc'] }]
+		});
+
+		expect(g.nodes[0].tags).toEqual(['abc']);
+	});
+
+	it('accepts tagged and directed edges', () => {
+		const g = makeGraph({
+			nodeCount: 2,
+			edges: [{ source: 0, target: 1, tags: ['rel'], directed: true }]
+		});
+
+		expect(g.edges[0]).toMatchObject({
+			sourceNodeId: 'n0',
+			targetNodeId: 'n1',
+			tags: ['rel'],
+			directed: true
+		});
+	});
+
+	it('accepts tag color config', () => {
+		const g = makeGraph({
+			tagColorConfig: {
+				nodeTags: { abc: '#112233' },
+				edgeTags: { rel: '#445566' }
+			}
+		});
+
+		expect(g.tagColorConfig).toEqual({
+			nodeTags: { abc: '#112233' },
+			edgeTags: { rel: '#445566' }
+		});
+	});
+
 	it('defaults positions to (0, 0) for every node', () => {
 		const g = makeGraph({ nodeCount: 2 });
 		expect(g.posByNodeId).toEqual({ n0: { x: 0, y: 0 }, n1: { x: 0, y: 0 } });
@@ -45,5 +91,210 @@ describe('makeGraph', () => {
 			posByNodeId: { n0: { x: 10, y: 20 } }
 		});
 		expect(g.posByNodeId).toEqual({ n0: { x: 10, y: 20 } });
+	});
+
+	it('marks generated nodes pinned by index', () => {
+		const g = makeGraph({ nodeCount: 2, pinned: [0] });
+		expect(g.nodes.map((node) => node.pinned)).toEqual([true, undefined]);
+	});
+
+	it('marks generated nodes pinned by id', () => {
+		const g = makeGraph({ nodeCount: 2, pinned: ['n1'] });
+		expect(g.nodes.map((node) => node.pinned)).toEqual([undefined, true]);
+	});
+});
+
+describe('parallel edge graph fixtures', () => {
+	it('exposes three tagged same-direction edges with stable distinct ids', () => {
+		const edges = SAME_DIRECTION_PARALLEL_EDGES_GRAPH.edges;
+
+		expect(edges.map((edge) => edge.id)).toEqual([
+			'parallel-same-01',
+			'parallel-same-02',
+			'parallel-same-03'
+		]);
+		expect(new Set(edges.map((edge) => edge.id)).size).toBe(edges.length);
+		expect(edges.map((edge) => [edge.sourceNodeId, edge.targetNodeId, edge.directed])).toEqual([
+			['parallel-a', 'parallel-b', true],
+			['parallel-a', 'parallel-b', true],
+			['parallel-a', 'parallel-b', true]
+		]);
+		expect(edges.map((edge) => edge.tags)).toEqual([['supports'], ['blocks'], ['references']]);
+	});
+
+	it('exposes opposite-direction parallel edges with stable distinct ids', () => {
+		const edges = OPPOSITE_DIRECTION_PARALLEL_EDGES_GRAPH.edges;
+
+		expect(edges.map((edge) => edge.id)).toEqual([
+			'parallel-opposite-a-to-b',
+			'parallel-opposite-b-to-a'
+		]);
+		expect(new Set(edges.map((edge) => edge.id)).size).toBe(edges.length);
+		expect(edges.map((edge) => [edge.sourceNodeId, edge.targetNodeId, edge.directed])).toEqual([
+			['parallel-a', 'parallel-b', true],
+			['parallel-b', 'parallel-a', true]
+		]);
+	});
+
+	it('exposes a mixed directed and undirected parallel edge group', () => {
+		const edges = MIXED_DIRECTION_PARALLEL_EDGES_GRAPH.edges;
+
+		expect(edges.map((edge) => edge.id)).toEqual([
+			'parallel-mixed-directed-a-to-b',
+			'parallel-mixed-directed-b-to-a',
+			'parallel-mixed-undirected'
+		]);
+		expect(new Set(edges.map((edge) => edge.id)).size).toBe(edges.length);
+		expect(edges.map((edge) => [edge.sourceNodeId, edge.targetNodeId, edge.directed])).toEqual([
+			['parallel-a', 'parallel-b', true],
+			['parallel-b', 'parallel-a', true],
+			['parallel-a', 'parallel-b', false]
+		]);
+		expect(edges.map((edge) => edge.tags)).toEqual([['causes'], ['responds'], ['related']]);
+	});
+});
+
+describe('makeRandomEdges', () => {
+	it('returns the same edges for the same seed', () => {
+		const first = makeRandomEdges({ nodeCount: 100, edgeCount: 300, seed: 42 });
+		const second = makeRandomEdges({ nodeCount: 100, edgeCount: 300, seed: 42 });
+		expect(second).toEqual(first);
+	});
+
+	it('returns different edges for different seeds', () => {
+		const first = makeRandomEdges({ nodeCount: 100, edgeCount: 300, seed: 42 });
+		const second = makeRandomEdges({ nodeCount: 100, edgeCount: 300, seed: 99 });
+		expect(second).not.toEqual(first);
+	});
+
+	it('generates unique non-self edges', () => {
+		const edges = makeRandomEdges({ nodeCount: 100, edgeCount: 300, seed: 42 });
+		expect(edges).toHaveLength(300);
+		const seen = new Set<string>();
+		for (const [source, target] of edges) {
+			expect(source).not.toBe(target);
+			const key = `${source},${target}`;
+			expect(seen.has(key)).toBe(false);
+			seen.add(key);
+		}
+	});
+});
+
+describe('assignNodeGroups', () => {
+	it('returns the same groups for the same seed', () => {
+		const first = assignNodeGroups({ nodeCount: 100, groupCount: 8, seed: 42 });
+		const second = assignNodeGroups({ nodeCount: 100, groupCount: 8, seed: 42 });
+		expect(second).toEqual(first);
+	});
+
+	it('assigns every node to a valid group index', () => {
+		const groups = assignNodeGroups({ nodeCount: 100, groupCount: 8, seed: 42 });
+		expect(groups).toHaveLength(100);
+		for (const group of groups) {
+			expect(group).toBeGreaterThanOrEqual(0);
+			expect(group).toBeLessThan(8);
+		}
+	});
+});
+
+describe('makeClusteredRandomEdges', () => {
+	const nodeCount = 100;
+	const edgeCount = 300;
+	const groupCount = 8;
+	const crossGroupFraction = 0.05;
+	const seed = 42;
+
+	function crossGroupCount(edges: Array<[number, number]>, groupByNode: number[]): number {
+		return edges.filter(([source, target]) => groupByNode[source] !== groupByNode[target]).length;
+	}
+
+	function isConnected(nodeCount: number, edges: Array<[number, number]>): boolean {
+		const parent = Array.from({ length: nodeCount }, (_, index) => index);
+
+		function find(index: number): number {
+			if (parent[index] !== index) parent[index] = find(parent[index]);
+			return parent[index];
+		}
+
+		function unite(left: number, right: number): void {
+			const leftRoot = find(left);
+			const rightRoot = find(right);
+			if (leftRoot !== rightRoot) parent[leftRoot] = rightRoot;
+		}
+
+		for (const [source, target] of edges) unite(source, target);
+
+		const root = find(0);
+		for (let index = 1; index < nodeCount; index += 1) {
+			if (find(index) !== root) return false;
+		}
+		return true;
+	}
+
+	it('returns the same edges for the same seed', () => {
+		const first = makeClusteredRandomEdges({
+			nodeCount,
+			edgeCount,
+			groupCount,
+			crossGroupFraction,
+			seed
+		});
+		const second = makeClusteredRandomEdges({
+			nodeCount,
+			edgeCount,
+			groupCount,
+			crossGroupFraction,
+			seed
+		});
+		expect(second).toEqual(first);
+	});
+
+	it('generates unique non-self edges with the requested cross-group fraction', () => {
+		const edges = makeClusteredRandomEdges({
+			nodeCount,
+			edgeCount,
+			groupCount,
+			crossGroupFraction,
+			seed
+		});
+		const groupByNode = assignNodeGroups({ nodeCount, groupCount, seed });
+
+		expect(edges).toHaveLength(edgeCount);
+		const seen = new Set<string>();
+		for (const [source, target] of edges) {
+			expect(source).not.toBe(target);
+			const key = `${source},${target}`;
+			expect(seen.has(key)).toBe(false);
+			seen.add(key);
+		}
+
+		expect(crossGroupCount(edges, groupByNode)).toBe(Math.round(edgeCount * crossGroupFraction));
+	});
+
+	it('produces one connected component', () => {
+		const edges = makeClusteredRandomEdges({
+			nodeCount,
+			edgeCount,
+			groupCount,
+			crossGroupFraction,
+			seed
+		});
+
+		expect(isConnected(nodeCount, edges)).toBe(true);
+	});
+
+	it('keeps most edges within the same group', () => {
+		const edges = makeClusteredRandomEdges({
+			nodeCount,
+			edgeCount,
+			groupCount,
+			crossGroupFraction,
+			seed
+		});
+		const groupByNode = assignNodeGroups({ nodeCount, groupCount, seed });
+		const cross = crossGroupCount(edges, groupByNode);
+
+		expect(cross / edgeCount).toBeLessThanOrEqual(crossGroupFraction + 0.01);
+		expect((edgeCount - cross) / edgeCount).toBeGreaterThanOrEqual(1 - crossGroupFraction - 0.01);
 	});
 });

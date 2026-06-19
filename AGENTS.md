@@ -105,6 +105,9 @@ Full details: `.cursor/rules/commits.mdc`.
 3. Add the pure function + spec first; wire it into the component second.
 4. Add or update the relevant story.
 5. Run lint, check, and tests; fix any failures.
-6. Commit with Conventional Commits.
+6. If executing a roadmap plan, update the plan, milestone, and roadmap
+   statuses before closing out.
+7. Commit with Conventional Commits after validation passes unless the user
+   explicitly asked not to commit yet.
 
 If anything is ambiguous, prefer pausing to ask over guessing.

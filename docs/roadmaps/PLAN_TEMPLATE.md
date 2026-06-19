@@ -1,10 +1,12 @@
 <!--
 This is the canonical template for milestone plans. Copy it to
-  docs/roadmaps/<roadmap>/plans/<YYYY-MM-DD> <plan-name>.md
+  docs/roadmaps/<roadmap>/plans/<YYYY-MM-DD> <milestone-id>-<plan-name>.md
 and replace the placeholder content with your milestone's specifics.
 
 A plan answers HOW we deliver a milestone (the milestone doc says WHAT
-and WHY). It exists to:
+and WHY). Do not duplicate milestone scope or acceptance criteria; link
+back to the milestone and add only the task-level detail needed to execute.
+It exists to:
 - Resolve the milestone's open questions before code is written.
 - Decompose the work into PR-sized tasks.
 - Annotate every task with what kind of AI agent / model fits best.
@@ -18,7 +20,7 @@ Delete this comment block when filling in the template.
 
 **Created:** <YYYY-MM-DD>
 **Author:** <name or "Cursor agent">
-**Milestone:** [milestones/<NN>-<name>.md](../milestones/<NN>-<name>.md)
+**Milestone:** [milestones/<milestone-id>-<name>.md](../milestones/<milestone-id>-<name>.md)
 **Status:** draft / executing / done
 **Total estimated effort:** <S / M / L>
 
@@ -62,7 +64,7 @@ code. Use this section to head off scope creep.
 | -------------- | ------------------------------------------------------------------ |
 | **Depends on** | —                                                                  |
 | **Wave**       | 1                                                                  |
-| **Agent**      | fast/cheap (composer-2-fast or kimi-k2.5)                          |
+| **Agent**      | fast/cheap (composer-2.5-fast or kimi-k2.5)                        |
 | **Effort**     | XS                                                                 |
 | **Files**      | `types/node.ts`, `lib/testFixtures.ts`, `lib/testFixtures.spec.ts` |
 | **PR title**   | `feat(graph): add pinned flag to NodeData and fixtures`            |
@@ -84,7 +86,7 @@ accordingly. Add a fixture spec covering `pinned: [0]` and
 | -------------- | ------------------------------------------------------------------- |
 | **Depends on** | T01                                                                 |
 | **Wave**       | 2                                                                   |
-| **Agent**      | default (claude-4.6-sonnet)                                         |
+| **Agent**      | default (claude-4.6-sonnet-medium-thinking)                         |
 | **Effort**     | M                                                                   |
 | **Files**      | new `lib/graph.ts`, new `lib/graph.spec.ts`                         |
 | **PR title**   | `feat(graph): add pure mutation API (add/remove/move/togglePinned)` |
@@ -107,7 +109,7 @@ a new `MultigraphData`.
 | -------------- | ------------------------------------------------------------ |
 | **Depends on** | T02                                                          |
 | **Wave**       | 3                                                            |
-| **Agent**      | default (claude-4.6-sonnet)                                  |
+| **Agent**      | default (claude-4.6-sonnet-medium-thinking)                  |
 | **Effort**     | M                                                            |
 | **Files**      | `Multigraph.svelte`, `Multigraph.stories.svelte`             |
 | **PR title**   | `refactor(multigraph): route state changes through graph.ts` |
@@ -128,7 +130,7 @@ offsets around the primary). Pinned nodes get a thicker border.
 | -------------- | --------------------------------------------------- |
 | **Depends on** | T02                                                 |
 | **Wave**       | 3 (parallel with T03)                               |
-| **Agent**      | default (claude-4.6-sonnet)                         |
+| **Agent**      | default (claude-4.6-sonnet-medium-thinking)         |
 | **Effort**     | S                                                   |
 | **Files**      | `Multigraph.svelte`, `Stage.stories.svelte`         |
 | **PR title**   | `feat(multigraph): map double-tap to toggle pinned` |
@@ -150,7 +152,7 @@ final behavior.
 | -------------- | ------------------------------------------------------------------- |
 | **Depends on** | T02, T03                                                            |
 | **Wave**       | 4                                                                   |
-| **Agent**      | default (claude-4.6-sonnet)                                         |
+| **Agent**      | default (claude-4.6-sonnet-medium-thinking)                         |
 | **Effort**     | S                                                                   |
 | **Files**      | `Multigraph.svelte`, `Multigraph.stories.svelte`                    |
 | **PR title**   | `feat(multigraph): add edges via double-tap-drag onto another node` |
@@ -200,8 +202,10 @@ The plan is done when:
 - All 5 tasks are merged to `main`.
 - The acceptance criteria from the milestone doc are satisfied (no need
   to copy them here — link, don't duplicate).
-- Roadmap status for milestone 01 updated to "complete" with a link
-  back to this plan in `docs/roadmaps/<roadmap>/roadmap.md`.
+- Plan status is `done`, milestone status is `complete`, and roadmap
+  status for the milestone is `complete` with a link back to this plan.
+- The finished work has been committed unless the user explicitly asked
+  not to commit yet.
 
 ## Notes
 

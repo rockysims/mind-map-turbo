@@ -8,6 +8,22 @@ alwaysApply: true
 This is a Turborepo with one SvelteKit 2 / Svelte 5 app at `apps/mind-map-sv`.
 Always work from the repo root unless a script explicitly says otherwise.
 
+## Shell environment
+
+Wrap every command in `/bin/zsh -f -c '…'`. This skips the user's `zshrc`
+(which may have broken hooks like `add-zsh-hook`/nvm-lazy-load) while
+still inheriting the parent process's PATH (so nvm-installed Node 20+ is
+on PATH).
+
+Do **not** use `bash -lc` — it sources `~/.bash_profile`, which may have
+syntax errors, and may put an older Node (e.g. v16) on PATH that fails
+pnpm's `engines` check with `pnpm requires Node ≥ 20`. If you see that
+error, or `command not found: add-zsh-hook`, or `_comps: assignment to
+invalid subscript range`, switch to `/bin/zsh -f -c` and retry.
+
+Prefer setting the tool's `working_directory` parameter over chaining
+`cd …` — many agent tool runners drop chained `cd` commands.
+
 ## Architecture: pure logic first, components thin
 
 - Behavior goes into pure TypeScript modules under `apps/mind-map-sv/src/lib/components/<Component>/lib/*.ts` (or a sibling `lib/` for app-level logic).
@@ -21,9 +37,11 @@ Always work from the repo root unless a script explicitly says otherwise.
 2. `pnpm --filter mind-map-sv lint` passes.
 3. `pnpm --filter mind-map-sv check` (svelte-check) passes.
 4. `pnpm --filter mind-map-sv test:unit -- --run` passes.
-5. If you touched gestures, layout, or anything visible: run the relevant story locally (or rely on the storybook Vitest project to run the `play`).
-6. Commit message follows Conventional Commits (see `commits.mdc`).
-7. No tracked changes to `.svelte-kit/`, build output, or log files (those are gitignored).
+5. If you touched gestures, layout, or anything visible: run the relevant story locally (or rely on the storybook Vitest project to run the `play`). E2E tests use Playwright's configured 30 second per-test timeout; do not pass a longer timeout unless you are deliberately debugging a hang.
+6. If the work executes a roadmap plan, update the plan, milestone, and roadmap status fields before closing out.
+7. Commit message follows Conventional Commits (see `commits.mdc`).
+8. No tracked changes to `.svelte-kit/`, build output, or log files (those are gitignored).
+9. After validation passes, commit the completed logical change unless the user has explicitly said not to commit yet.
 
 You must actually run the commands above and report results. Do not claim done from "I think this is fine".
 
@@ -36,13 +54,15 @@ You must actually run the commands above and report results. Do not claim done f
 
 ## Roadmaps, milestones, plans
 
-Three layers, each smaller in scope:
+Three layers, each smaller in scope and with minimal duplication:
 
 - **Roadmap** — the big picture. One per release/era.
 - **Milestone** — *what* and *why* a piece of the roadmap delivers, plus
   acceptance criteria and open questions.
 - **Plan** — *how* to deliver a milestone: tasks (one PR each),
-  parallelization waves, and per-task agent recommendations.
+  parallelization waves, and per-task agent recommendations. Link back to
+  milestone acceptance criteria instead of copying them unless a task needs a
+  narrower check.
 
 If a milestone doesn't have a current plan, write one before coding.
 Format and authoring checklist live in `.cursor/rules/plans.mdc` and

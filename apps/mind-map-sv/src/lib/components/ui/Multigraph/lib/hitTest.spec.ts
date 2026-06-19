@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isPointInCircle, pointerDistance } from './hitTest';
+import { effectiveHitRadius, isPointInCircle, pointerDistance } from './hitTest';
 
 describe('hitTest', () => {
 	describe('isPointInCircle', () => {
@@ -23,6 +23,20 @@ describe('hitTest', () => {
 		});
 		it('returns correct distance', () => {
 			expect(pointerDistance(0, 0, 3, 4)).toBe(5);
+		});
+	});
+
+	describe('effectiveHitRadius', () => {
+		it('uses the minimum when the visual radius is smaller', () => {
+			expect(effectiveHitRadius(12, 32)).toBe(32);
+		});
+
+		it('keeps the shared value when the visual radius matches the minimum', () => {
+			expect(effectiveHitRadius(32, 32)).toBe(32);
+		});
+
+		it('uses the visual radius when it is larger than the minimum', () => {
+			expect(effectiveHitRadius(48, 32)).toBe(48);
 		});
 	});
 });

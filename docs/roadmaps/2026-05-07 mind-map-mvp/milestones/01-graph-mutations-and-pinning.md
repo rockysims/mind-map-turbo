@@ -1,7 +1,7 @@
 # Milestone 01: Graph mutations and pinning
 
-**Status:** not started
-**Plan:** [2026-05-15 graph-mutations-and-pinning](../plans/2026-05-15 graph-mutations-and-pinning.md)
+**Status:** complete
+**Plan:** [2026-05-15 01-graph-mutations-and-pinning.md](../plans/2026-05-15 01-graph-mutations-and-pinning.md)
 
 ## Goal
 

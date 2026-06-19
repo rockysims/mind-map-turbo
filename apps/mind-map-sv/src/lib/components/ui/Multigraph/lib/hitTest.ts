@@ -19,3 +19,8 @@ export function isPointInCircle(
 export function pointerDistance(x1: number, y1: number, x2: number, y2: number): number {
 	return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
 }
+
+/** Minimum reachable radius for visually scaled-down nodes. */
+export function effectiveHitRadius(visualRadius: number, minHitRadius: number): number {
+	return Math.max(visualRadius, minHitRadius);
+}

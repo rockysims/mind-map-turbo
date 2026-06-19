@@ -1,0 +1,248 @@
+# `/work`: parallel worktree workflow
+
+Use this command when the user wants a task done in a **fresh git worktree on
+a fresh branch** instead of editing the current one. This lets the user run
+multiple tasks in parallel without the worktrees stepping on each other, and
+keeps the active branch clean until the work is reviewed and merged.
+
+`/work` is purely about *where* the work happens, not *how*. Follow all the
+normal repo rules (`core.mdc`, `commits.mdc`, `plans.mdc`, and the language
+conventions) while inside the worktree.
+
+## Delegating the plumbing (optional, recommended for non-trivial tasks)
+
+The setup/teardown steps are deterministic git/shell plumbing. Their verbose
+instructions and command back-and-forth don't need to sit in this (expensive)
+agent's context. For any non-trivial task, hand the plumbing to a `shell`
+subagent (Task tool, `subagent_type: "shell"`) running a cheap, fast model
+(prefer `composer-2.5-fast`). For a tiny task, just run it inline — the
+subagent round-trip can cost more than it saves.
+
+**Delegate (mechanical):** Step 2 (create worktree + collision `-2`/`-3`),
+Step 3 (install deps), Step 5b (detach HEAD), and the command-running inside
+Step 5 (dry-run merge) and Step 7 (merge + cleanup).
+
+**Keep on this agent (judgment):** Step 1 (derive `<type>`/`<slug>` from the
+prompt), Step 4 (the actual work), interpreting Step 5's conflict output, the
+Step 6 report, parsing the user's merge reply, and the Step 7 `git branch -d`
+failure escalation.
+
+When you delegate:
+
+- Pass the subagent everything it needs (`<type>`, `<slug>`, `<BASE>`, repo
+  root path) — subagents don't share this agent's context.
+- Have it **return the facts** you need back (worktree path, branch name,
+  base branch, install outcome, raw merge/clean output).
+- Tell it to **stop and report, never improvise**, on any edge case (worktree
+  already exists, dirty source, slug collision, `git branch -d` failure).
+  Subagents can't ask the user; decisions come back here.
+
+## Plan the run with a TodoWrite list
+
+Before Step 1, create a TodoWrite list with the eight steps (worktree,
+install, work, validate, dry-run merge, release branch, report, handle
+reply). Mark each as in-progress when you start it and completed when you
+finish, so the user can follow progress in the IDE without scanning prose.
+
+## Step 1 — derive `<type>` and `<slug>`
+
+`<type>` follows Conventional Commits (see `commits.mdc`):
+
+| Prompt cues | `<type>` |
+|---|---|
+| "fix", "bug", "broken", "regression", "wrong" | `fix` |
+| "add", "implement", "support", "new feature" | `feat` |
+| "refactor", "rename", "extract", "split", "move", "no behavior change" | `refactor` |
+| "speed", "faster", "perf", "optimize" | `perf` |
+| "test", "spec", "coverage", "story", "play" | `test` |
+| "docs", "readme", "comment", "explain" | `docs` |
+| "deps", "tooling", "config", "ci", "lint" config | `chore` |
+| anything else | `feat` |
+
+`<slug>`: 2–5 words, lowercase, kebab-case, no leading type prefix. Drop
+English filler and code/path noise; keep it human-readable.
+
+E.g. `/work fix the pinch zoom jitter on iOS Safari` →
+`<type>=fix`, `<slug>=pinch-zoom-jitter-ios-safari`.
+
+If `../mind-map-turbo-<slug>/` already exists, append `-2`, `-3`, … until
+free, and use the suffixed slug **everywhere downstream** (branch name,
+merge commit message, summary report). Don't reuse a stale worktree by
+accident.
+
+## Step 2 — create the worktree
+
+Run from the repo root:
+
+```bash
+# capture the base branch (the one the user is currently on)
+BASE="$(git rev-parse --abbrev-ref HEAD)"
+
+# create the worktree + branch in one shot
+git worktree add -b "<type>/work--<slug>" "../mind-map-turbo-<slug>" "$BASE"
+```
+
+Then operate inside `../mind-map-turbo-<slug>` (via `working_directory`)
+for the rest of the session.
+
+**Announce the worktree up front.** Your first reply after creating it
+should state: the worktree path, the new branch name, and the base branch.
+This lets the user open the worktree in another window if they want to
+watch.
+
+## Step 3 — install deps if needed
+
+Derive the source worktree path so the check isn't user-specific, then
+install only when needed:
+
+```bash
+SRC="$(git worktree list --porcelain | awk 'NR==2{print $2}')"
+[ -d node_modules ] && cmp -s pnpm-lock.yaml "$SRC/pnpm-lock.yaml" || pnpm install
+```
+
+After `git worktree add`, `package.json` and `pnpm-lock.yaml` are
+byte-identical to the source by construction, so the lockfile-drift check
+only matters if the source worktree has uncommitted lockfile changes —
+but it's cheap and catches a real footgun, so keep it.
+
+## Step 4 — do the work
+
+Inside the worktree, follow the normal repo conventions:
+
+- Architecture and Definition of Done from `core.mdc` (pure-logic-first,
+  lint + check + test must pass).
+- Conventional Commits from `commits.mdc`. Multiple commits are fine; one
+  logical change per commit.
+- Svelte / TypeScript / test conventions from the other rules.
+
+**Roadmap check.** Before editing, confirm the task maps to an active
+milestone in `docs/roadmaps/`. If it doesn't, ask whether to write or
+extend a milestone before coding (per `core.mdc`).
+
+**Formatting.** To format edited files, run `pnpm exec prettier --write
+<paths>` from the **repo root** (not from inside the workspace package,
+or pnpm will complain about missing workspace config). The repo's
+`lint-staged` re-runs prettier and eslint on staged files at commit time
+as a safety net — no need to re-verify formatting after the commit.
+
+The user said `/work`, not "skip the rules". `/work` is purely about
+*where* the work happens, not *how*.
+
+## Step 5 — pre-merge dry run
+
+After the Definition of Done is satisfied, dry-run-merge against the base
+branch to surface conflicts before bothering the user:
+
+```bash
+git fetch --quiet origin
+# refresh the local copy of the base branch if it tracks origin
+git fetch origin "$BASE":"$BASE" 2>/dev/null || true
+
+# attempt a no-commit, no-ff merge to detect conflicts, then back out
+git merge --no-commit --no-ff "$BASE"
+MERGE_STATUS=$?
+git merge --abort 2>/dev/null || git reset --merge
+```
+
+Interpret:
+
+- `MERGE_STATUS=0` + `Already up to date.` → **clean** (base hasn't moved
+  since the branch was cut; the most common case).
+- `MERGE_STATUS=0` + real merge happened → **clean**.
+- otherwise → **conflicts in <files>**; do not auto-resolve, just report.
+
+## Step 5b — release branch for cross-worktree checkout
+
+After Step 5, **inside the worktree**, detach HEAD so the work branch is
+no longer checked out there. Git allows each branch in only one worktree;
+without this step the user cannot `git checkout <type>/work--<slug>` in
+the source worktree while the parallel worktree still exists.
+
+```bash
+git checkout --detach
+```
+
+The branch ref still exists and Step 7 merges it by name. The worktree
+remains at the same commit — only the checked-out ref changes. Do not
+create a duplicate branch (e.g. `B_`); detached HEAD avoids extra cleanup.
+
+Skip this step only if validation failed — there is nothing useful to
+check out elsewhere yet.
+
+## Step 6 — final report and merge offer
+
+End the task with a report in this shape:
+
+```
+### /work summary
+
+- **Task:** <one-sentence restatement>
+- **Worktree:** ../mind-map-turbo-<slug>/
+- **Branch:** <type>/work--<slug>  ←  <BASE>
+- **Branch checkout:** `<type>/work--<slug>` is free to check out in other worktrees
+- **Commits:** <subject 1>; <subject 2>
+- **Validation:** lint pass; check pass; test:unit pass (N tests)
+- **Merges cleanly into <BASE>:** yes | no (conflicts in: <files>)
+
+Merge into <BASE> and clean up? (yes / no)
+```
+
+If validation failed or the dry-run found conflicts, **do not phrase the
+question as a yes-default merge offer**. Surface the failures first and
+ask how to proceed.
+
+## Step 7 — handle the user's reply
+
+On `yes`, `merge`, `lgtm`, `ship it`, or similar unconditional approval,
+run from the source worktree's root (use `working_directory`, not `cd`):
+
+```bash
+git checkout "$BASE"
+git merge --ff-only "<type>/work--<slug>" \
+  || git merge --no-ff "<type>/work--<slug>" \
+       -m "merge(<type>/work--<slug>): integrate <slug>"
+git -C "../mind-map-turbo-<slug>" clean -fdx
+git worktree remove "../mind-map-turbo-<slug>"
+git branch -d "<type>/work--<slug>"
+```
+
+The `git clean -fdx` step removes the worktree's `node_modules/`,
+`.svelte-kit/`, `.turbo/`, and other gitignored build/test artifacts that
+Step 3's `pnpm install` and later validation produced. Without it, the
+worktree directory still has content and `git worktree remove` fails with
+`Directory not empty`. Both commands stay narrow: `clean` only deletes
+files git already considers untracked or ignored, and `worktree remove`
+keeps its default safety net for tracked or modified files.
+
+Then report the new tip of `<BASE>` and confirm the worktree is gone.
+
+**If `git branch -d` fails** (typically because git doesn't consider the
+branch fully merged — possible after a non-fast-forward merge, or if the
+branch was rewritten), **stop and ask the user how to proceed**. Do not
+silently escalate to `git branch -D`. Surface the exact `git` output so
+the user can decide whether to force-delete, investigate, or leave the
+branch.
+
+If the user declines the merge (`no`, `leave it`, `wait`), stop. Don't
+clean up. The worktree stays live (on detached HEAD after Step 5b) and the
+branch ref remains for checkout elsewhere. If they later ask for more edits
+**in the worktree**, the agent runs `git switch "<type>/work--<slug>"` there
+first. If that fails because the branch is checked out in another worktree,
+report which worktree holds it and ask the user to switch that checkout
+before continuing.
+
+## Edge cases
+
+- **Already inside a `/work` worktree.** If the current cwd matches
+  `../mind-map-turbo-*`, do **not** nest a new one. Tell the user:
+  "you're already in `<path>` on `<branch>`; run `/work` from the source
+  worktree, or finish/abandon this one first." Wait for guidance.
+- **Uncommitted changes in the source worktree.** Creating a new worktree
+  is safe even with dirty changes in the source — the new worktree starts
+  from `HEAD`, not the working tree. Proceed without stashing, and mention
+  in the announcement that the source worktree's uncommitted changes were
+  left alone.
+- **Trivial tasks.** If the user explicitly typed `/work`, run the **full**
+  procedure regardless of how small the task is. Don't shortcut.
+- **Base branch unknown / detached HEAD.** Bail and ask the user which
+  branch to base off of. Don't guess.

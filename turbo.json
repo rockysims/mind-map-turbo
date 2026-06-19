@@ -12,6 +12,11 @@
     },
     "dev": {
       "cache": false,
+      "persistent": true,
+      "with": ["storybook"]
+    },
+    "storybook": {
+      "cache": false,
       "persistent": true
     }
   }

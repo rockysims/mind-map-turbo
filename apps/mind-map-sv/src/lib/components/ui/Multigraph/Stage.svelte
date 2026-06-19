@@ -1,47 +1,84 @@
 <script lang="ts">
-	import type { Snippet } from 'svelte';
+	import { untrack, type Snippet } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import type { NodeData } from '../types/node';
+	import type { Point } from '../types/multigraph';
 	import {
 		scaleFromWheelDelta,
 		clampScale,
 		DEFAULT_MIN_SCALE,
-		DEFAULT_MAX_SCALE
+		DEFAULT_MAX_SCALE,
+		zoomViewTransformAtPoint
 	} from './lib/graphMath.js';
 	import { pointerDistance } from './lib/hitTest.js';
-	import { DRAG_THRESHOLD, DBL_CLICK_MS } from '$lib/constants.js';
+	import { recognizeLongPress } from './lib/longPress.js';
+	import { clientPointToGraphPoint } from './lib/stageCoordinates.js';
+	import { DRAG_THRESHOLD, DBL_CLICK_MS, LONG_PRESS_DIST, LONG_PRESS_MS } from '$lib/constants.js';
+
+	interface ViewStateSnapshot {
+		panX: number;
+		panY: number;
+		scale: number;
+	}
 
 	interface Props {
 		/** Resolve node at (clientX, clientY); return null if none. Injected for testability. */
 		getNodeAt: (clientX: number, clientY: number) => NodeData | null;
+		/** Stage zoom scale on mount, clamped to configured min/max. */
+		initialScale?: number;
+		/** Stage pan X offset in pixels on mount. */
+		initialPanX?: number;
+		/** Stage pan Y offset in pixels on mount. */
+		initialPanY?: number;
 		/** Pixels of movement below which we treat as click rather than drag. */
 		dragThreshold?: number;
-		/** Callback when user single-clicks a node (no drag). */
-		onNodeClick?: (node: NodeData) => void;
-		/** Callback when user single-click-drags a node and releases (move node); (clientX, clientY) is the release position. */
-		onNodeMoved?: (node: NodeData, clientX: number, clientY: number) => void;
+		/** Callback when user single-click-drags a node and releases with a graph-local point. */
+		onNodeMoved?: (node: NodeData, point: Point) => void;
+		/** Callback when user starts dragging a node after crossing the drag threshold. */
+		onNodeDragStart?: (node: NodeData) => void;
+		/** Callback when user releases or cancels an active node drag. */
+		onNodeDragEnd?: (node: NodeData) => void;
 		/** Callback when user double-clicks a node (make primary). */
 		onNodeMakePrimary?: (node: NodeData) => void;
 		/** Callback when user double-click-drags and drops onto another node (e.g. add edge). */
 		onNodeDoubleClickDropOntoNode?: (sourceNode: NodeData, targetNode: NodeData) => void;
-		/** Callback when user double-click-drags and drops onto background (e.g. add node). */
-		onNodeDoubleClickDropOntoBackground?: (node: NodeData) => void;
+		/** Callback when user double-click-drags and drops onto background with a graph-local point. */
+		onNodeDoubleClickDropOntoBackground?: (node: NodeData, point: Point) => void;
+		/** Callback when user holds a node without dragging. */
+		onNodeLongPress?: (node: NodeData, point: Point) => void;
+		/** Fired whenever the internal pan/zoom state changes, including initial mount. */
+		onViewStateLiveChange?: (state: ViewStateSnapshot) => void;
+		/**
+		 * Fired after a user pan/zoom gesture completes (pointer-up after pan, wheel event,
+		 * or pinch end). Moving camera does not mutate graph data, so this callback is kept
+		 * separate from graph-data mutation callbacks.
+		 */
+		onViewStateChange?: (state: ViewStateSnapshot) => void;
 	}
 
 	let {
 		getNodeAt,
+		initialScale = 1,
+		initialPanX = 0,
+		initialPanY = 0,
 		dragThreshold = DRAG_THRESHOLD,
-		onNodeClick,
 		onNodeMoved,
+		onNodeDragStart,
+		onNodeDragEnd,
 		onNodeMakePrimary,
 		onNodeDoubleClickDropOntoNode,
 		onNodeDoubleClickDropOntoBackground,
+		onNodeLongPress,
+		onViewStateLiveChange,
+		onViewStateChange,
 		children
 	}: Props & { children?: Snippet } = $props();
 
 	// Pan
-	let panX = $state(0);
-	let panY = $state(0);
+	// svelte-ignore state_referenced_locally
+	let panX = $state(initialPanX);
+	// svelte-ignore state_referenced_locally
+	let panY = $state(initialPanY);
 	let panStart = $state<{
 		clientX: number;
 		clientY: number;
@@ -49,41 +86,103 @@
 		panY: number;
 	} | null>(null);
 
-	// Zoom
-	let scale = $state(1);
+	// Zoom: mount-only seed from initialScale; user gestures own scale afterward.
+	// svelte-ignore state_referenced_locally
+	let scale = $state(clampScale(initialScale));
 	let pinchStart = $state<{ distance: number; scale: number } | null>(null);
+
+	$effect(() => {
+		const state = { panX, panY, scale };
+		untrack(() => onViewStateLiveChange?.(state));
+	});
 
 	// Node drag
 	let dragNode = $state<NodeData | null>(null);
 	let dragStartPos = $state<{ x: number; y: number } | null>(null);
+	let dragCurrentPos = $state<{ x: number; y: number } | null>(null);
+	let isNodeDragActive = $state(false);
 
 	// Double-click: same node clicked twice within DBL_CLICK_MS
 	let lastClickNodeId = $state<string | null>(null);
 	let lastClickTime = $state(0);
 	let isDoubleClickSession = $state(false);
 
-	// Delay single-click so we don't fire it if a second click makes it a double-click
-	let pendingClickTimeoutId: ReturnType<typeof setTimeout> | null = null;
-	let pendingClickNode: NodeData | null = null;
+	let longPressTimeoutId: ReturnType<typeof setTimeout> | null = null;
+	let longPressStartTime = 0;
+	let longPressFired = false;
 
 	function onPointerDown(e: PointerEvent) {
 		const node = getNodeAt(e.clientX, e.clientY);
 		if (node) {
-			// If we were waiting to fire a single-click on this node, cancel it (user is double-clicking)
-			if (pendingClickNode?.id === node.id && pendingClickTimeoutId !== null) {
-				clearTimeout(pendingClickTimeoutId);
-				pendingClickTimeoutId = null;
-				pendingClickNode = null;
-			}
 			dragNode = node;
 			dragStartPos = { x: e.clientX, y: e.clientY };
+			dragCurrentPos = dragStartPos;
+			longPressFired = false;
 			isDoubleClickSession =
 				lastClickNodeId === node.id && Date.now() - lastClickTime < DBL_CLICK_MS;
+			startLongPressTimer(node);
 		} else {
 			panStart = { clientX: e.clientX, clientY: e.clientY, panX, panY };
 			isDoubleClickSession = false;
 		}
 		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+	}
+
+	function startLongPressTimer(node: NodeData) {
+		cancelLongPressTimer();
+		longPressStartTime = Date.now();
+		longPressTimeoutId = setTimeout(() => {
+			if (!dragNode || dragNode.id !== node.id || !dragStartPos || !dragCurrentPos) return;
+			if (activePointers.size !== 1 || isNodeDragActive || isDoubleClickSession) return;
+			const distance = pointerDistance(
+				dragStartPos.x,
+				dragStartPos.y,
+				dragCurrentPos.x,
+				dragCurrentPos.y
+			);
+			if (
+				recognizeLongPress({
+					duration: Date.now() - longPressStartTime,
+					distance,
+					minDuration: LONG_PRESS_MS,
+					maxDistance: LONG_PRESS_DIST
+				})
+			) {
+				longPressFired = true;
+				onNodeLongPress?.(node, { x: dragCurrentPos.x, y: dragCurrentPos.y });
+			}
+			longPressTimeoutId = null;
+		}, LONG_PRESS_MS);
+	}
+
+	function cancelLongPressTimer() {
+		if (longPressTimeoutId === null) return;
+		clearTimeout(longPressTimeoutId);
+		longPressTimeoutId = null;
+	}
+
+	function cancelActiveNodeGesture() {
+		cancelLongPressTimer();
+		if (dragNode && isNodeDragActive) {
+			onNodeDragEnd?.(dragNode);
+		}
+		dragNode = null;
+		dragStartPos = null;
+		dragCurrentPos = null;
+		isNodeDragActive = false;
+		longPressFired = false;
+		isDoubleClickSession = false;
+	}
+
+	function graphPointForEvent(e: PointerEvent): Point {
+		const stage = e.currentTarget as HTMLElement;
+
+		return clientPointToGraphPoint(
+			{ x: e.clientX, y: e.clientY },
+			stage.getBoundingClientRect(),
+			{ x: panX, y: panY },
+			scale
+		);
 	}
 
 	function onPointerMove(e: PointerEvent) {
@@ -92,8 +191,17 @@
 			panY = panStart.panY + (e.clientY - panStart.clientY);
 		} else if (dragNode && dragStartPos && !isDoubleClickSession) {
 			const dist = pointerDistance(dragStartPos.x, dragStartPos.y, e.clientX, e.clientY);
+			dragCurrentPos = { x: e.clientX, y: e.clientY };
+			if (dist > LONG_PRESS_DIST || getNodeAt(e.clientX, e.clientY)?.id !== dragNode.id) {
+				cancelLongPressTimer();
+			}
 			if (dist >= dragThreshold) {
-				onNodeMoved?.(dragNode, e.clientX, e.clientY);
+				cancelLongPressTimer();
+				if (!isNodeDragActive) {
+					isNodeDragActive = true;
+					onNodeDragStart?.(dragNode);
+				}
+				onNodeMoved?.(dragNode, graphPointForEvent(e));
 			}
 		}
 	}
@@ -104,7 +212,8 @@
 
 		if (dragNode && dragStartPos) {
 			// Only fire drop/click callbacks on actual pointerup; cancel means the gesture was aborted (e.g. drag started)
-			if (!isCancel) {
+			cancelLongPressTimer();
+			if (!isCancel && !longPressFired) {
 				const dropTarget = getNodeAt(e.clientX, e.clientY);
 				const dist = pointerDistance(dragStartPos.x, dragStartPos.y, e.clientX, e.clientY);
 				const didDrag = dist >= dragThreshold;
@@ -119,48 +228,52 @@
 						if (dropTarget && dropTarget.id !== dragNode.id) {
 							onNodeDoubleClickDropOntoNode?.(dragNode, dropTarget);
 						} else if (!dropTarget || dropTarget.id === dragNode.id) {
-							onNodeDoubleClickDropOntoBackground?.(dragNode);
+							onNodeDoubleClickDropOntoBackground?.(dragNode, graphPointForEvent(e));
 						}
 					} else {
-						onNodeMoved?.(dragNode, e.clientX, e.clientY);
+						onNodeMoved?.(dragNode, graphPointForEvent(e));
 					}
+				} else if (isDoubleClickSession) {
+					onNodeMakePrimary?.(dragNode);
 				} else {
-					// Click (no drag)
-					if (isDoubleClickSession) {
-						onNodeMakePrimary?.(dragNode);
-					} else {
-						// Delay single-click: only fire after DBL_CLICK_MS so a second click is treated as double-click only
-						if (pendingClickTimeoutId !== null) {
-							clearTimeout(pendingClickTimeoutId);
-							pendingClickTimeoutId = null;
-						}
-						const node = dragNode;
-						pendingClickNode = node;
-						pendingClickTimeoutId = setTimeout(() => {
-							onNodeClick?.(node);
-							pendingClickNode = null;
-							pendingClickTimeoutId = null;
-						}, DBL_CLICK_MS);
-						lastClickNodeId = node.id;
-						lastClickTime = Date.now();
-					}
+					lastClickNodeId = dragNode.id;
+					lastClickTime = Date.now();
 				}
 			}
 
+			if (isNodeDragActive) {
+				onNodeDragEnd?.(dragNode);
+			}
+			isNodeDragActive = false;
 			dragNode = null;
 			dragStartPos = null;
+			dragCurrentPos = null;
+			longPressFired = false;
 			stage.releasePointerCapture(e.pointerId);
 			return;
 		}
 		if (panStart) {
 			panStart = null;
 			stage.releasePointerCapture(e.pointerId);
+			onViewStateChange?.({ panX, panY, scale });
 		}
 	}
 
 	function onWheel(e: WheelEvent) {
 		e.preventDefault();
-		scale = scaleFromWheelDelta(scale, e.deltaY, undefined, DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE);
+		const stage = e.currentTarget as HTMLElement;
+		const rect = stage.getBoundingClientRect();
+		const nextView = zoomViewTransformAtPoint(
+			{ panX, panY, scale },
+			scaleFromWheelDelta(scale, e.deltaY, undefined, DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE),
+			{ x: e.clientX, y: e.clientY },
+			{ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+		);
+
+		panX = nextView.panX;
+		panY = nextView.panY;
+		scale = nextView.scale;
+		onViewStateChange?.({ panX, panY, scale });
 	}
 
 	// Pinch: track two active pointers and update scale from distance ratio
@@ -176,8 +289,9 @@
 		activePointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
 		if (activePointers.size === 1) {
 			onPointerDown(e);
-		} else if (activePointers.size === 2 && panStart) {
+		} else if (activePointers.size === 2) {
 			panStart = null;
+			cancelActiveNodeGesture();
 			const dist = getTwoPointerDistance();
 			if (dist !== null) pinchStart = { distance: dist, scale };
 		}
@@ -205,8 +319,12 @@
 
 	function onPointerUpStage(e: PointerEvent) {
 		activePointers.delete(e.pointerId);
+		const pinchWasActive = pinchStart !== null;
 		if (activePointers.size < 2) pinchStart = null;
 		onPointerUp(e);
+		if (pinchWasActive && activePointers.size < 2) {
+			onViewStateChange?.({ panX, panY, scale });
+		}
 	}
 
 	const transformStyle = $derived(`translate(${panX}px, ${panY}px) scale(${scale})`);
@@ -215,7 +333,6 @@
 <div
 	class="stage"
 	class:panning={panStart !== null}
-	style="transform: {transformStyle}; transform-origin: 50% 50%;"
 	onpointerdown={onPointerDownStage}
 	onpointermove={onPointerMoveStage}
 	onpointerup={onPointerUpStage}
@@ -223,9 +340,15 @@
 	onwheel={onWheel}
 	role="presentation"
 >
-	{#if children}
-		{@render children()}
-	{/if}
+	<div
+		class="stage-content"
+		style="transform: {transformStyle}; transform-origin: 50% 50%;"
+		aria-hidden="true"
+	>
+		{#if children}
+			{@render children()}
+		{/if}
+	</div>
 </div>
 
 <style>
@@ -233,8 +356,16 @@
 		position: absolute;
 		inset: 0;
 		cursor: grab;
+		touch-action: none;
+		-webkit-user-select: none;
+		user-select: none;
 	}
 	.stage.panning {
 		cursor: grabbing;
+	}
+	.stage-content {
+		position: absolute;
+		inset: 0;
+		pointer-events: none;
 	}
 </style>
