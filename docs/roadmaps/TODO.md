@@ -60,6 +60,7 @@ PROBLEMS:
 BUGS:
 
 - Edit dialog background (click to close) has very rounded edges and padding so it doesn't cover the full Stage.
+- Pinned node doesn't show description.
 
 MAYBE:
 
