@@ -4,7 +4,13 @@
 	import { expect, fn, waitFor, within } from 'storybook/test';
 	import { APP_CONFIG } from '$lib/appConfig';
 	import { DBL_CLICK_MS, LONG_PRESS_MS, MIN_NODE_HIT_RADIUS, NODE_RADIUS } from '$lib/constants';
-	import { makeClusteredRandomEdges, makeGraph, makeRandomEdges } from './lib/testFixtures';
+	import {
+		makeClusteredRandomEdges,
+		makeGraph,
+		makeRandomEdges,
+		OPPOSITE_DIRECTION_PARALLEL_EDGES_GRAPH,
+		SAME_DIRECTION_PARALLEL_EDGES_GRAPH
+	} from './lib/testFixtures';
 	import type { MultigraphData, Point } from '../types/multigraph';
 	import type { ViewState } from '$lib/migrations';
 	import type { ExitingBuffer } from './lib/elementTransitions';
@@ -215,6 +221,34 @@
 		return edge;
 	}
 
+	function expectParallelEdgeMetadata(edge: HTMLElement, groupCount: number, slot: number): void {
+		expect(edge).toHaveAttribute('data-edge-parallel-count', String(groupCount));
+		expect(Number(edge.dataset.edgeParallelSlot)).toBe(slot);
+
+		const offset = Number(edge.dataset.edgeParallelOffset);
+		if (slot === 0) {
+			expect(offset).toBe(0);
+			return;
+		}
+
+		expect(Math.sign(offset)).toBe(Math.sign(slot));
+		expect(Math.abs(offset)).toBeGreaterThan(0);
+	}
+
+	function expectEdgeBetweenHorizontalNodeRims(
+		el: HTMLElement,
+		edgeId: string,
+		leftNodeId: string,
+		rightNodeId: string
+	): void {
+		const edgeRect = getEdge(el, edgeId).getBoundingClientRect();
+		const leftCircleRect = getCircle(el, leftNodeId).getBoundingClientRect();
+		const rightCircleRect = getCircle(el, rightNodeId).getBoundingClientRect();
+
+		expect(edgeRect.left).toBeGreaterThanOrEqual(leftCircleRect.right);
+		expect(edgeRect.right).toBeLessThanOrEqual(rightCircleRect.left);
+	}
+
 	type EdgeGradientStop = {
 		color: string;
 		position: number;
@@ -319,6 +353,53 @@
 		crossGroupFraction: 0.05,
 		seed: 42
 	});
+
+	const SAME_DIRECTION_PARALLEL_EDGES_WITH_UNRELATED_EDGE = {
+		...SAME_DIRECTION_PARALLEL_EDGES_GRAPH,
+		nodes: [
+			...SAME_DIRECTION_PARALLEL_EDGES_GRAPH.nodes,
+			{
+				id: 'parallel-c',
+				title: 'Parallel C',
+				description: 'Endpoint for an unrelated single edge',
+				tags: []
+			}
+		],
+		edges: [
+			...SAME_DIRECTION_PARALLEL_EDGES_GRAPH.edges,
+			{
+				id: 'parallel-unrelated-a-to-c',
+				sourceNodeId: 'parallel-a',
+				targetNodeId: 'parallel-c',
+				tags: ['unrelated'],
+				directed: false
+			}
+		],
+		posByNodeId: {
+			...SAME_DIRECTION_PARALLEL_EDGES_GRAPH.posByNodeId,
+			'parallel-c': { x: 0, y: 240 }
+		},
+		tagColorConfig: {
+			nodeTags: {},
+			edgeTags: {
+				supports: '#2563eb',
+				blocks: '#dc2626',
+				references: '#16a34a',
+				unrelated: '#7c3aed'
+			}
+		}
+	} satisfies MultigraphData;
+
+	const OPPOSITE_DIRECTION_PARALLEL_EDGES_WITH_COLORS = {
+		...OPPOSITE_DIRECTION_PARALLEL_EDGES_GRAPH,
+		tagColorConfig: {
+			nodeTags: {},
+			edgeTags: {
+				parent: '#0f766e',
+				child: '#ea580c'
+			}
+		}
+	} satisfies MultigraphData;
 </script>
 
 <Story
@@ -1895,6 +1976,71 @@
 
 		expect(lastChangedGraph(args).edges[0].tags).toEqual(['strong', 'rel']);
 		expect(edge.style.getPropertyValue('--edge-background').trim()).toBe('#ff0000');
+	}}
+/>
+
+<Story
+	name="ThreeParallelEdgesRenderAsCenteredFan"
+	args={{
+		multigraphData: SAME_DIRECTION_PARALLEL_EDGES_WITH_UNRELATED_EDGE,
+		defaultPrimaryNodeId: 'parallel-a',
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }) => {
+		await waitForLayout();
+
+		const firstEdge = getEdge(canvasElement, 'parallel-same-01');
+		const middleEdge = getEdge(canvasElement, 'parallel-same-02');
+		const lastEdge = getEdge(canvasElement, 'parallel-same-03');
+		const unrelatedEdge = getEdge(canvasElement, 'parallel-unrelated-a-to-c');
+
+		expectParallelEdgeMetadata(firstEdge, 3, -1);
+		expectParallelEdgeMetadata(middleEdge, 3, 0);
+		expectParallelEdgeMetadata(lastEdge, 3, 1);
+		expectParallelEdgeMetadata(unrelatedEdge, 1, 0);
+
+		expect(firstEdge).toHaveAttribute('data-arrow-target-node-id', 'parallel-b');
+		expect(middleEdge).toHaveAttribute('data-arrow-target-node-id', 'parallel-b');
+		expect(lastEdge).toHaveAttribute('data-arrow-target-node-id', 'parallel-b');
+		expect(unrelatedEdge).not.toHaveAttribute('data-arrow-target-node-id');
+		expect(firstEdge.style.getPropertyValue('--edge-background').trim()).toBe('#2563eb');
+		expect(middleEdge.style.getPropertyValue('--edge-background').trim()).toBe('#dc2626');
+		expect(lastEdge.style.getPropertyValue('--edge-background').trim()).toBe('#16a34a');
+		expect(unrelatedEdge.style.getPropertyValue('--edge-background').trim()).toBe('#7c3aed');
+	}}
+/>
+
+<Story
+	name="OppositeDirectionParallelEdgesKeepOppositeArrows"
+	args={{
+		multigraphData: OPPOSITE_DIRECTION_PARALLEL_EDGES_WITH_COLORS,
+		defaultPrimaryNodeId: 'parallel-a',
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }) => {
+		await waitForLayout();
+
+		const outgoingEdge = getEdge(canvasElement, 'parallel-opposite-a-to-b');
+		const incomingEdge = getEdge(canvasElement, 'parallel-opposite-b-to-a');
+
+		expectParallelEdgeMetadata(outgoingEdge, 2, -0.5);
+		expectParallelEdgeMetadata(incomingEdge, 2, 0.5);
+		expect(outgoingEdge).toHaveAttribute('data-arrow-target-node-id', 'parallel-b');
+		expect(incomingEdge).toHaveAttribute('data-arrow-target-node-id', 'parallel-a');
+		expectEdgeBetweenHorizontalNodeRims(
+			canvasElement,
+			'parallel-opposite-a-to-b',
+			'parallel-a',
+			'parallel-b'
+		);
+		expectEdgeBetweenHorizontalNodeRims(
+			canvasElement,
+			'parallel-opposite-b-to-a',
+			'parallel-a',
+			'parallel-b'
+		);
+		expect(outgoingEdge.style.getPropertyValue('--edge-background').trim()).toBe('#0f766e');
+		expect(incomingEdge.style.getPropertyValue('--edge-background').trim()).toBe('#ea580c');
 	}}
 />
 
