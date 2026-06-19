@@ -84,7 +84,7 @@ fans out from a shared point.
   configured fraction of the smaller endpoint radius for small nodes.
 - Inputs are not mutated.
 
-### T02 — Wire offsets into visible edge rendering
+### ✓ T02 — Wire offsets into visible edge rendering
 
 |                |                                                                                                                                                               |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
