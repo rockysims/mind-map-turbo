@@ -21,6 +21,13 @@ describe('layoutSettings', () => {
 		});
 	});
 
+	it('pins the default parallel edge offset clamp', () => {
+		expect(DEFAULT_LAYOUT_SETTINGS.parallelEdgeMaxOffsetRadiusFactor).toBe(0.5);
+		expect(withDefaultLayoutSettings().parallelEdgeMaxOffsetRadiusFactor).toBe(0.5);
+		expect(DEFAULT_LAYOUT_SETTINGS.parallelEdgeClearancePx).toBe(4);
+		expect(withDefaultLayoutSettings().parallelEdgeClearancePx).toBe(4);
+	});
+
 	it('pins the pure edge occlusion helper defaults independently from app tuning', () => {
 		expect(DEFAULT_EDGE_OCCLUSION_CLEARANCE_PX).toBe(6);
 		expect(DEFAULT_EDGE_OCCLUSION_FADE_WIDTH_PX).toBe(12);

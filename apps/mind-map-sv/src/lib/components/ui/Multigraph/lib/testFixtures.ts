@@ -93,6 +93,97 @@ function defaultNodes(count: number): NodeData[] {
 	}));
 }
 
+const PARALLEL_EDGE_NODES: MakeNodeInput[] = [
+	{ id: 'parallel-a', title: 'Parallel A', description: 'First parallel edge endpoint' },
+	{ id: 'parallel-b', title: 'Parallel B', description: 'Second parallel edge endpoint' }
+];
+
+export const SAME_DIRECTION_PARALLEL_EDGES_GRAPH = makeGraph({
+	nodes: PARALLEL_EDGE_NODES,
+	posByNodeId: {
+		'parallel-a': { x: 0, y: 0 },
+		'parallel-b': { x: 240, y: 0 }
+	},
+	edges: [
+		{
+			id: 'parallel-same-01',
+			source: 'parallel-a',
+			target: 'parallel-b',
+			tags: ['supports'],
+			directed: true
+		},
+		{
+			id: 'parallel-same-02',
+			source: 'parallel-a',
+			target: 'parallel-b',
+			tags: ['blocks'],
+			directed: true
+		},
+		{
+			id: 'parallel-same-03',
+			source: 'parallel-a',
+			target: 'parallel-b',
+			tags: ['references'],
+			directed: true
+		}
+	]
+});
+
+export const OPPOSITE_DIRECTION_PARALLEL_EDGES_GRAPH = makeGraph({
+	nodes: PARALLEL_EDGE_NODES,
+	posByNodeId: {
+		'parallel-a': { x: 0, y: 0 },
+		'parallel-b': { x: 240, y: 0 }
+	},
+	edges: [
+		{
+			id: 'parallel-opposite-a-to-b',
+			source: 'parallel-a',
+			target: 'parallel-b',
+			tags: ['parent'],
+			directed: true
+		},
+		{
+			id: 'parallel-opposite-b-to-a',
+			source: 'parallel-b',
+			target: 'parallel-a',
+			tags: ['child'],
+			directed: true
+		}
+	]
+});
+
+export const MIXED_DIRECTION_PARALLEL_EDGES_GRAPH = makeGraph({
+	nodes: PARALLEL_EDGE_NODES,
+	posByNodeId: {
+		'parallel-a': { x: 0, y: 0 },
+		'parallel-b': { x: 240, y: 0 }
+	},
+	edges: [
+		{
+			id: 'parallel-mixed-directed-a-to-b',
+			source: 'parallel-a',
+			target: 'parallel-b',
+			tags: ['causes'],
+			directed: true
+		},
+		{
+			id: 'parallel-mixed-directed-b-to-a',
+			source: 'parallel-b',
+			target: 'parallel-a',
+			tags: ['responds'],
+			directed: true
+		},
+		{
+			id: 'parallel-mixed-undirected',
+			source: 'parallel-a',
+			target: 'parallel-b',
+			tags: ['related'],
+			directed: false
+		}
+	]
+});
+
 export interface MakeRandomEdgesInput {
 	nodeCount: number;
 	edgeCount: number;

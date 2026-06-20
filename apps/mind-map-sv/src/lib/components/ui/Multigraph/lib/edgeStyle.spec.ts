@@ -68,6 +68,18 @@ describe('edgeRenderPoints', () => {
 		});
 	});
 
+	it('applies a parallel offset before trimming visible edges', () => {
+		const visibility = {
+			kind: 'visible',
+			edge: directedEdge
+		} satisfies EdgeVisibility;
+
+		expect(edgeRenderPoints(visibility, layout, {}, { offsetVector: { x: 0, y: 12 } })).toEqual({
+			source: { x: 10, y: 12 },
+			target: { x: 76, y: 12 }
+		});
+	});
+
 	it('renders a boundary edge from the visible node toward the hidden node fade point', () => {
 		const visibility = {
 			kind: 'boundary',

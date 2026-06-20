@@ -15,6 +15,9 @@ export const APP_CONFIG = {
 	},
 	multigraph: {
 		nodeRadiusPx: NODE_RADIUS_PX, // default rendered node radius
+		nodeTextFontSizePx: 38, // default title and description font size
+		nodeBorderWidthPx: 8, // default node border width
+		pinnedNodeBorderWidthPx: 8, // border width for pinned nodes
 		minNodeHitRadiusPx: 32, // minimum tap/hit target radius
 		edgeArrow: {
 			lengthPx: 10, // arrowhead length along the edge
@@ -35,6 +38,8 @@ export const APP_CONFIG = {
 			scaleFalloff: 0.7, // scale multiplier per hop from pinned
 			minScale: 0.1, // minimum node scale in layout
 			relaxIterations: 12, // physics relax iterations per layout pass
+			parallelEdgeMaxOffsetRadiusFactor: 0.5, // max parallel-edge offset as fraction of smaller endpoint radius
+			parallelEdgeClearancePx: 4, // extra gap between parallel edge strokes/arrowheads
 			edgeGapMinRadiusFactor: 0.2, // min edge gap as fraction of node radius
 			edgeGapMaxRadiusFactor: 0.4, // max edge gap as fraction of node radius
 			edgeSpringStrength: 0.5, // how strongly edges pull nodes together

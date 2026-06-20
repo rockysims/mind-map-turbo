@@ -2,6 +2,7 @@
 	import { defineMeta } from '@storybook/addon-svelte-csf';
 	import { expect, within } from 'storybook/test';
 
+	import { APP_CONFIG } from '$lib/appConfig';
 	import Node from '$lib/components/ui/Node/Node.svelte';
 	import type { NodeData } from '$lib/components/ui/types/node';
 
@@ -51,6 +52,8 @@
 		const titleEl = canvasElement.querySelector('.node .title');
 		expect(titleEl).toBeInTheDocument();
 		const titleElement = titleEl as HTMLElement;
+		const expectedNodeTextFontSize = `${APP_CONFIG.multigraph.nodeTextFontSizePx}px`;
+		expect(window.getComputedStyle(titleElement).fontSize).toBe(expectedNodeTextFontSize);
 		if (!options.open || options.short) {
 			expect(titleElement.textContent).toBe(args.nodeData.title);
 		} else {
@@ -112,6 +115,7 @@
 			const descriptionStyles = window.getComputedStyle(descriptionElement);
 			const marginRight = parseFloat(descriptionStyles.marginRight);
 			const descriptionEffectiveRight = descriptionRect.right + marginRight;
+			expect(descriptionStyles.fontSize).toBe(expectedNodeTextFontSize);
 			expect(descriptionRect.left).toBeGreaterThanOrEqual(squareRect.left);
 			expect(descriptionEffectiveRight).toBeLessThanOrEqual(squareRect.right);
 			expect(descriptionRect.top).toBeGreaterThanOrEqual(squareRect.top);
@@ -156,6 +160,10 @@
 		const width = parseFloat(circleStyles.width);
 		const radiusValue = parseFloat(borderRadius);
 		const radiusPercent = radiusValue / width;
+		const expectedBorderWidth = args.nodeData.pinned
+			? APP_CONFIG.multigraph.pinnedNodeBorderWidthPx
+			: APP_CONFIG.multigraph.nodeBorderWidthPx;
+		expect(parseFloat(circleStyles.borderWidth)).toBe(expectedBorderWidth);
 		expect(radiusPercent).toBeGreaterThanOrEqual(0.5);
 
 		// Test 5–7: Description scrollbar, styling, and title-above-description (open only)
@@ -186,7 +194,9 @@
 		const circle = ctx.canvasElement.querySelector('.node .circle');
 		expect(circle).toBeInTheDocument();
 		const circleStyles = window.getComputedStyle(circle as HTMLElement);
-		expect(parseFloat(circleStyles.borderWidth)).toBeGreaterThanOrEqual(4);
+		expect(parseFloat(circleStyles.borderWidth)).toBe(
+			APP_CONFIG.multigraph.pinnedNodeBorderWidthPx
+		);
 	}
 </script>
 

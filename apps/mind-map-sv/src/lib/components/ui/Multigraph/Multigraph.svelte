@@ -7,6 +7,7 @@
 	import Stage from './Stage.svelte';
 	import TagColorLegend from './TagColorLegend.svelte';
 	import type { NodeData } from '../types/node';
+	import type { EdgeData } from '../types/edge';
 	import type { MultigraphData, Point, TagColorNamespace } from '../types/multigraph';
 	import { effectiveHitRadius, isPointInCircle } from './lib/hitTest.js';
 	import {
@@ -83,6 +84,7 @@
 		type ExitingBuffer,
 		type NodeEnterAnimation
 	} from './lib/elementTransitions.js';
+	import { computeParallelEdgeOffsets } from './lib/parallelEdges.js';
 
 	const CENTERED_POSITION: Point = { x: 0, y: 0 };
 
@@ -201,6 +203,30 @@
 			return [{ nodeId: node.id, position, radius }];
 		})
 	);
+	const visibleEdgeParallelOffsets = $derived.by(() => {
+		const visibleEdges: EdgeData[] = [];
+		const visualHalfWidthByEdgeId: Record<string, number> = {};
+
+		for (const visibility of renderableEdgeVisibility) {
+			if (visibility.kind !== 'visible') continue;
+
+			const edge = visibility.edge;
+			const strokeHalfWidth =
+				(EDGE_STROKE_WIDTH * edgeStrokeScale(visibility, graphLayout.scaleByNodeId)) / 2;
+			const arrowHalfHeight =
+				edge.directed === true
+					? EDGE_ARROW_HALF_HEIGHT * edgeArrowScale(visibility, graphLayout.scaleByNodeId)
+					: 0;
+			visibleEdges.push(edge);
+			visualHalfWidthByEdgeId[edge.id] = Math.max(strokeHalfWidth, arrowHalfHeight);
+		}
+
+		return computeParallelEdgeOffsets(visibleEdges, graphLayout, {
+			clearancePx: resolvedLayoutSettings.parallelEdgeClearancePx,
+			maxOffsetRadiusFactor: resolvedLayoutSettings.parallelEdgeMaxOffsetRadiusFactor,
+			visualHalfWidthByEdgeId
+		});
+	});
 	const nodeById = $derived(Object.fromEntries(graph.nodes.map((node) => [node.id, node])));
 	const revealWaveNodeOpacityByNodeId = $derived(layoutRuntime.revealWaveNodeOpacityByNodeId);
 	const revealWaveEdgeOpacityByEdgeId = $derived(layoutRuntime.revealWaveEdgeOpacityByEdgeId);
@@ -591,7 +617,14 @@
 		<div class="edges" aria-hidden="true">
 			{#each renderableEdgeVisibility as visibility (visibility.edge.id)}
 				{@const edge = visibility.edge}
-				{@const edgePoints = edgeRenderPoints(visibility, graphLayout, graph.posByNodeId)}
+				{@const parallelOffset =
+					visibility.kind === 'visible' ? visibleEdgeParallelOffsets[edge.id] : undefined}
+				{@const edgePoints = edgeRenderPoints(
+					visibility,
+					graphLayout,
+					graph.posByNodeId,
+					parallelOffset
+				)}
 				{@const edgeLengthPx = Math.hypot(
 					edgePoints.target.x - edgePoints.source.x,
 					edgePoints.target.y - edgePoints.source.y
@@ -659,6 +692,13 @@
 						: undefined}
 					data-edge-stroke-scale={strokeScale}
 					data-edge-opacity={edgeOpacity}
+					data-edge-parallel-count={visibility.kind === 'visible'
+						? parallelOffset?.groupCount
+						: undefined}
+					data-edge-parallel-slot={visibility.kind === 'visible' ? parallelOffset?.slot : undefined}
+					data-edge-parallel-offset={visibility.kind === 'visible'
+						? (parallelOffset?.offsetDistance ?? 0)
+						: undefined}
 					data-edge-occlusion-count={visibility.kind === 'visible'
 						? edgeOcclusionWindows.length
 						: undefined}

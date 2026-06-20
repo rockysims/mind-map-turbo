@@ -53,7 +53,7 @@ IMPROVEMENTS:
 - Find a more elegant way to view/edit/delete tags (plain text doesn't immediately suggest its tags nor make it visually clear at a glance where one tag starts and another begins).
 - Allow tags at the end of the title too when creating a node.
 - New, Load, Save, and Settings (no need for delete graph. Note: Load and Save are just new names for import and export). "New" should require confirmation. Settings can be the place to adjust tag colors and it can be a catch all place for future settings (such as how fast node size drops off due to distance from pinned node, font size, border width, etc.).
-- When a node un/pins, trans
+- Add another edge type for double sided arrow.
 
 PROBLEMS:
 
