@@ -45,13 +45,14 @@ IMPROVEMENTS:
 
 - If creating a new node and user hits esc, cancel (remove) new node & edge.
 - On new node submit (click away / blur / whatever), if title is empty, cancel (remove) new node & edge.
-- Add text size control (slider).
+- Add text size control (slider). Wait on this until settings dialog.
 - Scale arrow size with node.
 - Tabs look like buttons. UI should visually indicate its a tab by giving it a flat bottom and perhaps drawing an outline or adding a background to the contents of the tab.
 - Find a more elegant way to view/edit/delete tags (plain text doesn't immediately suggest its tags nor make it visually clear at a glance where one tag starts and another begins).
 - Allow tags at the end of the title too when creating a node.
 - New, Load, Save, and Settings (no need for delete graph. Note: Load and Save are just new names for import and export). "New" should require confirmation. Settings can be the place to adjust tag colors and it can be a catch all place for future settings (such as how fast node size drops off due to distance from pinned node, font size, border width, etc.).
 - Add another edge type for double sided arrow.
+- Node/edge create/edit dialog needs a UI overhall.
 
 PROBLEMS:
 
