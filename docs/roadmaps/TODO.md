@@ -34,8 +34,6 @@
 
 More TODO:
 
-- Add a small amount of friction so nodes don't move/rotate together endlessly until timeout stops them.
-- New nodes should be pinned by default.
 - Eliminate all abruptness:
 - - - Scale into and out of existence (or fade into and out of existence if scale doesn't work well such as for edges).
 - - Add node & edge / remove edge currently appear instantly.
