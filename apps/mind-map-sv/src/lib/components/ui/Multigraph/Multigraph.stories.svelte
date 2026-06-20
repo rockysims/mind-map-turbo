@@ -4,7 +4,12 @@
 	import { expect, fn, waitFor, within } from 'storybook/test';
 	import { APP_CONFIG } from '$lib/appConfig';
 	import { DBL_CLICK_MS, LONG_PRESS_MS, MIN_NODE_HIT_RADIUS, NODE_RADIUS } from '$lib/constants';
-	import { makeClusteredRandomEdges, makeGraph, makeRandomEdges } from './lib/testFixtures';
+	import {
+		makeClusteredRandomEdges,
+		makeGraph,
+		makeRandomEdges,
+		withRandomTagsAndDirections
+	} from './lib/testFixtures';
 	import type { MultigraphData, Point } from '../types/multigraph';
 	import type { ViewState } from '$lib/migrations';
 	import type { ExitingBuffer } from './lib/elementTransitions';
@@ -319,6 +324,15 @@
 		crossGroupFraction: 0.05,
 		seed: 42
 	});
+	const HUNDRED_NODE_MANY_GRAPH = withRandomTagsAndDirections(
+		makeGraph({
+			nodeCount: 100,
+			pinned: [0],
+			edges: HUNDRED_NODE_CLUSTERED_EDGES,
+			posByNodeId: HUNDRED_NODE_POSITIONS
+		}),
+		{ seed: 42, minNodeTags: 0, maxNodeTags: 4, minEdgeTags: 0, maxEdgeTags: 2 }
+	);
 </script>
 
 <Story
@@ -342,12 +356,7 @@
 <Story
 	name="Many"
 	args={{
-		multigraphData: makeGraph({
-			nodeCount: 100,
-			pinned: [0],
-			edges: HUNDRED_NODE_CLUSTERED_EDGES,
-			posByNodeId: HUNDRED_NODE_POSITIONS
-		}),
+		multigraphData: HUNDRED_NODE_MANY_GRAPH,
 		defaultPrimaryNodeId: 'n0',
 		initialViewState: { panX: 0, panY: 0, scale: 0.25 }
 	}}

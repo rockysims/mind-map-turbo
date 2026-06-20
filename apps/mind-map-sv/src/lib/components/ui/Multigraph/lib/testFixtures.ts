@@ -9,6 +9,7 @@
 import type { NodeData } from '../../types/node';
 import type { EdgeData } from '../../types/edge';
 import type { MultigraphData, Point, TagColorConfig } from '../../types/multigraph';
+import type { ParsedTitleDirection } from './titleSyntax';
 
 type MakeNodeInput = Omit<NodeData, 'tags'> & Partial<Pick<NodeData, 'tags'>>;
 type MakeEdgeInput =
@@ -207,7 +208,7 @@ function tryAddUniqueEdge(
 	return true;
 }
 
-function shuffleInPlace(values: number[], next: () => number): void {
+function shuffleInPlace<T>(values: T[], next: () => number): void {
 	for (let index = values.length - 1; index > 0; index -= 1) {
 		const swapIndex = Math.floor(next() * (index + 1));
 		[values[index], values[swapIndex]] = [values[swapIndex], values[index]];
@@ -396,4 +397,121 @@ export function makeClusteredRandomEdges({
 	}
 
 	return edges;
+}
+
+export const DEFAULT_RANDOM_TAG_POOL = [
+	'topic',
+	'urgent',
+	'idea',
+	'ref',
+	'rel',
+	'strong',
+	'weak',
+	'meta',
+	'core',
+	'leaf',
+	'group',
+	'link',
+	'note',
+	'todo',
+	'done'
+] as const;
+
+export interface WithRandomTagsAndDirectionsInput {
+	/** Seed for deterministic tag counts and edge directions. Default 42. */
+	seed?: number;
+	/** Inclusive min/max tag counts per node. Defaults 0 and 4. */
+	minNodeTags?: number;
+	maxNodeTags?: number;
+	/** Inclusive min/max tag counts per edge. Defaults 0 and 2. */
+	minEdgeTags?: number;
+	maxEdgeTags?: number;
+	tagPool?: readonly string[];
+}
+
+function randomIntInclusive(next: () => number, min: number, max: number): number {
+	if (min > max) {
+		throw new Error(`min must be <= max, got ${min} > ${max}`);
+	}
+
+	return min + Math.floor(next() * (max - min + 1));
+}
+
+function pickRandomUniqueTags(
+	next: () => number,
+	count: number,
+	pool: readonly string[]
+): string[] {
+	if (count === 0) return [];
+
+	const shuffled = [...pool];
+	shuffleInPlace(shuffled, next);
+	return shuffled.slice(0, Math.min(count, shuffled.length));
+}
+
+/** Matches title-syntax directions: undirected (B), parent-to-child (>C), child-to-parent (<A). */
+function randomTitleDirection(next: () => number): ParsedTitleDirection {
+	const roll = Math.floor(next() * 3);
+	if (roll === 0) return 'undirected';
+	if (roll === 1) return 'parent-to-child';
+	return 'child-to-parent';
+}
+
+function applyTitleDirectionToEdge(edge: EdgeData, direction: ParsedTitleDirection): EdgeData {
+	if (direction === 'undirected') {
+		return { ...edge, directed: false };
+	}
+
+	if (direction === 'parent-to-child') {
+		return { ...edge, directed: true };
+	}
+
+	return {
+		...edge,
+		sourceNodeId: edge.targetNodeId,
+		targetNodeId: edge.sourceNodeId,
+		directed: true
+	};
+}
+
+/**
+ * Assign random node tags, edge tags, and edge directions to an existing graph.
+ * Edge directions follow title-syntax semantics: undirected, parent-to-child
+ * (stored source → target), or child-to-parent (swapped endpoints).
+ */
+export function withRandomTagsAndDirections(
+	data: MultigraphData,
+	input: WithRandomTagsAndDirectionsInput = {}
+): MultigraphData {
+	const {
+		seed = 42,
+		minNodeTags = 0,
+		maxNodeTags = 4,
+		minEdgeTags = 0,
+		maxEdgeTags = 2,
+		tagPool = DEFAULT_RANDOM_TAG_POOL
+	} = input;
+
+	const next = createSeededRandom(seed);
+
+	const nodes = data.nodes.map((node) => ({
+		...node,
+		tags: pickRandomUniqueTags(next, randomIntInclusive(next, minNodeTags, maxNodeTags), tagPool)
+	}));
+
+	const edges = data.edges.map((edge) => {
+		const direction = randomTitleDirection(next);
+		const withDirection = applyTitleDirectionToEdge(edge, direction);
+
+		return {
+			...withDirection,
+			tags: pickRandomUniqueTags(next, randomIntInclusive(next, minEdgeTags, maxEdgeTags), tagPool)
+		};
+	});
+
+	return {
+		...data,
+		nodes,
+		edges
+	};
 }
