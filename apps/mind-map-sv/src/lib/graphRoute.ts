@@ -4,6 +4,10 @@ type ResolvePath = (path: '/') => string;
 
 export type GraphRouteMode = 'query' | 'hash';
 
+export function graphRouteModeForProtocol(protocol: string): GraphRouteMode {
+	return protocol === 'file:' ? 'hash' : 'query';
+}
+
 export function graphSearch(graphId: string): string {
 	if (graphId === DEFAULT_GRAPH_ID) return '';
 	return `?${new URLSearchParams({ graph: graphId }).toString()}`;

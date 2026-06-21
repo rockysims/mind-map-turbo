@@ -17,7 +17,12 @@
 		parseGraphFileText,
 		type GraphFileDocument
 	} from '$lib/graphFile';
-	import { graphIdFromUrl, resolveGraphHref } from '$lib/graphRoute';
+	import {
+		graphHash,
+		graphIdFromUrl,
+		graphRouteModeForProtocol,
+		resolveGraphHref
+	} from '$lib/graphRoute';
 	import { isSelfContainedHtmlShell, OFFLINE_APP_SHELL_PATH } from '$lib/htmlShell';
 	import {
 		createPersistence,
@@ -44,7 +49,10 @@
 	});
 
 	onMount(() => {
-		selectedGraphId = graphIdFromUrl(new URL(window.location.href));
+		selectedGraphId = graphIdFromUrl(
+			new URL(window.location.href),
+			graphRouteModeForProtocol(window.location.protocol)
+		);
 
 		const persistence = createPersistence('local', {
 			storage: localStorage,
@@ -69,6 +77,14 @@
 			createDefaultGraph,
 			navigate: async (graphId) => {
 				selectedGraphId = graphId;
+				if (graphRouteModeForProtocol(window.location.protocol) === 'hash') {
+					window.history.pushState(
+						window.history.state,
+						'',
+						`${window.location.href.split('#')[0]}${graphHash(graphId)}`
+					);
+					return;
+				}
 				// eslint-disable-next-line svelte/no-navigation-without-resolve -- resolveGraphHref delegates the root path through SvelteKit's resolve().
 				await goto(resolveGraphHref(resolve, graphId));
 			},

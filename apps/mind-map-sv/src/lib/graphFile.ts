@@ -83,21 +83,20 @@ export function serializeGraphHtmlFile(
 	htmlShell = defaultHtmlShell()
 ): string {
 	const payloadScript = graphPayloadScript(doc);
+	const existingPayloadPattern = graphPayloadScriptPattern();
 
-	if (htmlShell.includes(`id="${GRAPH_HTML_PAYLOAD_SCRIPT_ID}"`)) {
-		return htmlShell.replace(graphPayloadScriptPattern(), payloadScript);
+	if (existingPayloadPattern.test(htmlShell)) {
+		return htmlShell.replace(existingPayloadPattern, payloadScript);
 	}
 
-	if (htmlShell.includes(`id='${GRAPH_HTML_PAYLOAD_SCRIPT_ID}'`)) {
-		return htmlShell.replace(graphPayloadScriptPattern(), payloadScript);
+	const bodyCloseIndex = lastClosingTagIndex(htmlShell, 'body');
+	if (bodyCloseIndex !== -1) {
+		return `${htmlShell.slice(0, bodyCloseIndex)}${payloadScript}\n${htmlShell.slice(bodyCloseIndex)}`;
 	}
 
-	if (/<\/body>/i.test(htmlShell)) {
-		return htmlShell.replace(/<\/body>/i, `${payloadScript}\n</body>`);
-	}
-
-	if (/<\/html>/i.test(htmlShell)) {
-		return htmlShell.replace(/<\/html>/i, `${payloadScript}\n</html>`);
+	const htmlCloseIndex = lastClosingTagIndex(htmlShell, 'html');
+	if (htmlCloseIndex !== -1) {
+		return `${htmlShell.slice(0, htmlCloseIndex)}${payloadScript}\n${htmlShell.slice(htmlCloseIndex)}`;
 	}
 
 	return `${htmlShell}\n${payloadScript}`;
@@ -192,6 +191,10 @@ function graphPayloadScriptPattern(): RegExp {
 		`<script\\b(?=[^>]*\\bid=(["'])${GRAPH_HTML_PAYLOAD_SCRIPT_ID}\\1)(?=[^>]*\\btype=(["'])application/json\\2)[^>]*>[\\s\\S]*?<\\/script>`,
 		'i'
 	);
+}
+
+function lastClosingTagIndex(html: string, tagName: 'body' | 'html'): number {
+	return html.toLowerCase().lastIndexOf(`</${tagName}>`);
 }
 
 function extractHtmlGraphPayload(html: string): string {

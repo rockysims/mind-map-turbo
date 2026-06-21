@@ -69,6 +69,28 @@ describe('HTML graph files', () => {
 		expect(parseGraphFileText(second).documentId).toBe('second');
 	});
 
+	it('inserts a payload when the shell only mentions the payload id inside app code', () => {
+		const shell = `<!doctype html><html><body><script type="module">const id = "${GRAPH_HTML_PAYLOAD_SCRIPT_ID}"; const type = "application/json";</script></body></html>`;
+		const html = serializeGraphHtmlFile(makeDoc({ documentId: 'doc-from-shell' }), shell);
+
+		expect(html.match(new RegExp(GRAPH_HTML_PAYLOAD_SCRIPT_ID, 'g'))).toHaveLength(2);
+		expect(parseGraphFileText(html).documentId).toBe('doc-from-shell');
+	});
+
+	it('inserts a payload before the document body close when app code mentions body tags', () => {
+		const shell =
+			'<!doctype html><html><body><script>const replacement = `${payload}\\n</body>`;</script></body></html>';
+		const html = serializeGraphHtmlFile(makeDoc({ documentId: 'doc-body-boundary' }), shell);
+		const payloadIndex = html.indexOf(`id="${GRAPH_HTML_PAYLOAD_SCRIPT_ID}"`);
+		const appCodeBodyIndex = html.indexOf('`${payload}\\n</body>`');
+		const realBodyIndex = html.lastIndexOf('</body>');
+
+		expect(appCodeBodyIndex).toBeGreaterThan(-1);
+		expect(payloadIndex).toBeGreaterThan(appCodeBodyIndex);
+		expect(payloadIndex).toBeLessThan(realBodyIndex);
+		expect(parseGraphFileText(html).documentId).toBe('doc-body-boundary');
+	});
+
 	it('parses legacy JSON through the format-aware entry point', () => {
 		const doc = makeDoc();
 

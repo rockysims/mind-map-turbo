@@ -11,6 +11,7 @@ let html = await readFile(indexPath, 'utf8');
 
 html = await inlineStylesheets(html);
 html = await inlineModuleScripts(html);
+html = escapeInlineScriptContents(html);
 html = await inlineIcons(html);
 html = stripModulePreloads(html);
 
@@ -35,7 +36,7 @@ async function inlineModuleScripts(input) {
 		/<script\b(?=[^>]*\btype=(["'])module\1)(?=[^>]*\bsrc=(["'])([^"']+)\2)[^>]*><\/script>/gi,
 		async (_tag, _typeQuote, _srcQuote, src) => {
 			const js = await readBuildAsset(src);
-			return `<script type="module" data-inline-src="${escapeAttribute(src)}">\n${js}\n</script>`;
+			return `<script type="module" data-inline-src="${escapeAttribute(src)}">\n${escapeScriptContent(js)}\n</script>`;
 		}
 	);
 }
@@ -54,6 +55,19 @@ async function inlineIcons(input) {
 
 function stripModulePreloads(input) {
 	return input.replace(/<link\b(?=[^>]*\brel=(["'])modulepreload\1)[^>]*>/gi, '');
+}
+
+function escapeInlineScriptContents(input) {
+	const openMatch = /<script\b(?![^>]*\bsrc=)(?![^>]*\btype=(["'])application\/json\1)[^>]*>/i.exec(
+		input
+	);
+	if (!openMatch || openMatch.index === undefined) return input;
+
+	const openEnd = openMatch.index + openMatch[0].length;
+	const closeStart = input.toLowerCase().lastIndexOf('</script>');
+	if (closeStart <= openEnd) return input;
+
+	return `${input.slice(0, openEnd)}${escapeScriptContent(input.slice(openEnd, closeStart))}${input.slice(closeStart)}`;
 }
 
 async function readBuildAsset(assetHref) {
@@ -77,6 +91,10 @@ async function replaceAsync(input, pattern, replacer) {
 
 function escapeAttribute(value) {
 	return value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
+}
+
+function escapeScriptContent(value) {
+	return value.replace(/<(?=\/?script\b)/gi, '\\x3C');
 }
 
 async function removeSiblingArtifacts() {

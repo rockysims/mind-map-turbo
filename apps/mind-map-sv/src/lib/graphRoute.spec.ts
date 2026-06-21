@@ -4,6 +4,7 @@ import {
 	graphHash,
 	graphHref,
 	graphIdFromUrl,
+	graphRouteModeForProtocol,
 	graphSearch,
 	resolveGraphHref
 } from './graphRoute';
@@ -27,6 +28,12 @@ describe('graph route helpers', () => {
 		expect(resolveGraphHref((path) => `/base${path}`, 'graph-1', 'hash')).toBe(
 			'/base/#graph=graph-1'
 		);
+	});
+
+	it('uses hash routing for file URLs', () => {
+		expect(graphRouteModeForProtocol('file:')).toBe('hash');
+		expect(graphRouteModeForProtocol('http:')).toBe('query');
+		expect(graphRouteModeForProtocol('https:')).toBe('query');
 	});
 
 	it('encodes reserved URL characters in graph ids', () => {
