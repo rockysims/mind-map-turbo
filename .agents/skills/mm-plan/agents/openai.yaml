@@ -1,0 +1,4 @@
+interface:
+  display_name: "MM Plan"
+  short_description: "Write roadmap milestone plans"
+  default_prompt: "Use $mm-plan to write a roadmap milestone plan."

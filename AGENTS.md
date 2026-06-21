@@ -2,8 +2,9 @@
 
 > This is a Turborepo with one SvelteKit 2 / Svelte 5 (runes mode) app at
 > `apps/mind-map-sv`. Cursor-specific guidance lives in `.cursor/rules/*.mdc`;
-> this file mirrors the universal parts so any agent (Codex, Aider, Cline,
-> etc.) gets the same expectations.
+> Codex reusable workflows live in `.agents/skills/*`. This file mirrors the
+> universal parts so any agent (Codex, Aider, Cline, etc.) gets the same
+> expectations.
 
 ## How to run things
 
@@ -63,6 +64,7 @@ based on vibes.
 | E2E                       | `apps/mind-map-sv/e2e/*.test.ts`                                        |
 | Roadmaps & plans          | `docs/roadmaps/<YYYY-MM-DD> <name>/`                                    |
 | Plan template             | `docs/roadmaps/PLAN_TEMPLATE.md`                                        |
+| Codex plan workflow       | `.agents/skills/mm-plan/SKILL.md`                                       |
 
 ## Coding conventions (highlights)
 
@@ -101,7 +103,8 @@ Full details: `.cursor/rules/commits.mdc`.
    `plans/<YYYY-MM-DD> <name>.md` before coding. Use the structure in
    `docs/roadmaps/PLAN_TEMPLATE.md` (resolves open questions, decomposes
    into PR-sized tasks, lays out a parallel wave plan, and recommends an
-   agent class per task). Full spec: `.cursor/rules/plans.mdc`.
+   agent class per task). In Codex, use `$mm-plan`; in Cursor, use
+   `.cursor/rules/plans.mdc`.
 3. Add the pure function + spec first; wire it into the component second.
 4. Add or update the relevant story.
 5. Run lint, check, and tests; fix any failures.
