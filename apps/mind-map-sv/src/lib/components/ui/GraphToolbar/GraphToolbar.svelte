@@ -61,7 +61,7 @@
 		<input
 			bind:this={fileInput}
 			type="file"
-			accept=".json,application/json"
+			accept=".html,text/html,.json,application/json"
 			aria-label="Import graph from file"
 			class="file-input-hidden"
 			onchange={handleFileChange}

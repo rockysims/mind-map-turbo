@@ -5,6 +5,7 @@ import { CURRENT_SCHEMA_VERSION, NEUTRAL_VIEW_STATE } from './migrations';
 import {
 	LocalStoragePersistence,
 	ServerPersistence,
+	documentDraftGraphId,
 	estimateNamespaceUsageBytes,
 	graphStorageKey,
 	type StorageLike
@@ -35,6 +36,13 @@ class MemoryStorage implements StorageLike {
 }
 
 describe('LocalStoragePersistence', () => {
+	it('derives document-scoped draft graph ids', () => {
+		expect(documentDraftGraphId('doc-123')).toBe('document:doc-123');
+		expect(graphStorageKey('test', documentDraftGraphId('doc-123'))).toBe(
+			'test:graph:document%3Adoc-123'
+		);
+	});
+
 	it('round-trips saved graph data through the schema envelope', async () => {
 		const storage = new MemoryStorage();
 		const persistence = new LocalStoragePersistence(storage, 'test', () => 123);

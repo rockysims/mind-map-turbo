@@ -26,7 +26,7 @@ export type PersistedGraphPayload = {
 export class PersistedGraphError extends Error {
 	constructor(
 		message: string,
-		readonly code: 'malformed-payload' | 'unsupported-version'
+		readonly code: 'malformed-payload' | 'unsupported-version' | 'unsupported-app-version'
 	) {
 		super(message);
 		this.name = 'PersistedGraphError';

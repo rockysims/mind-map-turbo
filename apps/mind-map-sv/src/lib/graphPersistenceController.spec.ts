@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { makeGraph } from './components/ui/Multigraph/lib/testFixtures';
 import type { MultigraphData } from './components/ui/types/multigraph';
+import { parseGraphFileText, serializeGraphHtmlFile } from './graphFile';
 import { CURRENT_SCHEMA_VERSION, NEUTRAL_VIEW_STATE, type ViewState } from './migrations';
 import {
 	GraphPersistenceController,
@@ -106,6 +107,8 @@ function setup(
 		navigate,
 		storageNamespace: 'test',
 		confirmGraphImportReplace: options.confirmGraphImportReplace,
+		createDocumentId: () => 'doc-new',
+		now: () => 456,
 		createGraphId: () => 'graph-new'
 	});
 
@@ -288,7 +291,7 @@ describe('GraphPersistenceController', () => {
 		});
 	});
 
-	it('exports current graph and view state as schema-envelope JSON', async () => {
+	it('exports current graph and view state as a self-contained HTML artifact', async () => {
 		const { controller } = setup();
 		const graph = makeGraph({
 			nodeCount: 3,
@@ -302,15 +305,17 @@ describe('GraphPersistenceController', () => {
 		controller.notifyGraphChanged(graph, { syncView: true });
 		controller.notifyViewStateChanged(viewState, { syncView: true });
 
-		const exported = JSON.parse(controller.exportGraphDocument()) as {
-			schemaVersion: number;
-			data: MultigraphData;
-			viewState: ViewState;
-		};
+		const artifact = controller.exportGraphDocument('<!doctype html><html><body></body></html>');
+		const exported = parseGraphFileText(artifact.content);
+		expect(artifact).toMatchObject({
+			filename: 'active.html',
+			mimeType: 'text/html'
+		});
 		expect(exported).toEqual({
-			schemaVersion: CURRENT_SCHEMA_VERSION,
 			data: graph,
-			viewState
+			viewState,
+			documentId: 'doc-new',
+			exportedAt: 456
 		});
 	});
 
@@ -326,8 +331,8 @@ describe('GraphPersistenceController', () => {
 		const importedGraph = makeGraph({ nodeCount: 3, edges: [[0, 1]] });
 		const importedViewState = { panX: 50, panY: -20, scale: 1.25 };
 		const importResult = await controller.importGraphDocument(
-			JSON.stringify({
-				schemaVersion: CURRENT_SCHEMA_VERSION,
+			serializeGraphHtmlFile({
+				documentId: 'doc-imported',
 				data: importedGraph,
 				viewState: importedViewState
 			})
@@ -339,6 +344,7 @@ describe('GraphPersistenceController', () => {
 			loadedGraphId: 'active',
 			graph: importedGraph,
 			viewState: importedViewState,
+			documentId: 'doc-imported',
 			graphGeneration: generationBeforeImport + 1,
 			status: { state: 'notice', message: 'Imported graph into "active".' }
 		});
@@ -391,6 +397,34 @@ describe('GraphPersistenceController', () => {
 			graphGeneration: before.graphGeneration
 		});
 		expect(persistence.save).toHaveBeenCalledTimes(saveCallsBefore);
+	});
+
+	it('opens newer HTML graph files in a new tab when the app reader is unsupported', async () => {
+		const openUnsupportedHtmlFile = vi.fn(() => true);
+		const persistence = new MemoryPersistence();
+		const events: string[] = [];
+		const controller = new GraphPersistenceController({
+			persistence,
+			createScheduler: (onStatus) => new TestScheduler(persistence, onStatus, events),
+			createDefaultGraph,
+			navigate: vi.fn(),
+			storageNamespace: 'test',
+			openUnsupportedHtmlFile
+		});
+		await controller.load('active');
+		const html = serializeGraphHtmlFile({
+			data: makeGraph({ nodeCount: 1 }),
+			viewState: NEUTRAL_VIEW_STATE
+		}).replace('"minReaderVersion": 1', '"minReaderVersion": 999');
+
+		const result = await controller.importGraphDocument(html);
+
+		expect(result).toBe('opened-in-new-tab');
+		expect(openUnsupportedHtmlFile).toHaveBeenCalledWith(html);
+		expect(controller.getView().status).toEqual({
+			state: 'notice',
+			message: 'Opened newer graph file in a new tab.'
+		});
 	});
 
 	it('autosaves pan and zoom changes without mutating graph positions', async () => {

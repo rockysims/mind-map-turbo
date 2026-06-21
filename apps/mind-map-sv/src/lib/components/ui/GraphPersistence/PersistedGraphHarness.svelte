@@ -113,7 +113,7 @@
 	}
 
 	function handleExport(): void {
-		lastDownload = persisted.exportGraphDocument();
+		lastDownload = persisted.exportGraphDocument().content;
 	}
 
 	async function handleImportLastDownload(): Promise<void> {

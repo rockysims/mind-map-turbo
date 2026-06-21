@@ -4,6 +4,7 @@
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { APP_CONFIG } from '$lib/appConfig';
+	import { downloadFileArtifact, openHtmlTextInNewTab, readFileText } from '$lib/browserGraphFile';
 	import {
 		usePersistedGraph,
 		type PersistedGraph
@@ -11,36 +12,47 @@
 	import GraphToolbar from '$lib/components/ui/GraphToolbar/GraphToolbar.svelte';
 	import Multigraph from '$lib/components/ui/Multigraph/Multigraph.svelte';
 	import type { MultigraphData } from '$lib/components/ui/types/multigraph';
-	import { DEFAULT_GRAPH_ID, resolveGraphHref } from '$lib/graphRoute';
-	import { createPersistence, estimateNamespaceUsageBytes } from '$lib/persistence';
+	import {
+		GRAPH_HTML_PAYLOAD_SCRIPT_ID,
+		parseGraphFileText,
+		type GraphFileDocument
+	} from '$lib/graphFile';
+	import { graphIdFromUrl, resolveGraphHref } from '$lib/graphRoute';
+	import {
+		createPersistence,
+		documentDraftGraphId,
+		estimateNamespaceUsageBytes
+	} from '$lib/persistence';
 	import { SaveScheduler } from '$lib/saveScheduler';
-	import type { PageData } from './$types';
-
-	// Safe to import at module level: functions only use DOM APIs when called,
-	// not at import time, so SSR paths never touch Blob/FileReader/anchor.
-	import { downloadTextFile, readFileText } from '$lib/browserGraphFile';
-
-	let { data }: { data: PageData } = $props();
 
 	let persisted = $state<PersistedGraph | null>(null);
 	let hasRequestedInitialLoad = $state(false);
-	const selectedGraphId = $derived(page.url.searchParams.get('graph') ?? DEFAULT_GRAPH_ID);
+	let selectedGraphId = $state(graphIdFromUrl(page.url));
+	let activeDocumentId = $state<string | null>(null);
 	const defaultPrimaryNodeId = $derived(persisted?.graph.nodes[0]?.id ?? '');
 
 	$effect(() => {
 		if (persisted === null) return;
+		if (!hasRequestedInitialLoad) return;
 		const graphId = selectedGraphId;
-		if (persisted.loadedGraphId === '' && hasRequestedInitialLoad) return;
 		if (graphId === persisted.loadedGraphId) return;
-		void persisted.load(graphId, { flushCurrent: persisted.loadedGraphId !== '' });
+		void persisted.load(graphId, {
+			flushCurrent: persisted.loadedGraphId !== '',
+			documentId: activeDocumentId
+		});
 	});
 
 	onMount(() => {
-		const persistence = createPersistence(data.persistenceKind, {
+		selectedGraphId = graphIdFromUrl(new URL(window.location.href));
+
+		const persistence = createPersistence('local', {
 			storage: localStorage,
-			namespace: APP_CONFIG.persistence.storageNamespace,
-			fetchGraph: window.fetch.bind(window)
+			namespace: APP_CONFIG.persistence.storageNamespace
 		});
+
+		const embeddedGraph = readEmbeddedGraphDocument();
+		const initialLoad = seedEmbeddedGraphDraft(persistence, embeddedGraph);
+
 		const persistedGraph = usePersistedGraph({
 			persistence,
 			createScheduler: (onStatus) =>
@@ -54,20 +66,36 @@
 					onStatus
 				}),
 			createDefaultGraph,
-			navigate: (graphId) =>
+			navigate: async (graphId) => {
+				selectedGraphId = graphId;
 				// eslint-disable-next-line svelte/no-navigation-without-resolve -- resolveGraphHref delegates the root path through SvelteKit's resolve().
-				goto(resolveGraphHref(resolve, graphId)),
+				await goto(resolveGraphHref(resolve, graphId));
+			},
 			storageNamespace: APP_CONFIG.persistence.storageNamespace,
 			confirmGraphImportReplace: ({ loadedGraphId }) =>
 				window.confirm(
 					`Replace the current graph "${loadedGraphId}" with the imported graph? This cannot be undone.`
 				),
 			minScale: APP_CONFIG.multigraph.zoom.minScale,
-			maxScale: APP_CONFIG.multigraph.zoom.maxScale
+			maxScale: APP_CONFIG.multigraph.zoom.maxScale,
+			createDocumentId: () =>
+				typeof crypto.randomUUID === 'function'
+					? crypto.randomUUID()
+					: `doc-${Date.now().toString(36)}`,
+			openUnsupportedHtmlFile: openHtmlTextInNewTab
 		});
 		persisted = persistedGraph;
-		hasRequestedInitialLoad = true;
-		void persistedGraph.load(selectedGraphId, { flushCurrent: false });
+		void initialLoad.then(async (seeded) => {
+			if (seeded) {
+				selectedGraphId = seeded.graphId;
+				activeDocumentId = seeded.documentId;
+			}
+			await persistedGraph.load(selectedGraphId, {
+				flushCurrent: false,
+				documentId: activeDocumentId
+			});
+			hasRequestedInitialLoad = true;
+		});
 
 		const onStorage = (event: StorageEvent) => {
 			void persistedGraph.handleStorageEvent({ key: event.key });
@@ -107,13 +135,43 @@
 
 	function handleExport(): void {
 		if (!persisted) return;
-		const json = persisted.exportGraphDocument();
-		const graphId = persisted.loadedGraphId || DEFAULT_GRAPH_ID;
-		downloadTextFile(json, `${graphId}.json`);
+		downloadFileArtifact(persisted.exportGraphDocument(currentHtmlShell()));
 	}
 
 	async function handleImport(file: File): Promise<void> {
 		await persisted?.importGraphDocumentFromReader(() => readFileText(file));
+	}
+
+	function readEmbeddedGraphDocument(): GraphFileDocument | null {
+		if (document.getElementById(GRAPH_HTML_PAYLOAD_SCRIPT_ID) === null) return null;
+		try {
+			return parseGraphFileText(currentHtmlShell(), {
+				minScale: APP_CONFIG.multigraph.zoom.minScale,
+				maxScale: APP_CONFIG.multigraph.zoom.maxScale
+			});
+		} catch {
+			return null;
+		}
+	}
+
+	async function seedEmbeddedGraphDraft(
+		persistence: ReturnType<typeof createPersistence>,
+		doc: GraphFileDocument | null
+	): Promise<{ graphId: string; documentId: string } | null> {
+		if (!doc?.documentId) return null;
+		const graphId = documentDraftGraphId(doc.documentId);
+		const existingDraft = await persistence.load(graphId);
+		if (existingDraft === null) {
+			await persistence.save(graphId, {
+				data: doc.data,
+				viewState: doc.viewState
+			});
+		}
+		return { graphId, documentId: doc.documentId };
+	}
+
+	function currentHtmlShell(): string {
+		return `<!doctype html>\n${document.documentElement.outerHTML}`;
 	}
 </script>
 

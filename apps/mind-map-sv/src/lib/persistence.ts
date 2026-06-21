@@ -36,6 +36,10 @@ export function graphStorageKey(namespace: string, graphId: string): string {
 	return `${namespace}:graph:${encodeURIComponent(graphId)}`;
 }
 
+export function documentDraftGraphId(documentId: string): string {
+	return `document:${documentId}`;
+}
+
 export function graphIdFromStorageKey(namespace: string, key: string): string | null {
 	const prefix = `${namespace}:graph:`;
 	if (!key.startsWith(prefix)) return null;

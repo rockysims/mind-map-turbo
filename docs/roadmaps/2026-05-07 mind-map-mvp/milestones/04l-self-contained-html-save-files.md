@@ -1,6 +1,6 @@
 # Milestone 04l: Self-contained HTML save files
 
-**Status:** not started
+**Status:** complete
 **Depends on:** milestone 04c (JSON file import/export) and milestone 04
 (persistence).
 **Plan:** [2026-06-21 04l-self-contained-html-save-files.md](../plans/2026-06-21%2004l-self-contained-html-save-files.md)

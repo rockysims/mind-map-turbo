@@ -4,6 +4,7 @@
 	import { DBL_CLICK_MS } from '$lib/constants';
 	import { makeGraph } from '$lib/components/ui/Multigraph/lib/testFixtures';
 	import type { MultigraphData } from '$lib/components/ui/types/multigraph';
+	import { parseGraphFileText } from '$lib/graphFile';
 	import { CURRENT_SCHEMA_VERSION } from '$lib/migrations';
 	import PersistedGraphHarness from './PersistedGraphHarness.svelte';
 
@@ -323,21 +324,19 @@
 		await waitForHarnessData(canvasElement, 'loadedGraphId', 'export-graph');
 		await expect(harness.dataset.primaryTitle).toBe('Export Me');
 
-		// Export captures JSON into data-last-download without a real download.
+		// Export captures HTML into data-last-download without a real download.
 		await userEvent.click(canvas.getByRole('button', { name: 'Export' }));
 		await waitFor(() => expect(harness.dataset.lastDownload).toBeTruthy());
 
-		const exportedJson = harness.dataset.lastDownload!;
-		const parsed = JSON.parse(exportedJson) as {
-			schemaVersion: number;
-			viewState: { panX: number; panY: number; scale: number };
-		};
-		expect(parsed.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+		const exportedHtml = harness.dataset.lastDownload!;
+		const parsed = parseGraphFileText(exportedHtml);
+		expect(exportedHtml).toContain('mind-map-embedded-graph');
+		expect(exportedHtml).toContain(`"schemaVersion": ${CURRENT_SCHEMA_VERSION}`);
 		expect(typeof parsed.viewState.panX).toBe('number');
 		expect(typeof parsed.viewState.panY).toBe('number');
 		expect(typeof parsed.viewState.scale).toBe('number');
 
-		// Import the exported JSON back.
+		// Import the exported HTML back.
 		await userEvent.click(canvas.getByRole('button', { name: 'Import last download' }));
 
 		await waitFor(() => expect(harness.dataset.lastImportResult).toBe('imported'));

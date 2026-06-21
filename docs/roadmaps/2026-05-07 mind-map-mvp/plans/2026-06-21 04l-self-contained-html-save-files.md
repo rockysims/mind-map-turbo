@@ -3,7 +3,7 @@
 **Created:** 2026-06-21
 **Author:** Codex agent
 **Milestone:** [milestones/04l-self-contained-html-save-files.md](../milestones/04l-self-contained-html-save-files.md)
-**Status:** draft
+**Status:** done
 **Total estimated effort:** L (6 tasks; build target, file format, boot/draft
 recovery, and offline verification)
 
@@ -63,7 +63,7 @@ model to portable app documents.
 > parallel; route/page integration waits until the artifact and envelope shapes
 > are known.
 
-### T01 — Emit a self-contained offline app artifact
+### ✓ T01 — Emit a self-contained offline app artifact
 
 |                |                                                                                              |
 | -------------- | -------------------------------------------------------------------------------------------- |
@@ -89,7 +89,7 @@ offline default.
   files, or `version.json` at runtime.
 - Existing dev server workflow still works for local development.
 
-### T02 — Add a pure HTML graph document envelope
+### ✓ T02 — Add a pure HTML graph document envelope
 
 |                |                                                                                       |
 | -------------- | ------------------------------------------------------------------------------------- |
@@ -114,7 +114,7 @@ marker, and exported timestamp.
 - The parser never uses DOM execution or `innerHTML`; it extracts text from the
   known payload marker safely.
 
-### T03 — Wire HTML export/import through the UI and controller
+### ✓ T03 — Wire HTML export/import through the UI and controller
 
 |                |                                                                                                                                                     |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -138,7 +138,7 @@ notices aligned with the existing persistence controller behavior.
 - Importing a legacy JSON backup still succeeds.
 - Story or browser coverage exercises the new import/export controls.
 
-### T04 — Add document boot seeding and draft recovery
+### ✓ T04 — Add document boot seeding and draft recovery
 
 |                |                                                                                                                                  |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------- |
@@ -165,7 +165,7 @@ the latest local edits until the user exports a new file.
 - Specs cover draft-key derivation, draft-vs-embedded precedence, and isolation
   between two document ids.
 
-### T05 — Make graph switching safe under `file://`
+### ✓ T05 — Make graph switching safe under `file://`
 
 |                |                                                                                          |
 | -------------- | ---------------------------------------------------------------------------------------- |
@@ -189,7 +189,7 @@ while preserving normal dev-server behavior where practical.
   equivalent tested hash behavior.
 - Pure route specs explain and cover the file URL case.
 
-### T06 — Add newer-save fallback and offline propagation verification
+### ✓ T06 — Add newer-save fallback and offline propagation verification
 
 |                |                                                                                           |
 | -------------- | ----------------------------------------------------------------------------------------- |
@@ -275,3 +275,8 @@ branch.
   identity. From `file:///.../graph.html`, navigating to `/` or relying on a
   server fallback can leave the opened file behind; hash/state navigation keeps
   the user inside that same HTML document.
+- 2026-06-21: Implemented with SvelteKit hash routing, an inline single-file
+  static build, HTML graph payload envelopes, document-id draft keys, legacy JSON
+  import compatibility, newer-save new-tab fallback, and E2E coverage for
+  offline file open/import/export propagation. Validation passed: lint, check,
+  build, unit/storybook, and e2e.

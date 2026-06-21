@@ -3,7 +3,15 @@ import {
 	makeGraph,
 	SAME_DIRECTION_PARALLEL_EDGES_GRAPH
 } from './components/ui/Multigraph/lib/testFixtures';
-import { parseGraphFile, serializeGraphFile, type GraphFileDocument } from './graphFile';
+import {
+	GRAPH_HTML_PAYLOAD_SCRIPT_ID,
+	createGraphFileArtifact,
+	parseGraphFile,
+	parseGraphFileText,
+	serializeGraphFile,
+	serializeGraphHtmlFile,
+	type GraphFileDocument
+} from './graphFile';
 import { CURRENT_SCHEMA_VERSION, NEUTRAL_VIEW_STATE, PersistedGraphError } from './migrations';
 
 const NEUTRAL = NEUTRAL_VIEW_STATE;
@@ -40,6 +48,78 @@ describe('serializeGraphFile', () => {
 	it('produces pretty-printed JSON (indented)', () => {
 		const json = serializeGraphFile(makeDoc());
 		expect(json).toContain('\n');
+	});
+});
+
+describe('HTML graph files', () => {
+	it('round-trips graph data, viewState, and document metadata through HTML', () => {
+		const doc = makeDoc({ documentId: 'doc-123', exportedAt: 42 });
+		const html = serializeGraphHtmlFile(doc);
+		const parsed = parseGraphFileText(html);
+
+		expect(html).toContain(`id="${GRAPH_HTML_PAYLOAD_SCRIPT_ID}"`);
+		expect(parsed).toEqual(doc);
+	});
+
+	it('replaces an existing embedded graph payload in an app shell', () => {
+		const first = serializeGraphHtmlFile(makeDoc({ documentId: 'first' }));
+		const second = serializeGraphHtmlFile(makeDoc({ documentId: 'second' }), first);
+
+		expect(second.match(new RegExp(GRAPH_HTML_PAYLOAD_SCRIPT_ID, 'g'))).toHaveLength(1);
+		expect(parseGraphFileText(second).documentId).toBe('second');
+	});
+
+	it('parses legacy JSON through the format-aware entry point', () => {
+		const doc = makeDoc();
+
+		expect(parseGraphFileText(serializeGraphFile(doc))).toEqual(doc);
+	});
+
+	it('escapes script-breaking node text inside HTML payloads', () => {
+		const graph = makeGraph({ nodeCount: 1 });
+		const dangerousTitle = '</script><img src=x onerror=alert(1)>';
+		const doc = makeDoc({
+			data: {
+				...graph,
+				nodes: [{ ...graph.nodes[0], title: dangerousTitle }]
+			}
+		});
+
+		const html = serializeGraphHtmlFile(doc);
+		expect(html).not.toContain(dangerousTitle);
+		expect(html).toContain('\\u003c/script>');
+		expect(parseGraphFileText(html).data.nodes[0]?.title).toBe(dangerousTitle);
+	});
+
+	it('throws malformed-payload when HTML is missing embedded graph data', () => {
+		expect(() => parseGraphFileText('<!doctype html><html><body></body></html>')).toThrow(
+			new PersistedGraphError(
+				'Graph HTML file is missing embedded graph data.',
+				'malformed-payload'
+			)
+		);
+	});
+
+	it('throws unsupported-app-version for newer HTML document readers', () => {
+		const html = serializeGraphHtmlFile(makeDoc()).replace(
+			'"minReaderVersion": 1',
+			'"minReaderVersion": 999'
+		);
+
+		expect(() => parseGraphFileText(html)).toThrow(
+			new PersistedGraphError(
+				'Unsupported graph HTML reader version: 999',
+				'unsupported-app-version'
+			)
+		);
+	});
+
+	it('creates HTML file artifacts by default', () => {
+		const artifact = createGraphFileArtifact('team graph', makeDoc());
+
+		expect(artifact.filename).toBe('team-graph.html');
+		expect(artifact.mimeType).toBe('text/html');
+		expect(parseGraphFileText(artifact.content).data).toEqual(makeDoc().data);
 	});
 });
 

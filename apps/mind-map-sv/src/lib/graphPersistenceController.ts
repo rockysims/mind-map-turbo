@@ -1,9 +1,22 @@
 import type { MultigraphData } from './components/ui/types/multigraph';
-import { parseGraphFile, serializeGraphFile } from './graphFile';
+import {
+	createGraphFileArtifact,
+	isUnsupportedHtmlGraphFile,
+	parseGraphFileText,
+	type GraphFileArtifact
+} from './graphFile';
 import { DEFAULT_GRAPH_ID } from './graphRoute';
 import { NEUTRAL_VIEW_STATE, PersistedGraphError, type ViewState } from './migrations';
 import { graphIdFromStorageKey, type GraphSummary, type Persistence } from './persistence';
 import type { SaveStatus } from './saveScheduler';
+
+export type ImportGraphResult =
+	| 'imported'
+	| 'cancelled'
+	| 'invalid'
+	| 'unsupported'
+	| 'opened-in-new-tab'
+	| 'open-tab-blocked';
 
 export type ControllerStatus =
 	| { state: 'loading'; graphId: string }
@@ -20,6 +33,7 @@ export type ControllerView = {
 	viewState: ViewState;
 	graphSummaries: GraphSummary[];
 	loadedGraphId: string;
+	documentId: string | null;
 	graphGeneration: number;
 	status: ControllerStatus;
 };
@@ -46,6 +60,9 @@ export type GraphPersistenceControllerDeps = {
 	minScale?: number;
 	maxScale?: number;
 	createGraphId?: () => string;
+	createDocumentId?: () => string;
+	now?: () => number;
+	openUnsupportedHtmlFile?: (html: string) => boolean;
 };
 
 export class GraphPersistenceController {
@@ -61,6 +78,7 @@ export class GraphPersistenceController {
 			viewState: { ...NEUTRAL_VIEW_STATE },
 			graphSummaries: [],
 			loadedGraphId: '',
+			documentId: null,
 			graphGeneration: 0,
 			status: { state: 'loading', graphId: DEFAULT_GRAPH_ID }
 		};
@@ -83,7 +101,7 @@ export class GraphPersistenceController {
 
 	async load(
 		graphId: string,
-		options: { flushCurrent?: boolean; externalReload?: boolean } = {}
+		options: { flushCurrent?: boolean; externalReload?: boolean; documentId?: string | null } = {}
 	): Promise<void> {
 		if (options.flushCurrent) {
 			await this.flushPendingSave();
@@ -98,6 +116,7 @@ export class GraphPersistenceController {
 			graph: nextGraph,
 			viewState: nextViewState,
 			loadedGraphId: graphId,
+			documentId: options.documentId ?? null,
 			graphGeneration: this.graphGeneration,
 			graphSummaries: await this.deps.persistence.list()
 		});
@@ -130,25 +149,47 @@ export class GraphPersistenceController {
 		}
 	}
 
-	exportGraphDocument(): string {
-		return serializeGraphFile({
-			data: this.view.graph,
-			viewState: this.view.viewState
-		});
+	exportGraphDocument(htmlShell?: string): GraphFileArtifact {
+		const documentId = this.view.documentId ?? this.nextDocumentId();
+		if (this.view.documentId === null) {
+			this.update({ documentId });
+		}
+		return createGraphFileArtifact(
+			this.view.loadedGraphId || DEFAULT_GRAPH_ID,
+			{
+				data: this.view.graph,
+				viewState: this.view.viewState,
+				documentId,
+				exportedAt: this.deps.now?.() ?? Date.now()
+			},
+			{
+				htmlShell
+			}
+		);
 	}
 
-	async importGraphDocument(
-		json: string
-	): Promise<'imported' | 'cancelled' | 'invalid' | 'unsupported'> {
+	async importGraphDocument(text: string): Promise<ImportGraphResult> {
 		await this.flushPendingSave();
 
-		let imported: ReturnType<typeof parseGraphFile>;
+		let imported: ReturnType<typeof parseGraphFileText>;
 		try {
-			imported = parseGraphFile(json, {
+			imported = parseGraphFileText(text, {
 				minScale: this.deps.minScale,
 				maxScale: this.deps.maxScale
 			});
 		} catch (error) {
+			if (isUnsupportedHtmlGraphFile(error)) {
+				const opened = this.deps.openUnsupportedHtmlFile?.(text) ?? false;
+				this.update({
+					status: {
+						state: 'notice',
+						message: opened
+							? 'Opened newer graph file in a new tab.'
+							: 'Import needs a newer app version. Open the file directly to continue.'
+					}
+				});
+				return opened ? 'opened-in-new-tab' : 'open-tab-blocked';
+			}
 			if (error instanceof PersistedGraphError && error.code === 'unsupported-version') {
 				this.update({
 					status: {
@@ -194,6 +235,7 @@ export class GraphPersistenceController {
 		this.update({
 			graph: imported.data,
 			viewState: imported.viewState,
+			documentId: imported.documentId ?? this.view.documentId,
 			graphGeneration: this.graphGeneration
 		});
 		this.scheduler.schedule(graphId, imported.data, imported.viewState);
@@ -210,7 +252,7 @@ export class GraphPersistenceController {
 
 	async importGraphDocumentFromReader(
 		readText: () => Promise<string>
-	): Promise<'imported' | 'cancelled' | 'invalid' | 'unsupported' | 'read-failed'> {
+	): Promise<ImportGraphResult | 'read-failed'> {
 		try {
 			const text = await readText();
 			return await this.importGraphDocument(text);
@@ -299,6 +341,10 @@ export class GraphPersistenceController {
 
 	private nextGraphId(): string {
 		return this.deps.createGraphId?.() ?? `graph-${Date.now().toString(36)}`;
+	}
+
+	private nextDocumentId(): string {
+		return this.deps.createDocumentId?.() ?? `doc-${Date.now().toString(36)}`;
 	}
 }
 

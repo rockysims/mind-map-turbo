@@ -1,7 +1,21 @@
 import { readFile, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { pathToFileURL } from 'url';
 import { expect, test, type Page } from '@playwright/test';
+
+const CURRENT_SCHEMA_VERSION = 3;
+const GRAPH_HTML_PAYLOAD_SCRIPT_ID = 'mind-map-embedded-graph';
+
+function graphUrl(graphId: string): string {
+	return `/#/?${new URLSearchParams({ graph: graphId }).toString()}`;
+}
+
+function graphIdFromPageUrl(rawUrl: string): string | null {
+	const url = new URL(rawUrl);
+	const hashRoute = url.hash.startsWith('#/') ? new URL(url.hash.slice(1), url.origin) : null;
+	return hashRoute?.searchParams.get('graph') ?? url.searchParams.get('graph');
+}
 
 test('home page renders the graph entrypoint', async ({ page }) => {
 	await page.goto('/');
@@ -14,7 +28,7 @@ test('persists edited nodes across reloads and graph switches', async ({ page })
 
 	await page.goto('/');
 	await page.evaluate(() => localStorage.clear());
-	await page.goto(`/?graph=${firstGraphId}`);
+	await page.goto(graphUrl(firstGraphId));
 	await expect(page.getByText('Node 0')).toBeVisible();
 
 	await editFirstNodeTitle(page, 'Persisted Node');
@@ -28,11 +42,11 @@ test('persists edited nodes across reloads and graph switches', async ({ page })
 		const item = localStorage.getItem(key);
 		return item ? JSON.parse(item) : null;
 	}, firstGraphId);
-	expect(storedPayload).toMatchObject({ schemaVersion: 1 });
+	expect(storedPayload).toMatchObject({ schemaVersion: CURRENT_SCHEMA_VERSION });
 
 	await page.getByRole('button', { name: 'New graph' }).click();
 	await expect(page).toHaveURL(/graph=graph-/);
-	const secondGraphId = new URL(page.url()).searchParams.get('graph');
+	const secondGraphId = graphIdFromPageUrl(page.url());
 	if (!secondGraphId) throw new Error('Expected New graph to route to a generated graph id');
 	await expect(page.getByText('Node 0')).toBeVisible();
 
@@ -54,12 +68,12 @@ test('deletes the selected graph without recreating it when another graph exists
 
 	await page.goto('/');
 	await page.evaluate(() => localStorage.clear());
-	await page.goto(`/?graph=${firstGraphId}`);
+	await page.goto(graphUrl(firstGraphId));
 	await expect(page.getByText('Node 0')).toBeVisible();
 	await editFirstNodeTitle(page, 'Remaining Graph');
 	await waitForStoredTitle(page, firstGraphId, 'Remaining Graph');
 
-	await page.goto(`/?graph=${secondGraphId}`);
+	await page.goto(graphUrl(secondGraphId));
 	await expect(page.getByText('Node 0')).toBeVisible();
 	await editFirstNodeTitle(page, 'Deleted Graph');
 	await waitForStoredTitle(page, secondGraphId, 'Deleted Graph');
@@ -72,14 +86,14 @@ test('deletes the selected graph without recreating it when another graph exists
 	await expectStoredGraphMissing(page, secondGraphId);
 });
 
-test('exports graph document containing schemaVersion, graph data, and viewState', async ({
+test('exports HTML graph document containing schemaVersion, graph data, and viewState', async ({
 	page
 }) => {
 	const graphId = `e2e-export-${Date.now()}`;
 
 	await page.goto('/');
 	await page.evaluate(() => localStorage.clear());
-	await page.goto(`/?graph=${graphId}`);
+	await page.goto(graphUrl(graphId));
 	await expect(page.getByText('Node 0')).toBeVisible();
 
 	await editFirstNodeTitle(page, 'Exported Node');
@@ -96,14 +110,11 @@ test('exports graph document containing schemaVersion, graph data, and viewState
 	const download = await downloadPromise;
 	const downloadedPath = await download.path();
 	if (!downloadedPath) throw new Error('Export download did not produce a file');
-	const json = await readFile(downloadedPath, 'utf-8');
+	expect(download.suggestedFilename()).toBe(`${graphId}.html`);
+	const html = await readFile(downloadedPath, 'utf-8');
 
-	const doc = JSON.parse(json) as {
-		schemaVersion: unknown;
-		data: { nodes: Array<{ title: string }> };
-		viewState: { panX: number; panY: number; scale: number };
-	};
-	expect(doc.schemaVersion).toBe(1);
+	const doc = extractGraphHtmlPayload(html);
+	expect(doc.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
 	expect(doc.data.nodes.some((n) => n.title === 'Exported Node')).toBe(true);
 	expect(doc.viewState).toMatchObject({
 		panX: expect.any(Number),
@@ -119,20 +130,24 @@ test('imports graph document and restores graph data and viewState', async ({ pa
 	const importedTitle = 'Imported Node Title';
 	const knownViewState = { panX: 80, panY: 40, scale: 1.5 };
 	const knownDoc = {
-		schemaVersion: 1,
+		schemaVersion: CURRENT_SCHEMA_VERSION,
 		data: {
-			nodes: [{ id: 'n0', title: importedTitle, description: 'Imported description' }],
+			nodes: [{ id: 'n0', title: importedTitle, description: 'Imported description', tags: [] }],
 			edges: [],
-			posByNodeId: { n0: { x: 0, y: 0 } }
+			posByNodeId: { n0: { x: 0, y: 0 } },
+			tagColorConfig: { nodeTags: {}, edgeTags: {} }
 		},
-		viewState: knownViewState
+		viewState: knownViewState,
+		documentId: `doc-${Date.now()}`,
+		htmlDocumentVersion: 1,
+		minReaderVersion: 1
 	};
-	const tmpFile = join(tmpdir(), `e2e-import-${Date.now()}.json`);
-	await writeFile(tmpFile, JSON.stringify(knownDoc, null, 2));
+	const tmpFile = join(tmpdir(), `e2e-import-${Date.now()}.html`);
+	await writeFile(tmpFile, graphHtmlFile(knownDoc));
 
 	await page.goto('/');
 	await page.evaluate(() => localStorage.clear());
-	await page.goto(`/?graph=${graphId}`);
+	await page.goto(graphUrl(graphId));
 	await expect(page.getByText('Node 0')).toBeVisible();
 
 	// The default graph is unchanged, so no confirm dialog fires on import.
@@ -160,6 +175,52 @@ test('imports graph document and restores graph data and viewState', async ({ pa
 	expect(transform).toContain(`scale(${knownViewState.scale})`);
 });
 
+test('imports legacy JSON graph documents', async ({ page }) => {
+	const graphId = `e2e-json-import-${Date.now()}`;
+	const importedTitle = 'Legacy JSON Import';
+	const tmpFile = join(tmpdir(), `e2e-import-${Date.now()}.json`);
+	await writeFile(
+		tmpFile,
+		JSON.stringify(
+			{
+				schemaVersion: 1,
+				data: {
+					nodes: [{ id: 'n0', title: importedTitle, description: 'Imported description' }],
+					edges: [],
+					posByNodeId: { n0: { x: 0, y: 0 } }
+				},
+				viewState: { panX: 0, panY: 0, scale: 1 }
+			},
+			null,
+			2
+		)
+	);
+
+	await page.goto('/');
+	await page.evaluate(() => localStorage.clear());
+	await page.goto(graphUrl(graphId));
+	await expect(page.getByText('Node 0')).toBeVisible();
+
+	await page.getByLabel('Import graph from file').setInputFiles(tmpFile);
+
+	await expect(page.getByRole('status')).toContainText(`Imported graph into "${graphId}"`);
+	await expect(page.getByText(importedTitle)).toBeVisible();
+});
+
+test('self-contained build artifact opens from disk without sibling app assets', async ({
+	page
+}) => {
+	const requests: string[] = [];
+	page.on('request', (request) => {
+		requests.push(request.url());
+	});
+
+	await page.goto(pathToFileURL(join(process.cwd(), 'build', 'index.html')).href);
+
+	await expect(page.getByText('Node 0')).toBeVisible();
+	expect(requests.filter((url) => url.includes('/_app/'))).toEqual([]);
+});
+
 test('reload restores graph data and viewState from localStorage without file import', async ({
 	page
 }) => {
@@ -167,7 +228,7 @@ test('reload restores graph data and viewState from localStorage without file im
 
 	await page.goto('/');
 	await page.evaluate(() => localStorage.clear());
-	await page.goto(`/?graph=${graphId}`);
+	await page.goto(graphUrl(graphId));
 	await expect(page.getByText('Node 0')).toBeVisible();
 
 	await editFirstNodeTitle(page, 'Refresh Test Node');
@@ -294,4 +355,31 @@ async function expectStoredGraphMissing(page: Page, graphId: string) {
 			)
 		)
 		.toBeNull();
+}
+
+function graphHtmlFile(payload: unknown): string {
+	return `<!doctype html><html><body><script id="${GRAPH_HTML_PAYLOAD_SCRIPT_ID}" type="application/json">${JSON.stringify(
+		payload,
+		null,
+		2
+	).replaceAll('<', '\\u003c')}</script></body></html>`;
+}
+
+function extractGraphHtmlPayload(html: string): {
+	schemaVersion: unknown;
+	data: { nodes: Array<{ title: string }> };
+	viewState: { panX: number; panY: number; scale: number };
+} {
+	const match = html.match(
+		new RegExp(
+			`<script\\b(?=[^>]*\\bid=(["'])${GRAPH_HTML_PAYLOAD_SCRIPT_ID}\\1)(?=[^>]*\\btype=(["'])application/json\\2)[^>]*>([\\s\\S]*?)<\\/script>`,
+			'i'
+		)
+	);
+	if (!match?.[3]) throw new Error('Embedded graph payload not found');
+	return JSON.parse(match[3]) as {
+		schemaVersion: unknown;
+		data: { nodes: Array<{ title: string }> };
+		viewState: { panX: number; panY: number; scale: number };
+	};
 }

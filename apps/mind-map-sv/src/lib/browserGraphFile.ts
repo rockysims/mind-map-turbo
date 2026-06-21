@@ -5,15 +5,41 @@
  * the rest of the app stays pure and tests can inject a fake adapter.
  */
 
+export type BrowserFileArtifact = {
+	content: string;
+	filename: string;
+	mimeType: string;
+};
+
 /** Trigger a file download with the given text content and suggested filename. */
-export function downloadTextFile(content: string, filename: string): void {
-	const blob = new Blob([content], { type: 'application/json' });
+export function downloadTextFile(
+	content: string,
+	filename: string,
+	mimeType = 'application/json'
+): void {
+	const blob = new Blob([content], { type: mimeType });
 	const url = URL.createObjectURL(blob);
 	const anchor = document.createElement('a');
 	anchor.href = url;
 	anchor.download = filename;
 	anchor.click();
 	URL.revokeObjectURL(url);
+}
+
+export function downloadFileArtifact(artifact: BrowserFileArtifact): void {
+	downloadTextFile(artifact.content, artifact.filename, artifact.mimeType);
+}
+
+export function openHtmlTextInNewTab(html: string): boolean {
+	const blob = new Blob([html], { type: 'text/html' });
+	const url = URL.createObjectURL(blob);
+	const opened = window.open(url, '_blank', 'noopener,noreferrer');
+	if (opened === null) {
+		URL.revokeObjectURL(url);
+		return false;
+	}
+	setTimeout(() => URL.revokeObjectURL(url), 60_000);
+	return true;
 }
 
 /**
