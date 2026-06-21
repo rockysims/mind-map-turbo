@@ -177,13 +177,10 @@
 	): Promise<{ graphId: string; documentId: string } | null> {
 		if (!doc?.documentId) return null;
 		const graphId = documentDraftGraphId(doc.documentId);
-		const existingDraft = await persistence.load(graphId);
-		if (existingDraft === null) {
-			await persistence.save(graphId, {
-				data: doc.data,
-				viewState: doc.viewState
-			});
-		}
+		await persistence.save(graphId, {
+			data: doc.data,
+			viewState: doc.viewState
+		});
 		return { graphId, documentId: doc.documentId };
 	}
 

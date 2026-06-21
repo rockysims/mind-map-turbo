@@ -82,11 +82,12 @@ describe('HTML graph files', () => {
 			'<!doctype html><html><body><script>const replacement = `${payload}\\n</body>`;</script></body></html>';
 		const html = serializeGraphHtmlFile(makeDoc({ documentId: 'doc-body-boundary' }), shell);
 		const payloadIndex = html.indexOf(`id="${GRAPH_HTML_PAYLOAD_SCRIPT_ID}"`);
+		const bootScriptIndex = html.indexOf('<script>const replacement');
 		const appCodeBodyIndex = html.indexOf('`${payload}\\n</body>`');
 		const realBodyIndex = html.lastIndexOf('</body>');
 
 		expect(appCodeBodyIndex).toBeGreaterThan(-1);
-		expect(payloadIndex).toBeGreaterThan(appCodeBodyIndex);
+		expect(payloadIndex).toBeLessThan(bootScriptIndex);
 		expect(payloadIndex).toBeLessThan(realBodyIndex);
 		expect(parseGraphFileText(html).documentId).toBe('doc-body-boundary');
 	});

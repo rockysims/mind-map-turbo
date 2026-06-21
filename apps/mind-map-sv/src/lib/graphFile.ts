@@ -89,6 +89,11 @@ export function serializeGraphHtmlFile(
 		return htmlShell.replace(existingPayloadPattern, payloadScript);
 	}
 
+	const bootScriptIndex = firstExecutableScriptIndex(htmlShell);
+	if (bootScriptIndex !== -1) {
+		return `${htmlShell.slice(0, bootScriptIndex)}${payloadScript}\n${htmlShell.slice(bootScriptIndex)}`;
+	}
+
 	const bodyCloseIndex = lastClosingTagIndex(htmlShell, 'body');
 	if (bodyCloseIndex !== -1) {
 		return `${htmlShell.slice(0, bodyCloseIndex)}${payloadScript}\n${htmlShell.slice(bodyCloseIndex)}`;
@@ -191,6 +196,11 @@ function graphPayloadScriptPattern(): RegExp {
 		`<script\\b(?=[^>]*\\bid=(["'])${GRAPH_HTML_PAYLOAD_SCRIPT_ID}\\1)(?=[^>]*\\btype=(["'])application/json\\2)[^>]*>[\\s\\S]*?<\\/script>`,
 		'i'
 	);
+}
+
+function firstExecutableScriptIndex(html: string): number {
+	const match = html.match(/<script\b(?![^>]*\btype=(["'])application\/json\1)[^>]*>/i);
+	return match?.index ?? -1;
 }
 
 function lastClosingTagIndex(html: string, tagName: 'body' | 'html'): number {

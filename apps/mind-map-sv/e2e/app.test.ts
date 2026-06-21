@@ -223,6 +223,27 @@ test('self-contained build artifact opens from disk without sibling app assets',
 	expect(requests.filter((url) => url.includes('/_app/'))).toEqual([]);
 });
 
+test('opened HTML save file data wins over stale document draft', async ({ page }) => {
+	const documentId = `doc-stale-${Date.now()}`;
+	const tmpFile = join(tmpdir(), `e2e-open-save-${Date.now()}.html`);
+
+	await writeFile(
+		tmpFile,
+		await selfContainedGraphHtml(graphDocumentPayload({ documentId, title: 'Stale Embedded Node' }))
+	);
+	await page.goto(pathToFileURL(tmpFile).href);
+	await expect(page.getByText('Stale Embedded Node')).toBeVisible();
+
+	await writeFile(
+		tmpFile,
+		await selfContainedGraphHtml(graphDocumentPayload({ documentId, title: 'Fresh Embedded Node' }))
+	);
+	await page.goto(pathToFileURL(tmpFile).href);
+
+	await expect(page.getByText('Fresh Embedded Node')).toBeVisible();
+	await expect(page.getByText('Stale Embedded Node')).not.toBeVisible();
+});
+
 test('reload restores graph data and viewState from localStorage without file import', async ({
 	page
 }) => {
@@ -365,6 +386,33 @@ function graphHtmlFile(payload: unknown): string {
 		null,
 		2
 	).replaceAll('<', '\\u003c')}</script></body></html>`;
+}
+
+async function selfContainedGraphHtml(payload: unknown): Promise<string> {
+	const shell = await readFile(join(process.cwd(), 'build', 'index.html'), 'utf-8');
+	const payloadScript = graphHtmlFile(payload).match(
+		new RegExp(`<script\\b[\\s\\S]*?<\\/script>`, 'i')
+	)?.[0];
+	if (!payloadScript) throw new Error('Expected graphHtmlFile to produce a payload script');
+	const bootScriptIndex = shell.search(/<script\b(?![^>]*\btype=(["'])application\/json\1)[^>]*>/i);
+	if (bootScriptIndex === -1) throw new Error('Self-contained shell is missing app script');
+	return `${shell.slice(0, bootScriptIndex)}${payloadScript}\n${shell.slice(bootScriptIndex)}`;
+}
+
+function graphDocumentPayload({ documentId, title }: { documentId: string; title: string }) {
+	return {
+		schemaVersion: CURRENT_SCHEMA_VERSION,
+		data: {
+			nodes: [{ id: 'n0', title, description: 'Embedded description', tags: [] }],
+			edges: [],
+			posByNodeId: { n0: { x: 0, y: 0 } },
+			tagColorConfig: { nodeTags: {}, edgeTags: {} }
+		},
+		viewState: { panX: 0, panY: 0, scale: 1 },
+		documentId,
+		htmlDocumentVersion: 1,
+		minReaderVersion: 1
+	};
 }
 
 function extractGraphHtmlPayload(html: string): {
