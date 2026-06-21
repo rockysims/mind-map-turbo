@@ -10,8 +10,8 @@ conversation by one or more people. Critically: the graph remains
 _usable_ even when very large, by **pinning** nodes of interest at full
 size while showing only the useful neighborhood around those pins. Users
 can pan, zoom, drag, add nodes/edges, label and tag nodes quickly, save
-their work locally or as JSON, and have the layout self-tidy via gentle
-overlap repulsion. Mobile-first input.
+their work locally or as portable files, and have the layout self-tidy via
+gentle overlap repulsion. Mobile-first input.
 
 ## Design principles
 
@@ -51,17 +51,20 @@ individual PR-sized tasks.
 | 04i | Eliminate appearance/disappearance abruptness      | complete    | [milestone](milestones/04i-eliminate-appearance-abruptness.md), [plan](plans/2026-06-13%2004i-enter-exit-and-reveal-wave.md)                    |
 | 04j | Edge occlusion fade near unrelated nodes           | complete    | [milestone](milestones/04j-edge-occlusion-fade.md), [plan](plans/2026-06-13%2004j-edge-occlusion-fade.md)                                       |
 | 04k | Parallel edge visualization                        | complete    | [milestone](milestones/04k-parallel-edge-visualization.md), [plan](plans/2026-06-18%2004k-parallel-edge-visualization.md)                       |
+| 04l | Self-contained HTML save files                     | not started | [milestone](milestones/04l-self-contained-html-save-files.md), [plan](plans/2026-06-21%2004l-self-contained-html-save-files.md)                 |
 | 05  | Multiplayer                                        | not started | [milestones/05-multiplayer.md](milestones/05-multiplayer.md)                                                                                    |
 | 06  | Search                                             | not started | [milestones/06-search.md](milestones/06-search.md)                                                                                              |
 
-Milestones 04a-04k sit between persistence and multiplayer. Milestone 04b
+Milestones 04a-04l sit between persistence and multiplayer. Milestone 04b
 intentionally supersedes 04a's Fibonacci reveal and dimming behavior. Milestone
 04h is a behavior-preserving refactor, not new product scope. Milestone 04i adds
 enter/exit and pin reveal-wave animation as pure modules so 04h can absorb the
 wiring; if 04h lands first, 04i targets the post-split files. Milestone 04j adds
 edge-local fade windows for visual underpasses without changing graph
 connectivity or layout routing. Milestone 04k makes parallel edges visible with
-render offsets while deferring UI creation of duplicate edges.
+render offsets while deferring UI creation of duplicate edges. Milestone 04l
+evolves explicit graph files from JSON backups into self-contained offline HTML
+documents.
 
 ## How this directory is organized
 
