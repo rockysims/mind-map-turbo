@@ -112,6 +112,8 @@ test('exports HTML graph document containing schemaVersion, graph data, and view
 	if (!downloadedPath) throw new Error('Export download did not produce a file');
 	expect(download.suggestedFilename()).toBe(`${graphId}.html`);
 	const html = await readFile(downloadedPath, 'utf-8');
+	expect(html).not.toContain('/@fs/');
+	expect(html).not.toMatch(/<script\b(?=[^>]*\btype=(["'])module\1)(?=[^>]*\bsrc=)/i);
 
 	const doc = extractGraphHtmlPayload(html);
 	expect(doc.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const buildDir = join(appRoot, 'build');
 const indexPath = join(buildDir, 'index.html');
+const staticOfflineShellPath = join(appRoot, 'static', 'offline-app-shell.html');
 
 let html = await readFile(indexPath, 'utf8');
 
@@ -14,6 +15,7 @@ html = await inlineIcons(html);
 html = stripModulePreloads(html);
 
 await writeFile(indexPath, html);
+await writeFile(staticOfflineShellPath, html);
 await removeSiblingArtifacts();
 
 async function inlineStylesheets(input) {

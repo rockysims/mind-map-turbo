@@ -18,6 +18,7 @@
 		type GraphFileDocument
 	} from '$lib/graphFile';
 	import { graphIdFromUrl, resolveGraphHref } from '$lib/graphRoute';
+	import { isSelfContainedHtmlShell, OFFLINE_APP_SHELL_PATH } from '$lib/htmlShell';
 	import {
 		createPersistence,
 		documentDraftGraphId,
@@ -133,9 +134,9 @@
 		await persisted?.deleteGraph(selectedGraphId);
 	}
 
-	function handleExport(): void {
+	async function handleExport(): Promise<void> {
 		if (!persisted) return;
-		downloadFileArtifact(persisted.exportGraphDocument(currentHtmlShell()));
+		downloadFileArtifact(persisted.exportGraphDocument(await exportHtmlShell()));
 	}
 
 	async function handleImport(file: File): Promise<void> {
@@ -173,6 +174,19 @@
 	function currentHtmlShell(): string {
 		return `<!doctype html>\n${document.documentElement.outerHTML}`;
 	}
+
+	async function exportHtmlShell(): Promise<string> {
+		const currentShell = currentHtmlShell();
+		if (isSelfContainedHtmlShell(currentShell)) return currentShell;
+
+		try {
+			const response = await fetch(OFFLINE_APP_SHELL_PATH, { cache: 'no-store' });
+			if (!response.ok) return currentShell;
+			return await response.text();
+		} catch {
+			return currentShell;
+		}
+	}
 </script>
 
 <div class="page-shell">
@@ -183,7 +197,7 @@
 		onGraphSelected={handleGraphSelection}
 		onNewGraph={createNewGraph}
 		onDeleteGraph={() => void deleteSelectedGraph()}
-		onExport={handleExport}
+		onExport={() => void handleExport()}
 		onImport={(file) => void handleImport(file)}
 	/>
 
