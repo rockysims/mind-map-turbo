@@ -94,21 +94,24 @@
 			openUnsupportedHtmlFile: openHtmlTextInNewTab
 		});
 		persisted = persistedGraph;
-		if (embeddedGraph?.documentId && selectedGraphId === DEFAULT_GRAPH_ID) {
-			void persistedGraph.loadEmbeddedDocument(embeddedGraph);
-		} else {
-			void persistedGraph.load(selectedGraphId, { flushCurrent: false });
-		}
+		void loadRouteGraph(persistedGraph, embeddedGraph, { flushCurrent: false });
 
 		const onStorage = (event: StorageEvent) => {
 			void persistedGraph.handleStorageEvent({ key: event.key });
 		};
+		const onRouteChange = () => {
+			void loadRouteGraph(persistedGraph, embeddedGraph, { flushCurrent: true });
+		};
 
 		window.addEventListener('storage', onStorage);
+		window.addEventListener('hashchange', onRouteChange);
+		window.addEventListener('popstate', onRouteChange);
 
 		return () => {
 			persistedGraph.dispose();
 			window.removeEventListener('storage', onStorage);
+			window.removeEventListener('hashchange', onRouteChange);
+			window.removeEventListener('popstate', onRouteChange);
 		};
 	});
 
@@ -130,6 +133,24 @@
 
 	function loadGraphFile(file: File): void {
 		openHtmlFileInNewTab(file);
+	}
+
+	async function loadRouteGraph(
+		persistedGraph: PersistedGraph,
+		embeddedGraph: GraphFileDocument | null,
+		options: { flushCurrent: boolean }
+	): Promise<void> {
+		const graphId = graphIdFromUrl(
+			new URL(window.location.href),
+			graphRouteModeForProtocol(window.location.protocol)
+		);
+		if (graphId === selectedGraphId && persistedGraph.loadedGraphId !== '') return;
+		selectedGraphId = graphId;
+		if (embeddedGraph?.documentId && graphId === DEFAULT_GRAPH_ID) {
+			await persistedGraph.loadEmbeddedDocument(embeddedGraph);
+			return;
+		}
+		await persistedGraph.load(graphId, options);
 	}
 
 	async function handleDownload(): Promise<void> {

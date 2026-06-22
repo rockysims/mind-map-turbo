@@ -178,6 +178,32 @@ test('new opens a fresh graph from an opened HTML save file', async ({ page }) =
 	await expect(page.getByText('Saved File Node')).toBeVisible();
 });
 
+test('browser back restores embedded graph after opened file hash route', async ({ page }) => {
+	const documentId = `doc-file-back-${Date.now()}`;
+	const tmpFile = join(tmpdir(), `e2e-file-back-${Date.now()}.html`);
+	await writeFile(
+		tmpFile,
+		await selfContainedGraphHtml(graphDocumentPayload({ documentId, title: 'Original File Node' }))
+	);
+
+	const fileUrl = pathToFileURL(tmpFile).href;
+	await page.goto(fileUrl);
+	await expect(page.getByText('Original File Node')).toBeVisible();
+
+	const routedUrl = `${fileUrl}#/?${new URLSearchParams({ graph: `graph-${Date.now()}` }).toString()}`;
+	await page.evaluate((url) => {
+		window.location.href = url;
+	}, routedUrl);
+	await expect(page).toHaveURL(routedUrl);
+	await expect(page.getByText('Node 0')).toBeVisible();
+	await expect(page.getByText('Original File Node')).not.toBeVisible();
+
+	await page.goBack();
+	await expect(page).toHaveURL(fileUrl);
+	await expect(page.getByText('Original File Node')).toBeVisible();
+	await expect(page.getByText('Node 0')).not.toBeVisible();
+});
+
 test('single-document toolbar omits graph library controls', async ({ page }) => {
 	await page.goto('/');
 
