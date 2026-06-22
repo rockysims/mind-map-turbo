@@ -15,7 +15,8 @@
 		makeGraph,
 		makeRandomEdges,
 		OPPOSITE_DIRECTION_PARALLEL_EDGES_GRAPH,
-		SAME_DIRECTION_PARALLEL_EDGES_GRAPH
+		SAME_DIRECTION_PARALLEL_EDGES_GRAPH,
+		withRandomTagsAndDirections
 	} from './lib/testFixtures';
 	import type { MultigraphData, Point } from '../types/multigraph';
 	import type { ViewState } from '$lib/migrations';
@@ -359,6 +360,15 @@
 		crossGroupFraction: 0.05,
 		seed: 42
 	});
+	const HUNDRED_NODE_MANY_GRAPH = withRandomTagsAndDirections(
+		makeGraph({
+			nodeCount: 100,
+			pinned: [0],
+			edges: HUNDRED_NODE_CLUSTERED_EDGES,
+			posByNodeId: HUNDRED_NODE_POSITIONS
+		}),
+		{ seed: 42, minNodeTags: 0, maxNodeTags: 4, minEdgeTags: 0, maxEdgeTags: 2 }
+	);
 
 	const SAME_DIRECTION_PARALLEL_EDGES_WITH_UNRELATED_EDGE = {
 		...SAME_DIRECTION_PARALLEL_EDGES_GRAPH,
@@ -429,12 +439,7 @@
 <Story
 	name="Many"
 	args={{
-		multigraphData: makeGraph({
-			nodeCount: 100,
-			pinned: [0],
-			edges: HUNDRED_NODE_CLUSTERED_EDGES,
-			posByNodeId: HUNDRED_NODE_POSITIONS
-		}),
+		multigraphData: HUNDRED_NODE_MANY_GRAPH,
 		defaultPrimaryNodeId: 'n0',
 		initialViewState: { panX: 0, panY: 0, scale: 0.25 }
 	}}

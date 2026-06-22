@@ -6,7 +6,8 @@ import {
 	makeGraph,
 	makeRandomEdges,
 	OPPOSITE_DIRECTION_PARALLEL_EDGES_GRAPH,
-	SAME_DIRECTION_PARALLEL_EDGES_GRAPH
+	SAME_DIRECTION_PARALLEL_EDGES_GRAPH,
+	withRandomTagsAndDirections
 } from './testFixtures';
 
 describe('makeGraph', () => {
@@ -296,5 +297,99 @@ describe('makeClusteredRandomEdges', () => {
 
 		expect(cross / edgeCount).toBeLessThanOrEqual(crossGroupFraction + 0.01);
 		expect((edgeCount - cross) / edgeCount).toBeGreaterThanOrEqual(1 - crossGroupFraction - 0.01);
+	});
+});
+
+describe('withRandomTagsAndDirections', () => {
+	it('returns the same graph for the same seed', () => {
+		const base = makeGraph({
+			nodeCount: 10,
+			edges: [
+				[0, 1],
+				[1, 2],
+				[2, 3]
+			]
+		});
+		const first = withRandomTagsAndDirections(base, { seed: 42 });
+		const second = withRandomTagsAndDirections(base, { seed: 42 });
+		expect(second).toEqual(first);
+	});
+
+	it('does not mutate the input graph', () => {
+		const base = makeGraph({ nodeCount: 2, edges: [[0, 1]] });
+		const snapshot = structuredClone(base);
+		withRandomTagsAndDirections(base, { seed: 42 });
+		expect(base).toEqual(snapshot);
+	});
+
+	it('assigns node tags within the requested inclusive range', () => {
+		const enriched = withRandomTagsAndDirections(makeGraph({ nodeCount: 50, edges: [[0, 1]] }), {
+			seed: 42,
+			minNodeTags: 0,
+			maxNodeTags: 4
+		});
+
+		for (const node of enriched.nodes) {
+			expect(node.tags.length).toBeGreaterThanOrEqual(0);
+			expect(node.tags.length).toBeLessThanOrEqual(4);
+			expect(new Set(node.tags).size).toBe(node.tags.length);
+		}
+	});
+
+	it('assigns edge tags within the requested inclusive range', () => {
+		const enriched = withRandomTagsAndDirections(
+			makeGraph({
+				nodeCount: 10,
+				edges: [
+					[0, 1],
+					[1, 2],
+					[2, 3],
+					[3, 4]
+				]
+			}),
+			{ seed: 42, minEdgeTags: 0, maxEdgeTags: 2 }
+		);
+
+		for (const edge of enriched.edges) {
+			expect(edge.tags.length).toBeGreaterThanOrEqual(0);
+			expect(edge.tags.length).toBeLessThanOrEqual(2);
+			expect(new Set(edge.tags).size).toBe(edge.tags.length);
+		}
+	});
+
+	it('assigns title-syntax edge directions', () => {
+		const base = makeGraph({
+			nodeCount: 30,
+			edges: Array.from({ length: 30 }, (_, index) => [index, (index + 1) % 30] as [number, number])
+		});
+		const enriched = withRandomTagsAndDirections(base, { seed: 42 });
+
+		let undirectedCount = 0;
+		let forwardCount = 0;
+		let reverseCount = 0;
+
+		for (let index = 0; index < base.edges.length; index += 1) {
+			const original = base.edges[index];
+			const edge = enriched.edges[index];
+
+			if (edge.directed !== true) {
+				undirectedCount += 1;
+				expect(edge.directed).toBe(false);
+				continue;
+			}
+
+			const isForward =
+				edge.sourceNodeId === original.sourceNodeId && edge.targetNodeId === original.targetNodeId;
+			const isReverse =
+				edge.sourceNodeId === original.targetNodeId && edge.targetNodeId === original.sourceNodeId;
+			expect(isForward || isReverse).toBe(true);
+
+			if (isForward) forwardCount += 1;
+			if (isReverse) reverseCount += 1;
+		}
+
+		expect(undirectedCount).toBeGreaterThan(0);
+		expect(forwardCount).toBeGreaterThan(0);
+		expect(reverseCount).toBeGreaterThan(0);
 	});
 });
