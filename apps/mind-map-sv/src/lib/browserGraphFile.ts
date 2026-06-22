@@ -42,8 +42,11 @@ export function openHtmlTextInNewTab(html: string, urlSuffix = ''): boolean {
 	return true;
 }
 
-export function openHtmlFileInNewTab(file: File): boolean {
-	const opened = window.open('about:blank', '_blank');
+export function openBlankHtmlTab(): Window | null {
+	return window.open('about:blank', '_blank');
+}
+
+export function openHtmlFileInNewTab(file: File, opened = openBlankHtmlTab()): boolean {
 	if (opened === null) {
 		return false;
 	}

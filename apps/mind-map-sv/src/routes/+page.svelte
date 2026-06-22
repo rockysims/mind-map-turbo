@@ -5,6 +5,7 @@
 	import { APP_CONFIG } from '$lib/appConfig';
 	import {
 		downloadFileArtifact,
+		openBlankHtmlTab,
 		openHtmlFileInNewTab,
 		openHtmlTextInNewTab
 	} from '$lib/browserGraphFile';
@@ -36,6 +37,7 @@
 	let persisted = $state<PersistedGraph | null>(null);
 	let selectedGraphId = $state(graphIdFromUrl(page.url));
 	let initialTitleEditNodeId = $state<string | null>(null);
+	let pendingLoadGraphWindow: Window | null = null;
 	const defaultPrimaryNodeId = $derived(persisted?.graph.nodes[0]?.id ?? '');
 
 	onMount(() => {
@@ -113,6 +115,9 @@
 
 		return () => {
 			persistedGraph.dispose();
+			window.removeEventListener('focus', closeUnusedLoadGraphWindow);
+			pendingLoadGraphWindow?.close();
+			pendingLoadGraphWindow = null;
 			window.removeEventListener('storage', onStorage);
 			window.removeEventListener('hashchange', onRouteChange);
 			window.removeEventListener('popstate', onRouteChange);
@@ -135,8 +140,25 @@
 		openNewGraphInNewTab();
 	}
 
+	function prepareLoadGraphFile(): void {
+		window.removeEventListener('focus', closeUnusedLoadGraphWindow);
+		pendingLoadGraphWindow?.close();
+		pendingLoadGraphWindow = openBlankHtmlTab();
+		window.addEventListener('focus', closeUnusedLoadGraphWindow, { once: true });
+	}
+
 	function loadGraphFile(file: File): void {
-		openHtmlFileInNewTab(file);
+		const targetWindow = pendingLoadGraphWindow;
+		pendingLoadGraphWindow = null;
+		openHtmlFileInNewTab(file, targetWindow ?? undefined);
+	}
+
+	function closeUnusedLoadGraphWindow(): void {
+		setTimeout(() => {
+			if (pendingLoadGraphWindow === null) return;
+			pendingLoadGraphWindow.close();
+			pendingLoadGraphWindow = null;
+		}, 1_500);
 	}
 
 	async function loadRouteGraph(
@@ -290,6 +312,7 @@
 	<GraphToolbar
 		notice={persisted?.notice ?? 'Loading graph...'}
 		onNewGraph={createNewGraph}
+		onOpenGraphFilePicker={prepareLoadGraphFile}
 		onLoadGraph={loadGraphFile}
 		onDownload={() => void handleDownload()}
 	/>

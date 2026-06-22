@@ -2,16 +2,27 @@
 	let {
 		notice = '',
 		onNewGraph,
+		onOpenGraphFilePicker,
 		onLoadGraph,
 		onDownload
 	}: {
 		notice?: string;
 		onNewGraph?: () => void;
+		onOpenGraphFilePicker?: () => void;
 		onLoadGraph?: (file: File) => void;
 		onDownload?: () => void;
 	} = $props();
 
 	let fileInput = $state<HTMLInputElement | undefined>(undefined);
+
+	function handleOpenClick(): void {
+		try {
+			fileInput?.showPicker();
+		} catch {
+			fileInput?.click();
+		}
+		onOpenGraphFilePicker?.();
+	}
 
 	function handleFileChange(event: Event): void {
 		const target = event.currentTarget as HTMLInputElement;
@@ -29,7 +40,7 @@
 
 <div class="graph-toolbar" aria-label="Graph persistence controls">
 	<button type="button" onclick={() => onNewGraph?.()}>New</button>
-	<label>
+	<span>
 		<span class="sr-only">Load graph file</span>
 		<input
 			bind:this={fileInput}
@@ -39,8 +50,8 @@
 			class="file-input-hidden"
 			onchange={handleFileChange}
 		/>
-		<span aria-hidden="true" class="file-input-button">Open</span>
-	</label>
+		<button type="button" onclick={handleOpenClick}>Open</button>
+	</span>
 	<button type="button" onclick={() => onDownload?.()}>Download</button>
 	<p role="status">{notice}</p>
 </div>
@@ -63,8 +74,7 @@
 		transform: translateX(-50%);
 	}
 
-	.graph-toolbar button,
-	.file-input-button {
+	.graph-toolbar button {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;

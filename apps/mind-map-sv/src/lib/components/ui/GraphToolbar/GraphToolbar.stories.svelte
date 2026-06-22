@@ -10,6 +10,7 @@
 		argTypes: {
 			notice: { control: 'text' },
 			onNewGraph: { control: false },
+			onOpenGraphFilePicker: { control: false },
 			onLoadGraph: { control: false },
 			onDownload: { control: false }
 		},
@@ -29,6 +30,7 @@
 		args: {
 			notice?: string;
 			onNewGraph?: () => void;
+			onOpenGraphFilePicker?: () => void;
 			onLoadGraph?: (file: File) => void;
 			onDownload?: () => void;
 		};
@@ -44,6 +46,7 @@
 	args={{
 		notice: 'Draft differs from opened file. Download needed.',
 		onNewGraph: fn(),
+		onOpenGraphFilePicker: fn(),
 		onLoadGraph: fn(),
 		onDownload: fn()
 	}}
@@ -67,6 +70,7 @@
 	args={{
 		notice: 'Matches downloaded file.',
 		onNewGraph: fn(),
+		onOpenGraphFilePicker: fn(),
 		onLoadGraph: fn(),
 		onDownload: fn()
 	}}
@@ -86,6 +90,7 @@
 	args={{
 		notice: 'Matches opened file.',
 		onNewGraph: fn(),
+		onOpenGraphFilePicker: fn(),
 		onLoadGraph: fn(),
 		onDownload: fn()
 	}}
@@ -94,12 +99,14 @@
 		const fileInput = canvas.getByLabelText('Load graph file') as HTMLInputElement;
 		const file = new File(['<!doctype html><html></html>'], 'graph.html', { type: 'text/html' });
 
+		canvas.getByRole('button', { name: 'Open' }).click();
 		Object.defineProperty(fileInput, 'files', {
 			value: [file],
 			configurable: true
 		});
 		fileInput.dispatchEvent(new Event('change', { bubbles: true }));
 
+		expect(spyFor(args.onOpenGraphFilePicker).mock.calls).toHaveLength(1);
 		expect(spyFor(args.onLoadGraph).mock.calls).toHaveLength(1);
 		expect((spyFor(args.onLoadGraph).mock.calls[0] as [File])[0].name).toBe('graph.html');
 		expect(fileInput.value).toBe('');
