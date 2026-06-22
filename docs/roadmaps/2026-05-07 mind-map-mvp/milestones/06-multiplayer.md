@@ -1,8 +1,8 @@
-# Milestone 05: Multiplayer
+# Milestone 06: Multiplayer
 
 **Status:** not started
-**Depends on:** milestones 01 (mutations) and 04 (persistence interface
-and a server backend).
+**Depends on:** milestones 01 (mutations), 04 (persistence interface),
+and 05 (local filter/find semantics).
 **Plan:** _none yet._
 
 ## Goal

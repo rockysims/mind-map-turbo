@@ -73,18 +73,18 @@ for a SvelteKit API + Postgres without touching any UI code.
 
 - **Server backend implementation.** `ServerPersistence` is a stub /
   thin fetch wrapper; the actual Postgres + SvelteKit API endpoints
-  ship in a separate milestone with multiplayer (`05`) — they share
+  ship in a separate milestone with multiplayer (`06`) — they share
   infrastructure.
-- **Authentication / accounts.** Until 05, "user" = a browser. Graphs
+- **Authentication / accounts.** Until 06, "user" = a browser. Graphs
   live by id in the chosen backend.
 - **Conflict resolution.** Single-writer assumption. Multi-writer is
-  milestone 05.
+  milestone 06.
 
 ## Risks and open questions
 
 - **Save granularity.** Save the entire `MultigraphData` blob, or
   per-mutation deltas? For local-first → MVP, blob is fine. Deltas
-  matter for multiplayer (already a milestone 05 concern; Yjs handles
+  matter for multiplayer (already a milestone 06 concern; Yjs handles
   them transparently).
 - **localStorage quotas.** Roughly 5–10 MB. A graph with thousands of
   nodes + descriptions could hit this. Acceptable for MVP — surface a

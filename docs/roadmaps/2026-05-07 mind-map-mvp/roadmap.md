@@ -53,20 +53,24 @@ individual PR-sized tasks.
 | 04k | Parallel edge visualization                        | complete    | [milestone](milestones/04k-parallel-edge-visualization.md), [plan](plans/2026-06-18%2004k-parallel-edge-visualization.md)                       |
 | 04l | Self-contained HTML save files                     | complete    | [milestone](milestones/04l-self-contained-html-save-files.md), [plan](plans/2026-06-21%2004l-self-contained-html-save-files.md)                 |
 | 04m | Single-document save UX                            | complete    | [milestone](milestones/04m-single-document-save-ux.md), [plan](plans/2026-06-21%2004m-single-document-save-ux.md)                               |
-| 05  | Multiplayer                                        | not started | [milestones/05-multiplayer.md](milestones/05-multiplayer.md)                                                                                    |
-| 06  | Search                                             | not started | [milestones/06-search.md](milestones/06-search.md)                                                                                              |
+| 05  | Filter / find / search                             | not started | [milestones/05-filter-find-search.md](milestones/05-filter-find-search.md)                                                                      |
+| 06  | Multiplayer                                        | not started | [milestones/06-multiplayer.md](milestones/06-multiplayer.md)                                                                                    |
 
-Milestones 04a-04l sit between persistence and multiplayer. Milestone 04b
-intentionally supersedes 04a's Fibonacci reveal and dimming behavior. Milestone
-04h is a behavior-preserving refactor, not new product scope. Milestone 04i adds
-enter/exit and pin reveal-wave animation as pure modules so 04h can absorb the
-wiring; if 04h lands first, 04i targets the post-split files. Milestone 04j adds
-edge-local fade windows for visual underpasses without changing graph
-connectivity or layout routing. Milestone 04k makes parallel edges visible with
-render offsets while deferring UI creation of duplicate edges. Milestone 04l
-evolves explicit graph files from JSON backups into self-contained offline HTML
-documents. Milestone 04m streamlines that file model into a single-document
-toolbar with Download and draft-vs-file status instead of graph-library controls.
+Milestones 04a-04m deepen the local-first graph experience before multiplayer.
+Milestone 04b intentionally supersedes 04a's Fibonacci reveal and dimming
+behavior. Milestone 04h is a behavior-preserving refactor, not new product
+scope. Milestone 04i adds enter/exit and pin reveal-wave animation as pure
+modules so 04h can absorb the wiring; if 04h lands first, 04i targets the
+post-split files. Milestone 04j adds edge-local fade windows for visual
+underpasses without changing graph connectivity or layout routing. Milestone
+04k makes parallel edges visible with render offsets while deferring UI creation
+of duplicate edges. Milestone 04l evolves explicit graph files from JSON
+backups into self-contained offline HTML documents. Milestone 04m streamlines
+that file model into a single-document toolbar with Download and draft-vs-file
+status instead of graph-library controls.
+Milestone 05 intentionally lands before milestone 06 so local filter/find
+semantics, visual query states, and camera navigation are settled before those
+states need to respond to remote multiplayer edits.
 
 ## How this directory is organized
 
@@ -87,7 +91,7 @@ we change approach mid-stream — old plans stay as historical record.
 
 ## Out of scope (for now)
 
-- Authentication and accounts (deferred; blocks Multiplayer #5).
+- Authentication and accounts (deferred; blocks Multiplayer #6).
 - Rich text / markdown / images in node descriptions (post-MVP).
 - Versioning / undo-redo UI (the immutable-update pattern enables it; a
   UI for it can come later).

@@ -208,7 +208,7 @@ the milestone acceptance criteria are satisfied.
 
 - Plan status is `done`, milestone status is `complete`, and roadmap row 04
   links both the milestone and this plan.
-- Any notes from implementation that affect milestone 05 are captured in
+- Any notes from implementation that affect milestone 06 are captured in
   the plan notes or the multiplayer milestone.
 
 ## Wave plan

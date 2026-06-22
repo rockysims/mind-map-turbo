@@ -52,7 +52,7 @@ follow-up plan owns its own (architecture-level) decisions:
 
 - Any change to the `Persistence` interface, `SaveScheduler` API, or
   schema envelope. Behavior parity is the bar.
-- Server backend, Drizzle, Postgres — still milestone 05 territory.
+- Server backend, Drizzle, Postgres — still milestone 06 territory.
 - Multi-tab conflict resolution beyond the existing storage-event
   reload.
 - Undo/redo, version history, or richer notice UX (toasts, etc.).

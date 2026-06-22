@@ -11,7 +11,7 @@ through pure functions with unit tests. After this milestone, the only
 way the graph changes is via a function in `lib/graph.ts`.
 
 This is the keystone milestone — every later milestone (layout,
-persistence, multiplayer, search) consumes the API shaped here.
+persistence, filter/find/search, multiplayer) consumes the API shaped here.
 
 ## Scope
 
