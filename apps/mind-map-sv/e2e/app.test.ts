@@ -11,10 +11,8 @@ function graphUrl(graphId: string): string {
 	return `/#/?${new URLSearchParams({ graph: graphId }).toString()}`;
 }
 
-function graphIdFromPageUrl(rawUrl: string): string | null {
-	const url = new URL(rawUrl);
-	const hashRoute = url.hash.startsWith('#/') ? new URL(url.hash.slice(1), url.origin) : null;
-	return hashRoute?.searchParams.get('graph') ?? url.searchParams.get('graph');
+function documentDraftGraphId(documentId: string): string {
+	return `document:${documentId}`;
 }
 
 test('home page renders the graph entrypoint', async ({ page }) => {
@@ -23,7 +21,7 @@ test('home page renders the graph entrypoint', async ({ page }) => {
 	await expect(page.getByText('Node 0')).toBeVisible();
 });
 
-test('persists edited nodes across reloads and graph switches', async ({ page }) => {
+test('persists edited nodes across reloads in one document tab', async ({ page }) => {
 	const firstGraphId = `e2e-${Date.now()}`;
 
 	await page.goto('/');
@@ -36,6 +34,7 @@ test('persists edited nodes across reloads and graph switches', async ({ page })
 
 	await page.reload();
 	await expect(page.getByText('Persisted Node')).toBeVisible();
+	await expect(page.getByRole('status')).toContainText('Download needed');
 
 	const storedPayload = await page.evaluate((graphId) => {
 		const key = `mind-map:graph:${encodeURIComponent(graphId)}`;
@@ -44,46 +43,10 @@ test('persists edited nodes across reloads and graph switches', async ({ page })
 	}, firstGraphId);
 	expect(storedPayload).toMatchObject({ schemaVersion: CURRENT_SCHEMA_VERSION });
 
+	page.once('dialog', (dialog) => dialog.accept());
 	await page.getByRole('button', { name: 'New graph' }).click();
-	await expect(page).toHaveURL(/graph=graph-/);
-	const secondGraphId = graphIdFromPageUrl(page.url());
-	if (!secondGraphId) throw new Error('Expected New graph to route to a generated graph id');
 	await expect(page.getByText('Node 0')).toBeVisible();
-
-	await editFirstNodeTitle(page, 'Second Graph Node');
-	await waitForStoredTitle(page, secondGraphId, 'Second Graph Node');
-
-	await page.getByLabel('Load graph').selectOption(firstGraphId);
-	await expect(page.getByText('Persisted Node')).toBeVisible();
-
-	await page.getByLabel('Load graph').selectOption(secondGraphId ?? '');
-	await expect(page.getByText('Second Graph Node')).toBeVisible();
-});
-
-test('deletes the selected graph without recreating it when another graph exists', async ({
-	page
-}) => {
-	const firstGraphId = `delete-first-${Date.now()}`;
-	const secondGraphId = `delete-second-${Date.now()}`;
-
-	await page.goto('/');
-	await page.evaluate(() => localStorage.clear());
-	await page.goto(graphUrl(firstGraphId));
-	await expect(page.getByText('Node 0')).toBeVisible();
-	await editFirstNodeTitle(page, 'Remaining Graph');
-	await waitForStoredTitle(page, firstGraphId, 'Remaining Graph');
-
-	await page.goto(graphUrl(secondGraphId));
-	await expect(page.getByText('Node 0')).toBeVisible();
-	await editFirstNodeTitle(page, 'Deleted Graph');
-	await waitForStoredTitle(page, secondGraphId, 'Deleted Graph');
-
-	await page.getByRole('button', { name: 'Delete graph' }).click();
-
-	await expect(page).toHaveURL(new RegExp(`graph=${firstGraphId}`));
-	await expect(page.getByText('Remaining Graph')).toBeVisible();
-	await expect(page.getByLabel('Load graph')).not.toContainText(secondGraphId);
-	await expectStoredGraphMissing(page, secondGraphId);
+	await expect(page.getByRole('status')).toHaveText('New graph.');
 });
 
 test('exports HTML graph document containing schemaVersion, graph data, and viewState', async ({
@@ -104,12 +67,12 @@ test('exports HTML graph document containing schemaVersion, graph data, and view
 	await page.locator('.stage').dispatchEvent('wheel', { deltaY: -300 });
 	await waitForStoredViewState(page, graphId, { scaleDifferentFrom: 1 });
 
-	// Capture the Export download.
+	// Capture the Download artifact.
 	const downloadPromise = page.waitForEvent('download');
-	await page.getByRole('button', { name: 'Export' }).click();
+	await page.getByRole('button', { name: 'Download' }).click();
 	const download = await downloadPromise;
 	const downloadedPath = await download.path();
-	if (!downloadedPath) throw new Error('Export download did not produce a file');
+	if (!downloadedPath) throw new Error('Download did not produce a file');
 	expect(download.suggestedFilename()).toBe(`${graphId}.html`);
 	const html = await readFile(downloadedPath, 'utf-8');
 	expect(html).not.toContain('/@fs/');
@@ -125,88 +88,7 @@ test('exports HTML graph document containing schemaVersion, graph data, and view
 	});
 	// Wheel zoom should have changed scale away from the neutral value of 1.
 	expect(doc.viewState.scale).not.toBe(1);
-});
-
-test('imports graph document and restores graph data and viewState', async ({ page }) => {
-	const graphId = `e2e-import-${Date.now()}`;
-	const importedTitle = 'Imported Node Title';
-	const knownViewState = { panX: 80, panY: 40, scale: 1.5 };
-	const knownDoc = {
-		schemaVersion: CURRENT_SCHEMA_VERSION,
-		data: {
-			nodes: [{ id: 'n0', title: importedTitle, description: 'Imported description', tags: [] }],
-			edges: [],
-			posByNodeId: { n0: { x: 0, y: 0 } },
-			tagColorConfig: { nodeTags: {}, edgeTags: {} }
-		},
-		viewState: knownViewState,
-		documentId: `doc-${Date.now()}`,
-		htmlDocumentVersion: 1,
-		minReaderVersion: 1
-	};
-	const tmpFile = join(tmpdir(), `e2e-import-${Date.now()}.html`);
-	await writeFile(tmpFile, graphHtmlFile(knownDoc));
-
-	await page.goto('/');
-	await page.evaluate(() => localStorage.clear());
-	await page.goto(graphUrl(graphId));
-	await expect(page.getByText('Node 0')).toBeVisible();
-
-	// The default graph is unchanged, so no confirm dialog fires on import.
-	await page.getByLabel('Import graph from file').setInputFiles(tmpFile);
-
-	// Wait for the import success notice.
-	await expect(page.getByRole('status')).toContainText(`Imported graph into "${graphId}"`);
-
-	// Graph should now display the imported node title.
-	await expect(page.getByText(importedTitle)).toBeVisible();
-
-	// Verify viewState was persisted to localStorage.
-	const storedPayload = await page.evaluate((id) => {
-		const item = localStorage.getItem(`mind-map:graph:${encodeURIComponent(id)}`);
-		return item
-			? (JSON.parse(item) as { viewState?: { panX: number; panY: number; scale: number } })
-			: null;
-	}, graphId);
-	expect(storedPayload?.viewState).toMatchObject(knownViewState);
-
-	// Stage transform should reflect the imported viewState (graphGeneration bump remounts Stage).
-	const transform = await page
-		.locator('.stage-content')
-		.evaluate((el) => (el as HTMLElement).style.transform);
-	expect(transform).toContain(`scale(${knownViewState.scale})`);
-});
-
-test('imports legacy JSON graph documents', async ({ page }) => {
-	const graphId = `e2e-json-import-${Date.now()}`;
-	const importedTitle = 'Legacy JSON Import';
-	const tmpFile = join(tmpdir(), `e2e-import-${Date.now()}.json`);
-	await writeFile(
-		tmpFile,
-		JSON.stringify(
-			{
-				schemaVersion: 1,
-				data: {
-					nodes: [{ id: 'n0', title: importedTitle, description: 'Imported description' }],
-					edges: [],
-					posByNodeId: { n0: { x: 0, y: 0 } }
-				},
-				viewState: { panX: 0, panY: 0, scale: 1 }
-			},
-			null,
-			2
-		)
-	);
-
-	await page.goto('/');
-	await page.evaluate(() => localStorage.clear());
-	await page.goto(graphUrl(graphId));
-	await expect(page.getByText('Node 0')).toBeVisible();
-
-	await page.getByLabel('Import graph from file').setInputFiles(tmpFile);
-
-	await expect(page.getByRole('status')).toContainText(`Imported graph into "${graphId}"`);
-	await expect(page.getByText(importedTitle)).toBeVisible();
+	await expect(page.getByRole('status')).toHaveText('Matches downloaded file.');
 });
 
 test('self-contained build artifact opens from disk without sibling app assets', async ({
@@ -223,7 +105,7 @@ test('self-contained build artifact opens from disk without sibling app assets',
 	expect(requests.filter((url) => url.includes('/_app/'))).toEqual([]);
 });
 
-test('opened HTML save file data wins over stale document draft', async ({ page }) => {
+test('opened HTML save file data wins when no local draft exists', async ({ page }) => {
 	const documentId = `doc-stale-${Date.now()}`;
 	const tmpFile = join(tmpdir(), `e2e-open-save-${Date.now()}.html`);
 
@@ -242,6 +124,42 @@ test('opened HTML save file data wins over stale document draft', async ({ page 
 
 	await expect(page.getByText('Fresh Embedded Node')).toBeVisible();
 	await expect(page.getByText('Stale Embedded Node')).not.toBeVisible();
+});
+
+test('opened HTML save file recovers dirty local draft before embedded data', async ({ page }) => {
+	const documentId = `doc-dirty-${Date.now()}`;
+	const tmpFile = join(tmpdir(), `e2e-open-dirty-save-${Date.now()}.html`);
+	const graphId = documentDraftGraphId(documentId);
+
+	await writeFile(
+		tmpFile,
+		await selfContainedGraphHtml(graphDocumentPayload({ documentId, title: 'Embedded Node' }))
+	);
+	await page.goto(pathToFileURL(tmpFile).href);
+	await expect(page.getByText('Embedded Node')).toBeVisible();
+
+	await editFirstNodeTitle(page, 'Recovered Draft Node');
+	await waitForStoredTitle(page, graphId, 'Recovered Draft Node');
+
+	await writeFile(
+		tmpFile,
+		await selfContainedGraphHtml(graphDocumentPayload({ documentId, title: 'Fresh File Node' }))
+	);
+	await page.goto(pathToFileURL(tmpFile).href);
+
+	await expect(page.getByText('Recovered Draft Node')).toBeVisible();
+	await expect(page.getByText('Fresh File Node')).not.toBeVisible();
+	await expect(page.getByRole('status')).toHaveText('Recovered local edits. Download needed.');
+});
+
+test('single-document toolbar omits graph library controls', async ({ page }) => {
+	await page.goto('/');
+
+	await expect(page.getByRole('button', { name: 'New graph' })).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Download' })).toBeVisible();
+	await expect(page.getByLabel('Load graph')).toHaveCount(0);
+	await expect(page.getByLabel('Import graph from file')).toHaveCount(0);
+	await expect(page.getByRole('button', { name: 'Delete graph' })).toHaveCount(0);
 });
 
 test('reload restores graph data and viewState from localStorage without file import', async ({
@@ -367,17 +285,6 @@ async function waitForStoredViewState(
 		},
 		{ graphId, scaleDifferentFrom: opts.scaleDifferentFrom }
 	);
-}
-
-async function expectStoredGraphMissing(page: Page, graphId: string) {
-	await expect
-		.poll(async () =>
-			page.evaluate(
-				(graphId) => localStorage.getItem(`mind-map:graph:${encodeURIComponent(graphId)}`),
-				graphId
-			)
-		)
-		.toBeNull();
 }
 
 function graphHtmlFile(payload: unknown): string {

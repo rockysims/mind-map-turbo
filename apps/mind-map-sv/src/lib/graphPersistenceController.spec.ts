@@ -11,6 +11,7 @@ import {
 } from './graphPersistenceController';
 import { DEFAULT_GRAPH_ID } from './graphRoute';
 import {
+	documentDraftGraphId,
 	graphStorageKey,
 	type GraphSummary,
 	type PersistedGraphRecord,
@@ -208,13 +209,18 @@ describe('GraphPersistenceController', () => {
 		expect(events).toEqual(['save', 'save', 'navigate:next']);
 	});
 
-	it('creates generated graph ids through navigation', async () => {
+	it('creates generated graph ids in the current tab', async () => {
 		const { controller, navigate } = setup();
 		await controller.load('active');
 
 		await controller.createGraph();
 
-		expect(navigate).toHaveBeenCalledWith('graph-new');
+		expect(navigate).not.toHaveBeenCalled();
+		expect(controller.getView()).toMatchObject({
+			loadedGraphId: 'graph-new',
+			graph: createDefaultGraph(),
+			documentStatus: 'new-clean'
+		});
 	});
 
 	it('deletes the selected graph and navigates to an existing graph when one remains', async () => {
@@ -288,6 +294,69 @@ describe('GraphPersistenceController', () => {
 		expect(controller.getView()).toMatchObject({
 			graph: updated,
 			status: { state: 'reloaded', graphId: 'active' }
+		});
+	});
+
+	it('loads embedded HTML documents when no local draft exists', async () => {
+		const { controller, persistence } = setup();
+		const graph = makeGraph({ nodeCount: 2 });
+		const viewState = nonNeutralViewState();
+
+		await controller.loadEmbeddedDocument({ documentId: 'doc-file', data: graph, viewState });
+
+		expect(controller.getView()).toMatchObject({
+			loadedGraphId: documentDraftGraphId('doc-file'),
+			documentId: 'doc-file',
+			graph,
+			viewState,
+			documentStatus: 'file-clean'
+		});
+		expect(persistence.save).not.toHaveBeenCalled();
+	});
+
+	it('prefers a dirty local document draft over the embedded file payload', async () => {
+		const { controller, persistence } = setup();
+		const fileGraph = makeGraph({ nodeCount: 1 });
+		const draftGraph = makeGraph({ nodeCount: 3 });
+		await persistence.save(documentDraftGraphId('doc-dirty'), {
+			data: draftGraph,
+			viewState: nonNeutralViewState()
+		});
+
+		await controller.loadEmbeddedDocument({
+			documentId: 'doc-dirty',
+			data: fileGraph,
+			viewState: NEUTRAL_VIEW_STATE
+		});
+
+		expect(controller.getView()).toMatchObject({
+			loadedGraphId: documentDraftGraphId('doc-dirty'),
+			documentId: 'doc-dirty',
+			graph: draftGraph,
+			viewState: nonNeutralViewState(),
+			documentStatus: 'file-recovered-draft'
+		});
+		expect(persistence.save).toHaveBeenCalledTimes(1);
+	});
+
+	it('does not silently reload external storage over a dirty current graph', async () => {
+		const { controller, persistence } = setup();
+		await controller.load('active');
+		controller.notifyGraphChanged(makeGraph({ nodeCount: 2 }), { syncView: true });
+		await persistence.save('active', {
+			data: makeGraph({ nodeCount: 4 }),
+			viewState: NEUTRAL_VIEW_STATE
+		});
+
+		await controller.handleStorageEvent({ key: graphStorageKey('test', 'active') });
+
+		expect(controller.getView()).toMatchObject({
+			graph: makeGraph({ nodeCount: 2 }),
+			documentStatus: 'new-dirty',
+			status: {
+				state: 'notice',
+				message: 'Kept local draft; another tab changed this document.'
+			}
 		});
 	});
 

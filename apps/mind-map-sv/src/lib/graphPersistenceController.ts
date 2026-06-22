@@ -1,13 +1,26 @@
 import type { MultigraphData } from './components/ui/types/multigraph';
 import {
+	documentStatusForGraph,
+	documentStatusNotice,
+	graphDataEquals,
+	type DocumentBaseline,
+	type DocumentStatus
+} from './documentStatus';
+import {
 	createGraphFileArtifact,
 	isUnsupportedHtmlGraphFile,
 	parseGraphFileText,
+	type GraphFileDocument,
 	type GraphFileArtifact
 } from './graphFile';
 import { DEFAULT_GRAPH_ID } from './graphRoute';
 import { NEUTRAL_VIEW_STATE, PersistedGraphError, type ViewState } from './migrations';
-import { graphIdFromStorageKey, type GraphSummary, type Persistence } from './persistence';
+import {
+	documentDraftGraphId,
+	graphIdFromStorageKey,
+	type GraphSummary,
+	type Persistence
+} from './persistence';
 import type { SaveStatus } from './saveScheduler';
 
 export type ImportGraphResult =
@@ -34,6 +47,7 @@ export type ControllerView = {
 	graphSummaries: GraphSummary[];
 	loadedGraphId: string;
 	documentId: string | null;
+	documentStatus: DocumentStatus;
 	graphGeneration: number;
 	status: ControllerStatus;
 };
@@ -57,6 +71,10 @@ export type GraphPersistenceControllerDeps = {
 		currentGraph: MultigraphData;
 		incomingGraph: MultigraphData;
 	}) => boolean | Promise<boolean>;
+	confirmNewGraphReplace?: (context: {
+		currentGraph: MultigraphData;
+		documentStatus: DocumentStatus;
+	}) => boolean | Promise<boolean>;
 	minScale?: number;
 	maxScale?: number;
 	createGraphId?: () => string;
@@ -70,15 +88,20 @@ export class GraphPersistenceController {
 	private readonly scheduler: GraphSaveScheduler;
 	private view: ControllerView;
 	private graphGeneration = 0;
+	private baseline: DocumentBaseline;
+	private recoveredDraft = false;
 
 	constructor(private readonly deps: GraphPersistenceControllerDeps) {
+		const defaultGraph = deps.createDefaultGraph();
+		this.baseline = { kind: 'new', graph: defaultGraph };
 		this.scheduler = deps.createScheduler((status) => this.handleSaveStatus(status));
 		this.view = {
-			graph: deps.createDefaultGraph(),
+			graph: defaultGraph,
 			viewState: { ...NEUTRAL_VIEW_STATE },
 			graphSummaries: [],
 			loadedGraphId: '',
 			documentId: null,
+			documentStatus: documentStatusForGraph(defaultGraph, this.baseline),
 			graphGeneration: 0,
 			status: { state: 'loading', graphId: DEFAULT_GRAPH_ID }
 		};
@@ -95,6 +118,7 @@ export class GraphPersistenceController {
 	getView(): ControllerView {
 		return {
 			...this.view,
+			documentStatus: this.currentDocumentStatus(),
 			graphSummaries: [...this.view.graphSummaries]
 		};
 	}
@@ -109,14 +133,21 @@ export class GraphPersistenceController {
 
 		this.update({ status: { state: 'loading', graphId } });
 		const savedGraph = await this.deps.persistence.load(graphId);
-		const nextGraph = savedGraph?.data ?? this.deps.createDefaultGraph();
+		const defaultGraph = this.deps.createDefaultGraph();
+		const nextGraph = savedGraph?.data ?? defaultGraph;
 		const nextViewState = savedGraph?.viewState ?? { ...NEUTRAL_VIEW_STATE };
+		this.baseline = {
+			kind: 'new',
+			graph: defaultGraph
+		};
+		this.recoveredDraft = false;
 		this.graphGeneration += 1;
 		this.update({
 			graph: nextGraph,
 			viewState: nextViewState,
 			loadedGraphId: graphId,
 			documentId: options.documentId ?? null,
+			documentStatus: this.currentDocumentStatus(),
 			graphGeneration: this.graphGeneration,
 			graphSummaries: await this.deps.persistence.list()
 		});
@@ -133,11 +164,41 @@ export class GraphPersistenceController {
 		});
 	}
 
+	async loadEmbeddedDocument(doc: GraphFileDocument): Promise<void> {
+		if (!doc.documentId) {
+			await this.load(DEFAULT_GRAPH_ID, { flushCurrent: false });
+			return;
+		}
+
+		const graphId = documentDraftGraphId(doc.documentId);
+		this.update({ status: { state: 'loading', graphId } });
+		const savedDraft = await this.deps.persistence.load(graphId);
+		const recoveredDraft = savedDraft !== null && !graphDataEquals(savedDraft.data, doc.data);
+		const nextGraph = savedDraft?.data ?? doc.data;
+		const nextViewState = savedDraft?.viewState ?? doc.viewState;
+
+		this.baseline = { kind: 'file', graph: doc.data };
+		this.recoveredDraft = recoveredDraft;
+		this.graphGeneration += 1;
+		this.update({
+			graph: nextGraph,
+			viewState: nextViewState,
+			loadedGraphId: graphId,
+			documentId: doc.documentId,
+			documentStatus: this.currentDocumentStatus(),
+			graphGeneration: this.graphGeneration,
+			graphSummaries: await this.deps.persistence.list(),
+			status: { state: 'loaded', graphId }
+		});
+
+		if (savedDraft === null) await this.refreshGraphList();
+	}
+
 	notifyGraphChanged(data: MultigraphData, options: { syncView?: boolean } = {}): void {
 		const graphId = this.view.loadedGraphId || DEFAULT_GRAPH_ID;
 		this.scheduler.schedule(graphId, data, this.view.viewState);
 		if (options.syncView) {
-			this.update({ graph: data });
+			this.update({ graph: data, documentStatus: this.currentDocumentStatus(data) });
 		}
 	}
 
@@ -154,7 +215,7 @@ export class GraphPersistenceController {
 		if (this.view.documentId === null) {
 			this.update({ documentId });
 		}
-		return createGraphFileArtifact(
+		const artifact = createGraphFileArtifact(
 			this.view.loadedGraphId || DEFAULT_GRAPH_ID,
 			{
 				data: this.view.graph,
@@ -166,6 +227,10 @@ export class GraphPersistenceController {
 				htmlShell
 			}
 		);
+		this.baseline = { kind: 'download', graph: this.view.graph };
+		this.recoveredDraft = false;
+		this.update({ documentId, documentStatus: this.currentDocumentStatus() });
+		return artifact;
 	}
 
 	async importGraphDocument(text: string): Promise<ImportGraphResult> {
@@ -232,10 +297,13 @@ export class GraphPersistenceController {
 
 		const graphId = this.view.loadedGraphId || DEFAULT_GRAPH_ID;
 		this.graphGeneration += 1;
+		this.baseline = { kind: 'file', graph: imported.data };
+		this.recoveredDraft = false;
 		this.update({
 			graph: imported.data,
 			viewState: imported.viewState,
 			documentId: imported.documentId ?? this.view.documentId,
+			documentStatus: this.currentDocumentStatus(imported.data),
 			graphGeneration: this.graphGeneration
 		});
 		this.scheduler.schedule(graphId, imported.data, imported.viewState);
@@ -274,7 +342,35 @@ export class GraphPersistenceController {
 	}
 
 	async createGraph(graphId = this.nextGraphId()): Promise<void> {
-		await this.selectGraph(graphId);
+		const shouldConfirm = this.currentDocumentStatus() !== 'new-clean';
+		const confirmed = !shouldConfirm
+			? true
+			: ((await this.deps.confirmNewGraphReplace?.({
+					currentGraph: this.view.graph,
+					documentStatus: this.currentDocumentStatus()
+				})) ?? false);
+		if (!confirmed) {
+			this.update({ status: { state: 'notice', message: 'New graph cancelled.' } });
+			return;
+		}
+
+		await this.flushPendingSave();
+		const nextGraph = this.deps.createDefaultGraph();
+		this.baseline = { kind: 'new', graph: nextGraph };
+		this.recoveredDraft = false;
+		this.graphGeneration += 1;
+		this.update({
+			graph: nextGraph,
+			viewState: { ...NEUTRAL_VIEW_STATE },
+			loadedGraphId: graphId,
+			documentId: null,
+			documentStatus: this.currentDocumentStatus(nextGraph),
+			graphGeneration: this.graphGeneration,
+			status: { state: 'loaded', graphId }
+		});
+		this.scheduler.schedule(graphId, nextGraph, { ...NEUTRAL_VIEW_STATE });
+		await this.flushPendingSave();
+		await this.refreshGraphList();
 	}
 
 	async deleteGraph(graphId: string): Promise<void> {
@@ -298,6 +394,20 @@ export class GraphPersistenceController {
 
 		const graphId = graphIdFromStorageKey(this.deps.storageNamespace, event.key);
 		if (graphId !== this.view.loadedGraphId) return;
+		const documentStatus = this.currentDocumentStatus();
+		if (
+			documentStatus !== 'new-clean' &&
+			documentStatus !== 'file-clean' &&
+			documentStatus !== 'download-clean'
+		) {
+			this.update({
+				status: {
+					state: 'notice',
+					message: 'Kept local draft; another tab changed this document.'
+				}
+			});
+			return;
+		}
 
 		await this.load(graphId, { flushCurrent: false, externalReload: true });
 	}
@@ -328,8 +438,17 @@ export class GraphPersistenceController {
 	}
 
 	private update(patch: Partial<ControllerView>): void {
-		this.view = { ...this.view, ...patch };
+		const nextGraph = patch.graph ?? this.view.graph;
+		this.view = {
+			...this.view,
+			...patch,
+			documentStatus: patch.documentStatus ?? this.currentDocumentStatus(nextGraph)
+		};
 		this.emit();
+	}
+
+	private currentDocumentStatus(graph = this.view.graph): DocumentStatus {
+		return documentStatusForGraph(graph, this.baseline, { recoveredDraft: this.recoveredDraft });
 	}
 
 	private emit(): void {
@@ -357,6 +476,23 @@ export function statusToNotice(status: ControllerStatus): string {
 	if (status.state === 'warning') return status.message;
 	if (status.state === 'notice') return status.message;
 	return `Save failed: ${status.message}`;
+}
+
+export function controllerNotice(view: ControllerView): string {
+	if (view.status.state === 'loading') return statusToNotice(view.status);
+	if (view.status.state === 'saving') return statusToNotice(view.status);
+	if (view.status.state === 'warning') return statusToNotice(view.status);
+	if (view.status.state === 'error') return statusToNotice(view.status);
+	if (
+		view.status.state === 'notice' &&
+		(view.status.message.includes('cancelled') ||
+			view.status.message.includes('failed') ||
+			view.status.message.includes('newer') ||
+			view.status.message.includes('Kept local draft'))
+	) {
+		return view.status.message;
+	}
+	return documentStatusNotice(view.documentStatus);
 }
 
 function saveStatusToControllerStatus(status: SaveStatus): ControllerStatus {

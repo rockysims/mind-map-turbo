@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { APP_CONFIG } from '$lib/appConfig';
-	import { readFileText } from '$lib/browserGraphFile';
 	import { makeGraph } from '$lib/components/ui/Multigraph/lib/testFixtures';
 	import Multigraph from '$lib/components/ui/Multigraph/Multigraph.svelte';
 	import GraphToolbar from '$lib/components/ui/GraphToolbar/GraphToolbar.svelte';
@@ -61,6 +60,7 @@
 		},
 		storageNamespace: namespace,
 		createGraphId: () => 'graph-new',
+		confirmNewGraphReplace: () => confirmResponse,
 		confirmGraphImportReplace: () => confirmResponse,
 		minScale: APP_CONFIG.multigraph.zoom.minScale,
 		maxScale: APP_CONFIG.multigraph.zoom.maxScale
@@ -112,7 +112,7 @@
 		};
 	}
 
-	function handleExport(): void {
+	function handleDownload(): void {
 		lastDownload = persisted.exportGraphDocument().content;
 	}
 
@@ -123,10 +123,6 @@
 
 	async function handleImportText(): Promise<void> {
 		lastImportResult = await persisted.importGraphDocument(simulateImportText);
-	}
-
-	async function handleRealImport(file: File): Promise<void> {
-		lastImportResult = await persisted.importGraphDocumentFromReader(() => readFileText(file));
 	}
 </script>
 
@@ -139,6 +135,7 @@
 	data-node-count={persisted.graph.nodes.length}
 	data-primary-title={primaryTitle}
 	data-graph-generation={persisted.graphGeneration}
+	data-document-status={persisted.documentStatus}
 	data-scale-animation-duration-ms={layoutSettings.scaleAnimationDurationMs ?? ''}
 	data-last-download={lastDownload}
 	data-last-import-result={lastImportResult}
@@ -147,14 +144,9 @@
 	data-view-scale={persisted.viewState.scale}
 >
 	<GraphToolbar
-		selectedGraphId={routedGraphId}
-		graphSummaries={persisted.graphSummaries}
 		notice={persisted.notice}
-		onGraphSelected={(graphId) => void persisted.selectGraph(graphId)}
 		onNewGraph={() => void persisted.createGraph()}
-		onDeleteGraph={() => void persisted.deleteGraph(routedGraphId)}
-		onExport={handleExport}
-		onImport={(file) => void handleRealImport(file)}
+		onDownload={handleDownload}
 	/>
 
 	<div class="harness-actions" aria-label="Story harness controls">

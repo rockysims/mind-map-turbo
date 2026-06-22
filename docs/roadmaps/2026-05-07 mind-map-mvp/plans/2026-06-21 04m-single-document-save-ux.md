@@ -3,7 +3,7 @@
 **Created:** 2026-06-21
 **Author:** Codex agent
 **Milestone:** [milestones/04m-single-document-save-ux.md](../milestones/04m-single-document-save-ux.md)
-**Status:** draft
+**Status:** done
 **Total estimated effort:** L (4 tasks; status model, controller behavior,
 toolbar simplification, and browser coverage)
 
@@ -57,7 +57,7 @@ whether the local draft matches the file/download baseline.
 > the persistence controller, route page, and toolbar all participate in the same
 > user-visible state machine.
 
-### T01 - Add document fingerprint and status helpers
+### ✓ T01 - Add document fingerprint and status helpers
 
 |                |                                                                                                     |
 | -------------- | --------------------------------------------------------------------------------------------------- |
@@ -84,7 +84,7 @@ downloaded current version without depending on autosave metadata.
 - The helper returns copy-neutral state identifiers; component wording remains
   outside the pure module.
 
-### T02 - Preserve dirty document drafts during boot and autosave
+### ✓ T02 - Preserve dirty document drafts during boot and autosave
 
 |                |                                                                                                                                  |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------- |
@@ -114,7 +114,7 @@ document id.
 - Controller specs cover embedded-vs-draft precedence, new graph reset behavior,
   and external storage reload behavior.
 
-### T03 - Simplify the toolbar to document controls
+### ✓ T03 - Simplify the toolbar to document controls
 
 |                |                                                                                                                                        |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
@@ -142,7 +142,7 @@ to concise right-side copy.
 - Story coverage asserts the simplified toolbar surface and representative
   status copy.
 
-### T04 - Verify the single-document offline flow
+### ✓ T04 - Verify the single-document offline flow
 
 |                |                                                                                                         |
 | -------------- | ------------------------------------------------------------------------------------------------------- |
@@ -219,3 +219,8 @@ surface rather than an intermediate one.
   graph dropdown, Import, or Delete; Export becomes Download; status should show
   whether the draft differs from the file/download baseline; new default graphs
   should not show download-needed until graph data differs from the template.
+- 2026-06-21: Executed all four waves in one implementation pass. The final
+  behavior keeps Import parsing APIs for compatibility while removing the primary
+  Import UI, treats ordinary local graph drafts as dirty relative to the default
+  new-graph template, and does not seed embedded file payloads into localStorage
+  until autosave activity creates a draft.

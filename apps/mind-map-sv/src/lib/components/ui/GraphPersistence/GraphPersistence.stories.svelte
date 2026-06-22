@@ -133,7 +133,7 @@
 
 		await waitForHarnessData(canvasElement, 'loadedGraphId', 'saved');
 		await expect(harness.dataset.primaryTitle).toBe('Saved Graph');
-		await expect(harness.dataset.notice).toBe('Loaded "saved".');
+		await expect(harness.dataset.notice).toBe('Draft saved locally. Download needed.');
 	}}
 />
 
@@ -153,13 +153,15 @@
 		await userEvent.click(canvas.getByRole('button', { name: 'Simulate graph change' }));
 
 		await waitFor(() => expect(harness.dataset.primaryTitle).toBe('Changed Node'));
-		await waitFor(() => expect(harness.dataset.notice).toBe('Saved.'));
+		await waitFor(() =>
+			expect(harness.dataset.notice).toBe('Draft saved locally. Download needed.')
+		);
 		await expect(harness.dataset.graphIds).toContain('editable');
 	}}
 />
 
 <Story
-	name="UserCreatesAndSwitchesGraphs"
+	name="UserCreatesNewGraphInCurrentTab"
 	args={{
 		initialGraphId: 'default',
 		graphs: {
@@ -174,53 +176,9 @@
 		await userEvent.click(canvas.getByRole('button', { name: 'New graph' }));
 
 		await waitForHarnessData(canvasElement, 'loadedGraphId', 'graph-new');
-		await expect(harness.dataset.routedGraphId).toBe('graph-new');
+		await expect(harness.dataset.primaryTitle).toBe('Node 0');
+		await expect(harness.dataset.documentStatus).toBe('new-clean');
 		await expect(harness.dataset.graphIds).toContain('graph-new');
-	}}
-/>
-
-<Story
-	name="DeletingSelectedGraphRoutesToRemainingGraph"
-	args={{
-		initialGraphId: 'second',
-		graphs: {
-			first: graphWithTitle('First Graph'),
-			second: graphWithTitle('Second Graph', 2)
-		}
-	}}
-	play={async ({ canvasElement }: PlayContext) => {
-		const canvas = within(canvasElement);
-		const harness = getHarness(canvasElement);
-
-		await waitForHarnessData(canvasElement, 'loadedGraphId', 'second');
-		await userEvent.click(canvas.getByRole('button', { name: 'Delete graph' }));
-
-		await waitForHarnessData(canvasElement, 'loadedGraphId', 'first');
-		await expect(harness.dataset.routedGraphId).toBe('first');
-		await expect(harness.dataset.graphIds).toBe('first');
-		await expect(harness.dataset.primaryTitle).toBe('First Graph');
-	}}
-/>
-
-<Story
-	name="DeletingLastGraphResetsToDefault"
-	args={{
-		initialGraphId: 'default',
-		graphs: {
-			default: graphWithTitle('Temporary Default', 2)
-		}
-	}}
-	play={async ({ canvasElement }: PlayContext) => {
-		const canvas = within(canvasElement);
-		const harness = getHarness(canvasElement);
-
-		await waitForHarnessData(canvasElement, 'loadedGraphId', 'default');
-		await userEvent.click(canvas.getByRole('button', { name: 'Delete graph' }));
-
-		await waitForHarnessData(canvasElement, 'loadedGraphId', 'default');
-		await waitFor(() => expect(harness.dataset.nodeCount).toBe('1'));
-		await expect(harness.dataset.routedGraphId).toBe('default');
-		await expect(harness.dataset.graphIds).toBe('default');
 	}}
 />
 
@@ -290,7 +248,7 @@
 />
 
 <Story
-	name="ExternalStorageEventReloadsActiveGraph"
+	name="ExternalStorageEventDoesNotReplaceDirtyGraph"
 	args={{
 		initialGraphId: 'shared',
 		graphs: {
@@ -304,13 +262,15 @@
 		await waitForHarnessData(canvasElement, 'loadedGraphId', 'shared');
 		await userEvent.click(canvas.getByRole('button', { name: 'Simulate external reload' }));
 
-		await waitFor(() => expect(harness.dataset.primaryTitle).toBe('Externally Reloaded'));
-		await expect(harness.dataset.notice).toBe('Reloaded "shared" from another tab.');
+		await waitFor(() =>
+			expect(harness.dataset.notice).toBe('Kept local draft; another tab changed this document.')
+		);
+		await expect(harness.dataset.primaryTitle).toBe('Original Graph');
 	}}
 />
 
 <Story
-	name="ExportAndImportRoundTrip"
+	name="DownloadAndImportRoundTrip"
 	args={{
 		initialGraphId: 'export-graph',
 		graphs: {
@@ -324,9 +284,10 @@
 		await waitForHarnessData(canvasElement, 'loadedGraphId', 'export-graph');
 		await expect(harness.dataset.primaryTitle).toBe('Export Me');
 
-		// Export captures HTML into data-last-download without a real download.
-		await userEvent.click(canvas.getByRole('button', { name: 'Export' }));
+		// Download captures HTML into data-last-download without a real browser download.
+		await userEvent.click(canvas.getByRole('button', { name: 'Download' }));
 		await waitFor(() => expect(harness.dataset.lastDownload).toBeTruthy());
+		await expect(harness.dataset.notice).toBe('Matches downloaded file.');
 
 		const exportedHtml = harness.dataset.lastDownload!;
 		const parsed = parseGraphFileText(exportedHtml);
@@ -340,9 +301,7 @@
 		await userEvent.click(canvas.getByRole('button', { name: 'Import last download' }));
 
 		await waitFor(() => expect(harness.dataset.lastImportResult).toBe('imported'));
-		await waitFor(() =>
-			expect(harness.dataset.notice).toMatch(/Imported graph into "export-graph"/)
-		);
+		await waitFor(() => expect(harness.dataset.documentStatus).toBe('file-clean'));
 
 		// Graph data is preserved.
 		await expect(harness.dataset.primaryTitle).toBe('Export Me');
@@ -396,15 +355,15 @@
 		await waitForHarnessData(canvasElement, 'loadedGraphId', 'nonempty');
 		await expect(harness.dataset.nodeCount).toBe('3');
 
-		// Export so we have a valid payload to import.
-		await userEvent.click(canvas.getByRole('button', { name: 'Export' }));
+		// Download so we have a valid payload to import.
+		await userEvent.click(canvas.getByRole('button', { name: 'Download' }));
 		await waitFor(() => expect(harness.dataset.lastDownload).toBeTruthy());
 
 		// Import with confirmResponse=true; replacement is confirmed.
 		await userEvent.click(canvas.getByRole('button', { name: 'Import last download' }));
 
 		await waitFor(() => expect(harness.dataset.lastImportResult).toBe('imported'));
-		await waitFor(() => expect(harness.dataset.notice).toMatch(/Imported graph into "nonempty"/));
+		await waitFor(() => expect(harness.dataset.documentStatus).toBe('file-clean'));
 		expect(harness.dataset.nodeCount).toBe('3');
 	}}
 />

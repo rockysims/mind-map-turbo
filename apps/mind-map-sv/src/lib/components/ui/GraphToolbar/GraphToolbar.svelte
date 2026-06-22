@@ -1,73 +1,18 @@
 <script lang="ts">
-	import type { GraphSummary } from '$lib/persistence';
-
 	let {
-		selectedGraphId,
-		graphSummaries = [],
 		notice = '',
-		onGraphSelected,
 		onNewGraph,
-		onDeleteGraph,
-		onExport,
-		onImport
+		onDownload
 	}: {
-		selectedGraphId: string;
-		graphSummaries?: GraphSummary[];
 		notice?: string;
-		onGraphSelected?: (graphId: string) => void;
 		onNewGraph?: () => void;
-		onDeleteGraph?: () => void;
-		onExport?: () => void;
-		onImport?: (file: File) => void;
+		onDownload?: () => void;
 	} = $props();
-
-	let fileInput = $state<HTMLInputElement | undefined>(undefined);
-
-	function handleGraphSelection(event: Event): void {
-		const target = event.currentTarget as HTMLSelectElement;
-		onGraphSelected?.(target.value);
-	}
-
-	function handleFileChange(event: Event): void {
-		const target = event.currentTarget as HTMLInputElement;
-		const file = target.files?.[0];
-		if (file) {
-			onImport?.(file);
-		}
-		// Reset so the same file can be imported again.
-		if (fileInput) {
-			fileInput.value = '';
-		}
-	}
 </script>
 
 <div class="graph-toolbar" aria-label="Graph persistence controls">
-	<label>
-		Graph
-		<select aria-label="Load graph" value={selectedGraphId} onchange={handleGraphSelection}>
-			{#if graphSummaries.length === 0}
-				<option value={selectedGraphId}>{selectedGraphId}</option>
-			{/if}
-			{#each graphSummaries as summary (summary.id)}
-				<option value={summary.id}>{summary.id}</option>
-			{/each}
-		</select>
-	</label>
 	<button type="button" onclick={() => onNewGraph?.()}>New graph</button>
-	<button type="button" onclick={() => onDeleteGraph?.()}>Delete graph</button>
-	<button type="button" onclick={() => onExport?.()}>Export</button>
-	<label>
-		<span class="sr-only">Import graph from file</span>
-		<input
-			bind:this={fileInput}
-			type="file"
-			accept=".html,text/html,.json,application/json"
-			aria-label="Import graph from file"
-			class="file-input-hidden"
-			onchange={handleFileChange}
-		/>
-		<span aria-hidden="true" class="file-input-button">Import</span>
-	</label>
+	<button type="button" onclick={() => onDownload?.()}>Download</button>
 	<p role="status">{notice}</p>
 </div>
 
@@ -89,17 +34,7 @@
 		transform: translateX(-50%);
 	}
 
-	.graph-toolbar label {
-		display: flex;
-		align-items: center;
-		gap: 0.375rem;
-		font-size: 0.875rem;
-		font-weight: 600;
-	}
-
-	.graph-toolbar select,
-	.graph-toolbar button,
-	.file-input-button {
+	.graph-toolbar button {
 		border: 0;
 		border-radius: 999px;
 		padding: 0.375rem 0.625rem;
@@ -107,31 +42,6 @@
 		color: #0f172a;
 		font: inherit;
 		cursor: pointer;
-	}
-
-	.file-input-hidden {
-		/* Visually hidden but accessible: clicking the label triggers the input. */
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		padding: 0;
-		margin: -1px;
-		overflow: hidden;
-		clip: rect(0, 0, 0, 0);
-		white-space: nowrap;
-		border: 0;
-	}
-
-	.sr-only {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		padding: 0;
-		margin: -1px;
-		overflow: hidden;
-		clip: rect(0, 0, 0, 0);
-		white-space: nowrap;
-		border: 0;
 	}
 
 	.graph-toolbar p {

@@ -1,6 +1,6 @@
 # Milestone 04m: Single-document save UX
 
-**Status:** not started
+**Status:** complete
 **Depends on:** milestone 04l (self-contained HTML save files).
 **Plan:** [2026-06-21 04m-single-document-save-ux.md](../plans/2026-06-21%2004m-single-document-save-ux.md)
 
