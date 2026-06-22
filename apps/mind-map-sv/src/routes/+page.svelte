@@ -5,7 +5,7 @@
 	import { APP_CONFIG } from '$lib/appConfig';
 	import {
 		downloadFileArtifact,
-		OPEN_HTML_FILE_PREFER_EMBEDDED_SESSION_KEY,
+		OPEN_HTML_FILE_FROM_PICKER_SESSION_KEY,
 		openHtmlFilePickerInNewTab,
 		openHtmlTextInNewTab
 	} from '$lib/browserGraphFile';
@@ -16,6 +16,7 @@
 	import GraphToolbar from '$lib/components/ui/GraphToolbar/GraphToolbar.svelte';
 	import Multigraph from '$lib/components/ui/Multigraph/Multigraph.svelte';
 	import type { MultigraphData } from '$lib/components/ui/types/multigraph';
+	import type { EmbeddedDocumentConflictChoice } from '$lib/graphPersistenceController';
 	import {
 		GRAPH_HTML_PAYLOAD_SCRIPT_ID,
 		parseGraphFileText,
@@ -37,6 +38,10 @@
 	let persisted = $state<PersistedGraph | null>(null);
 	let selectedGraphId = $state(graphIdFromUrl(page.url));
 	let initialTitleEditNodeId = $state<string | null>(null);
+	let embeddedDocumentConflict = $state<{
+		documentId: string;
+		resolve: (choice: EmbeddedDocumentConflictChoice) => void;
+	} | null>(null);
 	const defaultPrimaryNodeId = $derived(persisted?.graph.nodes[0]?.id ?? '');
 
 	onMount(() => {
@@ -51,7 +56,7 @@
 		});
 
 		const embeddedGraph = readEmbeddedGraphDocument();
-		const preferEmbeddedGraph = consumeOpenFilePreferEmbeddedFlag();
+		const openedFromFilePicker = consumeOpenFileFromPickerFlag();
 
 		const persistedGraph = usePersistedGraph({
 			persistence,
@@ -97,12 +102,16 @@
 				typeof crypto.randomUUID === 'function'
 					? crypto.randomUUID()
 					: `doc-${Date.now().toString(36)}`,
-			openUnsupportedHtmlFile: openHtmlTextInNewTab
+			openUnsupportedHtmlFile: openHtmlTextInNewTab,
+			chooseEmbeddedDocumentConflict: ({ documentId }) =>
+				new Promise<EmbeddedDocumentConflictChoice>((resolve) => {
+					embeddedDocumentConflict = { documentId, resolve };
+				})
 		});
 		persisted = persistedGraph;
 		void loadRouteGraph(persistedGraph, embeddedGraph, {
 			flushCurrent: false,
-			preferEmbedded: preferEmbeddedGraph
+			openedFromPicker: openedFromFilePicker
 		});
 
 		const onStorage = (event: StorageEvent) => {
@@ -144,21 +153,28 @@
 		openHtmlFilePickerInNewTab();
 	}
 
-	function consumeOpenFilePreferEmbeddedFlag(): boolean {
+	function consumeOpenFileFromPickerFlag(): boolean {
 		try {
-			const shouldPreferEmbedded =
-				sessionStorage.getItem(OPEN_HTML_FILE_PREFER_EMBEDDED_SESSION_KEY) === '1';
-			sessionStorage.removeItem(OPEN_HTML_FILE_PREFER_EMBEDDED_SESSION_KEY);
-			return shouldPreferEmbedded;
+			const openedFromPicker =
+				sessionStorage.getItem(OPEN_HTML_FILE_FROM_PICKER_SESSION_KEY) === '1';
+			sessionStorage.removeItem(OPEN_HTML_FILE_FROM_PICKER_SESSION_KEY);
+			return openedFromPicker;
 		} catch {
 			return false;
 		}
 	}
 
+	function resolveEmbeddedDocumentConflict(choice: EmbeddedDocumentConflictChoice): void {
+		const conflict = embeddedDocumentConflict;
+		if (conflict === null) return;
+		embeddedDocumentConflict = null;
+		conflict.resolve(choice);
+	}
+
 	async function loadRouteGraph(
 		persistedGraph: PersistedGraph,
 		embeddedGraph: GraphFileDocument | null,
-		options: { flushCurrent: boolean; preferEmbedded?: boolean }
+		options: { flushCurrent: boolean; openedFromPicker?: boolean }
 	): Promise<void> {
 		const graphId = graphIdFromUrl(
 			new URL(window.location.href),
@@ -169,7 +185,7 @@
 		if (embeddedGraph?.documentId && graphId === DEFAULT_GRAPH_ID) {
 			initialTitleEditNodeId = null;
 			await persistedGraph.loadEmbeddedDocument(embeddedGraph, {
-				preferEmbedded: options.preferEmbedded
+				openedFromPicker: options.openedFromPicker
 			});
 			return;
 		}
@@ -312,6 +328,32 @@
 		onDownload={() => void handleDownload()}
 	/>
 
+	{#if embeddedDocumentConflict !== null}
+		<div
+			class="conflict-layer"
+			role="alertdialog"
+			aria-labelledby="conflict-title"
+			aria-modal="true"
+		>
+			<section class="conflict-panel">
+				<h2 id="conflict-title">Local edits found</h2>
+				<p>This browser has local edits for this graph. What do you want to open?</p>
+				<div class="conflict-actions">
+					<button type="button" onclick={() => resolveEmbeddedDocumentConflict('recover-draft')}>
+						Recover local edits
+					</button>
+					<button
+						type="button"
+						class="primary"
+						onclick={() => resolveEmbeddedDocumentConflict('open-file')}
+					>
+						Open selected file
+					</button>
+				</div>
+			</section>
+		</div>
+	{/if}
+
 	{#if persisted !== null}
 		{#key `${persisted.loadedGraphId}:${persisted.graphGeneration}`}
 			<Multigraph
@@ -332,5 +374,64 @@
 	.page-shell {
 		position: relative;
 		min-height: 100vh;
+	}
+
+	.conflict-layer {
+		position: fixed;
+		inset: 0;
+		z-index: 80;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 1rem;
+		background: rgb(15 23 42 / 32%);
+	}
+
+	.conflict-panel {
+		display: grid;
+		gap: 1rem;
+		width: min(100%, 28rem);
+		border: 1px solid #cbd5e1;
+		border-radius: 0.5rem;
+		padding: 1rem;
+		background: white;
+		box-shadow: 0 20px 60px rgb(15 23 42 / 24%);
+	}
+
+	.conflict-panel h2,
+	.conflict-panel p {
+		margin: 0;
+	}
+
+	.conflict-panel h2 {
+		color: #0f172a;
+		font-size: 1.125rem;
+	}
+
+	.conflict-panel p {
+		color: #475569;
+	}
+
+	.conflict-actions {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+		gap: 0.5rem;
+	}
+
+	.conflict-actions button {
+		min-height: 2.5rem;
+		border: 0;
+		border-radius: 999px;
+		padding: 0.625rem 0.875rem;
+		background: #e2e8f0;
+		color: #0f172a;
+		font: inherit;
+		cursor: pointer;
+	}
+
+	.conflict-actions button.primary {
+		background: #0f172a;
+		color: white;
 	}
 </style>

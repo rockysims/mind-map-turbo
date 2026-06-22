@@ -59,6 +59,8 @@ export type GraphSaveScheduler = {
 	dispose(): void;
 };
 
+export type EmbeddedDocumentConflictChoice = 'recover-draft' | 'open-file';
+
 type ControllerListener = (view: ControllerView) => void;
 
 export type GraphPersistenceControllerDeps = {
@@ -82,6 +84,11 @@ export type GraphPersistenceControllerDeps = {
 	createDocumentId?: () => string;
 	now?: () => number;
 	openUnsupportedHtmlFile?: (html: string) => boolean;
+	chooseEmbeddedDocumentConflict?: (context: {
+		documentId: string;
+		draftGraph: MultigraphData;
+		fileGraph: MultigraphData;
+	}) => EmbeddedDocumentConflictChoice | Promise<EmbeddedDocumentConflictChoice>;
 };
 
 export class GraphPersistenceController {
@@ -167,7 +174,7 @@ export class GraphPersistenceController {
 
 	async loadEmbeddedDocument(
 		doc: GraphFileDocument,
-		options: { preferEmbedded?: boolean } = {}
+		options: { openedFromPicker?: boolean } = {}
 	): Promise<void> {
 		if (!doc.documentId) {
 			await this.load(DEFAULT_GRAPH_ID, { flushCurrent: false });
@@ -177,7 +184,15 @@ export class GraphPersistenceController {
 		const graphId = documentDraftGraphId(doc.documentId);
 		this.update({ status: { state: 'loading', graphId } });
 		const savedDraft = await this.deps.persistence.load(graphId);
-		const shouldRecoverDraft = savedDraft !== null && options.preferEmbedded !== true;
+		const shouldOpenFile =
+			savedDraft !== null && options.openedFromPicker === true
+				? await this.shouldOpenEmbeddedFile({
+						documentId: doc.documentId,
+						draftGraph: savedDraft.data,
+						fileGraph: doc.data
+					})
+				: savedDraft === null;
+		const shouldRecoverDraft = savedDraft !== null && !shouldOpenFile;
 		const recoveredDraft = shouldRecoverDraft && !graphDataEquals(savedDraft.data, doc.data);
 		const nextGraph = shouldRecoverDraft ? savedDraft.data : doc.data;
 		const nextViewState = shouldRecoverDraft ? savedDraft.viewState : doc.viewState;
@@ -197,11 +212,21 @@ export class GraphPersistenceController {
 		});
 
 		if (savedDraft === null) await this.refreshGraphList();
-		if (savedDraft !== null && options.preferEmbedded === true) {
+		if (savedDraft !== null && shouldOpenFile) {
 			this.scheduler.schedule(graphId, doc.data, doc.viewState);
 			await this.flushPendingSave();
 			await this.refreshGraphList();
 		}
+	}
+
+	private async shouldOpenEmbeddedFile(context: {
+		documentId: string;
+		draftGraph: MultigraphData;
+		fileGraph: MultigraphData;
+	}): Promise<boolean> {
+		if (graphDataEquals(context.draftGraph, context.fileGraph)) return true;
+		const choice = await this.deps.chooseEmbeddedDocumentConflict?.(context);
+		return choice === 'open-file';
 	}
 
 	notifyGraphChanged(data: MultigraphData, options: { syncView?: boolean } = {}): void {

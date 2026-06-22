@@ -7,6 +7,7 @@ import {
 	GraphPersistenceController,
 	statusToNotice,
 	type ControllerStatus,
+	type EmbeddedDocumentConflictChoice,
 	type GraphSaveScheduler
 } from './graphPersistenceController';
 import { DEFAULT_GRAPH_ID } from './graphRoute';
@@ -94,6 +95,11 @@ function setup(
 			currentGraph: MultigraphData;
 			documentStatus: ReturnType<GraphPersistenceController['getView']>['documentStatus'];
 		}) => boolean | Promise<boolean>;
+		chooseEmbeddedDocumentConflict?: (context: {
+			documentId: string;
+			draftGraph: MultigraphData;
+			fileGraph: MultigraphData;
+		}) => EmbeddedDocumentConflictChoice | Promise<EmbeddedDocumentConflictChoice>;
 	} = {}
 ) {
 	const persistence = new MemoryPersistence();
@@ -113,6 +119,7 @@ function setup(
 		storageNamespace: 'test',
 		confirmGraphImportReplace: options.confirmGraphImportReplace,
 		confirmNewGraphReplace: options.confirmNewGraphReplace,
+		chooseEmbeddedDocumentConflict: options.chooseEmbeddedDocumentConflict,
 		createDocumentId: () => 'doc-new',
 		now: () => 456,
 		createGraphId: () => 'graph-new'
@@ -379,7 +386,8 @@ describe('GraphPersistenceController', () => {
 	});
 
 	it('can prefer an opened embedded file over a dirty local document draft', async () => {
-		const { controller, persistence, scheduler } = setup();
+		const chooseEmbeddedDocumentConflict = vi.fn(() => 'open-file' as const);
+		const { controller, persistence, scheduler } = setup({ chooseEmbeddedDocumentConflict });
 		const fileGraph = makeGraph({ nodeCount: 1 });
 		const draftGraph = makeGraph({ nodeCount: 3 });
 		const fileViewState = { panX: 8, panY: 13, scale: 1.2 };
@@ -394,9 +402,14 @@ describe('GraphPersistenceController', () => {
 				data: fileGraph,
 				viewState: fileViewState
 			},
-			{ preferEmbedded: true }
+			{ openedFromPicker: true }
 		);
 
+		expect(chooseEmbeddedDocumentConflict).toHaveBeenCalledWith({
+			documentId: 'doc-opened',
+			draftGraph,
+			fileGraph
+		});
 		expect(controller.getView()).toMatchObject({
 			loadedGraphId: documentDraftGraphId('doc-opened'),
 			documentId: 'doc-opened',
@@ -412,6 +425,48 @@ describe('GraphPersistenceController', () => {
 		expect(await persistence.load(documentDraftGraphId('doc-opened'))).toEqual({
 			data: fileGraph,
 			viewState: fileViewState
+		});
+	});
+
+	it('recovers a dirty local document draft when the opened file conflict is declined', async () => {
+		const chooseEmbeddedDocumentConflict = vi.fn(() => 'recover-draft' as const);
+		const { controller, persistence, scheduler } = setup({ chooseEmbeddedDocumentConflict });
+		const fileGraph = makeGraph({ nodeCount: 1 });
+		const draftGraph = makeGraph({ nodeCount: 3 });
+		await persistence.save(documentDraftGraphId('doc-recover'), {
+			data: draftGraph,
+			viewState: nonNeutralViewState()
+		});
+
+		await controller.loadEmbeddedDocument(
+			{
+				documentId: 'doc-recover',
+				data: fileGraph,
+				viewState: NEUTRAL_VIEW_STATE
+			},
+			{ openedFromPicker: true }
+		);
+
+		expect(chooseEmbeddedDocumentConflict).toHaveBeenCalledWith({
+			documentId: 'doc-recover',
+			draftGraph,
+			fileGraph
+		});
+		expect(controller.getView()).toMatchObject({
+			loadedGraphId: documentDraftGraphId('doc-recover'),
+			documentId: 'doc-recover',
+			graph: draftGraph,
+			viewState: nonNeutralViewState(),
+			documentStatus: 'file-recovered-draft'
+		});
+		expect(scheduler.schedule).not.toHaveBeenCalledWith(
+			documentDraftGraphId('doc-recover'),
+			fileGraph,
+			NEUTRAL_VIEW_STATE
+		);
+		expect(await persistence.load(documentDraftGraphId('doc-recover'))).toEqual({
+			data: draftGraph,
+			viewState: nonNeutralViewState()
 		});
 	});
 

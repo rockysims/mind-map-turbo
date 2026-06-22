@@ -241,6 +241,7 @@ test('load opens an HTML save file in a new tab', async ({ page }) => {
 	await popup.waitForLoadState('domcontentloaded');
 
 	await expect(popup.getByText('Loaded File Node')).toBeVisible();
+	await expect(popup.getByText('Local edits found')).not.toBeVisible();
 	await expect(page.getByText('Root')).toBeVisible();
 });
 
@@ -279,10 +280,55 @@ test('load opens selected HTML file instead of stale local document draft', asyn
 	const fileChooser = await fileChooserPromise;
 	await fileChooser.setFiles(tmpFile);
 	await popup.waitForLoadState('domcontentloaded');
+	await expect(popup.getByText('Local edits found')).toBeVisible();
+	await popup.getByRole('button', { name: 'Open selected file' }).click();
 
 	await expect(popup.getByText('Fresh Loaded Node')).toBeVisible();
 	await expect(popup.getByText('Stale Local Draft Node')).not.toBeVisible();
 	await waitForStoredTitle(popup, documentDraftGraphId(documentId), 'Fresh Loaded Node');
+});
+
+test('load can recover local edits instead of opening selected HTML file', async ({ page }) => {
+	const documentId = `doc-load-recover-${Date.now()}`;
+	const tmpFile = join(tmpdir(), `e2e-load-recover-save-${Date.now()}.html`);
+	const filePayload = graphDocumentPayload({ documentId, title: 'Selected File Node' });
+	const draftPayload = graphDocumentPayload({ documentId, title: 'Recovered Draft Node' });
+	await writeFile(tmpFile, await selfContainedGraphHtml(filePayload));
+
+	await page.goto('/');
+	await page.evaluate(
+		({ graphId, payload }) => {
+			localStorage.setItem(
+				`mind-map:graph:${encodeURIComponent(graphId)}`,
+				JSON.stringify({
+					schemaVersion: payload.schemaVersion,
+					data: payload.data,
+					viewState: payload.viewState,
+					updatedAt: Date.now()
+				})
+			);
+		},
+		{
+			graphId: documentDraftGraphId(documentId),
+			payload: draftPayload
+		}
+	);
+
+	const popupPromise = page.waitForEvent('popup');
+	await page.getByText('Open').click();
+	const popup = await popupPromise;
+	await popup.waitForLoadState('domcontentloaded');
+	const fileChooserPromise = popup.waitForEvent('filechooser');
+	await popup.getByRole('button', { name: 'Choose graph file' }).click();
+	const fileChooser = await fileChooserPromise;
+	await fileChooser.setFiles(tmpFile);
+	await popup.waitForLoadState('domcontentloaded');
+	await expect(popup.getByText('Local edits found')).toBeVisible();
+	await popup.getByRole('button', { name: 'Recover local edits' }).click();
+
+	await expect(popup.getByText('Recovered Draft Node')).toBeVisible();
+	await expect(popup.getByText('Selected File Node')).not.toBeVisible();
+	await waitForStoredTitle(popup, documentDraftGraphId(documentId), 'Recovered Draft Node');
 });
 
 test('reload restores graph data and viewState from localStorage without file import', async ({
