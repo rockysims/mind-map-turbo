@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { isSelfContainedHtmlShell } from './htmlShell';
 
@@ -41,5 +42,14 @@ describe('HTML shell helpers', () => {
 				'<script type="module">const devOnly = ["/@fs/", "/node_modules/", "/.svelte-kit/generated/"];</script>'
 			)
 		).toBe(true);
+	});
+
+	it('keeps the static offline shell current with the graph query controls', () => {
+		const shell = readFileSync(new URL('../../static/offline-app-shell.html', import.meta.url), {
+			encoding: 'utf8'
+		});
+
+		expect(shell).toContain('graph-query-button');
+		expect(shell).toContain('Find / Filter');
 	});
 });
