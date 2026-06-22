@@ -30,16 +30,16 @@
 <div class="graph-toolbar" aria-label="Graph persistence controls">
 	<button type="button" onclick={() => onNewGraph?.()}>New</button>
 	<label>
-		<span class="sr-only">Load HTML file</span>
+		<span class="sr-only">Load graph file</span>
 		<input
 			bind:this={fileInput}
 			type="file"
 			accept=".html,text/html"
-			aria-label="Load HTML file"
+			aria-label="Load graph file"
 			class="file-input-hidden"
 			onchange={handleFileChange}
 		/>
-		<span aria-hidden="true" class="file-input-button">Load</span>
+		<span aria-hidden="true" class="file-input-button">Open</span>
 	</label>
 	<button type="button" onclick={() => onDownload?.()}>Download</button>
 	<p role="status">{notice}</p>

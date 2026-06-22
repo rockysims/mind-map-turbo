@@ -51,12 +51,12 @@
 		const canvas = within(canvasElement);
 
 		await expect(canvas.getByRole('button', { name: 'New' })).toBeInTheDocument();
-		await expect(canvas.getByText('Load')).toBeInTheDocument();
+		await expect(canvas.getByText('Open')).toBeInTheDocument();
 		await expect(canvas.getByRole('button', { name: 'Download' })).toBeInTheDocument();
 		await expect(canvas.getByRole('status')).toHaveTextContent(
 			'Draft differs from opened file. Download needed.'
 		);
-		await expect(canvas.queryByLabelText('Load graph')).not.toBeInTheDocument();
+		await expect(canvas.queryByLabelText('Load graph file')).toBeInTheDocument();
 		await expect(canvas.queryByLabelText('Import graph from file')).not.toBeInTheDocument();
 		await expect(canvas.queryByRole('button', { name: 'Delete graph' })).not.toBeInTheDocument();
 	}}
@@ -91,7 +91,7 @@
 	}}
 	play={async ({ canvasElement, args }: PlayContext) => {
 		const canvas = within(canvasElement);
-		const fileInput = canvas.getByLabelText('Load HTML file') as HTMLInputElement;
+		const fileInput = canvas.getByLabelText('Load graph file') as HTMLInputElement;
 		const file = new File(['<!doctype html><html></html>'], 'graph.html', { type: 'text/html' });
 
 		Object.defineProperty(fileInput, 'files', {

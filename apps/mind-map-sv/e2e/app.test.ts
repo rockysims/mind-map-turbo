@@ -182,9 +182,9 @@ test('single-document toolbar omits graph library controls', async ({ page }) =>
 	await page.goto('/');
 
 	await expect(page.getByRole('button', { name: 'New' })).toBeVisible();
-	await expect(page.getByLabel('Load HTML file')).toHaveCount(1);
+	await expect(page.getByLabel('Load graph file')).toHaveCount(1);
 	await expect(page.getByRole('button', { name: 'Download' })).toBeVisible();
-	await expect(page.getByLabel('Load graph')).toHaveCount(0);
+	await expect(page.getByLabel('Load graph', { exact: true })).toHaveCount(0);
 	await expect(page.getByLabel('Import graph from file')).toHaveCount(0);
 	await expect(page.getByRole('button', { name: 'Delete graph' })).toHaveCount(0);
 });
@@ -199,7 +199,7 @@ test('load opens an HTML save file in a new tab', async ({ page }) => {
 
 	await page.goto('/');
 	const popupPromise = page.waitForEvent('popup');
-	await page.getByLabel('Load HTML file').setInputFiles(tmpFile);
+	await page.getByLabel('Load graph file').setInputFiles(tmpFile);
 	const popup = await popupPromise;
 	await popup.waitForLoadState('domcontentloaded');
 
