@@ -40,13 +40,13 @@ export const APP_CONFIG = {
 			relaxIterations: 12, // physics relax iterations per layout pass
 			parallelEdgeMaxOffsetRadiusFactor: 0.5, // max parallel-edge offset as fraction of smaller endpoint radius
 			parallelEdgeClearancePx: 4, // extra gap between parallel edge strokes/arrowheads
-			edgeGapMinRadiusFactor: 0.2, // min edge gap as fraction of node radius
-			edgeGapMaxRadiusFactor: 0.4, // max edge gap as fraction of node radius
+			edgeGapMinRadiusFactor: 0.42, // min edge gap as fraction of node radius
+			edgeGapMaxRadiusFactor: 0.84, // max edge gap as fraction of node radius
 			edgeSpringStrength: 0.5, // how strongly edges pull nodes together
 			hopRepulsionStrength: 0.3, // repulsion strength between distant hops
 			hopRepulsionMinHops: 0, // min hop distance before repulsion applies
-			hopRepulsionMaxHops: 8, // hop distance where repulsion peaks
-			hopRepulsionMaxExtraGapRadiusFactor: 8, // cap on extra gap from hop repulsion
+			hopRepulsionMaxHops: 4, // hop distance where repulsion peaks
+			hopRepulsionMaxExtraGapRadiusFactor: 2, // cap on extra gap from hop repulsion
 			postDragSettleEpsilonPx: 0.25, // motion threshold to end post-drag settle
 			postDragSettleMaxFrames: 200, // max frames for post-drag physics settle
 			postScaleChangeSettleMaxFrames: 200, // max frames to settle after scale animation
