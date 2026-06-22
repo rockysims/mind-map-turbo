@@ -244,6 +244,47 @@ test('load opens an HTML save file in a new tab', async ({ page }) => {
 	await expect(page.getByText('Root')).toBeVisible();
 });
 
+test('load opens selected HTML file instead of stale local document draft', async ({ page }) => {
+	const documentId = `doc-load-stale-${Date.now()}`;
+	const tmpFile = join(tmpdir(), `e2e-load-stale-save-${Date.now()}.html`);
+	const freshFilePayload = graphDocumentPayload({ documentId, title: 'Fresh Loaded Node' });
+	const staleDraftPayload = graphDocumentPayload({ documentId, title: 'Stale Local Draft Node' });
+	await writeFile(tmpFile, await selfContainedGraphHtml(freshFilePayload));
+
+	await page.goto('/');
+	await page.evaluate(
+		({ graphId, payload }) => {
+			localStorage.setItem(
+				`mind-map:graph:${encodeURIComponent(graphId)}`,
+				JSON.stringify({
+					schemaVersion: payload.schemaVersion,
+					data: payload.data,
+					viewState: payload.viewState,
+					updatedAt: Date.now()
+				})
+			);
+		},
+		{
+			graphId: documentDraftGraphId(documentId),
+			payload: staleDraftPayload
+		}
+	);
+
+	const popupPromise = page.waitForEvent('popup');
+	await page.getByText('Open').click();
+	const popup = await popupPromise;
+	await popup.waitForLoadState('domcontentloaded');
+	const fileChooserPromise = popup.waitForEvent('filechooser');
+	await popup.getByRole('button', { name: 'Choose graph file' }).click();
+	const fileChooser = await fileChooserPromise;
+	await fileChooser.setFiles(tmpFile);
+	await popup.waitForLoadState('domcontentloaded');
+
+	await expect(popup.getByText('Fresh Loaded Node')).toBeVisible();
+	await expect(popup.getByText('Stale Local Draft Node')).not.toBeVisible();
+	await waitForStoredTitle(popup, documentDraftGraphId(documentId), 'Fresh Loaded Node');
+});
+
 test('reload restores graph data and viewState from localStorage without file import', async ({
 	page
 }) => {

@@ -165,7 +165,10 @@ export class GraphPersistenceController {
 		});
 	}
 
-	async loadEmbeddedDocument(doc: GraphFileDocument): Promise<void> {
+	async loadEmbeddedDocument(
+		doc: GraphFileDocument,
+		options: { preferEmbedded?: boolean } = {}
+	): Promise<void> {
 		if (!doc.documentId) {
 			await this.load(DEFAULT_GRAPH_ID, { flushCurrent: false });
 			return;
@@ -174,9 +177,10 @@ export class GraphPersistenceController {
 		const graphId = documentDraftGraphId(doc.documentId);
 		this.update({ status: { state: 'loading', graphId } });
 		const savedDraft = await this.deps.persistence.load(graphId);
-		const recoveredDraft = savedDraft !== null && !graphDataEquals(savedDraft.data, doc.data);
-		const nextGraph = savedDraft?.data ?? doc.data;
-		const nextViewState = savedDraft?.viewState ?? doc.viewState;
+		const shouldRecoverDraft = savedDraft !== null && options.preferEmbedded !== true;
+		const recoveredDraft = shouldRecoverDraft && !graphDataEquals(savedDraft.data, doc.data);
+		const nextGraph = shouldRecoverDraft ? savedDraft.data : doc.data;
+		const nextViewState = shouldRecoverDraft ? savedDraft.viewState : doc.viewState;
 
 		this.baseline = { kind: 'file', graph: doc.data };
 		this.recoveredDraft = recoveredDraft;
@@ -193,6 +197,11 @@ export class GraphPersistenceController {
 		});
 
 		if (savedDraft === null) await this.refreshGraphList();
+		if (savedDraft !== null && options.preferEmbedded === true) {
+			this.scheduler.schedule(graphId, doc.data, doc.viewState);
+			await this.flushPendingSave();
+			await this.refreshGraphList();
+		}
 	}
 
 	notifyGraphChanged(data: MultigraphData, options: { syncView?: boolean } = {}): void {

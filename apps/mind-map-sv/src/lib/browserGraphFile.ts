@@ -11,6 +11,8 @@ export type BrowserFileArtifact = {
 	mimeType: string;
 };
 
+export const OPEN_HTML_FILE_PREFER_EMBEDDED_SESSION_KEY = 'mind-map:open-file-prefer-embedded';
+
 /** Trigger a file download with the given text content and suggested filename. */
 export function downloadTextFile(
 	content: string,
@@ -158,6 +160,11 @@ function filePickerTabHtml(): string {
 				status.textContent = 'Opening graph file...';
 				const reader = new FileReader();
 				reader.onload = () => {
+					try {
+						sessionStorage.setItem(${JSON.stringify(OPEN_HTML_FILE_PREFER_EMBEDDED_SESSION_KEY)}, '1');
+					} catch {
+						// Ignore storage failures; the file still opens.
+					}
 					document.open();
 					document.write(String(reader.result || ''));
 					document.close();

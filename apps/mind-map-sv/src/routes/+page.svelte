@@ -5,6 +5,7 @@
 	import { APP_CONFIG } from '$lib/appConfig';
 	import {
 		downloadFileArtifact,
+		OPEN_HTML_FILE_PREFER_EMBEDDED_SESSION_KEY,
 		openHtmlFilePickerInNewTab,
 		openHtmlTextInNewTab
 	} from '$lib/browserGraphFile';
@@ -50,6 +51,7 @@
 		});
 
 		const embeddedGraph = readEmbeddedGraphDocument();
+		const preferEmbeddedGraph = consumeOpenFilePreferEmbeddedFlag();
 
 		const persistedGraph = usePersistedGraph({
 			persistence,
@@ -98,7 +100,10 @@
 			openUnsupportedHtmlFile: openHtmlTextInNewTab
 		});
 		persisted = persistedGraph;
-		void loadRouteGraph(persistedGraph, embeddedGraph, { flushCurrent: false });
+		void loadRouteGraph(persistedGraph, embeddedGraph, {
+			flushCurrent: false,
+			preferEmbedded: preferEmbeddedGraph
+		});
 
 		const onStorage = (event: StorageEvent) => {
 			void persistedGraph.handleStorageEvent({ key: event.key });
@@ -139,10 +144,21 @@
 		openHtmlFilePickerInNewTab();
 	}
 
+	function consumeOpenFilePreferEmbeddedFlag(): boolean {
+		try {
+			const shouldPreferEmbedded =
+				sessionStorage.getItem(OPEN_HTML_FILE_PREFER_EMBEDDED_SESSION_KEY) === '1';
+			sessionStorage.removeItem(OPEN_HTML_FILE_PREFER_EMBEDDED_SESSION_KEY);
+			return shouldPreferEmbedded;
+		} catch {
+			return false;
+		}
+	}
+
 	async function loadRouteGraph(
 		persistedGraph: PersistedGraph,
 		embeddedGraph: GraphFileDocument | null,
-		options: { flushCurrent: boolean }
+		options: { flushCurrent: boolean; preferEmbedded?: boolean }
 	): Promise<void> {
 		const graphId = graphIdFromUrl(
 			new URL(window.location.href),
@@ -152,7 +168,9 @@
 		selectedGraphId = graphId;
 		if (embeddedGraph?.documentId && graphId === DEFAULT_GRAPH_ID) {
 			initialTitleEditNodeId = null;
-			await persistedGraph.loadEmbeddedDocument(embeddedGraph);
+			await persistedGraph.loadEmbeddedDocument(embeddedGraph, {
+				preferEmbedded: options.preferEmbedded
+			});
 			return;
 		}
 		await persistedGraph.load(graphId, options);

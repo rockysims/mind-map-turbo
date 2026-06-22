@@ -378,6 +378,43 @@ describe('GraphPersistenceController', () => {
 		expect(persistence.save).toHaveBeenCalledTimes(1);
 	});
 
+	it('can prefer an opened embedded file over a dirty local document draft', async () => {
+		const { controller, persistence, scheduler } = setup();
+		const fileGraph = makeGraph({ nodeCount: 1 });
+		const draftGraph = makeGraph({ nodeCount: 3 });
+		const fileViewState = { panX: 8, panY: 13, scale: 1.2 };
+		await persistence.save(documentDraftGraphId('doc-opened'), {
+			data: draftGraph,
+			viewState: nonNeutralViewState()
+		});
+
+		await controller.loadEmbeddedDocument(
+			{
+				documentId: 'doc-opened',
+				data: fileGraph,
+				viewState: fileViewState
+			},
+			{ preferEmbedded: true }
+		);
+
+		expect(controller.getView()).toMatchObject({
+			loadedGraphId: documentDraftGraphId('doc-opened'),
+			documentId: 'doc-opened',
+			graph: fileGraph,
+			viewState: fileViewState,
+			documentStatus: 'file-clean'
+		});
+		expect(scheduler.schedule).toHaveBeenLastCalledWith(
+			documentDraftGraphId('doc-opened'),
+			fileGraph,
+			fileViewState
+		);
+		expect(await persistence.load(documentDraftGraphId('doc-opened'))).toEqual({
+			data: fileGraph,
+			viewState: fileViewState
+		});
+	});
+
 	it('does not silently reload external storage over a dirty current graph', async () => {
 		const { controller, persistence } = setup();
 		await controller.load('active');
