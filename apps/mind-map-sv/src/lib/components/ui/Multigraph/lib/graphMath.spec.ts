@@ -6,6 +6,7 @@ import {
 	pinchScaleFactor,
 	DEFAULT_MIN_SCALE,
 	DEFAULT_MAX_SCALE,
+	fitGraphBoundsInView,
 	zoomViewTransformAtPoint
 } from './graphMath';
 
@@ -62,6 +63,30 @@ describe('graphMath', () => {
 			expect(next.scale).toBe(nextScale);
 			expect(graphPointAfter.x).toBeCloseTo(graphPointBefore.x);
 			expect(graphPointAfter.y).toBeCloseTo(graphPointBefore.y);
+		});
+	});
+
+	describe('fitGraphBoundsInView', () => {
+		it('centers graph bounds and chooses a fitting scale', () => {
+			const next = fitGraphBoundsInView(
+				{ minX: -100, minY: -50, maxX: 300, maxY: 150 },
+				{ width: 1000, height: 800 },
+				{ paddingPx: 100, minScale: 0.1, maxScale: 4 }
+			);
+
+			expect(next.scale).toBe(2);
+			expect(next.panX).toBe(-200);
+			expect(next.panY).toBe(-100);
+		});
+
+		it('clamps the fitting scale', () => {
+			expect(
+				fitGraphBoundsInView(
+					{ minX: -1, minY: -1, maxX: 1, maxY: 1 },
+					{ width: 1000, height: 800 },
+					{ maxScale: 3 }
+				).scale
+			).toBe(3);
 		});
 	});
 

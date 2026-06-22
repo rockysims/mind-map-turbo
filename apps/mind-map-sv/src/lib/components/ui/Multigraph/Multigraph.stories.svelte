@@ -1900,6 +1900,190 @@
 />
 
 <Story
+	name="UserFiltersGraphByNodeTag"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'n0', title: 'Topic', description: '', tags: ['topic'] },
+				{ id: 'n1', title: 'Urgent', description: '', tags: ['urgent', 'topic'] },
+				{ id: 'n2', title: 'Plain', description: '', tags: [] }
+			],
+			edges: [
+				{ source: 'n0', target: 'n1', tags: ['rel'] },
+				{ source: 'n1', target: 'n2', tags: [] }
+			],
+			posByNodeId: { n0: { x: -220, y: 0 }, n1: { x: 0, y: 0 }, n2: { x: 220, y: 0 } },
+			tagColorConfig: {
+				nodeTags: { topic: '#ff0000', urgent: '#00ff00' },
+				edgeTags: { rel: '#0000ff' }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const canvas = within(canvasElement);
+		canvas.getByRole('button', { name: 'Find / Filter' }).click();
+		await sleep();
+
+		const input = canvas.getByLabelText('Graph query') as HTMLInputElement;
+		input.value = '#topic';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		await sleep();
+
+		expect(getNodeWrapper(canvasElement, 'n0')).toHaveAttribute('data-query-role', 'focus');
+		expect(getNodeWrapper(canvasElement, 'n1')).toHaveAttribute('data-query-role', 'focus');
+		expect(getNodeWrapper(canvasElement, 'n2')).toHaveAttribute('data-query-role', 'background');
+		expect(nodeOpacity(canvasElement, 'n2')).toBeLessThan(1);
+	}}
+/>
+
+<Story
+	name="UserSpotlightsNodeTagWithMatchedColor"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [{ id: 'n0', title: 'Mixed', description: '', tags: ['topic', 'urgent'] }],
+			tagColorConfig: { nodeTags: { topic: '#ff0000', urgent: '#00ff00' }, edgeTags: {} }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const canvas = within(canvasElement);
+		canvas.getByRole('button', { name: 'Find / Filter' }).click();
+		await sleep();
+
+		const input = canvas.getByLabelText('Graph query') as HTMLInputElement;
+		input.value = '+#urgent';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		await sleep();
+
+		expect(getNodeWrapper(canvasElement, 'n0')).toHaveAttribute('data-query-role', 'spotlight');
+		const node = canvasElement.querySelector('[data-node-id="n0"] .node') as HTMLElement;
+		expect(node).toHaveAttribute('data-tag-border', 'true');
+		expect(node).toHaveAttribute('data-spotlight', 'true');
+		expect(node.style.getPropertyValue('--node-spotlight-color').trim()).toBe('#00ff00');
+	}}
+/>
+
+<Story
+	name="UserSpotlightsEdgeTagWithMatchedColor"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'n0', title: 'Source', description: '', tags: [] },
+				{ id: 'n1', title: 'Target', description: '', tags: [] }
+			],
+			edges: [{ source: 'n0', target: 'n1', tags: ['link', 'edgy'] }],
+			posByNodeId: { n0: { x: -180, y: 0 }, n1: { x: 180, y: 0 } },
+			tagColorConfig: { nodeTags: {}, edgeTags: { link: '#0000ff', edgy: '#ff0000' } }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const canvas = within(canvasElement);
+		canvas.getByRole('button', { name: 'Find / Filter' }).click();
+		await sleep();
+
+		const input = canvas.getByLabelText('Graph query') as HTMLInputElement;
+		input.value = '+@edgy';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		await sleep();
+
+		const edge = getEdge(canvasElement, 'e0');
+		expect(edge).toHaveAttribute('data-query-role', 'spotlight');
+		expect(edge.style.getPropertyValue('--edge-background').trim()).toBe('#ff0000');
+		expect(edge.style.getPropertyValue('--edge-spotlight-color').trim()).toBe('#ff0000');
+		expect(getNodeWrapper(canvasElement, 'n0')).toHaveAttribute('data-query-role', 'context');
+		expect(getNodeWrapper(canvasElement, 'n1')).toHaveAttribute('data-query-role', 'context');
+	}}
+/>
+
+<Story
+	name="UserExcludesNodeTagWithoutRelayout"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'n0', title: 'Keep', description: '', tags: ['keep'] },
+				{ id: 'n1', title: 'Hide', description: '', tags: ['hide'] },
+				{ id: 'n2', title: 'Other', description: '', tags: [] }
+			],
+			edges: [
+				{ source: 'n0', target: 'n1', tags: ['rel'] },
+				{ source: 'n1', target: 'n2', tags: ['rel'] }
+			],
+			posByNodeId: { n0: { x: -240, y: 0 }, n1: { x: 0, y: 0 }, n2: { x: 240, y: 0 } },
+			tagColorConfig: {
+				nodeTags: { hide: '#ff0000', keep: '#00ff00' },
+				edgeTags: { rel: '#0000ff' }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const n0XBefore = getNodeWrapper(canvasElement, 'n0').dataset.x;
+		const canvas = within(canvasElement);
+		canvas.getByRole('button', { name: 'Find / Filter' }).click();
+		await sleep();
+
+		const input = canvas.getByLabelText('Graph query') as HTMLInputElement;
+		input.value = '-#hide';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		await sleep();
+
+		expect(canvasElement.querySelector('[data-node-id="n1"].node-wrapper')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-edge-id="e0"]')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-edge-id="e1"]')).not.toBeInTheDocument();
+		expect(getNodeWrapper(canvasElement, 'n0').dataset.x).toBe(n0XBefore);
+	}}
+/>
+
+<Story
+	name="UserNavigatesQueryRegions"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'n0', title: 'First topic', description: '', tags: ['topic'] },
+				{ id: 'n1', title: 'Bridge', description: '', tags: [] },
+				{ id: 'n2', title: 'Second topic', description: '', tags: ['topic'] }
+			],
+			edges: [
+				{ source: 'n0', target: 'n1', tags: [] },
+				{ source: 'n1', target: 'n2', tags: [] }
+			],
+			posByNodeId: { n0: { x: -500, y: 0 }, n1: { x: 0, y: 0 }, n2: { x: 500, y: 0 } },
+			tagColorConfig: { nodeTags: { topic: '#ff0000' }, edgeTags: {} }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { relaxIterations: 0 },
+		onViewStateChange: fn()
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const canvas = within(canvasElement);
+		canvas.getByRole('button', { name: 'Find / Filter' }).click();
+		await sleep();
+
+		const input = canvas.getByLabelText('Graph query') as HTMLInputElement;
+		input.value = '#topic';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		await sleep();
+
+		const before = getStageTransform(canvasElement);
+		canvas.getByRole('button', { name: 'Next' }).click();
+		await sleep();
+
+		expect(getStageTransform(canvasElement)).not.toBe(before);
+	}}
+/>
+
+<Story
 	name="UserDeletesTagsFromLegend"
 	args={{
 		multigraphData: makeGraph({

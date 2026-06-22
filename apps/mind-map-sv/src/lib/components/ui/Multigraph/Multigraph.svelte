@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import Node from '$lib/components/ui/Node/Node.svelte';
 	import DuplicateEdgeDialog from './DuplicateEdgeDialog.svelte';
+	import GraphQueryPanel from './GraphQueryPanel.svelte';
 	import NodeActionMenu from './NodeActionMenu.svelte';
 	import NodeEditSheet from './NodeEditSheet.svelte';
 	import Stage from './Stage.svelte';
@@ -39,6 +40,7 @@
 		updateNodeContent
 	} from './lib/graph.js';
 	import { deriveGraphLayout, withSettledGraphPositions } from './lib/graphLayout.js';
+	import { evaluateGraphQuery, type GraphQueryElementState } from './lib/graphQuery.js';
 	import { hopsFromPinned } from './lib/layout.js';
 	import type { LayoutSettings } from './lib/layoutSettings.js';
 	import { withDefaultLayoutSettings } from './lib/layoutSettings.js';
@@ -135,6 +137,15 @@
 	let duplicateEdgeConfirm = $state<{ edgeId: string } | null>(null);
 	let titleEditContext = $state<{ nodeId: string; edgeId?: string } | null>(null);
 	let tagColorLegendOpen = $state(false);
+	let graphQueryPanelOpen = $state(false);
+	let graphQueryText = $state('');
+	let graphQueryPreviewText = $state<string | null>(null);
+	let activeQueryRegionIndex = $state(0);
+	let fitViewRequest = $state<{
+		id: number;
+		bounds: import('./lib/graphMath.js').GraphBounds;
+	} | null>(null);
+	let fitViewRequestId = $state(0);
 	let graphRef = $state<HTMLElement | null>(null);
 	let lastPinnedNodeId = $state<string | null>(null);
 	let lastSyncedGeneration = $state(-1);
@@ -192,6 +203,8 @@
 		)
 	);
 	const legendTags = $derived(collectLegendTags(graph));
+	const activeGraphQueryText = $derived(graphQueryPreviewText ?? graphQueryText);
+	const graphQueryResult = $derived(evaluateGraphQuery(graph, activeGraphQueryText));
 	const graphLayout = $derived(
 		deriveGraphLayout(
 			visibleGraph,
@@ -310,6 +323,29 @@
 		lastInitialTitleEditKey = editKey;
 		closeOverlays();
 		titleEditContext = { nodeId };
+	});
+
+	$effect(() => {
+		const regionCount = graphQueryResult.regions.length;
+		if (regionCount === 0) {
+			activeQueryRegionIndex = 0;
+			return;
+		}
+		if (activeQueryRegionIndex >= regionCount) {
+			activeQueryRegionIndex = regionCount - 1;
+		}
+	});
+
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'k') return;
+			event.preventDefault();
+			closeOverlays();
+			graphQueryPanelOpen = true;
+		};
+		window.addEventListener('keydown', onKeyDown);
+		return () => window.removeEventListener('keydown', onKeyDown);
 	});
 
 	$effect(() => {
@@ -480,6 +516,8 @@
 		duplicateEdgeConfirm = null;
 		titleEditContext = null;
 		tagColorLegendOpen = false;
+		graphQueryPanelOpen = false;
+		graphQueryPreviewText = null;
 	}
 
 	function toggleNodePinned(nodeId: string) {
@@ -583,6 +621,63 @@
 		commitUserGraph(deleteTagEverywhere(graph, namespace, tag));
 	}
 
+	function queryStateForNode(nodeId: string): GraphQueryElementState | undefined {
+		return graphQueryResult.nodeStateById[nodeId];
+	}
+
+	function queryStateForEdge(edgeId: string): GraphQueryElementState | undefined {
+		return graphQueryResult.edgeStateById[edgeId];
+	}
+
+	function queryOpacity(state: GraphQueryElementState | undefined): number {
+		if (!graphQueryResult.hasActiveQuery || !state) return 1;
+		if (state.role === 'focus' || state.role === 'spotlight') return 1;
+		if (state.role === 'context') return 0.42;
+		if (state.role === 'background') return 0.16;
+		return 0;
+	}
+
+	function navigateQueryRegion(direction: 'previous' | 'next') {
+		const regionCount = graphQueryResult.regions.length;
+		if (regionCount === 0) return;
+		activeQueryRegionIndex =
+			direction === 'next'
+				? (activeQueryRegionIndex + 1) % regionCount
+				: (activeQueryRegionIndex - 1 + regionCount) % regionCount;
+		fitActiveQueryRegion();
+	}
+
+	function fitActiveQueryRegion() {
+		const region = graphQueryResult.regions[activeQueryRegionIndex];
+		if (!region) return;
+		const bounds = boundsForNodeIds(region.nodeIds);
+		if (!bounds) return;
+		fitViewRequest = { id: (fitViewRequestId += 1), bounds };
+	}
+
+	function boundsForNodeIds(nodeIds: string[]) {
+		const entries = nodeIds.flatMap((nodeId) => {
+			const position = graphLayout.posByNodeId[nodeId];
+			const radius = graphLayout.radiusByNodeId[nodeId];
+			if (!position || radius === undefined) return [];
+			return [
+				{
+					minX: position.x - radius,
+					minY: position.y - radius,
+					maxX: position.x + radius,
+					maxY: position.y + radius
+				}
+			];
+		});
+		if (entries.length === 0) return null;
+		return {
+			minX: Math.min(...entries.map((entry) => entry.minX)),
+			minY: Math.min(...entries.map((entry) => entry.minY)),
+			maxX: Math.max(...entries.map((entry) => entry.maxX)),
+			maxY: Math.max(...entries.map((entry) => entry.maxY))
+		};
+	}
+
 	function commitUserGraph(nextGraph: MultigraphData) {
 		graph = nextGraph;
 		onMultigraphChange?.(nextGraph);
@@ -611,8 +706,22 @@
 		Tag colors
 	</button>
 
+	<button
+		type="button"
+		class="graph-query-button"
+		aria-haspopup="dialog"
+		aria-expanded={graphQueryPanelOpen}
+		onclick={() => {
+			closeOverlays();
+			graphQueryPanelOpen = true;
+		}}
+	>
+		Find / Filter
+	</button>
+
 	<Stage
 		{getNodeAt}
+		{fitViewRequest}
 		initialScale={initialViewState?.scale}
 		initialPanX={initialViewState?.panX}
 		initialPanY={initialViewState?.panY}
@@ -631,106 +740,121 @@
 		<div class="edges" aria-hidden="true">
 			{#each renderableEdgeVisibility as visibility (visibility.edge.id)}
 				{@const edge = visibility.edge}
-				{@const parallelOffset =
-					visibility.kind === 'visible' ? visibleEdgeParallelOffsets[edge.id] : undefined}
-				{@const edgePoints = edgeRenderPoints(
-					visibility,
-					graphLayout,
-					graph.posByNodeId,
-					parallelOffset
-				)}
-				{@const edgeLengthPx = Math.hypot(
-					edgePoints.target.x - edgePoints.source.x,
-					edgePoints.target.y - edgePoints.source.y
-				)}
-				{@const boundaryFadeRadiusPx =
-					visibility.kind === 'boundary'
-						? (graphLayout.radiusByNodeId[visibility.visibleNodeId] ?? 0)
-						: undefined}
-				{@const effectiveEdgeOcclusionParameters = edgeOcclusionParametersForZoom(
-					{
-						clearancePx: resolvedLayoutSettings.edgeOcclusionClearancePx,
-						fadeWidthPx: resolvedLayoutSettings.edgeOcclusionFadeWidthPx,
-						zoomScaleExponent: resolvedLayoutSettings.edgeOcclusionZoomScaleExponent
-					},
-					stageScale
-				)}
-				{@const edgeOcclusionWindows =
-					visibility.kind === 'visible'
-						? computeEdgeOcclusionWindows(
-								{
-									sourceNodeId: edge.sourceNodeId,
-									targetNodeId: edge.targetNodeId,
-									source: edgePoints.source,
-									target: edgePoints.target,
-									directed: edge.directed
-								},
-								visibleEdgeOcclusionNodes,
-								{
-									...effectiveEdgeOcclusionParameters,
-									edgeOcclusionMinOpacity: resolvedLayoutSettings.edgeOcclusionMinOpacity
-								}
-							)
-						: []}
-				{@const arrowScale = edgeArrowScale(visibility, graphLayout.scaleByNodeId)}
-				{@const strokeScale = edgeStrokeScale(visibility, graphLayout.scaleByNodeId)}
-				{@const edgeColor = edgeStrokeColor(edge, graph.tagColorConfig.edgeTags)}
-				{@const edgeEnterAnim = edgeEnterAnimations[edge.id]}
-				{@const baseEdgeOpacity =
-					edgeRenderOverrides?.[edge.id]?.opacity ??
-					(edgeEnterAnim ? edgeOpacityAt(edgeEnterAnim, layoutRuntime.animationNowMs) : 1)}
-				{@const edgeOpacity = baseEdgeOpacity * (revealWaveEdgeOpacityByEdgeId[edge.id] ?? 1)}
-				<div
-					class="edge"
-					class:directed={edge.directed === true && visibility.kind === 'visible'}
-					class:boundary={visibility.kind === 'boundary'}
-					data-edge-id={edge.id}
-					data-source-node-id={edge.sourceNodeId}
-					data-target-node-id={edge.targetNodeId}
-					data-directed={edge.directed === true ? 'true' : undefined}
-					data-arrow-target-node-id={edge.directed === true && visibility.kind === 'visible'
-						? edge.targetNodeId
-						: undefined}
-					data-edge-visibility={visibility.kind}
-					data-visible-node-id={visibility.kind === 'boundary'
-						? visibility.visibleNodeId
-						: undefined}
-					data-hidden-node-id={visibility.kind === 'boundary' ? visibility.hiddenNodeId : undefined}
-					data-boundary-fade-ratio={visibility.kind === 'boundary'
-						? visibility.fadeRatio
-						: undefined}
-					data-boundary-fade-radius={boundaryFadeRadiusPx}
-					data-edge-boundary-dashed={visibility.kind === 'boundary' ? 'true' : undefined}
-					data-edge-arrow-scale={edge.directed === true && visibility.kind === 'visible'
-						? arrowScale
-						: undefined}
-					data-edge-stroke-scale={strokeScale}
-					data-edge-opacity={edgeOpacity}
-					data-edge-parallel-count={visibility.kind === 'visible'
-						? parallelOffset?.groupCount
-						: undefined}
-					data-edge-parallel-slot={visibility.kind === 'visible' ? parallelOffset?.slot : undefined}
-					data-edge-parallel-offset={visibility.kind === 'visible'
-						? (parallelOffset?.offsetDistance ?? 0)
-						: undefined}
-					data-edge-occlusion-count={visibility.kind === 'visible'
-						? edgeOcclusionWindows.length
-						: undefined}
-					data-edge-occlusion-fade-width={visibility.kind === 'visible'
-						? effectiveEdgeOcclusionParameters.edgeOcclusionFadeWidthPx
-						: undefined}
-					style={`${edgeStyle(edgePoints.source, edgePoints.target)} --edge-background: ${edgeBackground(
+				{@const queryEdgeState = queryStateForEdge(edge.id)}
+				{#if queryEdgeState?.role !== 'excluded'}
+					{@const parallelOffset =
+						visibility.kind === 'visible' ? visibleEdgeParallelOffsets[edge.id] : undefined}
+					{@const edgePoints = edgeRenderPoints(
 						visibility,
-						edgeColor,
+						graphLayout,
+						graph.posByNodeId,
+						parallelOffset
+					)}
+					{@const edgeLengthPx = Math.hypot(
+						edgePoints.target.x - edgePoints.source.x,
+						edgePoints.target.y - edgePoints.source.y
+					)}
+					{@const boundaryFadeRadiusPx =
+						visibility.kind === 'boundary'
+							? (graphLayout.radiusByNodeId[visibility.visibleNodeId] ?? 0)
+							: undefined}
+					{@const effectiveEdgeOcclusionParameters = edgeOcclusionParametersForZoom(
 						{
-							occlusionWindows: edgeOcclusionWindows,
-							edgeLengthPx,
-							edgeArrowLengthPx: EDGE_ARROW_LENGTH * arrowScale,
-							edgeOcclusionMinOpacity: resolvedLayoutSettings.edgeOcclusionMinOpacity,
-							boundaryFadeRadiusPx
-						}
-					)}; color: ${edgeColor}; --edge-arrow-length: ${EDGE_ARROW_LENGTH * arrowScale}px; --edge-arrow-half-height: ${EDGE_ARROW_HALF_HEIGHT * arrowScale}px; --edge-stroke-width: ${EDGE_STROKE_WIDTH * strokeScale}px; opacity: ${edgeOpacity};`}
-				></div>
+							clearancePx: resolvedLayoutSettings.edgeOcclusionClearancePx,
+							fadeWidthPx: resolvedLayoutSettings.edgeOcclusionFadeWidthPx,
+							zoomScaleExponent: resolvedLayoutSettings.edgeOcclusionZoomScaleExponent
+						},
+						stageScale
+					)}
+					{@const edgeOcclusionWindows =
+						visibility.kind === 'visible'
+							? computeEdgeOcclusionWindows(
+									{
+										sourceNodeId: edge.sourceNodeId,
+										targetNodeId: edge.targetNodeId,
+										source: edgePoints.source,
+										target: edgePoints.target,
+										directed: edge.directed
+									},
+									visibleEdgeOcclusionNodes,
+									{
+										...effectiveEdgeOcclusionParameters,
+										edgeOcclusionMinOpacity: resolvedLayoutSettings.edgeOcclusionMinOpacity
+									}
+								)
+							: []}
+					{@const arrowScale = edgeArrowScale(visibility, graphLayout.scaleByNodeId)}
+					{@const strokeScale = edgeStrokeScale(visibility, graphLayout.scaleByNodeId)}
+					{@const edgeColor =
+						queryEdgeState?.role === 'spotlight' && queryEdgeState.spotlightColor
+							? queryEdgeState.spotlightColor
+							: edgeStrokeColor(edge, graph.tagColorConfig.edgeTags)}
+					{@const edgeEnterAnim = edgeEnterAnimations[edge.id]}
+					{@const baseEdgeOpacity =
+						edgeRenderOverrides?.[edge.id]?.opacity ??
+						(edgeEnterAnim ? edgeOpacityAt(edgeEnterAnim, layoutRuntime.animationNowMs) : 1)}
+					{@const edgeOpacity =
+						baseEdgeOpacity *
+						(revealWaveEdgeOpacityByEdgeId[edge.id] ?? 1) *
+						queryOpacity(queryEdgeState)}
+					<div
+						class="edge"
+						class:directed={edge.directed === true && visibility.kind === 'visible'}
+						class:boundary={visibility.kind === 'boundary'}
+						class:query-spotlight={queryEdgeState?.role === 'spotlight'}
+						data-edge-id={edge.id}
+						data-query-role={queryEdgeState?.role}
+						data-source-node-id={edge.sourceNodeId}
+						data-target-node-id={edge.targetNodeId}
+						data-directed={edge.directed === true ? 'true' : undefined}
+						data-arrow-target-node-id={edge.directed === true && visibility.kind === 'visible'
+							? edge.targetNodeId
+							: undefined}
+						data-edge-visibility={visibility.kind}
+						data-visible-node-id={visibility.kind === 'boundary'
+							? visibility.visibleNodeId
+							: undefined}
+						data-hidden-node-id={visibility.kind === 'boundary'
+							? visibility.hiddenNodeId
+							: undefined}
+						data-boundary-fade-ratio={visibility.kind === 'boundary'
+							? visibility.fadeRatio
+							: undefined}
+						data-boundary-fade-radius={boundaryFadeRadiusPx}
+						data-edge-boundary-dashed={visibility.kind === 'boundary' ? 'true' : undefined}
+						data-edge-arrow-scale={edge.directed === true && visibility.kind === 'visible'
+							? arrowScale
+							: undefined}
+						data-edge-stroke-scale={strokeScale}
+						data-edge-opacity={edgeOpacity}
+						data-edge-parallel-count={visibility.kind === 'visible'
+							? parallelOffset?.groupCount
+							: undefined}
+						data-edge-parallel-slot={visibility.kind === 'visible'
+							? parallelOffset?.slot
+							: undefined}
+						data-edge-parallel-offset={visibility.kind === 'visible'
+							? (parallelOffset?.offsetDistance ?? 0)
+							: undefined}
+						data-edge-occlusion-count={visibility.kind === 'visible'
+							? edgeOcclusionWindows.length
+							: undefined}
+						data-edge-occlusion-fade-width={visibility.kind === 'visible'
+							? effectiveEdgeOcclusionParameters.edgeOcclusionFadeWidthPx
+							: undefined}
+						style={`${edgeStyle(edgePoints.source, edgePoints.target)} --edge-background: ${edgeBackground(
+							visibility,
+							edgeColor,
+							{
+								occlusionWindows: edgeOcclusionWindows,
+								edgeLengthPx,
+								edgeArrowLengthPx: EDGE_ARROW_LENGTH * arrowScale,
+								edgeOcclusionMinOpacity: resolvedLayoutSettings.edgeOcclusionMinOpacity,
+								boundaryFadeRadiusPx
+							}
+						)}; color: ${edgeColor}; --edge-spotlight-color: ${queryEdgeState?.spotlightColor ?? 'transparent'}; --edge-arrow-length: ${EDGE_ARROW_LENGTH * arrowScale}px; --edge-arrow-half-height: ${EDGE_ARROW_HALF_HEIGHT * arrowScale}px; --edge-stroke-width: ${EDGE_STROKE_WIDTH * strokeScale}px; opacity: ${edgeOpacity};`}
+					></div>
+				{/if}
 			{/each}
 			{#each layoutRuntime.revealWavePreviousOnlyEdgeVisibility as visibility (visibility.edge.id)}
 				{@const edge = visibility.edge}
@@ -807,36 +931,46 @@
 		</div>
 
 		{#each visibleGraph.nodes as node (node.id)}
-			{@const nodePos = graphLayout.posByNodeId[node.id] ?? CENTERED_POSITION}
-			{@const nodeTargetScale = graphLayout.scaleByNodeId[node.id] ?? 1}
-			{@const nodeEnterAnim = nodeEnterAnimations[node.id]}
-			{@const nodeScale = nodeEnterAnim
-				? nodeEnterScaleAt(nodeEnterAnim, layoutRuntime.animationNowMs)
-				: nodeTargetScale}
-			{@const baseNodeOpacity = nodeRenderOverrides?.[node.id]?.opacity ?? 1}
-			{@const nodeOpacity = baseNodeOpacity * (revealWaveNodeOpacityByNodeId[node.id] ?? 1)}
-			<div
-				class="node-wrapper"
-				class:primary={primaryNodeId === node.id}
-				data-node-id={node.id}
-				data-scale={nodeScale}
-				data-node-opacity={nodeOpacity}
-				data-x={nodePos.x}
-				data-y={nodePos.y}
-				style={`left: calc(50% + ${nodePos.x}px); top: calc(50% + ${nodePos.y}px); transform: translate(-50%, -50%) scale(${nodeScale}); opacity: ${nodeOpacity};`}
-			>
-				<Node
-					nodeData={node}
-					isOpen={false}
-					isTitleEditing={titleEditContext?.nodeId === node.id}
-					borderSegments={nodeBorderSegments(node, graph.tagColorConfig.nodeTags)}
-					onTitleCommit={(title) => {
-						const createdEdgeId = titleEditContext?.edgeId;
-						titleEditContext = null;
-						commitUserGraph(commitInlineTitleSyntax(graph, node.id, title, createdEdgeId));
-					}}
-				/>
-			</div>
+			{@const queryNodeState = queryStateForNode(node.id)}
+			{#if queryNodeState?.role !== 'excluded'}
+				{@const nodePos = graphLayout.posByNodeId[node.id] ?? CENTERED_POSITION}
+				{@const nodeTargetScale = graphLayout.scaleByNodeId[node.id] ?? 1}
+				{@const nodeEnterAnim = nodeEnterAnimations[node.id]}
+				{@const nodeScale = nodeEnterAnim
+					? nodeEnterScaleAt(nodeEnterAnim, layoutRuntime.animationNowMs)
+					: nodeTargetScale}
+				{@const baseNodeOpacity = nodeRenderOverrides?.[node.id]?.opacity ?? 1}
+				{@const nodeOpacity =
+					baseNodeOpacity *
+					(revealWaveNodeOpacityByNodeId[node.id] ?? 1) *
+					queryOpacity(queryNodeState)}
+				<div
+					class="node-wrapper"
+					class:primary={primaryNodeId === node.id}
+					data-node-id={node.id}
+					data-query-role={queryNodeState?.role}
+					data-scale={nodeScale}
+					data-node-opacity={nodeOpacity}
+					data-x={nodePos.x}
+					data-y={nodePos.y}
+					style={`left: calc(50% + ${nodePos.x}px); top: calc(50% + ${nodePos.y}px); transform: translate(-50%, -50%) scale(${nodeScale}); opacity: ${nodeOpacity};`}
+				>
+					<Node
+						nodeData={node}
+						isOpen={false}
+						isTitleEditing={titleEditContext?.nodeId === node.id}
+						borderSegments={nodeBorderSegments(node, graph.tagColorConfig.nodeTags)}
+						spotlightColor={queryNodeState?.role === 'spotlight'
+							? queryNodeState.spotlightColor
+							: undefined}
+						onTitleCommit={(title) => {
+							const createdEdgeId = titleEditContext?.edgeId;
+							titleEditContext = null;
+							commitUserGraph(commitInlineTitleSyntax(graph, node.id, title, createdEdgeId));
+						}}
+					/>
+				</div>
+			{/if}
 		{/each}
 		{#each layoutRuntime.revealWavePreviousOnlyNodeIds as nodeId (nodeId)}
 			{@const bufferedNode = nodeById[nodeId]}
@@ -956,6 +1090,26 @@
 			onClose={() => (tagColorLegendOpen = false)}
 		/>
 	{/if}
+
+	{#if graphQueryPanelOpen}
+		<GraphQueryPanel
+			query={graphQueryText}
+			tags={legendTags}
+			result={graphQueryResult}
+			activeRegionIndex={activeQueryRegionIndex}
+			onQueryChange={(query) => {
+				graphQueryText = query;
+				graphQueryPreviewText = null;
+				activeQueryRegionIndex = 0;
+			}}
+			onPreviewQueryChange={(query) => (graphQueryPreviewText = query)}
+			onRegionNavigate={navigateQueryRegion}
+			onClose={() => {
+				graphQueryPanelOpen = false;
+				graphQueryPreviewText = null;
+			}}
+		/>
+	{/if}
 </div>
 
 <style>
@@ -981,6 +1135,20 @@
 		padding: 0.625rem 0.875rem;
 		background: #0f172a;
 		color: #ffffff;
+		font: inherit;
+		box-shadow: 0 8px 24px rgb(15 23 42 / 18%);
+	}
+
+	.graph-query-button {
+		position: absolute;
+		z-index: 25;
+		left: 0.75rem;
+		bottom: 0.75rem;
+		border: 0;
+		border-radius: 999px;
+		padding: 0.625rem 0.875rem;
+		background: #f8fafc;
+		color: #0f172a;
 		font: inherit;
 		box-shadow: 0 8px 24px rgb(15 23 42 / 18%);
 	}
@@ -1033,5 +1201,11 @@
 		color: inherit;
 		content: '';
 		transform: translateY(-50%);
+	}
+
+	.edge.query-spotlight::before {
+		box-shadow:
+			0 0 0 4px color-mix(in srgb, var(--edge-spotlight-color) 42%, transparent),
+			0 0 18px color-mix(in srgb, var(--edge-spotlight-color) 58%, transparent);
 	}
 </style>

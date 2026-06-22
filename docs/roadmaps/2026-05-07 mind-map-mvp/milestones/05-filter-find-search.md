@@ -1,9 +1,9 @@
 # Milestone 05: Filter / find / search
 
-**Status:** not started
+**Status:** complete
 **Depends on:** milestones 01 (graph data), 03 (editing UX provides
 title/description content), 04e (node/edge tags), and 04f (tag colors).
-**Plan:** _none yet._
+**Plan:** [2026-06-22 05-filter-find-search.md](../plans/2026-06-22%2005-filter-find-search.md)
 
 ## Goal
 

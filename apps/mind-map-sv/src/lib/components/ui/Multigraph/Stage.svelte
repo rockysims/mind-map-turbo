@@ -8,6 +8,8 @@
 		clampScale,
 		DEFAULT_MIN_SCALE,
 		DEFAULT_MAX_SCALE,
+		fitGraphBoundsInView,
+		type GraphBounds,
 		zoomViewTransformAtPoint
 	} from './lib/graphMath.js';
 	import { pointerDistance } from './lib/hitTest.js';
@@ -19,6 +21,12 @@
 		panX: number;
 		panY: number;
 		scale: number;
+	}
+
+	interface FitViewRequest {
+		id: number;
+		bounds: GraphBounds;
+		paddingPx?: number;
 	}
 
 	interface Props {
@@ -54,6 +62,8 @@
 		 * separate from graph-data mutation callbacks.
 		 */
 		onViewStateChange?: (state: ViewStateSnapshot) => void;
+		/** One-shot request to fit graph-local bounds into the stage viewport. */
+		fitViewRequest?: FitViewRequest | null;
 	}
 
 	let {
@@ -71,8 +81,12 @@
 		onNodeLongPress,
 		onViewStateLiveChange,
 		onViewStateChange,
+		fitViewRequest,
 		children
 	}: Props & { children?: Snippet } = $props();
+
+	let stageRef = $state<HTMLElement | null>(null);
+	let lastFitViewRequestId = $state<number | null>(null);
 
 	// Pan
 	// svelte-ignore state_referenced_locally
@@ -94,6 +108,25 @@
 	$effect(() => {
 		const state = { panX, panY, scale };
 		untrack(() => onViewStateLiveChange?.(state));
+	});
+
+	$effect(() => {
+		const request = fitViewRequest;
+		if (!request || request.id === lastFitViewRequestId || !stageRef) return;
+		lastFitViewRequestId = request.id;
+		const next = fitGraphBoundsInView(
+			request.bounds,
+			{ width: stageRef.clientWidth, height: stageRef.clientHeight },
+			{
+				paddingPx: request.paddingPx,
+				minScale: DEFAULT_MIN_SCALE,
+				maxScale: DEFAULT_MAX_SCALE
+			}
+		);
+		panX = next.panX;
+		panY = next.panY;
+		scale = next.scale;
+		onViewStateChange?.({ panX, panY, scale });
 	});
 
 	// Node drag
@@ -331,6 +364,7 @@
 </script>
 
 <div
+	bind:this={stageRef}
 	class="stage"
 	class:panning={panStart !== null}
 	onpointerdown={onPointerDownStage}

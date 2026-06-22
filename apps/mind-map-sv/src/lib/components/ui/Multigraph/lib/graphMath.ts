@@ -15,6 +15,13 @@ export interface ViewTransform {
 	scale: number;
 }
 
+export interface GraphBounds {
+	minX: number;
+	minY: number;
+	maxX: number;
+	maxY: number;
+}
+
 export function clampScale(
 	scale: number,
 	min: number = DEFAULT_MIN_SCALE,
@@ -55,6 +62,31 @@ export function zoomViewTransformAtPoint(
 		panX: focalClientPoint.x - stageCenter.x - graphX * nextScale,
 		panY: focalClientPoint.y - stageCenter.y - graphY * nextScale,
 		scale: nextScale
+	};
+}
+
+export function fitGraphBoundsInView(
+	bounds: GraphBounds,
+	viewport: { width: number; height: number },
+	options: { paddingPx?: number; minScale?: number; maxScale?: number } = {}
+): ViewTransform {
+	const paddingPx = Math.max(0, options.paddingPx ?? 80);
+	const availableWidth = Math.max(1, viewport.width - paddingPx * 2);
+	const availableHeight = Math.max(1, viewport.height - paddingPx * 2);
+	const boundsWidth = Math.max(1, bounds.maxX - bounds.minX);
+	const boundsHeight = Math.max(1, bounds.maxY - bounds.minY);
+	const scale = clampScale(
+		Math.min(availableWidth / boundsWidth, availableHeight / boundsHeight),
+		options.minScale,
+		options.maxScale
+	);
+	const centerX = (bounds.minX + bounds.maxX) / 2;
+	const centerY = (bounds.minY + bounds.maxY) / 2;
+
+	return {
+		panX: -centerX * scale,
+		panY: -centerY * scale,
+		scale
 	};
 }
 

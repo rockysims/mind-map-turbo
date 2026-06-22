@@ -6,6 +6,7 @@ export * from './edgeRender.js';
 export * from './edgeStyle.js';
 export * from './graphMath.js';
 export * from './graphLayout.js';
+export * from './graphQuery.js';
 export * from './boundedVisibility.js';
 export * from './hitTest.js';
 export * from './layout.js';

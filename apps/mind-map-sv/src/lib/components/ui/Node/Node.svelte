@@ -22,12 +22,14 @@
 		isOpen = false,
 		isTitleEditing = false,
 		borderSegments = [],
+		spotlightColor,
 		onTitleCommit
 	} = $props<{
 		nodeData: NodeData;
 		isOpen: boolean;
 		isTitleEditing?: boolean;
 		borderSegments?: TagColorSegment[];
+		spotlightColor?: string;
 		onTitleCommit?: (title: string) => void;
 	}>();
 
@@ -72,8 +74,10 @@
 	data-node-id={nodeData.id}
 	data-pinned={nodeData.pinned ? 'true' : undefined}
 	data-tag-border={borderSegments.length > 0 ? 'true' : undefined}
+	data-spotlight={spotlightColor ? 'true' : undefined}
 	style="--node-diameter: {NODE_RADIUS *
-		2}px; --node-tag-border: {borderBackground}; --node-text-font-size: {NODE_TEXT_FONT_SIZE}px; --node-border-width: {NODE_BORDER_WIDTH}px; --pinned-node-border-width: {PINNED_NODE_BORDER_WIDTH}px;"
+		2}px; --node-tag-border: {borderBackground}; --node-text-font-size: {NODE_TEXT_FONT_SIZE}px; --node-border-width: {NODE_BORDER_WIDTH}px; --pinned-node-border-width: {PINNED_NODE_BORDER_WIDTH}px; --node-spotlight-color: {spotlightColor ??
+		'transparent'};"
 >
 	<div class="circle">
 		<!-- closed -->
@@ -140,6 +144,12 @@
 		background:
 			linear-gradient(#ccc, #ccc) padding-box,
 			var(--node-tag-border) border-box;
+	}
+
+	.node[data-spotlight='true'] .circle {
+		box-shadow:
+			0 0 0 4px color-mix(in srgb, var(--node-spotlight-color) 55%, transparent),
+			0 0 20px color-mix(in srgb, var(--node-spotlight-color) 62%, transparent);
 	}
 
 	.node .square {
