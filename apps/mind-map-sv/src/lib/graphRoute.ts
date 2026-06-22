@@ -5,7 +5,7 @@ type ResolvePath = (path: '/') => string;
 export type GraphRouteMode = 'query' | 'hash';
 
 export function graphRouteModeForProtocol(protocol: string): GraphRouteMode {
-	return protocol === 'file:' ? 'hash' : 'query';
+	return protocol === 'file:' || protocol === 'blob:' ? 'hash' : 'query';
 }
 
 export function graphSearch(graphId: string): string {
@@ -15,7 +15,7 @@ export function graphSearch(graphId: string): string {
 
 export function graphHash(graphId: string): string {
 	if (graphId === DEFAULT_GRAPH_ID) return '';
-	return `#${new URLSearchParams({ graph: graphId }).toString()}`;
+	return `#/?${new URLSearchParams({ graph: graphId }).toString()}`;
 }
 
 export function graphHref(graphId: string): string {
@@ -39,6 +39,14 @@ export function graphIdFromUrl(url: URL, mode: GraphRouteMode = 'query'): string
 		const hashRoute = new URL(url.hash.slice(1), url.origin);
 		return graphIdFromUrl(hashRoute);
 	}
-	const params = mode === 'hash' ? new URLSearchParams(url.hash.slice(1)) : url.searchParams;
+	if (mode === 'hash') {
+		const hash = url.hash.slice(1);
+		if (hash.startsWith('/')) {
+			return graphIdFromUrl(new URL(hash, 'https://hash-route.local'));
+		}
+		const params = new URLSearchParams(hash.startsWith('?') ? hash.slice(1) : hash);
+		return params.get('graph') ?? DEFAULT_GRAPH_ID;
+	}
+	const params = url.searchParams;
 	return params.get('graph') ?? DEFAULT_GRAPH_ID;
 }

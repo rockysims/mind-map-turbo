@@ -6,7 +6,6 @@ import {
 	documentStatusNotice,
 	graphDataEquals,
 	graphFingerprint,
-	newGraphConfirmationMessage,
 	type DocumentStatus
 } from './documentStatus';
 
@@ -97,21 +96,5 @@ describe('documentStatus', () => {
 		expect(documentStatusHasUndownloadedChanges('file-dirty')).toBe(true);
 		expect(documentStatusHasUndownloadedChanges('file-recovered-draft')).toBe(true);
 		expect(documentStatusHasUndownloadedChanges('download-dirty')).toBe(true);
-	});
-
-	it('uses status-specific New graph confirmation copy', () => {
-		expect(newGraphConfirmationMessage('download-clean')).toBeNull();
-		expect(newGraphConfirmationMessage('new-dirty')).toBe(
-			'This graph has changes that have not been downloaded. Start a new graph anyway?'
-		);
-		expect(newGraphConfirmationMessage('file-dirty')).toBe(
-			'This graph has changes that have not been downloaded. Start a new graph anyway?'
-		);
-		expect(newGraphConfirmationMessage('file-recovered-draft')).toBe(
-			'Recovered local edits have not been downloaded. Start a new graph anyway?'
-		);
-		expect(newGraphConfirmationMessage('download-dirty')).toBe(
-			'This graph has changes since the last Download. Start a new graph anyway?'
-		);
 	});
 });

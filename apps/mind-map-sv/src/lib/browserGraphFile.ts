@@ -30,15 +30,33 @@ export function downloadFileArtifact(artifact: BrowserFileArtifact): void {
 	downloadTextFile(artifact.content, artifact.filename, artifact.mimeType);
 }
 
-export function openHtmlTextInNewTab(html: string): boolean {
+export function openHtmlTextInNewTab(html: string, urlSuffix = ''): boolean {
 	const blob = new Blob([html], { type: 'text/html' });
 	const url = URL.createObjectURL(blob);
-	const opened = window.open(url, '_blank', 'noopener,noreferrer');
+	const opened = window.open(`${url}${urlSuffix}`, '_blank');
 	if (opened === null) {
 		URL.revokeObjectURL(url);
 		return false;
 	}
 	setTimeout(() => URL.revokeObjectURL(url), 60_000);
+	return true;
+}
+
+export function openHtmlFileInNewTab(file: File): boolean {
+	const opened = window.open('about:blank', '_blank');
+	if (opened === null) {
+		return false;
+	}
+	const reader = new FileReader();
+	reader.onload = () => {
+		opened.document.open();
+		opened.document.write(String(reader.result ?? ''));
+		opened.document.close();
+	};
+	reader.onerror = () => {
+		opened.close();
+	};
+	reader.readAsText(file);
 	return true;
 }
 

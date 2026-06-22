@@ -24,14 +24,15 @@ describe('graph route helpers', () => {
 
 	it('adds graph hash params for file-safe routing', () => {
 		expect(graphHash(DEFAULT_GRAPH_ID)).toBe('');
-		expect(graphHash('graph-1')).toBe('#graph=graph-1');
+		expect(graphHash('graph-1')).toBe('#/?graph=graph-1');
 		expect(resolveGraphHref((path) => `/base${path}`, 'graph-1', 'hash')).toBe(
-			'/base/#graph=graph-1'
+			'/base/#/?graph=graph-1'
 		);
 	});
 
-	it('uses hash routing for file URLs', () => {
+	it('uses hash routing for file and blob URLs', () => {
 		expect(graphRouteModeForProtocol('file:')).toBe('hash');
+		expect(graphRouteModeForProtocol('blob:')).toBe('hash');
 		expect(graphRouteModeForProtocol('http:')).toBe('query');
 		expect(graphRouteModeForProtocol('https:')).toBe('query');
 	});
@@ -48,6 +49,9 @@ describe('graph route helpers', () => {
 		expect(graphIdFromUrl(new URL('https://example.test/?graph=query'))).toBe('query');
 		expect(graphIdFromUrl(new URL('https://example.test/#/?graph=hash-router'))).toBe(
 			'hash-router'
+		);
+		expect(graphIdFromUrl(new URL('file:///tmp/mind-map.html#/?graph=hash-route'), 'hash')).toBe(
+			'hash-route'
 		);
 		expect(graphIdFromUrl(new URL('file:///tmp/mind-map.html#graph=hash'), 'hash')).toBe('hash');
 		expect(graphIdFromUrl(new URL('file:///tmp/mind-map.html'), 'hash')).toBe(DEFAULT_GRAPH_ID);

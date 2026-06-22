@@ -43,20 +43,15 @@ test('persists edited nodes across reloads in one document tab', async ({ page }
 	}, firstGraphId);
 	expect(storedPayload).toMatchObject({ schemaVersion: CURRENT_SCHEMA_VERSION });
 
-	page.once('dialog', async (dialog) => {
-		expect(dialog.message()).toBe(
-			'This graph has changes that have not been downloaded. Start a new graph anyway?'
-		);
-		await dialog.accept();
-	});
-	await page.getByRole('button', { name: 'New graph' }).click();
-	await expect(page).toHaveURL(/graph=graph-/);
-	await expect(page.getByText('Node 0')).toBeVisible();
-	await expect(page.getByRole('status')).toHaveText('New graph.');
+	const newGraphPromise = page.waitForEvent('popup');
+	await page.getByRole('button', { name: 'New' }).click();
+	const newGraphPage = await newGraphPromise;
+	await newGraphPage.waitForLoadState('domcontentloaded');
+	await expect(newGraphPage.getByText('Node 0')).toBeVisible();
+	await expect(newGraphPage).toHaveURL(/graph=graph-/);
 
-	await page.reload();
-	await expect(page.getByText('Node 0')).toBeVisible();
-	await expect(page.getByText('Persisted Node')).not.toBeVisible();
+	await expect(page.getByText('Persisted Node')).toBeVisible();
+	await expect(page.getByRole('status')).toContainText('Download needed');
 });
 
 test('exports HTML graph document containing schemaVersion, graph data, and viewState', async ({
@@ -162,14 +157,54 @@ test('opened HTML save file recovers dirty local draft before embedded data', as
 	await expect(page.getByRole('status')).toHaveText('Recovered local edits. Download needed.');
 });
 
+test('new opens a fresh graph from an opened HTML save file', async ({ page }) => {
+	const documentId = `doc-new-from-file-${Date.now()}`;
+	const tmpFile = join(tmpdir(), `e2e-new-from-save-${Date.now()}.html`);
+	await writeFile(
+		tmpFile,
+		await selfContainedGraphHtml(graphDocumentPayload({ documentId, title: 'Saved File Node' }))
+	);
+
+	await page.goto(pathToFileURL(tmpFile).href);
+	await expect(page.getByText('Saved File Node')).toBeVisible();
+
+	const popupPromise = page.waitForEvent('popup');
+	await page.getByRole('button', { name: 'New' }).click();
+	const popup = await popupPromise;
+	await popup.waitForLoadState('domcontentloaded');
+
+	await expect(popup.getByText('Node 0')).toBeVisible();
+	await expect(popup.getByText('Saved File Node')).not.toBeVisible();
+	await expect(page.getByText('Saved File Node')).toBeVisible();
+});
+
 test('single-document toolbar omits graph library controls', async ({ page }) => {
 	await page.goto('/');
 
-	await expect(page.getByRole('button', { name: 'New graph' })).toBeVisible();
+	await expect(page.getByRole('button', { name: 'New' })).toBeVisible();
+	await expect(page.getByLabel('Load HTML file')).toHaveCount(1);
 	await expect(page.getByRole('button', { name: 'Download' })).toBeVisible();
 	await expect(page.getByLabel('Load graph')).toHaveCount(0);
 	await expect(page.getByLabel('Import graph from file')).toHaveCount(0);
 	await expect(page.getByRole('button', { name: 'Delete graph' })).toHaveCount(0);
+});
+
+test('load opens an HTML save file in a new tab', async ({ page }) => {
+	const documentId = `doc-load-${Date.now()}`;
+	const tmpFile = join(tmpdir(), `e2e-load-save-${Date.now()}.html`);
+	await writeFile(
+		tmpFile,
+		await selfContainedGraphHtml(graphDocumentPayload({ documentId, title: 'Loaded File Node' }))
+	);
+
+	await page.goto('/');
+	const popupPromise = page.waitForEvent('popup');
+	await page.getByLabel('Load HTML file').setInputFiles(tmpFile);
+	const popup = await popupPromise;
+	await popup.waitForLoadState('domcontentloaded');
+
+	await expect(popup.getByText('Loaded File Node')).toBeVisible();
+	await expect(page.getByText('Node 0')).toBeVisible();
 });
 
 test('reload restores graph data and viewState from localStorage without file import', async ({

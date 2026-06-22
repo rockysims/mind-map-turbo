@@ -2,7 +2,11 @@
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { APP_CONFIG } from '$lib/appConfig';
-	import { downloadFileArtifact, openHtmlTextInNewTab } from '$lib/browserGraphFile';
+	import {
+		downloadFileArtifact,
+		openHtmlFileInNewTab,
+		openHtmlTextInNewTab
+	} from '$lib/browserGraphFile';
 	import {
 		usePersistedGraph,
 		type PersistedGraph
@@ -10,7 +14,6 @@
 	import GraphToolbar from '$lib/components/ui/GraphToolbar/GraphToolbar.svelte';
 	import Multigraph from '$lib/components/ui/Multigraph/Multigraph.svelte';
 	import type { MultigraphData } from '$lib/components/ui/types/multigraph';
-	import { newGraphConfirmationMessage } from '$lib/documentStatus';
 	import {
 		GRAPH_HTML_PAYLOAD_SCRIPT_ID,
 		parseGraphFileText,
@@ -88,14 +91,10 @@
 				typeof crypto.randomUUID === 'function'
 					? crypto.randomUUID()
 					: `doc-${Date.now().toString(36)}`,
-			confirmNewGraphReplace: ({ documentStatus }) => {
-				const message = newGraphConfirmationMessage(documentStatus);
-				return message === null || window.confirm(message);
-			},
 			openUnsupportedHtmlFile: openHtmlTextInNewTab
 		});
 		persisted = persistedGraph;
-		if (embeddedGraph?.documentId) {
+		if (embeddedGraph?.documentId && selectedGraphId === DEFAULT_GRAPH_ID) {
 			void persistedGraph.loadEmbeddedDocument(embeddedGraph);
 		} else {
 			void persistedGraph.load(selectedGraphId, { flushCurrent: false });
@@ -126,7 +125,11 @@
 	}
 
 	function createNewGraph(): void {
-		void persisted?.createGraph();
+		openNewGraphInNewTab();
+	}
+
+	function loadGraphFile(file: File): void {
+		openHtmlFileInNewTab(file);
 	}
 
 	async function handleDownload(): Promise<void> {
@@ -150,6 +153,51 @@
 		return `<!doctype html>\n${document.documentElement.outerHTML}`;
 	}
 
+	function currentHtmlShellWithoutEmbeddedGraph(): string {
+		const html = document.documentElement.cloneNode(true) as HTMLElement;
+		html.querySelector(`#${GRAPH_HTML_PAYLOAD_SCRIPT_ID}`)?.remove();
+		const appRoot = html.querySelector('body > div');
+		if (appRoot) {
+			for (const child of [...appRoot.childNodes]) {
+				if (
+					child.nodeType === Node.ELEMENT_NODE &&
+					(child as Element).tagName.toLowerCase() === 'script'
+				) {
+					continue;
+				}
+				child.remove();
+			}
+		}
+		return `<!doctype html>\n${html.outerHTML}`;
+	}
+
+	function openNewGraphInNewTab(): void {
+		const graphId =
+			typeof crypto.randomUUID === 'function'
+				? `graph-${crypto.randomUUID()}`
+				: `graph-${Date.now().toString(36)}`;
+		const routeMode = graphRouteModeForProtocol(window.location.protocol);
+		if (
+			routeMode === 'hash' &&
+			(window.location.protocol === 'file:' || window.location.protocol === 'blob:')
+		) {
+			const currentWithoutHash = window.location.href.split('#')[0];
+			window.open(`${currentWithoutHash}${graphHash(graphId)}`, '_blank');
+			return;
+		}
+		if (routeMode === 'hash' && isSelfContainedHtmlShell(currentHtmlShell())) {
+			openHtmlTextInNewTab(currentHtmlShellWithoutEmbeddedGraph(), graphHash(graphId));
+			return;
+		}
+
+		const currentWithoutHash = window.location.href.split('#')[0];
+		const currentPath = currentWithoutHash.split('?')[0];
+		window.open(
+			`${currentPath}${routeMode === 'hash' ? graphHash(graphId) : graphSearch(graphId)}`,
+			'_blank'
+		);
+	}
+
 	async function exportHtmlShell(): Promise<string> {
 		const currentShell = currentHtmlShell();
 		if (isSelfContainedHtmlShell(currentShell)) return currentShell;
@@ -168,6 +216,7 @@
 	<GraphToolbar
 		notice={persisted?.notice ?? 'Loading graph...'}
 		onNewGraph={createNewGraph}
+		onLoadGraph={loadGraphFile}
 		onDownload={() => void handleDownload()}
 	/>
 

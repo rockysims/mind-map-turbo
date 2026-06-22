@@ -10,6 +10,7 @@
 		argTypes: {
 			notice: { control: 'text' },
 			onNewGraph: { control: false },
+			onLoadGraph: { control: false },
 			onDownload: { control: false }
 		},
 		parameters: {
@@ -28,6 +29,7 @@
 		args: {
 			notice?: string;
 			onNewGraph?: () => void;
+			onLoadGraph?: (file: File) => void;
 			onDownload?: () => void;
 		};
 	};
@@ -42,12 +44,14 @@
 	args={{
 		notice: 'Draft differs from opened file. Download needed.',
 		onNewGraph: fn(),
+		onLoadGraph: fn(),
 		onDownload: fn()
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		const canvas = within(canvasElement);
 
-		await expect(canvas.getByRole('button', { name: 'New graph' })).toBeInTheDocument();
+		await expect(canvas.getByRole('button', { name: 'New' })).toBeInTheDocument();
+		await expect(canvas.getByText('Load')).toBeInTheDocument();
 		await expect(canvas.getByRole('button', { name: 'Download' })).toBeInTheDocument();
 		await expect(canvas.getByRole('status')).toHaveTextContent(
 			'Draft differs from opened file. Download needed.'
@@ -63,16 +67,42 @@
 	args={{
 		notice: 'Matches downloaded file.',
 		onNewGraph: fn(),
+		onLoadGraph: fn(),
 		onDownload: fn()
 	}}
 	play={async ({ canvasElement, args }: PlayContext) => {
 		const canvas = within(canvasElement);
 
-		canvas.getByRole('button', { name: 'New graph' }).click();
+		canvas.getByRole('button', { name: 'New' }).click();
 		canvas.getByRole('button', { name: 'Download' }).click();
 
 		expect(spyFor(args.onNewGraph).mock.calls).toHaveLength(1);
 		expect(spyFor(args.onDownload).mock.calls).toHaveLength(1);
+	}}
+/>
+
+<Story
+	name="UserLoadsHtmlFile"
+	args={{
+		notice: 'Matches opened file.',
+		onNewGraph: fn(),
+		onLoadGraph: fn(),
+		onDownload: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		const canvas = within(canvasElement);
+		const fileInput = canvas.getByLabelText('Load HTML file') as HTMLInputElement;
+		const file = new File(['<!doctype html><html></html>'], 'graph.html', { type: 'text/html' });
+
+		Object.defineProperty(fileInput, 'files', {
+			value: [file],
+			configurable: true
+		});
+		fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+		expect(spyFor(args.onLoadGraph).mock.calls).toHaveLength(1);
+		expect((spyFor(args.onLoadGraph).mock.calls[0] as [File])[0].name).toBe('graph.html');
+		expect(fileInput.value).toBe('');
 	}}
 />
 

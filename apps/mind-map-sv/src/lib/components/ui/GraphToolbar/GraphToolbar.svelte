@@ -2,16 +2,45 @@
 	let {
 		notice = '',
 		onNewGraph,
+		onLoadGraph,
 		onDownload
 	}: {
 		notice?: string;
 		onNewGraph?: () => void;
+		onLoadGraph?: (file: File) => void;
 		onDownload?: () => void;
 	} = $props();
+
+	let fileInput = $state<HTMLInputElement | undefined>(undefined);
+
+	function handleFileChange(event: Event): void {
+		const target = event.currentTarget as HTMLInputElement;
+		const file = target.files?.[0];
+		if (file) {
+			onLoadGraph?.(file);
+		}
+		if (fileInput) {
+			setTimeout(() => {
+				if (fileInput) fileInput.value = '';
+			});
+		}
+	}
 </script>
 
 <div class="graph-toolbar" aria-label="Graph persistence controls">
-	<button type="button" onclick={() => onNewGraph?.()}>New graph</button>
+	<button type="button" onclick={() => onNewGraph?.()}>New</button>
+	<label>
+		<span class="sr-only">Load HTML file</span>
+		<input
+			bind:this={fileInput}
+			type="file"
+			accept=".html,text/html"
+			aria-label="Load HTML file"
+			class="file-input-hidden"
+			onchange={handleFileChange}
+		/>
+		<span aria-hidden="true" class="file-input-button">Load</span>
+	</label>
 	<button type="button" onclick={() => onDownload?.()}>Download</button>
 	<p role="status">{notice}</p>
 </div>
@@ -34,7 +63,8 @@
 		transform: translateX(-50%);
 	}
 
-	.graph-toolbar button {
+	.graph-toolbar button,
+	.file-input-button {
 		border: 0;
 		border-radius: 999px;
 		padding: 0.375rem 0.625rem;
@@ -42,6 +72,30 @@
 		color: #0f172a;
 		font: inherit;
 		cursor: pointer;
+	}
+
+	.file-input-hidden {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
+	}
+
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
 	}
 
 	.graph-toolbar p {

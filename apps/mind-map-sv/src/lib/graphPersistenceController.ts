@@ -350,10 +350,7 @@ export class GraphPersistenceController {
 					currentGraph: this.view.graph,
 					documentStatus: this.currentDocumentStatus()
 				})) ?? false);
-		if (!confirmed) {
-			this.update({ status: { state: 'notice', message: 'New graph cancelled.' } });
-			return;
-		}
+		if (!confirmed) return;
 
 		await this.flushPendingSave();
 		const nextGraph = this.deps.createDefaultGraph();
@@ -487,8 +484,7 @@ export function controllerNotice(view: ControllerView): string {
 	if (view.status.state === 'error') return statusToNotice(view.status);
 	if (
 		view.status.state === 'notice' &&
-		(view.status.message.includes('cancelled') ||
-			view.status.message.includes('failed') ||
+		(view.status.message.includes('failed') ||
 			view.status.message.includes('newer') ||
 			view.status.message.includes('Kept local draft'))
 	) {

@@ -173,7 +173,7 @@
 		const harness = getHarness(canvasElement);
 
 		await waitForHarnessData(canvasElement, 'loadedGraphId', 'default');
-		await userEvent.click(canvas.getByRole('button', { name: 'New graph' }));
+		await userEvent.click(canvas.getByRole('button', { name: 'New' }));
 
 		await waitForHarnessData(canvasElement, 'loadedGraphId', 'graph-new');
 		await expect(harness.dataset.primaryTitle).toBe('Node 0');

@@ -258,7 +258,7 @@ describe('GraphPersistenceController', () => {
 		expect(controller.getView()).toMatchObject({
 			loadedGraphId: 'active',
 			documentStatus: 'new-dirty',
-			status: { state: 'notice', message: 'New graph cancelled.' }
+			status: { state: 'saved', savedAt: 123 }
 		});
 	});
 
