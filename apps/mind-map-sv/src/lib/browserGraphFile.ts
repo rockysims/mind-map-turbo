@@ -12,6 +12,7 @@ export type BrowserFileArtifact = {
 };
 
 export const OPEN_HTML_FILE_FROM_PICKER_SESSION_KEY = 'mind-map:open-file-from-picker';
+export const OPEN_HTML_FILE_TEXT_SESSION_KEY = 'mind-map:open-file-text';
 
 /** Trigger a file download with the given text content and suggested filename. */
 export function downloadTextFile(
@@ -65,16 +66,16 @@ export function openHtmlFileInNewTab(file: File, opened = openBlankHtmlTab()): b
 	return true;
 }
 
-export function openHtmlFilePickerInNewTab(): boolean {
+export function openHtmlFilePickerInNewTab(appUrl: string): boolean {
 	const opened = openBlankHtmlTab();
 	if (opened === null) return false;
 	opened.document.open();
-	opened.document.write(filePickerTabHtml());
+	opened.document.write(filePickerTabHtml(appUrl));
 	opened.document.close();
 	return true;
 }
 
-function filePickerTabHtml(): string {
+function filePickerTabHtml(appUrl: string): string {
 	return `<!doctype html>
 <html lang="en">
 	<head>
@@ -162,12 +163,11 @@ function filePickerTabHtml(): string {
 				reader.onload = () => {
 					try {
 						sessionStorage.setItem(${JSON.stringify(OPEN_HTML_FILE_FROM_PICKER_SESSION_KEY)}, '1');
+						sessionStorage.setItem(${JSON.stringify(OPEN_HTML_FILE_TEXT_SESSION_KEY)}, String(reader.result || ''));
 					} catch {
 						// Ignore storage failures; the file still opens.
 					}
-					document.open();
-					document.write(String(reader.result || ''));
-					document.close();
+					location.replace(${JSON.stringify(appUrl)});
 				};
 				reader.onerror = () => {
 					status.textContent = 'Unable to open that graph file.';

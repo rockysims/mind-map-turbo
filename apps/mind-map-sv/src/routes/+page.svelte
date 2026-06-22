@@ -6,6 +6,7 @@
 	import {
 		downloadFileArtifact,
 		OPEN_HTML_FILE_FROM_PICKER_SESSION_KEY,
+		OPEN_HTML_FILE_TEXT_SESSION_KEY,
 		openHtmlFilePickerInNewTab,
 		openHtmlTextInNewTab
 	} from '$lib/browserGraphFile';
@@ -55,7 +56,9 @@
 			namespace: APP_CONFIG.persistence.storageNamespace
 		});
 
-		const embeddedGraph = readEmbeddedGraphDocument();
+		const selectedGraphFileText = consumeOpenFileText();
+		const embeddedGraph =
+			readSelectedGraphDocument(selectedGraphFileText) ?? readEmbeddedGraphDocument();
 		const openedFromFilePicker = consumeOpenFileFromPickerFlag();
 
 		const persistedGraph = usePersistedGraph({
@@ -150,7 +153,7 @@
 	}
 
 	function openGraphFilePicker(): void {
-		openHtmlFilePickerInNewTab();
+		openHtmlFilePickerInNewTab(currentAppUrlWithoutGraphRoute());
 	}
 
 	function consumeOpenFileFromPickerFlag(): boolean {
@@ -161,6 +164,16 @@
 			return openedFromPicker;
 		} catch {
 			return false;
+		}
+	}
+
+	function consumeOpenFileText(): string | null {
+		try {
+			const text = sessionStorage.getItem(OPEN_HTML_FILE_TEXT_SESSION_KEY);
+			sessionStorage.removeItem(OPEN_HTML_FILE_TEXT_SESSION_KEY);
+			return text;
+		} catch {
+			return null;
 		}
 	}
 
@@ -210,6 +223,23 @@
 		} catch {
 			return null;
 		}
+	}
+
+	function readSelectedGraphDocument(text: string | null): GraphFileDocument | null {
+		if (text === null) return null;
+		try {
+			return parseGraphFileText(text, {
+				minScale: APP_CONFIG.multigraph.zoom.minScale,
+				maxScale: APP_CONFIG.multigraph.zoom.maxScale
+			});
+		} catch {
+			return null;
+		}
+	}
+
+	function currentAppUrlWithoutGraphRoute(): string {
+		const currentWithoutHash = window.location.href.split('#')[0];
+		return currentWithoutHash.split('?')[0];
 	}
 
 	function currentHtmlShell(): string {
