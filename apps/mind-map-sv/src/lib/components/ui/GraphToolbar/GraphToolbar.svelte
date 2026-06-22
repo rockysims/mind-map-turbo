@@ -65,6 +65,10 @@
 
 	.graph-toolbar button,
 	.file-input-button {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 2rem;
 		border: 0;
 		border-radius: 999px;
 		padding: 0.375rem 0.625rem;
