@@ -11,7 +11,6 @@
 			notice: { control: 'text' },
 			onNewGraph: { control: false },
 			onOpenGraphFilePicker: { control: false },
-			onLoadGraph: { control: false },
 			onDownload: { control: false }
 		},
 		parameters: {
@@ -31,7 +30,6 @@
 			notice?: string;
 			onNewGraph?: () => void;
 			onOpenGraphFilePicker?: () => void;
-			onLoadGraph?: (file: File) => void;
 			onDownload?: () => void;
 		};
 	};
@@ -47,7 +45,6 @@
 		notice: 'Draft differs from opened file. Download needed.',
 		onNewGraph: fn(),
 		onOpenGraphFilePicker: fn(),
-		onLoadGraph: fn(),
 		onDownload: fn()
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
@@ -59,7 +56,6 @@
 		await expect(canvas.getByRole('status')).toHaveTextContent(
 			'Draft differs from opened file. Download needed.'
 		);
-		await expect(canvas.queryByLabelText('Load graph file')).toBeInTheDocument();
 		await expect(canvas.queryByLabelText('Import graph from file')).not.toBeInTheDocument();
 		await expect(canvas.queryByRole('button', { name: 'Delete graph' })).not.toBeInTheDocument();
 	}}
@@ -71,7 +67,6 @@
 		notice: 'Matches downloaded file.',
 		onNewGraph: fn(),
 		onOpenGraphFilePicker: fn(),
-		onLoadGraph: fn(),
 		onDownload: fn()
 	}}
 	play={async ({ canvasElement, args }: PlayContext) => {
@@ -86,30 +81,19 @@
 />
 
 <Story
-	name="UserLoadsHtmlFile"
+	name="UserOpensGraphFileTab"
 	args={{
 		notice: 'Matches opened file.',
 		onNewGraph: fn(),
 		onOpenGraphFilePicker: fn(),
-		onLoadGraph: fn(),
 		onDownload: fn()
 	}}
 	play={async ({ canvasElement, args }: PlayContext) => {
 		const canvas = within(canvasElement);
-		const fileInput = canvas.getByLabelText('Load graph file') as HTMLInputElement;
-		const file = new File(['<!doctype html><html></html>'], 'graph.html', { type: 'text/html' });
 
 		canvas.getByRole('button', { name: 'Open' }).click();
-		Object.defineProperty(fileInput, 'files', {
-			value: [file],
-			configurable: true
-		});
-		fileInput.dispatchEvent(new Event('change', { bubbles: true }));
 
 		expect(spyFor(args.onOpenGraphFilePicker).mock.calls).toHaveLength(1);
-		expect(spyFor(args.onLoadGraph).mock.calls).toHaveLength(1);
-		expect((spyFor(args.onLoadGraph).mock.calls[0] as [File])[0].name).toBe('graph.html');
-		expect(fileInput.value).toBe('');
 	}}
 />
 

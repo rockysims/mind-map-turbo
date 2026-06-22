@@ -212,7 +212,7 @@ test('single-document toolbar omits graph library controls', async ({ page }) =>
 	await page.goto('/');
 
 	await expect(page.getByRole('button', { name: 'New' })).toBeVisible();
-	await expect(page.getByLabel('Load graph file')).toHaveCount(1);
+	await expect(page.getByRole('button', { name: 'Open' })).toBeVisible();
 	await expect(page.getByRole('button', { name: 'Download' })).toBeVisible();
 	await expect(page.getByLabel('Load graph', { exact: true })).toHaveCount(0);
 	await expect(page.getByLabel('Import graph from file')).toHaveCount(0);
@@ -229,11 +229,15 @@ test('load opens an HTML save file in a new tab', async ({ page }) => {
 
 	await page.goto('/');
 	const popupPromise = page.waitForEvent('popup');
-	const fileChooserPromise = page.waitForEvent('filechooser');
 	await page.getByText('Open').click();
+	const popup = await popupPromise;
+	await popup.waitForLoadState('domcontentloaded');
+	await expect(popup.getByRole('button', { name: 'Choose graph file' })).toBeVisible();
+
+	const fileChooserPromise = popup.waitForEvent('filechooser');
+	await popup.getByRole('button', { name: 'Choose graph file' }).click();
 	const fileChooser = await fileChooserPromise;
 	await fileChooser.setFiles(tmpFile);
-	const popup = await popupPromise;
 	await popup.waitForLoadState('domcontentloaded');
 
 	await expect(popup.getByText('Loaded File Node')).toBeVisible();

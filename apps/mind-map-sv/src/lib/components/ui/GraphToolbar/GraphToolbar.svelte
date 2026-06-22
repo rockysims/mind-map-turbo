@@ -3,55 +3,18 @@
 		notice = '',
 		onNewGraph,
 		onOpenGraphFilePicker,
-		onLoadGraph,
 		onDownload
 	}: {
 		notice?: string;
 		onNewGraph?: () => void;
 		onOpenGraphFilePicker?: () => void;
-		onLoadGraph?: (file: File) => void;
 		onDownload?: () => void;
 	} = $props();
-
-	let fileInput = $state<HTMLInputElement | undefined>(undefined);
-
-	function handleOpenClick(): void {
-		try {
-			fileInput?.showPicker();
-		} catch {
-			fileInput?.click();
-		}
-		onOpenGraphFilePicker?.();
-	}
-
-	function handleFileChange(event: Event): void {
-		const target = event.currentTarget as HTMLInputElement;
-		const file = target.files?.[0];
-		if (file) {
-			onLoadGraph?.(file);
-		}
-		if (fileInput) {
-			setTimeout(() => {
-				if (fileInput) fileInput.value = '';
-			});
-		}
-	}
 </script>
 
 <div class="graph-toolbar" aria-label="Graph persistence controls">
 	<button type="button" onclick={() => onNewGraph?.()}>New</button>
-	<span>
-		<span class="sr-only">Load graph file</span>
-		<input
-			bind:this={fileInput}
-			type="file"
-			accept=".html,text/html"
-			aria-label="Load graph file"
-			class="file-input-hidden"
-			onchange={handleFileChange}
-		/>
-		<button type="button" onclick={handleOpenClick}>Open</button>
-	</span>
+	<button type="button" onclick={() => onOpenGraphFilePicker?.()}>Open</button>
 	<button type="button" onclick={() => onDownload?.()}>Download</button>
 	<p role="status">{notice}</p>
 </div>
@@ -86,30 +49,6 @@
 		color: #0f172a;
 		font: inherit;
 		cursor: pointer;
-	}
-
-	.file-input-hidden {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		padding: 0;
-		margin: -1px;
-		overflow: hidden;
-		clip: rect(0, 0, 0, 0);
-		white-space: nowrap;
-		border: 0;
-	}
-
-	.sr-only {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		padding: 0;
-		margin: -1px;
-		overflow: hidden;
-		clip: rect(0, 0, 0, 0);
-		white-space: nowrap;
-		border: 0;
 	}
 
 	.graph-toolbar p {

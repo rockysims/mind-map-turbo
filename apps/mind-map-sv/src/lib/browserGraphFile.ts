@@ -63,6 +63,119 @@ export function openHtmlFileInNewTab(file: File, opened = openBlankHtmlTab()): b
 	return true;
 }
 
+export function openHtmlFilePickerInNewTab(): boolean {
+	const opened = openBlankHtmlTab();
+	if (opened === null) return false;
+	opened.document.open();
+	opened.document.write(filePickerTabHtml());
+	opened.document.close();
+	return true;
+}
+
+function filePickerTabHtml(): string {
+	return `<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Open graph file</title>
+		<style>
+			:root {
+				color-scheme: light;
+				font-family:
+					Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+				background: #f8fafc;
+				color: #0f172a;
+			}
+
+			body {
+				min-height: 100vh;
+				margin: 0;
+				display: grid;
+				place-items: center;
+			}
+
+			main {
+				display: grid;
+				gap: 1rem;
+				justify-items: center;
+				padding: 2rem;
+				text-align: center;
+			}
+
+			h1,
+			p {
+				margin: 0;
+			}
+
+			h1 {
+				font-size: 1.25rem;
+			}
+
+			button {
+				min-height: 2.5rem;
+				border: 0;
+				border-radius: 999px;
+				padding: 0.625rem 1rem;
+				background: #0f172a;
+				color: white;
+				font: inherit;
+				cursor: pointer;
+			}
+
+			input {
+				position: absolute;
+				width: 1px;
+				height: 1px;
+				padding: 0;
+				margin: -1px;
+				overflow: hidden;
+				clip: rect(0, 0, 0, 0);
+				white-space: nowrap;
+				border: 0;
+			}
+		</style>
+	</head>
+	<body>
+		<main>
+			<h1>Open graph file</h1>
+			<button type="button">Choose graph file</button>
+			<input type="file" accept=".html,text/html" aria-label="Graph file" />
+			<p role="status"></p>
+		</main>
+		<script>
+			const button = document.querySelector('button');
+			const input = document.querySelector('input');
+			const status = document.querySelector('[role="status"]');
+
+			button.addEventListener('click', () => {
+				input.click();
+			});
+
+			input.addEventListener('change', () => {
+				const file = input.files && input.files[0];
+				if (!file) return;
+				status.textContent = 'Opening graph file...';
+				const reader = new FileReader();
+				reader.onload = () => {
+					document.open();
+					document.write(String(reader.result || ''));
+					document.close();
+				};
+				reader.onerror = () => {
+					status.textContent = 'Unable to open that graph file.';
+				};
+				reader.readAsText(file);
+			});
+		${scriptCloseTag()}
+	</body>
+</html>`;
+}
+
+function scriptCloseTag(): string {
+	return '</' + 'script>';
+}
+
 /**
  * Read the text content of a File object.
  *
