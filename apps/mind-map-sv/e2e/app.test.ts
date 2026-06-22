@@ -241,6 +241,7 @@ test('load opens an HTML save file in a new tab', async ({ page }) => {
 	await popup.waitForLoadState('domcontentloaded');
 
 	await expect(popup).not.toHaveURL('about:blank');
+	await expect(popup).not.toHaveURL(/^blob:/);
 	await expect(popup.getByText('Loaded File Node')).toBeVisible();
 	await expect(popup.getByText('Local edits found')).not.toBeVisible();
 	await expect(page.getByText('Root')).toBeVisible();
@@ -282,6 +283,7 @@ test('load opens selected HTML file instead of stale local document draft', asyn
 	await fileChooser.setFiles(tmpFile);
 	await popup.waitForLoadState('domcontentloaded');
 	await expect(popup).not.toHaveURL('about:blank');
+	await expect(popup).not.toHaveURL(/^blob:/);
 	await expect(popup.getByText('Local edits found')).toBeVisible();
 	await popup.getByRole('button', { name: 'Open selected file' }).click();
 
@@ -326,6 +328,7 @@ test('load can recover local edits instead of opening selected HTML file', async
 	await fileChooser.setFiles(tmpFile);
 	await popup.waitForLoadState('domcontentloaded');
 	await expect(popup).not.toHaveURL('about:blank');
+	await expect(popup).not.toHaveURL(/^blob:/);
 	await expect(popup.getByText('Local edits found')).toBeVisible();
 	await popup.getByRole('button', { name: 'Recover local edits' }).click();
 

@@ -7,6 +7,7 @@
 		downloadFileArtifact,
 		OPEN_HTML_FILE_FROM_PICKER_SESSION_KEY,
 		OPEN_HTML_FILE_TEXT_SESSION_KEY,
+		OPEN_HTML_FILE_WINDOW_NAME_PREFIX,
 		openHtmlFilePickerInNewTab,
 		openHtmlTextInNewTab
 	} from '$lib/browserGraphFile';
@@ -56,10 +57,10 @@
 			namespace: APP_CONFIG.persistence.storageNamespace
 		});
 
-		const selectedGraphFileText = consumeOpenFileText();
+		const selectedGraphFileText = consumeOpenFileWindowName() ?? consumeOpenFileText();
 		const embeddedGraph =
 			readSelectedGraphDocument(selectedGraphFileText) ?? readEmbeddedGraphDocument();
-		const openedFromFilePicker = consumeOpenFileFromPickerFlag();
+		const openedFromFilePicker = selectedGraphFileText !== null || consumeOpenFileFromPickerFlag();
 
 		const persistedGraph = usePersistedGraph({
 			persistence,
@@ -167,6 +168,18 @@
 		}
 	}
 
+	function consumeOpenFileWindowName(): string | null {
+		if (!window.name.startsWith(OPEN_HTML_FILE_WINDOW_NAME_PREFIX)) return null;
+		const payload = window.name.slice(OPEN_HTML_FILE_WINDOW_NAME_PREFIX.length);
+		window.name = '';
+		try {
+			const parsed = JSON.parse(payload) as { text?: unknown };
+			return typeof parsed.text === 'string' ? parsed.text : null;
+		} catch {
+			return null;
+		}
+	}
+
 	function consumeOpenFileText(): string | null {
 		try {
 			const text = sessionStorage.getItem(OPEN_HTML_FILE_TEXT_SESSION_KEY);
@@ -237,11 +250,6 @@
 		}
 	}
 
-	function currentAppUrlWithoutGraphRoute(): string {
-		const currentWithoutHash = window.location.href.split('#')[0];
-		return currentWithoutHash.split('?')[0];
-	}
-
 	function currentHtmlShell(): string {
 		return `<!doctype html>\n${document.documentElement.outerHTML}`;
 	}
@@ -262,6 +270,11 @@
 			}
 		}
 		return `<!doctype html>\n${html.outerHTML}`;
+	}
+
+	function currentAppUrlWithoutGraphRoute(): string {
+		const currentWithoutHash = window.location.href.split('#')[0];
+		return currentWithoutHash.split('?')[0];
 	}
 
 	function openNewGraphInNewTab(): void {

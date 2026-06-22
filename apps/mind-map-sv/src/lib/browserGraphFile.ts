@@ -13,6 +13,7 @@ export type BrowserFileArtifact = {
 
 export const OPEN_HTML_FILE_FROM_PICKER_SESSION_KEY = 'mind-map:open-file-from-picker';
 export const OPEN_HTML_FILE_TEXT_SESSION_KEY = 'mind-map:open-file-text';
+export const OPEN_HTML_FILE_WINDOW_NAME_PREFIX = 'mind-map:open-file:';
 
 /** Trigger a file download with the given text content and suggested filename. */
 export function downloadTextFile(
@@ -161,12 +162,16 @@ function filePickerTabHtml(appUrl: string): string {
 				status.textContent = 'Opening graph file...';
 				const reader = new FileReader();
 				reader.onload = () => {
+					const fileText = String(reader.result || '');
 					try {
 						sessionStorage.setItem(${JSON.stringify(OPEN_HTML_FILE_FROM_PICKER_SESSION_KEY)}, '1');
-						sessionStorage.setItem(${JSON.stringify(OPEN_HTML_FILE_TEXT_SESSION_KEY)}, String(reader.result || ''));
+						sessionStorage.setItem(${JSON.stringify(OPEN_HTML_FILE_TEXT_SESSION_KEY)}, fileText);
 					} catch {
-						// Ignore storage failures; the file still opens.
+						// Ignore storage failures; opening still works without conflict recovery metadata.
 					}
+					window.name = ${JSON.stringify(OPEN_HTML_FILE_WINDOW_NAME_PREFIX)} + JSON.stringify({
+						text: fileText
+					});
 					location.replace(${JSON.stringify(appUrl)});
 				};
 				reader.onerror = () => {
