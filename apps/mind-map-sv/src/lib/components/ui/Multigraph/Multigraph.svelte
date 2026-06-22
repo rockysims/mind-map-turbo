@@ -97,6 +97,7 @@
 		},
 		graphGeneration = 0,
 		defaultPrimaryNodeId = '',
+		initialTitleEditNodeId,
 		layoutSettings = {},
 		initialViewState,
 		onMultigraphChange,
@@ -108,6 +109,7 @@
 		multigraphData: MultigraphData;
 		graphGeneration?: number;
 		defaultPrimaryNodeId?: string;
+		initialTitleEditNodeId?: string | null;
 		layoutSettings?: Partial<LayoutSettings>;
 		initialViewState?: ViewState;
 		onMultigraphChange?: (data: MultigraphData) => void;
@@ -136,6 +138,7 @@
 	let graphRef = $state<HTMLElement | null>(null);
 	let lastPinnedNodeId = $state<string | null>(null);
 	let lastSyncedGeneration = $state(-1);
+	let lastInitialTitleEditKey = $state('');
 	let stageScale = $state(1);
 
 	/** Internal enter animations for nodes added by the user (scale 0 → target). */
@@ -296,6 +299,17 @@
 		internalExitingBuffer = EMPTY_EXITING_BUFFER;
 		nodeEnterAnimations = {};
 		edgeEnterAnimations = {};
+	});
+
+	$effect(() => {
+		const nodeId = initialTitleEditNodeId;
+		if (!nodeId) return;
+		const editKey = `${externalGraphSyncToken(graphGeneration)}:${nodeId}`;
+		if (editKey === lastInitialTitleEditKey) return;
+		if (!graph.nodes.some((node) => node.id === nodeId)) return;
+		lastInitialTitleEditKey = editKey;
+		closeOverlays();
+		titleEditContext = { nodeId };
 	});
 
 	$effect(() => {

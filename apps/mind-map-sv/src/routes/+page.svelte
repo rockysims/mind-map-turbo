@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
+	import { SvelteURLSearchParams } from 'svelte/reactivity';
 	import { APP_CONFIG } from '$lib/appConfig';
 	import {
 		downloadFileArtifact,
@@ -30,8 +31,11 @@
 	import { createPersistence, estimateNamespaceUsageBytes } from '$lib/persistence';
 	import { SaveScheduler } from '$lib/saveScheduler';
 
+	const EDIT_ROOT_PARAM = 'editRoot';
+
 	let persisted = $state<PersistedGraph | null>(null);
 	let selectedGraphId = $state(graphIdFromUrl(page.url));
+	let initialTitleEditNodeId = $state<string | null>(null);
 	const defaultPrimaryNodeId = $derived(persisted?.graph.nodes[0]?.id ?? '');
 
 	onMount(() => {
@@ -117,7 +121,7 @@
 
 	function createDefaultGraph(): MultigraphData {
 		return {
-			nodes: [{ id: 'n0', title: 'Node 0', description: 'Description for node 0', tags: [] }],
+			nodes: [{ id: 'n0', title: 'Root', description: 'Description for root node', tags: [] }],
 			edges: [],
 			posByNodeId: { n0: { x: 0, y: 0 } },
 			tagColorConfig: {
@@ -147,10 +151,14 @@
 		if (graphId === selectedGraphId && persistedGraph.loadedGraphId !== '') return;
 		selectedGraphId = graphId;
 		if (embeddedGraph?.documentId && graphId === DEFAULT_GRAPH_ID) {
+			initialTitleEditNodeId = null;
 			await persistedGraph.loadEmbeddedDocument(embeddedGraph);
 			return;
 		}
 		await persistedGraph.load(graphId, options);
+		const shouldEditRoot = shouldEditRootTitleFromUrl();
+		initialTitleEditNodeId = shouldEditRoot ? 'n0' : null;
+		if (shouldEditRoot) removeEditRootTitleFlagFromUrl();
 	}
 
 	async function handleDownload(): Promise<void> {
@@ -203,20 +211,65 @@
 			(window.location.protocol === 'file:' || window.location.protocol === 'blob:')
 		) {
 			const currentWithoutHash = window.location.href.split('#')[0];
-			window.open(`${currentWithoutHash}${graphHash(graphId)}`, '_blank');
+			window.open(`${currentWithoutHash}${graphHash(graphId, { editRoot: true })}`, '_blank');
 			return;
 		}
 		if (routeMode === 'hash' && isSelfContainedHtmlShell(currentHtmlShell())) {
-			openHtmlTextInNewTab(currentHtmlShellWithoutEmbeddedGraph(), graphHash(graphId));
+			openHtmlTextInNewTab(
+				currentHtmlShellWithoutEmbeddedGraph(),
+				graphHash(graphId, { editRoot: true })
+			);
 			return;
 		}
 
 		const currentWithoutHash = window.location.href.split('#')[0];
 		const currentPath = currentWithoutHash.split('?')[0];
 		window.open(
-			`${currentPath}${routeMode === 'hash' ? graphHash(graphId) : graphSearch(graphId)}`,
+			`${currentPath}${
+				routeMode === 'hash'
+					? graphHash(graphId, { editRoot: true })
+					: graphSearch(graphId, { editRoot: true })
+			}`,
 			'_blank'
 		);
+	}
+
+	function shouldEditRootTitleFromUrl(): boolean {
+		const url = new URL(window.location.href);
+		const routeMode = graphRouteModeForProtocol(window.location.protocol);
+		if (routeMode === 'hash') {
+			const hash = url.hash.slice(1);
+			if (hash.startsWith('/')) {
+				return new URL(hash, 'https://hash-route.local').searchParams.get(EDIT_ROOT_PARAM) === '1';
+			}
+			const params = new SvelteURLSearchParams(hash.startsWith('?') ? hash.slice(1) : hash);
+			return params.get(EDIT_ROOT_PARAM) === '1';
+		}
+		return url.searchParams.get(EDIT_ROOT_PARAM) === '1';
+	}
+
+	function removeEditRootTitleFlagFromUrl(): void {
+		const url = new URL(window.location.href);
+		const routeMode = graphRouteModeForProtocol(window.location.protocol);
+		if (routeMode === 'hash') {
+			const hash = url.hash.slice(1);
+			if (hash.startsWith('/')) {
+				const hashRoute = new URL(hash, 'https://hash-route.local');
+				hashRoute.searchParams.delete(EDIT_ROOT_PARAM);
+				window.history.replaceState(
+					window.history.state,
+					'',
+					`${url.href.split('#')[0]}#${hashRoute.pathname}${hashRoute.search}`
+				);
+				return;
+			}
+			const params = new SvelteURLSearchParams(hash.startsWith('?') ? hash.slice(1) : hash);
+			params.delete(EDIT_ROOT_PARAM);
+			window.history.replaceState(window.history.state, '', `${url.href.split('#')[0]}#${params}`);
+			return;
+		}
+		url.searchParams.delete(EDIT_ROOT_PARAM);
+		window.history.replaceState(window.history.state, '', url);
 	}
 
 	async function exportHtmlShell(): Promise<string> {
@@ -247,6 +300,7 @@
 				multigraphData={persisted.graph}
 				graphGeneration={persisted.graphGeneration}
 				initialViewState={persisted.viewState}
+				{initialTitleEditNodeId}
 				{defaultPrimaryNodeId}
 				onMultigraphChange={(graph) => persisted?.notifyGraphChanged(graph, { syncView: true })}
 				onViewStateChange={(viewState) =>

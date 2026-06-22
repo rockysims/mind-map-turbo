@@ -8,14 +8,20 @@ export function graphRouteModeForProtocol(protocol: string): GraphRouteMode {
 	return protocol === 'file:' || protocol === 'blob:' ? 'hash' : 'query';
 }
 
-export function graphSearch(graphId: string): string {
-	if (graphId === DEFAULT_GRAPH_ID) return '';
-	return `?${new URLSearchParams({ graph: graphId }).toString()}`;
+export type GraphRouteOptions = {
+	editRoot?: boolean;
+};
+
+export function graphSearch(graphId: string, options: GraphRouteOptions = {}): string {
+	const params = graphRouteParams(graphId, options);
+	if (params.size === 0) return '';
+	return `?${params.toString()}`;
 }
 
-export function graphHash(graphId: string): string {
-	if (graphId === DEFAULT_GRAPH_ID) return '';
-	return `#/?${new URLSearchParams({ graph: graphId }).toString()}`;
+export function graphHash(graphId: string, options: GraphRouteOptions = {}): string {
+	const params = graphRouteParams(graphId, options);
+	if (params.size === 0) return '';
+	return `#/?${params.toString()}`;
 }
 
 export function graphHref(graphId: string): string {
@@ -49,4 +55,11 @@ export function graphIdFromUrl(url: URL, mode: GraphRouteMode = 'query'): string
 	}
 	const params = url.searchParams;
 	return params.get('graph') ?? DEFAULT_GRAPH_ID;
+}
+
+function graphRouteParams(graphId: string, options: GraphRouteOptions): URLSearchParams {
+	const params = new URLSearchParams();
+	if (graphId !== DEFAULT_GRAPH_ID) params.set('graph', graphId);
+	if (options.editRoot === true) params.set('editRoot', '1');
+	return params;
 }

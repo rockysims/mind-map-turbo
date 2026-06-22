@@ -22,6 +22,11 @@ describe('graph route helpers', () => {
 		expect(resolveGraphHref((path) => `/base${path}`, 'graph-1')).toBe('/base/?graph=graph-1');
 	});
 
+	it('adds route flags alongside graph ids', () => {
+		expect(graphSearch('graph-1', { editRoot: true })).toBe('?graph=graph-1&editRoot=1');
+		expect(graphHash('graph-1', { editRoot: true })).toBe('#/?graph=graph-1&editRoot=1');
+	});
+
 	it('adds graph hash params for file-safe routing', () => {
 		expect(graphHash(DEFAULT_GRAPH_ID)).toBe('');
 		expect(graphHash('graph-1')).toBe('#/?graph=graph-1');

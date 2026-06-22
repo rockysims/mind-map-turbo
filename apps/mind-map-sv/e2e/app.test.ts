@@ -18,7 +18,7 @@ function documentDraftGraphId(documentId: string): string {
 test('home page renders the graph entrypoint', async ({ page }) => {
 	await page.goto('/');
 
-	await expect(page.getByText('Node 0')).toBeVisible();
+	await expect(page.getByText('Root')).toBeVisible();
 });
 
 test('persists edited nodes across reloads in one document tab', async ({ page }) => {
@@ -27,7 +27,7 @@ test('persists edited nodes across reloads in one document tab', async ({ page }
 	await page.goto('/');
 	await page.evaluate(() => localStorage.clear());
 	await page.goto(graphUrl(firstGraphId));
-	await expect(page.getByText('Node 0')).toBeVisible();
+	await expect(page.getByText('Root')).toBeVisible();
 
 	await editFirstNodeTitle(page, 'Persisted Node');
 	await waitForStoredTitle(page, firstGraphId, 'Persisted Node');
@@ -47,7 +47,9 @@ test('persists edited nodes across reloads in one document tab', async ({ page }
 	await page.getByRole('button', { name: 'New' }).click();
 	const newGraphPage = await newGraphPromise;
 	await newGraphPage.waitForLoadState('domcontentloaded');
-	await expect(newGraphPage.getByText('Node 0')).toBeVisible();
+	const rootTitleInput = newGraphPage.locator('.title-input');
+	await expect(rootTitleInput).toHaveValue('Root');
+	await expect(rootTitleInput).toBeFocused();
 	await expect(newGraphPage).toHaveURL(/graph=graph-/);
 
 	await expect(page.getByText('Persisted Node')).toBeVisible();
@@ -62,7 +64,7 @@ test('exports HTML graph document containing schemaVersion, graph data, and view
 	await page.goto('/');
 	await page.evaluate(() => localStorage.clear());
 	await page.goto(graphUrl(graphId));
-	await expect(page.getByText('Node 0')).toBeVisible();
+	await expect(page.getByText('Root')).toBeVisible();
 
 	await editFirstNodeTitle(page, 'Exported Node');
 	await waitForStoredTitle(page, graphId, 'Exported Node');
@@ -106,7 +108,7 @@ test('self-contained build artifact opens from disk without sibling app assets',
 
 	await page.goto(pathToFileURL(join(process.cwd(), 'build', 'index.html')).href);
 
-	await expect(page.getByText('Node 0')).toBeVisible();
+	await expect(page.getByText('Root')).toBeVisible();
 	expect(requests.filter((url) => url.includes('/_app/'))).toEqual([]);
 });
 
@@ -173,7 +175,9 @@ test('new opens a fresh graph from an opened HTML save file', async ({ page }) =
 	const popup = await popupPromise;
 	await popup.waitForLoadState('domcontentloaded');
 
-	await expect(popup.getByText('Node 0')).toBeVisible();
+	const rootTitleInput = popup.locator('.title-input');
+	await expect(rootTitleInput).toHaveValue('Root');
+	await expect(rootTitleInput).toBeFocused();
 	await expect(popup.getByText('Saved File Node')).not.toBeVisible();
 	await expect(page.getByText('Saved File Node')).toBeVisible();
 });
@@ -195,13 +199,13 @@ test('browser back restores embedded graph after opened file hash route', async 
 		window.location.href = url;
 	}, routedUrl);
 	await expect(page).toHaveURL(routedUrl);
-	await expect(page.getByText('Node 0')).toBeVisible();
+	await expect(page.getByText('Root')).toBeVisible();
 	await expect(page.getByText('Original File Node')).not.toBeVisible();
 
 	await page.goBack();
 	await expect(page).toHaveURL(fileUrl);
 	await expect(page.getByText('Original File Node')).toBeVisible();
-	await expect(page.getByText('Node 0')).not.toBeVisible();
+	await expect(page.getByText('Root')).not.toBeVisible();
 });
 
 test('single-document toolbar omits graph library controls', async ({ page }) => {
@@ -230,7 +234,7 @@ test('load opens an HTML save file in a new tab', async ({ page }) => {
 	await popup.waitForLoadState('domcontentloaded');
 
 	await expect(popup.getByText('Loaded File Node')).toBeVisible();
-	await expect(page.getByText('Node 0')).toBeVisible();
+	await expect(page.getByText('Root')).toBeVisible();
 });
 
 test('reload restores graph data and viewState from localStorage without file import', async ({
@@ -241,7 +245,7 @@ test('reload restores graph data and viewState from localStorage without file im
 	await page.goto('/');
 	await page.evaluate(() => localStorage.clear());
 	await page.goto(graphUrl(graphId));
-	await expect(page.getByText('Node 0')).toBeVisible();
+	await expect(page.getByText('Root')).toBeVisible();
 
 	await editFirstNodeTitle(page, 'Refresh Test Node');
 	await waitForStoredTitle(page, graphId, 'Refresh Test Node');
