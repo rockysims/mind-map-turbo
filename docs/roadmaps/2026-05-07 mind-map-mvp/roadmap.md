@@ -52,6 +52,7 @@ individual PR-sized tasks.
 | 04j | Edge occlusion fade near unrelated nodes           | complete    | [milestone](milestones/04j-edge-occlusion-fade.md), [plan](plans/2026-06-13%2004j-edge-occlusion-fade.md)                                       |
 | 04k | Parallel edge visualization                        | complete    | [milestone](milestones/04k-parallel-edge-visualization.md), [plan](plans/2026-06-18%2004k-parallel-edge-visualization.md)                       |
 | 04l | Self-contained HTML save files                     | complete    | [milestone](milestones/04l-self-contained-html-save-files.md), [plan](plans/2026-06-21%2004l-self-contained-html-save-files.md)                 |
+| 04m | Single-document save UX                            | not started | [milestone](milestones/04m-single-document-save-ux.md), [plan](plans/2026-06-21%2004m-single-document-save-ux.md)                               |
 | 05  | Multiplayer                                        | not started | [milestones/05-multiplayer.md](milestones/05-multiplayer.md)                                                                                    |
 | 06  | Search                                             | not started | [milestones/06-search.md](milestones/06-search.md)                                                                                              |
 
@@ -64,7 +65,8 @@ edge-local fade windows for visual underpasses without changing graph
 connectivity or layout routing. Milestone 04k makes parallel edges visible with
 render offsets while deferring UI creation of duplicate edges. Milestone 04l
 evolves explicit graph files from JSON backups into self-contained offline HTML
-documents.
+documents. Milestone 04m streamlines that file model into a single-document
+toolbar with Download and draft-vs-file status instead of graph-library controls.
 
 ## How this directory is organized
 
