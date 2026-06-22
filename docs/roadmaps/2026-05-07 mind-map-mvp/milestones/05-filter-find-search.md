@@ -45,6 +45,11 @@ The query model separates semantic role from layout participation:
 - `background`: rendered very dimmed.
 - `excluded`: not rendered, but still participates in layout.
 
+Dimmed `context` and `background` treatment only applies when the active query
+contains at least one positive token: text, `#tag`, `@tag`, `+#tag`, or `+@tag`.
+Exclude-only queries, such as `-#archived`, hide the excluded matches while
+leaving the rest of the rendered graph at normal opacity.
+
 This milestone implements a visual mask only. Querying must not cause layout
 reflow. A later isolation mode may let users remove non-matches from both
 rendering and layout influence, but that must be an explicit mode with its own
@@ -72,8 +77,8 @@ transition and status indicator.
 - Excluding a node hides that node and its incident edges from rendering.
 - Excluding an edge hides only that edge from rendering.
 - Exclusion wins over focus and spotlight.
-- Background nodes/edges remain rendered but dimmed so users can preserve their
-  mental map while filtering.
+- When at least one positive token is active, background nodes/edges remain
+  rendered but dimmed so users can preserve their mental map while filtering.
 
 ### UI
 

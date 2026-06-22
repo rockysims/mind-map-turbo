@@ -2040,6 +2040,8 @@
 		expect(canvasElement.querySelector('[data-node-id="n1"].node-wrapper')).not.toBeInTheDocument();
 		expect(canvasElement.querySelector('[data-edge-id="e0"]')).not.toBeInTheDocument();
 		expect(canvasElement.querySelector('[data-edge-id="e1"]')).not.toBeInTheDocument();
+		expect(nodeOpacity(canvasElement, 'n0')).toBe(1);
+		expect(nodeOpacity(canvasElement, 'n2')).toBe(1);
 		expect(getNodeWrapper(canvasElement, 'n0').dataset.x).toBe(n0XBefore);
 	}}
 />

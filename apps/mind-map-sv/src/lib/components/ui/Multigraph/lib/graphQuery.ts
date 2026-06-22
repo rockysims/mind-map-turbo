@@ -26,6 +26,7 @@ export interface GraphQueryRegion {
 export interface GraphQueryResult {
 	tokens: GraphQueryToken[];
 	hasActiveQuery: boolean;
+	dimsBackground: boolean;
 	nodeStateById: Record<string, GraphQueryElementState>;
 	edgeStateById: Record<string, GraphQueryElementState>;
 	regions: GraphQueryRegion[];
@@ -99,6 +100,7 @@ export function evaluateGraphQuery(data: MultigraphData, input: string): GraphQu
 		return {
 			tokens,
 			hasActiveQuery: false,
+			dimsBackground: false,
 			nodeStateById: {},
 			edgeStateById: {},
 			regions: [],
@@ -180,6 +182,7 @@ export function evaluateGraphQuery(data: MultigraphData, input: string): GraphQu
 	return {
 		tokens,
 		hasActiveQuery: true,
+		dimsBackground: tokens.some((token) => token.mode !== 'exclude'),
 		nodeStateById,
 		edgeStateById,
 		focusedNodeIds,

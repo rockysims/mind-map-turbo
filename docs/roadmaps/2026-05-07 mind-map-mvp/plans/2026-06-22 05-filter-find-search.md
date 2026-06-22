@@ -180,3 +180,5 @@ query results and render-state semantics.
 - 2026-06-22: Implemented the pure graph query model, visual query mask,
   Find / Filter panel, spotlight coloring rules, render-only exclusion, and
   result-region navigation. Validation passed locally.
+- 2026-06-22: Clarified and implemented positive-token dimming: exclude-only
+  queries hide matches without dimming the rest of the rendered graph.

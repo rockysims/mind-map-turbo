@@ -632,6 +632,8 @@
 	function queryOpacity(state: GraphQueryElementState | undefined): number {
 		if (!graphQueryResult.hasActiveQuery || !state) return 1;
 		if (state.role === 'focus' || state.role === 'spotlight') return 1;
+		if (state.role === 'excluded') return 0;
+		if (!graphQueryResult.dimsBackground) return 1;
 		if (state.role === 'context') return 0.42;
 		if (state.role === 'background') return 0.16;
 		return 0;

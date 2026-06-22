@@ -45,6 +45,7 @@ describe('graphQuery', () => {
 	it('returns inactive state for empty queries', () => {
 		expect(evaluateGraphQuery(graph, '   ')).toMatchObject({
 			hasActiveQuery: false,
+			dimsBackground: false,
 			nodeStateById: {},
 			edgeStateById: {},
 			regions: []
@@ -99,10 +100,25 @@ describe('graphQuery', () => {
 	it('excludes node tags and incident edges from rendering', () => {
 		const result = evaluateGraphQuery(graph, '#dialog -#nodal');
 
+		expect(result.dimsBackground).toBe(true);
 		expect(result.nodeStateById.b.role).toBe('excluded');
 		expect(result.edgeStateById.ab.role).toBe('excluded');
 		expect(result.edgeStateById.bc.role).toBe('excluded');
 		expect(result.nodeStateById.a.role).toBe('focus');
+	});
+
+	it('does not dim remaining graph for exclude-only queries', () => {
+		const result = evaluateGraphQuery(graph, '-#nodal -@reference');
+
+		expect(result.hasActiveQuery).toBe(true);
+		expect(result.dimsBackground).toBe(false);
+		expect(result.nodeStateById.b.role).toBe('excluded');
+		expect(result.edgeStateById.ab.role).toBe('excluded');
+		expect(result.edgeStateById.bc.role).toBe('excluded');
+		expect(result.edgeStateById.cd.role).toBe('excluded');
+		expect(result.nodeStateById.a.role).toBe('background');
+		expect(result.nodeStateById.c.role).toBe('background');
+		expect(result.nodeStateById.d.role).toBe('background');
 	});
 
 	it('excludes only the matching edge for edge exclusions', () => {
