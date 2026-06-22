@@ -209,13 +209,13 @@ describe('GraphPersistenceController', () => {
 		expect(events).toEqual(['save', 'save', 'navigate:next']);
 	});
 
-	it('creates generated graph ids in the current tab', async () => {
+	it('creates generated graph ids and persists the active route', async () => {
 		const { controller, navigate } = setup();
 		await controller.load('active');
 
 		await controller.createGraph();
 
-		expect(navigate).not.toHaveBeenCalled();
+		expect(navigate).toHaveBeenCalledWith('graph-new');
 		expect(controller.getView()).toMatchObject({
 			loadedGraphId: 'graph-new',
 			graph: createDefaultGraph(),

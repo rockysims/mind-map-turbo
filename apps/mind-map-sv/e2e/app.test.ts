@@ -45,8 +45,13 @@ test('persists edited nodes across reloads in one document tab', async ({ page }
 
 	page.once('dialog', (dialog) => dialog.accept());
 	await page.getByRole('button', { name: 'New graph' }).click();
+	await expect(page).toHaveURL(/graph=graph-/);
 	await expect(page.getByText('Node 0')).toBeVisible();
 	await expect(page.getByRole('status')).toHaveText('New graph.');
+
+	await page.reload();
+	await expect(page.getByText('Node 0')).toBeVisible();
+	await expect(page.getByText('Persisted Node')).not.toBeVisible();
 });
 
 test('exports HTML graph document containing schemaVersion, graph data, and viewState', async ({

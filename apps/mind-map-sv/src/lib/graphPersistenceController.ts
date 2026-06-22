@@ -371,6 +371,7 @@ export class GraphPersistenceController {
 		this.scheduler.schedule(graphId, nextGraph, { ...NEUTRAL_VIEW_STATE });
 		await this.flushPendingSave();
 		await this.refreshGraphList();
+		await this.deps.navigate(graphId);
 	}
 
 	async deleteGraph(graphId: string): Promise<void> {

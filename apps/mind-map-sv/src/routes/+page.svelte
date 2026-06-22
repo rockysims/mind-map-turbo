@@ -15,7 +15,13 @@
 		parseGraphFileText,
 		type GraphFileDocument
 	} from '$lib/graphFile';
-	import { graphIdFromUrl, graphRouteModeForProtocol } from '$lib/graphRoute';
+	import {
+		DEFAULT_GRAPH_ID,
+		graphHash,
+		graphIdFromUrl,
+		graphRouteModeForProtocol,
+		graphSearch
+	} from '$lib/graphRoute';
 	import { isSelfContainedHtmlShell, OFFLINE_APP_SHELL_PATH } from '$lib/htmlShell';
 	import { createPersistence, estimateNamespaceUsageBytes } from '$lib/persistence';
 	import { SaveScheduler } from '$lib/saveScheduler';
@@ -52,6 +58,23 @@
 			createDefaultGraph,
 			navigate: async (graphId) => {
 				selectedGraphId = graphId;
+				const routeMode = graphRouteModeForProtocol(window.location.protocol);
+				if (routeMode === 'hash') {
+					window.history.pushState(
+						window.history.state,
+						'',
+						`${window.location.href.split('#')[0]}${graphHash(graphId)}`
+					);
+					return;
+				}
+
+				const currentWithoutHash = window.location.href.split('#')[0];
+				const currentPath = currentWithoutHash.split('?')[0];
+				window.history.pushState(
+					window.history.state,
+					'',
+					`${currentPath}${graphId === DEFAULT_GRAPH_ID ? '' : graphSearch(graphId)}`
+				);
 			},
 			storageNamespace: APP_CONFIG.persistence.storageNamespace,
 			confirmGraphImportReplace: ({ loadedGraphId }) =>
