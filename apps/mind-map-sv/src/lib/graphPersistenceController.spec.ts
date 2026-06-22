@@ -90,6 +90,10 @@ function setup(
 			currentGraph: MultigraphData;
 			incomingGraph: MultigraphData;
 		}) => boolean | Promise<boolean>;
+		confirmNewGraphReplace?: (context: {
+			currentGraph: MultigraphData;
+			documentStatus: ReturnType<GraphPersistenceController['getView']>['documentStatus'];
+		}) => boolean | Promise<boolean>;
 	} = {}
 ) {
 	const persistence = new MemoryPersistence();
@@ -108,6 +112,7 @@ function setup(
 		navigate,
 		storageNamespace: 'test',
 		confirmGraphImportReplace: options.confirmGraphImportReplace,
+		confirmNewGraphReplace: options.confirmNewGraphReplace,
 		createDocumentId: () => 'doc-new',
 		now: () => 456,
 		createGraphId: () => 'graph-new'
@@ -220,6 +225,40 @@ describe('GraphPersistenceController', () => {
 			loadedGraphId: 'graph-new',
 			graph: createDefaultGraph(),
 			documentStatus: 'new-clean'
+		});
+	});
+
+	it('does not confirm before replacing a graph that matches the last download', async () => {
+		const confirmNewGraphReplace = vi.fn(() => true);
+		const { controller } = setup({ confirmNewGraphReplace });
+		await controller.load('active');
+		controller.exportGraphDocument();
+
+		await controller.createGraph();
+
+		expect(confirmNewGraphReplace).not.toHaveBeenCalled();
+		expect(controller.getView()).toMatchObject({
+			loadedGraphId: 'graph-new',
+			documentStatus: 'new-clean'
+		});
+	});
+
+	it('confirms before replacing a dirty graph', async () => {
+		const confirmNewGraphReplace = vi.fn(() => false);
+		const { controller } = setup({ confirmNewGraphReplace });
+		await controller.load('active');
+		controller.notifyGraphChanged(makeGraph({ nodeCount: 2 }), { syncView: true });
+
+		await controller.createGraph();
+
+		expect(confirmNewGraphReplace).toHaveBeenCalledWith({
+			currentGraph: makeGraph({ nodeCount: 2 }),
+			documentStatus: 'new-dirty'
+		});
+		expect(controller.getView()).toMatchObject({
+			loadedGraphId: 'active',
+			documentStatus: 'new-dirty',
+			status: { state: 'notice', message: 'New graph cancelled.' }
 		});
 	});
 

@@ -43,7 +43,12 @@ test('persists edited nodes across reloads in one document tab', async ({ page }
 	}, firstGraphId);
 	expect(storedPayload).toMatchObject({ schemaVersion: CURRENT_SCHEMA_VERSION });
 
-	page.once('dialog', (dialog) => dialog.accept());
+	page.once('dialog', async (dialog) => {
+		expect(dialog.message()).toBe(
+			'This graph has changes that have not been downloaded. Start a new graph anyway?'
+		);
+		await dialog.accept();
+	});
 	await page.getByRole('button', { name: 'New graph' }).click();
 	await expect(page).toHaveURL(/graph=graph-/);
 	await expect(page.getByText('Node 0')).toBeVisible();

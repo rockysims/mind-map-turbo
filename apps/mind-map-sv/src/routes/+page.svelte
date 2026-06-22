@@ -10,6 +10,7 @@
 	import GraphToolbar from '$lib/components/ui/GraphToolbar/GraphToolbar.svelte';
 	import Multigraph from '$lib/components/ui/Multigraph/Multigraph.svelte';
 	import type { MultigraphData } from '$lib/components/ui/types/multigraph';
+	import { newGraphConfirmationMessage } from '$lib/documentStatus';
 	import {
 		GRAPH_HTML_PAYLOAD_SCRIPT_ID,
 		parseGraphFileText,
@@ -87,9 +88,10 @@
 				typeof crypto.randomUUID === 'function'
 					? crypto.randomUUID()
 					: `doc-${Date.now().toString(36)}`,
-			confirmNewGraphReplace: ({ documentStatus }) =>
-				documentStatus === 'new-clean' ||
-				window.confirm('Start a new graph? Local edits stay in this browser until you Download.'),
+			confirmNewGraphReplace: ({ documentStatus }) => {
+				const message = newGraphConfirmationMessage(documentStatus);
+				return message === null || window.confirm(message);
+			},
 			openUnsupportedHtmlFile: openHtmlTextInNewTab
 		});
 		persisted = persistedGraph;

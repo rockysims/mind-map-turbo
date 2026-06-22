@@ -1,5 +1,6 @@
 import type { MultigraphData } from './components/ui/types/multigraph';
 import {
+	documentStatusHasUndownloadedChanges,
 	documentStatusForGraph,
 	documentStatusNotice,
 	graphDataEquals,
@@ -342,7 +343,7 @@ export class GraphPersistenceController {
 	}
 
 	async createGraph(graphId = this.nextGraphId()): Promise<void> {
-		const shouldConfirm = this.currentDocumentStatus() !== 'new-clean';
+		const shouldConfirm = documentStatusHasUndownloadedChanges(this.currentDocumentStatus());
 		const confirmed = !shouldConfirm
 			? true
 			: ((await this.deps.confirmNewGraphReplace?.({

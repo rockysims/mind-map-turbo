@@ -52,3 +52,23 @@ export function documentStatusNotice(status: DocumentStatus): string {
 	if (status === 'download-dirty') return 'Draft differs from downloaded file. Download needed.';
 	return 'Draft differs from opened file. Download needed.';
 }
+
+export function documentStatusHasUndownloadedChanges(status: DocumentStatus): boolean {
+	return (
+		status === 'new-dirty' ||
+		status === 'file-dirty' ||
+		status === 'file-recovered-draft' ||
+		status === 'download-dirty'
+	);
+}
+
+export function newGraphConfirmationMessage(status: DocumentStatus): string | null {
+	if (!documentStatusHasUndownloadedChanges(status)) return null;
+	if (status === 'file-recovered-draft') {
+		return 'Recovered local edits have not been downloaded. Start a new graph anyway?';
+	}
+	if (status === 'download-dirty') {
+		return 'This graph has changes since the last Download. Start a new graph anyway?';
+	}
+	return 'This graph has changes that have not been downloaded. Start a new graph anyway?';
+}
