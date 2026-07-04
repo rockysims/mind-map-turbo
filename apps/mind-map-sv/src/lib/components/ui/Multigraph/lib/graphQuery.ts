@@ -1,6 +1,7 @@
 import type { MultigraphData } from '../../types/multigraph';
 import type { NodeData } from '../../types/node';
 import { colorForTag } from './tagColors';
+import { DEFAULT_TAG_SYNTAX, type TagSyntaxConfig } from './titleSyntax';
 
 export type GraphQueryTokenMode = 'focus' | 'spotlight' | 'exclude';
 export type GraphQueryTokenTarget = 'nodeTag' | 'edgeTag' | 'text';
@@ -40,7 +41,10 @@ type MutableElementState = {
 	spotlightOrder?: number;
 };
 
-export function parseGraphQuery(input: string): GraphQueryToken[] {
+export function parseGraphQuery(
+	input: string,
+	tagSyntax: TagSyntaxConfig = DEFAULT_TAG_SYNTAX
+): GraphQueryToken[] {
 	const tokens: GraphQueryToken[] = [];
 	let index = 0;
 
@@ -55,7 +59,7 @@ export function parseGraphQuery(input: string): GraphQueryToken[] {
 		if (
 			(current === '+' || current === '-') &&
 			index + 1 < input.length &&
-			(input[index + 1] === '#' || input[index + 1] === '@' || input[index + 1] === '"')
+			(input[index + 1] === '"' || startsWithTagMarker(input, index + 1, tagSyntax))
 		) {
 			mode = current === '+' ? 'spotlight' : 'exclude';
 			index += 1;
@@ -71,12 +75,13 @@ export function parseGraphQuery(input: string): GraphQueryToken[] {
 			continue;
 		}
 
-		if (marker === '#' || marker === '@') {
-			const parsed = readTag(input, index + 1);
+		const tagMarker = tagMarkerAt(input, index, tagSyntax);
+		if (tagMarker) {
+			const parsed = readTag(input, index + tagMarker.length, tagSyntax);
 			if (parsed.value) {
 				tokens.push({
 					mode,
-					target: marker === '#' ? 'nodeTag' : 'edgeTag',
+					target: tagMarker === tagSyntax.nodeTagMarker ? 'nodeTag' : 'edgeTag',
 					value: parsed.value
 				});
 			}
@@ -84,7 +89,7 @@ export function parseGraphQuery(input: string): GraphQueryToken[] {
 			continue;
 		}
 
-		const parsed = readText(input, index);
+		const parsed = readText(input, index, tagSyntax);
 		if (parsed.value) {
 			tokens.push({ mode: 'focus', target: 'text', value: parsed.value });
 		}
@@ -94,8 +99,12 @@ export function parseGraphQuery(input: string): GraphQueryToken[] {
 	return tokens;
 }
 
-export function evaluateGraphQuery(data: MultigraphData, input: string): GraphQueryResult {
-	const tokens = parseGraphQuery(input);
+export function evaluateGraphQuery(
+	data: MultigraphData,
+	input: string,
+	tagSyntax: TagSyntaxConfig = DEFAULT_TAG_SYNTAX
+): GraphQueryResult {
+	const tokens = parseGraphQuery(input, tagSyntax);
 	if (tokens.length === 0) {
 		return {
 			tokens,
@@ -328,7 +337,11 @@ function readQuoted(input: string, start: number): { value: string; nextIndex: n
 	return { value, nextIndex: index < input.length ? index + 1 : index };
 }
 
-function readTag(input: string, start: number): { value: string; nextIndex: number } {
+function readTag(
+	input: string,
+	start: number,
+	tagSyntax: TagSyntaxConfig
+): { value: string; nextIndex: number } {
 	let index = start;
 	let value = '';
 	while (index < input.length) {
@@ -336,9 +349,9 @@ function readTag(input: string, start: number): { value: string; nextIndex: numb
 		const next = input[index + 1];
 		if (
 			isWhitespace(current) ||
-			current === '#' ||
-			current === '@' ||
-			((current === '+' || current === '-') && (next === '#' || next === '@' || next === '"'))
+			startsWithTagMarker(input, index, tagSyntax) ||
+			((current === '+' || current === '-') &&
+				(next === '"' || startsWithTagMarker(input, index + 1, tagSyntax)))
 		) {
 			break;
 		}
@@ -348,7 +361,11 @@ function readTag(input: string, start: number): { value: string; nextIndex: numb
 	return { value, nextIndex: index };
 }
 
-function readText(input: string, start: number): { value: string; nextIndex: number } {
+function readText(
+	input: string,
+	start: number,
+	tagSyntax: TagSyntaxConfig = DEFAULT_TAG_SYNTAX
+): { value: string; nextIndex: number } {
 	let index = start;
 	let value = '';
 	while (index < input.length) {
@@ -356,9 +373,9 @@ function readText(input: string, start: number): { value: string; nextIndex: num
 		const next = input[index + 1];
 		if (
 			isWhitespace(current) ||
-			current === '#' ||
-			current === '@' ||
-			((current === '+' || current === '-') && (next === '#' || next === '@' || next === '"'))
+			startsWithTagMarker(input, index, tagSyntax) ||
+			((current === '+' || current === '-') &&
+				(next === '"' || startsWithTagMarker(input, index + 1, tagSyntax)))
 		) {
 			break;
 		}
@@ -366,4 +383,18 @@ function readText(input: string, start: number): { value: string; nextIndex: num
 		index += 1;
 	}
 	return { value, nextIndex: index };
+}
+
+function startsWithTagMarker(input: string, index: number, tagSyntax: TagSyntaxConfig): boolean {
+	return tagMarkerAt(input, index, tagSyntax) !== null;
+}
+
+function tagMarkerAt(input: string, index: number, tagSyntax: TagSyntaxConfig): string | null {
+	if (tagSyntax.nodeTagMarker && input.startsWith(tagSyntax.nodeTagMarker, index)) {
+		return tagSyntax.nodeTagMarker;
+	}
+	if (tagSyntax.edgeTagMarker && input.startsWith(tagSyntax.edgeTagMarker, index)) {
+		return tagSyntax.edgeTagMarker;
+	}
+	return null;
 }

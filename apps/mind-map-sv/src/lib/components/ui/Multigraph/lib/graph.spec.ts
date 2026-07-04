@@ -354,7 +354,7 @@ describe('graph mutations', () => {
 		it('commits parent-to-child direction, tags, and display title to a connected node', () => {
 			const graph = makeGraph({ nodeCount: 2, edges: [[0, 1]] });
 
-			const next = commitInlineTitleSyntax(graph, 'n1', '>:abc ;rel Displayed title', 'e0');
+			const next = commitInlineTitleSyntax(graph, 'n1', '>#abc @rel Displayed title', 'e0');
 
 			expect(next.nodes[1]).toMatchObject({ title: 'Displayed title', tags: ['abc'] });
 			expect(next.edges[0]).toMatchObject({
@@ -380,7 +380,7 @@ describe('graph mutations', () => {
 		it('commits compact edge and node tags without leaking syntax into the title', () => {
 			const graph = makeGraph({ nodeCount: 2, edges: [[0, 1]] });
 
-			const next = commitInlineTitleSyntax(graph, 'n1', '<;e:n Test', 'e0');
+			const next = commitInlineTitleSyntax(graph, 'n1', '<@e#n Test', 'e0');
 
 			expect(next.nodes[1]).toMatchObject({ title: 'Test', tags: ['n'] });
 			expect(next.edges[0]).toMatchObject({
@@ -394,7 +394,7 @@ describe('graph mutations', () => {
 		it('keeps a connected edge undirected when no marker is present', () => {
 			const graph = makeGraph({ nodeCount: 2, edges: [[0, 1]] });
 
-			const next = commitInlineTitleSyntax(graph, 'n1', ':node ;rel Plain title', 'e0');
+			const next = commitInlineTitleSyntax(graph, 'n1', '#node @rel Plain title', 'e0');
 
 			expect(next.nodes[1]).toMatchObject({ title: 'Plain title', tags: ['node'] });
 			expect(next.edges[0]).toMatchObject({ tags: ['rel'], directed: false });
@@ -403,7 +403,7 @@ describe('graph mutations', () => {
 		it('ignores direction and edge tags for standalone node creation', () => {
 			const graph = makeGraph({ nodeCount: 1 });
 
-			const next = commitInlineTitleSyntax(graph, 'n0', '>:node ;rel Standalone title');
+			const next = commitInlineTitleSyntax(graph, 'n0', '>#node @rel Standalone title');
 
 			expect(next.nodes[0]).toMatchObject({ title: 'Standalone title', tags: ['node'] });
 			expect(next.edges).toEqual([]);
@@ -412,7 +412,7 @@ describe('graph mutations', () => {
 		it('is a no-op when the node id is missing', () => {
 			const graph = makeGraph({ nodeCount: 2, edges: [[0, 1]] });
 
-			expect(commitInlineTitleSyntax(graph, 'missing', '>:node ;rel Missing', 'e0')).toBe(graph);
+			expect(commitInlineTitleSyntax(graph, 'missing', '>#node @rel Missing', 'e0')).toBe(graph);
 		});
 
 		it('does not mutate a created edge that is not incident to the node', () => {
@@ -424,7 +424,7 @@ describe('graph mutations', () => {
 				]
 			});
 
-			const next = commitInlineTitleSyntax(graph, 'n2', '>:node ;rel Node title', 'e0');
+			const next = commitInlineTitleSyntax(graph, 'n2', '>#node @rel Node title', 'e0');
 
 			expect(next.nodes[2]).toMatchObject({ title: 'Node title', tags: ['node'] });
 			expect(next.edges[0]).toEqual(graph.edges[0]);

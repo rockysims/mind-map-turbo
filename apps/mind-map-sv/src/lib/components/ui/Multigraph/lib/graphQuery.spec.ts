@@ -42,6 +42,22 @@ describe('graphQuery', () => {
 		]);
 	});
 
+	it('parses configured node and edge tag markers', () => {
+		expect(
+			parseGraphQuery('+:nodal;link :dialog-:modal -;edgo text', {
+				nodeTagMarker: ':',
+				edgeTagMarker: ';'
+			})
+		).toEqual([
+			{ mode: 'spotlight', target: 'nodeTag', value: 'nodal' },
+			{ mode: 'focus', target: 'edgeTag', value: 'link' },
+			{ mode: 'focus', target: 'nodeTag', value: 'dialog' },
+			{ mode: 'exclude', target: 'nodeTag', value: 'modal' },
+			{ mode: 'exclude', target: 'edgeTag', value: 'edgo' },
+			{ mode: 'focus', target: 'text', value: 'text' }
+		]);
+	});
+
 	it('returns inactive state for empty queries', () => {
 		expect(evaluateGraphQuery(graph, '   ')).toMatchObject({
 			hasActiveQuery: false,

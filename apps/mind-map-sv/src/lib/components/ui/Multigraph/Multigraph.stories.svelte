@@ -1707,7 +1707,7 @@
 		);
 		expect(lastChangedGraph(args).nodes.find((node) => node.id === 'n1')?.pinned).toBe(true);
 
-		titleInput!.value = '>:abc ;rel The displayed title';
+		titleInput!.value = '>#abc @rel The displayed title';
 		titleInput!.dispatchEvent(
 			new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
 		);
@@ -1718,7 +1718,7 @@
 			'data-pinned'
 		);
 		expect(canvasElement).toHaveTextContent('The displayed title');
-		expect(canvasElement).not.toHaveTextContent('>:abc ;rel');
+		expect(canvasElement).not.toHaveTextContent('>#abc @rel');
 		const changedGraph = lastChangedGraph(args);
 		expect(changedGraph.nodes.find((node) => node.id === 'n1')).toMatchObject({
 			title: 'The displayed title',

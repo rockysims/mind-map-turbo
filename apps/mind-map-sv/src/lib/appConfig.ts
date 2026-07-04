@@ -32,6 +32,10 @@ export const APP_CONFIG = {
 			minScale: 0.05, // minimum stage zoom scale
 			maxScale: 4 // maximum stage zoom scale
 		},
+		tagSyntax: {
+			nodeTagMarker: '#', // leading marker for node tags in title/query shortcuts
+			edgeTagMarker: '@' // leading marker for edge tags in title/query shortcuts
+		},
 		layout: {
 			baseRadius: NODE_RADIUS_PX, // base radius for hop-scaled layout
 			displayedLayers: 3, // hop layers visible around pinned nodes

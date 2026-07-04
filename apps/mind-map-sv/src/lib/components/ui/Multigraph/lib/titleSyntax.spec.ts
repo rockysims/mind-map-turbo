@@ -26,7 +26,7 @@ describe('parseTitleSyntax', () => {
 	});
 
 	it('parses multiple leading node tags', () => {
-		expect(parseTitleSyntax(':alpha :beta:gamma Tagged title')).toEqual({
+		expect(parseTitleSyntax('#alpha #beta#gamma Tagged title')).toEqual({
 			displayTitle: 'Tagged title',
 			nodeTags: ['alpha', 'beta', 'gamma'],
 			edgeTags: [],
@@ -35,7 +35,7 @@ describe('parseTitleSyntax', () => {
 	});
 
 	it('parses leading edge tags', () => {
-		expect(parseTitleSyntax(';rel ;strong Connected title')).toEqual({
+		expect(parseTitleSyntax('@rel @strong Connected title')).toEqual({
 			displayTitle: 'Connected title',
 			nodeTags: [],
 			edgeTags: ['rel', 'strong'],
@@ -44,7 +44,7 @@ describe('parseTitleSyntax', () => {
 	});
 
 	it('parses mixed node and edge tags after a direction marker', () => {
-		expect(parseTitleSyntax('>:abc;rel:urgent The displayed title')).toEqual({
+		expect(parseTitleSyntax('>#abc@rel#urgent The displayed title')).toEqual({
 			displayTitle: 'The displayed title',
 			nodeTags: ['abc', 'urgent'],
 			edgeTags: ['rel'],
@@ -53,7 +53,7 @@ describe('parseTitleSyntax', () => {
 	});
 
 	it('parses compact edge and node tags after a child-to-parent marker', () => {
-		expect(parseTitleSyntax('<;e:n Test')).toEqual({
+		expect(parseTitleSyntax('<@e#n Test')).toEqual({
 			displayTitle: 'Test',
 			nodeTags: ['n'],
 			edgeTags: ['e'],
@@ -62,8 +62,8 @@ describe('parseTitleSyntax', () => {
 	});
 
 	it('stops parsing when a malformed tag-like token appears', () => {
-		expect(parseTitleSyntax(':good : Title')).toEqual({
-			displayTitle: ': Title',
+		expect(parseTitleSyntax('#good # Title')).toEqual({
+			displayTitle: '# Title',
 			nodeTags: ['good'],
 			edgeTags: [],
 			direction: 'undirected'
@@ -71,7 +71,7 @@ describe('parseTitleSyntax', () => {
 	});
 
 	it('returns an empty display title when syntax consumes the whole input', () => {
-		expect(parseTitleSyntax('  < :child ;rel  ')).toEqual({
+		expect(parseTitleSyntax('  < #child @rel  ')).toEqual({
 			displayTitle: '',
 			nodeTags: ['child'],
 			edgeTags: ['rel'],
@@ -80,9 +80,23 @@ describe('parseTitleSyntax', () => {
 	});
 
 	it('trims whitespace around markers, tags, and display title', () => {
-		expect(parseTitleSyntax('  >   :alpha   ;rel   Display title   ')).toEqual({
+		expect(parseTitleSyntax('  >   #alpha   @rel   Display title   ')).toEqual({
 			displayTitle: 'Display title',
 			nodeTags: ['alpha'],
+			edgeTags: ['rel'],
+			direction: 'parent-to-child'
+		});
+	});
+
+	it('supports configured tag markers', () => {
+		expect(
+			parseTitleSyntax('>:alpha;rel:urgent Custom markers', {
+				nodeTagMarker: ':',
+				edgeTagMarker: ';'
+			})
+		).toEqual({
+			displayTitle: 'Custom markers',
+			nodeTags: ['alpha', 'urgent'],
 			edgeTags: ['rel'],
 			direction: 'parent-to-child'
 		});
@@ -95,6 +109,6 @@ describe('normalizeTagList', () => {
 	});
 
 	it('ignores invalid tag names consistently with parser rules', () => {
-		expect(normalizeTagList('ok bad:name ;edge :node also-ok')).toEqual(['ok', 'also-ok']);
+		expect(normalizeTagList('ok bad#name @edge #node also-ok')).toEqual(['ok', 'also-ok']);
 	});
 });

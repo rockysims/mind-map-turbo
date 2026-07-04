@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { APP_CONFIG } from '$lib/appConfig';
 	import type { LegendTag } from './lib/tagColors';
 	import type { GraphQueryResult, GraphQueryToken } from './lib/graphQuery';
 	import { parseGraphQuery } from './lib/graphQuery';
@@ -23,7 +24,10 @@
 		onClose?: () => void;
 	} = $props();
 
-	const tokens = $derived(parseGraphQuery(query));
+	const tagSyntax = APP_CONFIG.multigraph.tagSyntax;
+	const nodeTagMarker = tagSyntax.nodeTagMarker;
+	const edgeTagMarker = tagSyntax.edgeTagMarker;
+	const tokens = $derived(parseGraphQuery(query, tagSyntax));
 	const nodeTags = $derived(tags.filter((tag) => tag.namespace === 'nodeTags'));
 	const edgeTags = $derived(tags.filter((tag) => tag.namespace === 'edgeTags'));
 
@@ -41,7 +45,8 @@
 
 	function tokenLabel(token: GraphQueryToken): string {
 		const prefix = token.mode === 'spotlight' ? '+' : token.mode === 'exclude' ? '-' : '';
-		const marker = token.target === 'nodeTag' ? '#' : token.target === 'edgeTag' ? '@' : '';
+		const marker =
+			token.target === 'nodeTag' ? nodeTagMarker : token.target === 'edgeTag' ? edgeTagMarker : '';
 		return `${prefix}${marker}${token.value}`;
 	}
 </script>
@@ -56,7 +61,7 @@
 		<span class="sr-only">Graph query</span>
 		<input
 			value={query}
-			placeholder="#tag @edge &quot;quoted phrase&quot; +#spotlight -@hide"
+			placeholder={`${nodeTagMarker}tag ${edgeTagMarker}edge "quoted phrase" +${nodeTagMarker}spotlight -${edgeTagMarker}hide`}
 			oninput={(event) => updateQuery(event.currentTarget.value)}
 		/>
 	</label>
@@ -105,14 +110,14 @@
 					{#each nodeTags as tag (`node:${tag.tag}`)}
 						<button
 							type="button"
-							onclick={() => appendToken(`#${tag.tag}`)}
-							onmouseenter={() => previewToken(`+#${tag.tag}`)}
+							onclick={() => appendToken(`${nodeTagMarker}${tag.tag}`)}
+							onmouseenter={() => previewToken(`+${nodeTagMarker}${tag.tag}`)}
 							onmouseleave={() => previewToken(null)}
-							onfocus={() => previewToken(`+#${tag.tag}`)}
+							onfocus={() => previewToken(`+${nodeTagMarker}${tag.tag}`)}
 							onblur={() => previewToken(null)}
 						>
 							<span class="swatch" style={`--tag-color: ${tag.color}`}></span>
-							<span>#{tag.tag}</span>
+							<span>{nodeTagMarker}{tag.tag}</span>
 						</button>
 					{/each}
 				</div>
@@ -128,14 +133,14 @@
 					{#each edgeTags as tag (`edge:${tag.tag}`)}
 						<button
 							type="button"
-							onclick={() => appendToken(`@${tag.tag}`)}
-							onmouseenter={() => previewToken(`+@${tag.tag}`)}
+							onclick={() => appendToken(`${edgeTagMarker}${tag.tag}`)}
+							onmouseenter={() => previewToken(`+${edgeTagMarker}${tag.tag}`)}
 							onmouseleave={() => previewToken(null)}
-							onfocus={() => previewToken(`+@${tag.tag}`)}
+							onfocus={() => previewToken(`+${edgeTagMarker}${tag.tag}`)}
 							onblur={() => previewToken(null)}
 						>
 							<span class="swatch" style={`--tag-color: ${tag.color}`}></span>
-							<span>@{tag.tag}</span>
+							<span>{edgeTagMarker}{tag.tag}</span>
 						</button>
 					{/each}
 				</div>

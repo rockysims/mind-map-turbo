@@ -1,4 +1,11 @@
+import { APP_CONFIG } from '$lib/appConfig';
+
 export type ParsedTitleDirection = 'parent-to-child' | 'child-to-parent' | 'undirected';
+
+export interface TagSyntaxConfig {
+	nodeTagMarker: string;
+	edgeTagMarker: string;
+}
 
 export interface ParsedTitleSyntax {
 	displayTitle: string;
@@ -7,7 +14,12 @@ export interface ParsedTitleSyntax {
 	direction: ParsedTitleDirection;
 }
 
-export function parseTitleSyntax(rawTitle: string): ParsedTitleSyntax {
+export const DEFAULT_TAG_SYNTAX: TagSyntaxConfig = APP_CONFIG.multigraph.tagSyntax;
+
+export function parseTitleSyntax(
+	rawTitle: string,
+	tagSyntax: TagSyntaxConfig = DEFAULT_TAG_SYNTAX
+): ParsedTitleSyntax {
 	let remaining = rawTitle.trimStart();
 	let direction: ParsedTitleDirection = 'undirected';
 
@@ -24,14 +36,15 @@ export function parseTitleSyntax(rawTitle: string): ParsedTitleSyntax {
 
 	while (remaining.length > 0) {
 		remaining = remaining.trimStart();
-		const marker = remaining[0];
-		if (marker !== ':' && marker !== ';') break;
+		const marker = leadingTagMarker(remaining, tagSyntax);
+		if (!marker) break;
 
-		const tagNameEnd = findTagNameEnd(remaining, 1);
-		const tagName = remaining.slice(1, tagNameEnd);
-		if (!isValidTagName(tagName)) break;
+		const tagNameStart = marker.length;
+		const tagNameEnd = findTagNameEnd(remaining, tagNameStart, tagSyntax);
+		const tagName = remaining.slice(tagNameStart, tagNameEnd);
+		if (!isValidTagName(tagName, tagSyntax)) break;
 
-		if (marker === ':') {
+		if (marker === tagSyntax.nodeTagMarker) {
 			nodeTags.push(tagName);
 		} else {
 			edgeTags.push(tagName);
@@ -47,21 +60,42 @@ export function parseTitleSyntax(rawTitle: string): ParsedTitleSyntax {
 	};
 }
 
-function findTagNameEnd(input: string, startIndex: number): number {
+function leadingTagMarker(input: string, tagSyntax: TagSyntaxConfig): string | null {
+	if (tagSyntax.nodeTagMarker && input.startsWith(tagSyntax.nodeTagMarker)) {
+		return tagSyntax.nodeTagMarker;
+	}
+	if (tagSyntax.edgeTagMarker && input.startsWith(tagSyntax.edgeTagMarker)) {
+		return tagSyntax.edgeTagMarker;
+	}
+	return null;
+}
+
+function findTagNameEnd(input: string, startIndex: number, tagSyntax: TagSyntaxConfig): number {
 	for (let index = startIndex; index < input.length; index += 1) {
-		if (/[\s:;]/.test(input[index])) return index;
+		if (/\s/.test(input[index]) || leadingTagMarker(input.slice(index), tagSyntax)) return index;
 	}
 
 	return input.length;
 }
 
-export function normalizeTagList(rawTags: string): string[] {
+export function normalizeTagList(
+	rawTags: string,
+	tagSyntax: TagSyntaxConfig = DEFAULT_TAG_SYNTAX
+): string[] {
 	return rawTags
 		.split(/\s+/)
 		.map((tag) => tag.trim())
-		.filter(isValidTagName);
+		.filter((tag) => isValidTagName(tag, tagSyntax));
 }
 
-export function isValidTagName(tagName: string): boolean {
-	return tagName.length > 0 && !/[\s:;]/.test(tagName);
+export function isValidTagName(
+	tagName: string,
+	tagSyntax: TagSyntaxConfig = DEFAULT_TAG_SYNTAX
+): boolean {
+	return (
+		tagName.length > 0 &&
+		!/\s/.test(tagName) &&
+		!tagName.includes(tagSyntax.nodeTagMarker) &&
+		!tagName.includes(tagSyntax.edgeTagMarker)
+	);
 }
