@@ -18,7 +18,7 @@ function documentDraftGraphId(documentId: string): string {
 test('home page renders the graph entrypoint', async ({ page }) => {
 	await page.goto('/');
 
-	await expect(page.getByText('Root')).toBeVisible();
+	await expect(page.locator('.title-input')).toHaveValue('Root');
 });
 
 test('persists edited nodes across reloads in one document tab', async ({ page }) => {
@@ -98,6 +98,101 @@ test('exports HTML graph document containing schemaVersion, graph data, and view
 	await expect(page.getByRole('status')).toHaveText('Matches downloaded file.');
 });
 
+test('downloaded HTML documents propagate a clean live shell to descendants', async ({ page }) => {
+	const graphId = `e2e-descendant-${Date.now()}`;
+
+	await page.goto('/');
+	await page.evaluate(() => localStorage.clear());
+	await page.goto(graphUrl(graphId));
+	await expect(page.getByText('Root')).toBeVisible();
+
+	await editFirstNodeTitle(page, 'Descendant Node');
+	await waitForStoredTitle(page, graphId, 'Descendant Node');
+
+	const firstDownload = await downloadHtml(page);
+	expectCleanExportedHtml(firstDownload.html);
+	const firstFile = join(tmpdir(), `e2e-first-download-${Date.now()}.html`);
+	await writeFile(firstFile, firstDownload.html);
+
+	await page.goto(pathToFileURL(firstFile).href);
+	await expect(page.getByText('Descendant Node')).toBeVisible();
+
+	const descendantDownload = await downloadHtml(page);
+	expectCleanExportedHtml(descendantDownload.html);
+	expect(extractGraphHtmlPayload(descendantDownload.html).data.nodes).toContainEqual(
+		expect.objectContaining({ title: 'Descendant Node' })
+	);
+
+	const descendantFile = join(tmpdir(), `e2e-descendant-download-${Date.now()}.html`);
+	await writeFile(descendantFile, descendantDownload.html);
+	await page.goto(pathToFileURL(descendantFile).href);
+	await expect(page.getByText('Descendant Node')).toBeVisible();
+
+	await downloadHtml(page);
+
+	const openPopupPromise = page.waitForEvent('popup');
+	await page.getByRole('button', { name: 'Open' }).click();
+	const openPopup = await openPopupPromise;
+	await openPopup.waitForLoadState('domcontentloaded');
+	await expect(openPopup.getByRole('button', { name: 'Choose graph file' })).toBeVisible();
+	await openPopup.close();
+
+	const newPopupPromise = page.waitForEvent('popup');
+	await page.getByRole('button', { name: 'New' }).click();
+	const newPopup = await newPopupPromise;
+	await newPopup.waitForLoadState('domcontentloaded');
+	await expect(newPopup.locator('.title-input')).toHaveValue('Root');
+	await newPopup.close();
+});
+
+test('a fixed document can open a broken document and download a clean replacement', async ({
+	page
+}) => {
+	const fixedDocumentId = `doc-fixed-${Date.now()}`;
+	const brokenDocumentId = `doc-broken-${Date.now()}`;
+	const fixedFile = join(tmpdir(), `e2e-fixed-save-${Date.now()}.html`);
+	const brokenFile = join(tmpdir(), `e2e-broken-save-${Date.now()}.html`);
+
+	await writeFile(
+		fixedFile,
+		await selfContainedGraphHtml(
+			graphDocumentPayload({ documentId: fixedDocumentId, title: 'Fixed Shell Node' })
+		)
+	);
+	await writeFile(
+		brokenFile,
+		await brokenSelfContainedGraphHtml(
+			graphDocumentPayload({ documentId: brokenDocumentId, title: 'Recovered Broken Node' })
+		)
+	);
+
+	await page.goto(pathToFileURL(fixedFile).href);
+	await expect(page.getByText('Fixed Shell Node')).toBeVisible();
+
+	const popupPromise = page.waitForEvent('popup');
+	await page.getByRole('button', { name: 'Open' }).click();
+	const popup = await popupPromise;
+	await popup.waitForLoadState('domcontentloaded');
+	const fileChooserPromise = popup.waitForEvent('filechooser');
+	await popup.getByRole('button', { name: 'Choose graph file' }).click();
+	const fileChooser = await fileChooserPromise;
+	await fileChooser.setFiles(brokenFile);
+	await popup.waitForLoadState('domcontentloaded');
+
+	await expect(popup.getByText('Recovered Broken Node')).toBeVisible();
+	const replacementDownload = await downloadHtml(popup);
+	expectCleanExportedHtml(replacementDownload.html);
+	expect(extractGraphHtmlPayload(replacementDownload.html).data.nodes).toContainEqual(
+		expect.objectContaining({ title: 'Recovered Broken Node' })
+	);
+
+	const replacementFile = join(tmpdir(), `e2e-recovered-save-${Date.now()}.html`);
+	await writeFile(replacementFile, replacementDownload.html);
+	await page.goto(pathToFileURL(replacementFile).href);
+	await expect(page.getByText('Recovered Broken Node')).toBeVisible();
+	await downloadHtml(page);
+});
+
 test('self-contained build artifact opens from disk without sibling app assets', async ({
 	page
 }) => {
@@ -108,7 +203,7 @@ test('self-contained build artifact opens from disk without sibling app assets',
 
 	await page.goto(pathToFileURL(join(process.cwd(), 'build', 'index.html')).href);
 
-	await expect(page.getByText('Root')).toBeVisible();
+	await expect(page.locator('.title-input')).toHaveValue('Root');
 	expect(requests.filter((url) => url.includes('/_app/'))).toEqual([]);
 });
 
@@ -462,6 +557,18 @@ async function waitForStoredViewState(
 	);
 }
 
+async function downloadHtml(page: Page): Promise<{ html: string; suggestedFilename: string }> {
+	const downloadPromise = page.waitForEvent('download');
+	await page.getByRole('button', { name: 'Download' }).click();
+	const download = await downloadPromise;
+	const downloadedPath = await download.path();
+	if (!downloadedPath) throw new Error('Download did not produce a file');
+	return {
+		html: await readFile(downloadedPath, 'utf-8'),
+		suggestedFilename: download.suggestedFilename()
+	};
+}
+
 function graphHtmlFile(payload: unknown): string {
 	return `<!doctype html><html><body><script id="${GRAPH_HTML_PAYLOAD_SCRIPT_ID}" type="application/json">${JSON.stringify(
 		payload,
@@ -481,6 +588,16 @@ async function selfContainedGraphHtml(payload: unknown): Promise<string> {
 	return `${shell.slice(0, bootScriptIndex)}${payloadScript}\n${shell.slice(bootScriptIndex)}`;
 }
 
+async function brokenSelfContainedGraphHtml(payload: unknown): Promise<string> {
+	const html = await selfContainedGraphHtml(payload);
+	const scriptEnd = html.toLowerCase().lastIndexOf('</script>');
+	if (scriptEnd === -1) throw new Error('Expected a boot script before </body>');
+	const insertAt = scriptEnd + '</script>'.length;
+	return `${html.slice(0, insertAt)}
+<!----><div class="page-shell"><div class="graph-toolbar"><button type="button">New</button><button type="button">Open</button><button type="button">Download</button></div><div class="graph">stale rendered graph</div></div><div id="svelte-announcer" aria-live="assertive"></div>
+${html.slice(insertAt)}`;
+}
+
 function graphDocumentPayload({ documentId, title }: { documentId: string; title: string }) {
 	return {
 		schemaVersion: CURRENT_SCHEMA_VERSION,
@@ -495,6 +612,24 @@ function graphDocumentPayload({ documentId, title }: { documentId: string; title
 		htmlDocumentVersion: 1,
 		minReaderVersion: 1
 	};
+}
+
+function expectCleanExportedHtml(html: string) {
+	expect(html.match(new RegExp(`id="${GRAPH_HTML_PAYLOAD_SCRIPT_ID}"`, 'g')) ?? []).toHaveLength(1);
+	const markup = htmlWithoutScriptsAndStyles(html);
+	expect(markup).not.toContain('<div class="page-shell"');
+	expect(markup).not.toContain('<div class="graph-toolbar"');
+	expect(markup).not.toContain('<div class="graph"');
+	expect(markup).not.toContain('id="svelte-announcer"');
+	expect(markup).not.toContain('<!----><div');
+	expect(html).not.toMatch(/<script\b(?=[^>]*\btype=(["'])module\1)(?=[^>]*\bsrc=)/i);
+	expect(html).not.toContain('/@fs/');
+}
+
+function htmlWithoutScriptsAndStyles(html: string): string {
+	return html
+		.replace(/<script\b[\s\S]*?<\/script>/gi, '')
+		.replace(/<style\b[\s\S]*?<\/style>/gi, '');
 }
 
 function extractGraphHtmlPayload(html: string): {

@@ -53,6 +53,7 @@ individual PR-sized tasks.
 | 04k | Parallel edge visualization                        | complete    | [milestone](milestones/04k-parallel-edge-visualization.md), [plan](plans/2026-06-18%2004k-parallel-edge-visualization.md)                       |
 | 04l | Self-contained HTML save files                     | complete    | [milestone](milestones/04l-self-contained-html-save-files.md), [plan](plans/2026-06-21%2004l-self-contained-html-save-files.md)                 |
 | 04m | Single-document save UX                            | complete    | [milestone](milestones/04m-single-document-save-ux.md), [plan](plans/2026-06-21%2004m-single-document-save-ux.md)                               |
+| 04n | Reliable propagated HTML app shell                 | complete    | [milestone](milestones/04n-reliable-propagated-html-app-shell.md), [plan](plans/2026-07-04%2004n-reliable-propagated-html-app-shell.md)         |
 | 05  | Filter / find / search                             | complete    | [milestone](milestones/05-filter-find-search.md), [plan](plans/2026-06-22%2005-filter-find-search.md)                                           |
 | 06  | Multiplayer                                        | not started | [milestones/06-multiplayer.md](milestones/06-multiplayer.md)                                                                                    |
 
@@ -67,7 +68,9 @@ underpasses without changing graph connectivity or layout routing. Milestone
 of duplicate edges. Milestone 04l evolves explicit graph files from JSON
 backups into self-contained offline HTML documents. Milestone 04m streamlines
 that file model into a single-document toolbar with Download and draft-vs-file
-status instead of graph-library controls.
+status instead of graph-library controls. Milestone 04n hardens the propagated
+HTML shell so descendant downloads carry app code forward without serializing
+hydrated runtime UI.
 Milestone 05 intentionally lands before milestone 06 so local filter/find
 semantics, visual query states, and camera navigation are settled before those
 states need to respond to remote multiplayer edits.

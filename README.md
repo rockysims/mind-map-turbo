@@ -28,34 +28,55 @@ Read them before making non-trivial changes. The "Definition of Done" in
 ## Development
 
 Install:
+
 ```
 pnpm install
 ```
 
 Run the app:
+
 ```
 turbo run dev
 ```
 
+Run the app after refreshing the self-contained HTML shell used by Download:
+
+```
+pnpm dev:downloadable
+```
+
+Verify the tracked downloadable shell is fresh after code changes:
+
+```
+pnpm check:offline-shell
+```
+
+Restarting `turbo dev` does not refresh the app code embedded in downloaded HTML
+files; rebuild the offline shell when those files should carry new code forward.
+
 Run storybook:
+
 ```
 cd apps/mind-map-sv
 pnpm run storybook
 ```
 
 Push to Chromatic:
+
 ```
 cd apps/mind-map-sv
 pnpm run chromatic
 ```
 
 Run the app in docker:
+
 ```
 cd apps/mind-map-sv
 docker compose up
 ```
 
 Run tests:
+
 ```
 pnpm --filter mind-map-sv test:unit -- --run
 pnpm --filter mind-map-sv test:e2e

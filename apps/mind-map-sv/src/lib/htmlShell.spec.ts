@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { isSelfContainedHtmlShell } from './htmlShell';
+import { GRAPH_HTML_PAYLOAD_SCRIPT_ID, serializeGraphHtmlFile } from './graphFile';
+import { cleanExportHtmlShell, isSelfContainedHtmlShell } from './htmlShell';
 
 describe('HTML shell helpers', () => {
 	it('accepts inline module scripts as self-contained', () => {
@@ -42,6 +43,24 @@ describe('HTML shell helpers', () => {
 				'<script type="module">const devOnly = ["/@fs/", "/node_modules/", "/.svelte-kit/generated/"];</script>'
 			)
 		).toBe(true);
+	});
+
+	it('removes an embedded graph payload from a captured export shell', () => {
+		const shell = serializeGraphHtmlFile({
+			data: {
+				nodes: [{ id: 'n0', title: 'Old', description: '', tags: [] }],
+				edges: [],
+				posByNodeId: { n0: { x: 0, y: 0 } },
+				tagColorConfig: { nodeTags: {}, edgeTags: {} }
+			},
+			viewState: { panX: 0, panY: 0, scale: 1 },
+			documentId: 'old-doc'
+		});
+
+		const cleaned = cleanExportHtmlShell(shell);
+
+		expect(cleaned).not.toContain(`id="${GRAPH_HTML_PAYLOAD_SCRIPT_ID}"`);
+		expect(cleaned).toContain('<title>Mind Map</title>');
 	});
 
 	it('keeps the static offline shell current with the graph query controls', () => {

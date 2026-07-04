@@ -3,7 +3,9 @@
   "private": true,
   "scripts": {
     "build": "turbo run build",
+    "check:offline-shell": "node apps/mind-map-sv/scripts/check-offline-shell-fresh.mjs",
     "dev": "turbo run dev",
+    "dev:downloadable": "pnpm -w build && pnpm -w dev",
     "lint": "turbo run lint",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
     "prepare": "husky"

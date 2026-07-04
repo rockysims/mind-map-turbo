@@ -1,11 +1,16 @@
 import { readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+	offlineShellSourceFingerprint,
+	withOfflineShellFingerprint
+} from './offline-shell-fingerprint.mjs';
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const buildDir = join(appRoot, 'build');
 const indexPath = join(buildDir, 'index.html');
 const staticOfflineShellPath = join(appRoot, 'static', 'offline-app-shell.html');
+const exportHtmlShellWindowKey = '__MIND_MAP_EXPORT_HTML_SHELL__';
 
 let html = await readFile(indexPath, 'utf8');
 
@@ -14,6 +19,8 @@ html = await inlineModuleScripts(html);
 html = escapeInlineScriptContents(html);
 html = await inlineIcons(html);
 html = stripModulePreloads(html);
+html = injectExportShellCapture(html);
+html = withOfflineShellFingerprint(html, await offlineShellSourceFingerprint({ appRoot }));
 
 await writeFile(indexPath, html);
 await writeFile(staticOfflineShellPath, html);
@@ -55,6 +62,19 @@ async function inlineIcons(input) {
 
 function stripModulePreloads(input) {
 	return input.replace(/<link\b(?=[^>]*\brel=(["'])modulepreload\1)[^>]*>/gi, '');
+}
+
+function injectExportShellCapture(input) {
+	if (input.includes(exportHtmlShellWindowKey)) return input;
+
+	const startCall = /\b__sveltekit_[A-Za-z0-9_]+\.app\.start\(element\);/;
+	const match = startCall.exec(input);
+	if (!match || match.index === undefined) {
+		throw new Error('Unable to find SvelteKit app.start call for export shell capture');
+	}
+
+	const captureScript = `window[${JSON.stringify(exportHtmlShellWindowKey)}] = '<!doctype html>\\n' + document.documentElement.outerHTML;\n\t\t\t\t\t`;
+	return `${input.slice(0, match.index)}${captureScript}${input.slice(match.index)}`;
 }
 
 function escapeInlineScriptContents(input) {

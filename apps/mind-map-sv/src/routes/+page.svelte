@@ -31,7 +31,12 @@
 		graphRouteModeForProtocol,
 		graphSearch
 	} from '$lib/graphRoute';
-	import { isSelfContainedHtmlShell, OFFLINE_APP_SHELL_PATH } from '$lib/htmlShell';
+	import {
+		cleanExportHtmlShell,
+		EXPORT_HTML_SHELL_WINDOW_KEY,
+		isSelfContainedHtmlShell,
+		OFFLINE_APP_SHELL_PATH
+	} from '$lib/htmlShell';
 	import { createPersistence, estimateNamespaceUsageBytes } from '$lib/persistence';
 	import { SaveScheduler } from '$lib/saveScheduler';
 
@@ -247,6 +252,11 @@
 		return `<!doctype html>\n${document.documentElement.outerHTML}`;
 	}
 
+	function capturedExportHtmlShell(): string | null {
+		const captured = window[EXPORT_HTML_SHELL_WINDOW_KEY];
+		return typeof captured === 'string' ? cleanExportHtmlShell(captured) : null;
+	}
+
 	function currentHtmlShellWithoutEmbeddedGraph(): string {
 		const html = document.documentElement.cloneNode(true) as HTMLElement;
 		html.querySelector(`#${GRAPH_HTML_PAYLOAD_SCRIPT_ID}`)?.remove();
@@ -343,8 +353,13 @@
 	}
 
 	async function exportHtmlShell(): Promise<string> {
+		const capturedShell = capturedExportHtmlShell();
+		if (capturedShell !== null && isSelfContainedHtmlShell(capturedShell)) {
+			return capturedShell;
+		}
+
 		const currentShell = currentHtmlShell();
-		if (isSelfContainedHtmlShell(currentShell)) return currentShell;
+		if (isSelfContainedHtmlShell(currentShell)) return currentHtmlShellWithoutEmbeddedGraph();
 
 		try {
 			const response = await fetch(OFFLINE_APP_SHELL_PATH, { cache: 'no-store' });
