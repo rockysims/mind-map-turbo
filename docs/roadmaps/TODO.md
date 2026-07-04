@@ -66,3 +66,22 @@ BUGS:
 MAYBE:
 
 - Make power of physics reduce by an order of magnitude for each hop from pinned (instead of layer by layer layout process)?
+
+UNSORTED TODO:
+open node/edges edit dialog (with edges pre-selected) when trying to add a second edge (instead of current confirm delete dialog)
+make status info (to the right of Download button) show part 1 and part 2 on 2 different lines
+or better yet find a way to say both parts visually with icons?
+
+folded into 05-filter-find-search.md milestone:
+I'd like to be able to show only nodes/edges with/without certain tags and/or phrases
+For example: +@edgy +#nodish@link #dialog-#nodal#modal -@edgo Some words in title/description "and a phrase in title/description"
+Translates as:
+edge tags: edgy, link
+node tags: nodish, nodal, modal
+the + means edgy tagged edges and nodish tagged nodes should flash (or draw attention in some way TBD)
+the - means any node tagged nodal and any edge tagged edgo should be hidden (and hide their edges? TBD)
+no + or - prefix means edges tagged link and nodes tagged modal or dialog should be shown in full opacity (and all others faded? TBD)
+the non tag related part of the search is saying any nodes with any of the character sequences ['Some','words','in','title/description', 'and a phrase in title/description'] should be show in full opacity (and all others faded? TBD)
+seems like filter input text box should open via key combo (with another way in a menu for discoverability) but I'm not sure
+it would also be really nice if tags could be color coded as the user types them in
+and maybe bounce (scale up and down a little on repeat) the most recent tag/word/phrase added to the search
