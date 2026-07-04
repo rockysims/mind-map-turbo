@@ -15,7 +15,8 @@
 		argTypes: {
 			initialGraphId: { control: 'text' },
 			graphs: { control: 'object' },
-			layoutSettings: { control: 'object' }
+			layoutSettings: { control: 'object' },
+			editFreshDefaultRoot: { control: 'boolean' }
 		},
 		parameters: {
 			viewport: {
@@ -121,6 +122,38 @@
 </script>
 
 <Story
+	name="FreshDefaultGraphStartsPinnedAndTitleEditing"
+	args={{
+		editFreshDefaultRoot: true
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const harness = getHarness(canvasElement);
+
+		await waitForHarnessData(canvasElement, 'loadedGraphId', 'default');
+		expect(harness.dataset.primaryTitle).toBe('Root');
+
+		await waitFor(() => expect(canvasElement.querySelector('.title-input')).toBeInTheDocument());
+		const titleInput = canvasElement.querySelector('.title-input') as HTMLInputElement | null;
+		expect(titleInput).toBeInTheDocument();
+		await waitFor(() => expect(document.activeElement).toBe(titleInput));
+		expect(canvasElement.querySelector('[data-node-id="n0"] .node')).toHaveAttribute(
+			'data-pinned',
+			'true'
+		);
+
+		titleInput!.value = 'Fresh idea';
+		titleInput!.dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+		);
+
+		await waitFor(() =>
+			expect(canvasElement.querySelector('.title-input')).not.toBeInTheDocument()
+		);
+		await waitFor(() => expect(harness.dataset.primaryTitle).toBe('Fresh idea'));
+	}}
+/>
+
+<Story
 	name="ExistingGraphLoadsFromPersistence"
 	args={{
 		initialGraphId: 'saved',
@@ -176,7 +209,7 @@
 		await userEvent.click(canvas.getByRole('button', { name: 'New' }));
 
 		await waitForHarnessData(canvasElement, 'loadedGraphId', 'graph-new');
-		await expect(harness.dataset.primaryTitle).toBe('Node 0');
+		await expect(harness.dataset.primaryTitle).toBe('Root');
 		await expect(harness.dataset.documentStatus).toBe('new-clean');
 		await expect(harness.dataset.graphIds).toContain('graph-new');
 	}}

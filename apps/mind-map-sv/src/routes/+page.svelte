@@ -17,7 +17,7 @@
 	} from '$lib/components/ui/GraphPersistence/usePersistedGraph.svelte';
 	import GraphToolbar from '$lib/components/ui/GraphToolbar/GraphToolbar.svelte';
 	import Multigraph from '$lib/components/ui/Multigraph/Multigraph.svelte';
-	import type { MultigraphData } from '$lib/components/ui/types/multigraph';
+	import { createDefaultGraph, shouldEditInitialRootTitle } from '$lib/defaultGraph';
 	import type { EmbeddedDocumentConflictChoice } from '$lib/graphPersistenceController';
 	import {
 		GRAPH_HTML_PAYLOAD_SCRIPT_ID,
@@ -137,18 +137,6 @@
 		};
 	});
 
-	function createDefaultGraph(): MultigraphData {
-		return {
-			nodes: [{ id: 'n0', title: 'Root', description: 'Description for root node', tags: [] }],
-			edges: [],
-			posByNodeId: { n0: { x: 0, y: 0 } },
-			tagColorConfig: {
-				nodeTags: {},
-				edgeTags: {}
-			}
-		};
-	}
-
 	function createNewGraph(): void {
 		openNewGraphInNewTab();
 	}
@@ -215,10 +203,15 @@
 			});
 			return;
 		}
-		await persistedGraph.load(graphId, options);
-		const shouldEditRoot = shouldEditRootTitleFromUrl();
+		const loadResult = await persistedGraph.load(graphId, options);
+		const requestedRootEdit = shouldEditRootTitleFromUrl();
+		const shouldEditRoot = shouldEditInitialRootTitle({
+			graphId,
+			requestedByUrl: requestedRootEdit,
+			createdDefaultGraph: loadResult.createdDefaultGraph
+		});
 		initialTitleEditNodeId = shouldEditRoot ? 'n0' : null;
-		if (shouldEditRoot) removeEditRootTitleFlagFromUrl();
+		if (requestedRootEdit) removeEditRootTitleFlagFromUrl();
 	}
 
 	async function handleDownload(): Promise<void> {

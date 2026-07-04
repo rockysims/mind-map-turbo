@@ -133,9 +133,10 @@ describe('GraphPersistenceController', () => {
 	it('loads a missing graph by creating and saving the default graph', async () => {
 		const { controller, persistence, scheduler } = setup();
 
-		await controller.load('missing');
+		const result = await controller.load('missing');
 
 		expect(persistence.load).toHaveBeenCalledWith('missing');
+		expect(result).toEqual({ createdDefaultGraph: true });
 		expect(scheduler.schedule).toHaveBeenCalledWith(
 			'missing',
 			createDefaultGraph(),
@@ -159,8 +160,9 @@ describe('GraphPersistenceController', () => {
 		const graph = makeGraph({ nodeCount: 2 });
 		await persistence.save('saved', { data: graph, viewState: nonNeutralViewState() });
 
-		await controller.load('saved');
+		const result = await controller.load('saved');
 
+		expect(result).toEqual({ createdDefaultGraph: false });
 		expect(controller.getView()).toMatchObject({
 			graph,
 			viewState: nonNeutralViewState(),

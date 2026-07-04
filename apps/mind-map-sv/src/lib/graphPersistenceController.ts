@@ -59,6 +59,10 @@ export type GraphSaveScheduler = {
 	dispose(): void;
 };
 
+export type LoadGraphResult = {
+	createdDefaultGraph: boolean;
+};
+
 export type EmbeddedDocumentConflictChoice = 'recover-draft' | 'open-file';
 
 type ControllerListener = (view: ControllerView) => void;
@@ -134,7 +138,7 @@ export class GraphPersistenceController {
 	async load(
 		graphId: string,
 		options: { flushCurrent?: boolean; externalReload?: boolean; documentId?: string | null } = {}
-	): Promise<void> {
+	): Promise<LoadGraphResult> {
 		if (options.flushCurrent) {
 			await this.flushPendingSave();
 		}
@@ -164,12 +168,13 @@ export class GraphPersistenceController {
 			this.scheduler.schedule(graphId, nextGraph, nextViewState);
 			await this.flushPendingSave();
 			await this.refreshGraphList();
-			return;
+			return { createdDefaultGraph: true };
 		}
 
 		this.update({
 			status: options.externalReload ? { state: 'reloaded', graphId } : { state: 'loaded', graphId }
 		});
+		return { createdDefaultGraph: false };
 	}
 
 	async loadEmbeddedDocument(

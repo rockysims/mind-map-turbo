@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { APP_CONFIG } from '$lib/appConfig';
-	import { makeGraph } from '$lib/components/ui/Multigraph/lib/testFixtures';
 	import Multigraph from '$lib/components/ui/Multigraph/Multigraph.svelte';
 	import GraphToolbar from '$lib/components/ui/GraphToolbar/GraphToolbar.svelte';
 	import type { LayoutSettings } from '$lib/components/ui/Multigraph/lib/layoutSettings';
 	import type { MultigraphData } from '$lib/components/ui/types/multigraph';
+	import { createDefaultGraph, shouldEditInitialRootTitle } from '$lib/defaultGraph';
 	import { DEFAULT_GRAPH_ID } from '$lib/graphRoute';
 	import { NEUTRAL_VIEW_STATE } from '$lib/migrations';
 	import { graphStorageKey } from '$lib/persistence';
@@ -20,13 +20,16 @@
 		/** Controls whether confirmGraphImportReplace returns true or false in stories. */
 		confirmResponse = true,
 		/** Text to import when the "Import text" harness button is clicked. */
-		simulateImportText = ''
+		simulateImportText = '',
+		/** Mirrors the root route's fresh-default inline edit behavior for stories. */
+		editFreshDefaultRoot = false
 	}: {
 		initialGraphId?: string;
 		graphs?: Record<string, MultigraphData>;
 		layoutSettings?: Partial<LayoutSettings>;
 		confirmResponse?: boolean;
 		simulateImportText?: string;
+		editFreshDefaultRoot?: boolean;
 	} = $props();
 
 	let now = 0;
@@ -38,6 +41,7 @@
 	let routedGraphId = $state(initialGraphIdAtMount());
 	let lastDownload = $state('');
 	let lastImportResult = $state('');
+	let initialTitleEditNodeId = $state<string | null>(null);
 	const persisted = usePersistedGraph({
 		persistence,
 		createScheduler: (onStatus) =>
@@ -71,16 +75,12 @@
 	const defaultPrimaryNodeId = $derived(persisted.graph.nodes[0]?.id ?? '');
 
 	onMount(() => {
-		void persisted.load(routedGraphId);
+		void loadRoutedGraph(routedGraphId);
 
 		return () => {
 			persisted.dispose();
 		};
 	});
-
-	function createDefaultGraph(): MultigraphData {
-		return makeGraph({ nodeCount: 1 });
-	}
 
 	function initialGraphIdAtMount(): string {
 		return initialGraphId;
@@ -88,6 +88,19 @@
 
 	function graphsAtMount(): Record<string, MultigraphData> {
 		return graphs;
+	}
+
+	async function loadRoutedGraph(graphId: string): Promise<void> {
+		const loadResult = await persisted.load(graphId);
+		initialTitleEditNodeId =
+			editFreshDefaultRoot &&
+			shouldEditInitialRootTitle({
+				graphId,
+				requestedByUrl: false,
+				createdDefaultGraph: loadResult.createdDefaultGraph
+			})
+				? 'n0'
+				: null;
 	}
 
 	function changeGraph(): void {
@@ -167,6 +180,7 @@
 			multigraphData={persisted.graph}
 			graphGeneration={persisted.graphGeneration}
 			initialViewState={persisted.viewState}
+			{initialTitleEditNodeId}
 			{defaultPrimaryNodeId}
 			{layoutSettings}
 			onMultigraphChange={(graph) => persisted.notifyGraphChanged(graph, { syncView: true })}
