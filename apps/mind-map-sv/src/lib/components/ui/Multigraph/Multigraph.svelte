@@ -34,6 +34,7 @@
 		moveNode,
 		removeEdge,
 		removeNode,
+		setNodePinned,
 		setTagColor,
 		togglePinned,
 		updateEdge,
@@ -135,7 +136,11 @@
 	let editNodeId = $state<string | null>(null);
 	let actionMenu = $state<{ nodeId: string; position: Point } | null>(null);
 	let duplicateEdgeConfirm = $state<{ edgeId: string } | null>(null);
-	let titleEditContext = $state<{ nodeId: string; edgeId?: string } | null>(null);
+	let titleEditContext = $state<{
+		nodeId: string;
+		edgeId?: string;
+		unpinOnCommit?: boolean;
+	} | null>(null);
 	let tagColorLegendOpen = $state(false);
 	let graphQueryPanelOpen = $state(false);
 	let graphQueryText = $state('');
@@ -496,7 +501,7 @@
 		}
 
 		if (newNode) {
-			titleEditContext = { nodeId: newNode.id, edgeId: newEdge?.id };
+			titleEditContext = { nodeId: newNode.id, edgeId: newEdge?.id, unpinOnCommit: true };
 		}
 	}
 
@@ -967,8 +972,16 @@
 							: undefined}
 						onTitleCommit={(title) => {
 							const createdEdgeId = titleEditContext?.edgeId;
+							const shouldUnpin = titleEditContext?.unpinOnCommit === true;
 							titleEditContext = null;
-							commitUserGraph(commitInlineTitleSyntax(graph, node.id, title, createdEdgeId));
+							const committedGraph = commitInlineTitleSyntax(graph, node.id, title, createdEdgeId);
+							const nextGraph = shouldUnpin
+								? layoutRuntime.beginScaleChange(
+										setNodePinned(committedGraph, node.id, false),
+										node.id
+									)
+								: committedGraph;
+							commitUserGraph(nextGraph);
 						}}
 					/>
 				</div>

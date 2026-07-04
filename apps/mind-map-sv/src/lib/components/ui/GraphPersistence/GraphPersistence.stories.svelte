@@ -150,6 +150,10 @@
 			expect(canvasElement.querySelector('.title-input')).not.toBeInTheDocument()
 		);
 		await waitFor(() => expect(harness.dataset.primaryTitle).toBe('Fresh idea'));
+		expect(canvasElement.querySelector('[data-node-id="n0"] .node')).toHaveAttribute(
+			'data-pinned',
+			'true'
+		);
 	}}
 />
 

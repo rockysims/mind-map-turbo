@@ -1714,12 +1714,16 @@
 		await sleep();
 
 		expect(canvasElement.querySelector('.title-input')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-node-id="n1"] .node')).not.toHaveAttribute(
+			'data-pinned'
+		);
 		expect(canvasElement).toHaveTextContent('The displayed title');
 		expect(canvasElement).not.toHaveTextContent('>:abc ;rel');
 		const changedGraph = lastChangedGraph(args);
 		expect(changedGraph.nodes.find((node) => node.id === 'n1')).toMatchObject({
 			title: 'The displayed title',
-			tags: ['abc']
+			tags: ['abc'],
+			pinned: false
 		});
 		expect(changedGraph.edges.find((edge) => edge.id === 'e0')).toMatchObject({
 			sourceNodeId: 'n0',
@@ -1744,9 +1748,10 @@
 		}),
 		defaultPrimaryNodeId: 'n0',
 		initialViewState: { panX: 0, panY: 0, scale: 0.5 },
-		layoutSettings: { relaxIterations: 1 }
+		layoutSettings: { relaxIterations: 1 },
+		onMultigraphChange: fn()
 	}}
-	play={async ({ canvasElement }: PlayContext) => {
+	play={async ({ canvasElement, args }: PlayContext) => {
 		await waitForLayout();
 		const stage = getStage(canvasElement);
 		const stageRect = stage.getBoundingClientRect();
@@ -1768,7 +1773,11 @@
 		await sleep();
 
 		expect(canvasElement.querySelector('.title-input')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-node-id="n1"] .node')).not.toHaveAttribute(
+			'data-pinned'
+		);
 		expect(canvasElement).toHaveTextContent('New Node');
+		expect(lastChangedGraph(args).nodes.find((node) => node.id === 'n1')?.pinned).toBe(false);
 	}}
 />
 

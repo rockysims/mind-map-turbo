@@ -12,6 +12,7 @@ import {
 	normalizeNodeTitle,
 	removeEdge,
 	removeNode,
+	setNodePinned,
 	setTagColor,
 	togglePinned,
 	updateEdge,
@@ -174,6 +175,27 @@ describe('graph mutations', () => {
 			const graph = makeGraph({ nodeCount: 1 });
 
 			expect(togglePinned(graph, 'missing')).toBe(graph);
+		});
+	});
+
+	describe('setNodePinned', () => {
+		it('sets the pinned flag without toggling', () => {
+			const graph = makeGraph({ nodeCount: 1, pinned: [0] });
+
+			const unpinned = setNodePinned(graph, 'n0', false);
+			const stillUnpinned = setNodePinned(unpinned, 'n0', false);
+			const pinned = setNodePinned(stillUnpinned, 'n0', true);
+
+			expect(unpinned.nodes[0].pinned).toBe(false);
+			expect(stillUnpinned.nodes[0].pinned).toBe(false);
+			expect(pinned.nodes[0].pinned).toBe(true);
+			expect(graph.nodes[0].pinned).toBe(true);
+		});
+
+		it('is a no-op for missing node ids', () => {
+			const graph = makeGraph({ nodeCount: 1 });
+
+			expect(setNodePinned(graph, 'missing', true)).toBe(graph);
 		});
 	});
 

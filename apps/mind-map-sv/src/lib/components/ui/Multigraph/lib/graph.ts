@@ -161,6 +161,19 @@ export function togglePinned(data: MultigraphData, nodeId: string): MultigraphDa
 	};
 }
 
+export function setNodePinned(
+	data: MultigraphData,
+	nodeId: string,
+	pinned: boolean
+): MultigraphData {
+	if (!hasNode(data, nodeId)) return data;
+
+	return {
+		...data,
+		nodes: data.nodes.map((node) => (node.id === nodeId ? { ...node, pinned } : node))
+	};
+}
+
 export function updateNodeContent(
 	data: MultigraphData,
 	nodeId: string,
