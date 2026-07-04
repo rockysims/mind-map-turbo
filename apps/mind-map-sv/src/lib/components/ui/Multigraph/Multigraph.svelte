@@ -525,6 +525,18 @@
 		graphQueryPreviewText = null;
 	}
 
+	function toggleTagColorLegend() {
+		const shouldOpen = !tagColorLegendOpen;
+		closeOverlays();
+		tagColorLegendOpen = shouldOpen;
+	}
+
+	function toggleGraphQueryPanel() {
+		const shouldOpen = !graphQueryPanelOpen;
+		closeOverlays();
+		graphQueryPanelOpen = shouldOpen;
+	}
+
 	function toggleNodePinned(nodeId: string) {
 		commitUserGraph(layoutRuntime.beginScaleChange(togglePinned(graph, nodeId), nodeId));
 		lastPinnedNodeId = nodeId;
@@ -702,26 +714,20 @@
 >
 	<button
 		type="button"
-		class="tag-color-button"
+		class="toolbar-button tag-color-button"
 		aria-haspopup="dialog"
 		aria-expanded={tagColorLegendOpen}
-		onclick={() => {
-			closeOverlays();
-			tagColorLegendOpen = true;
-		}}
+		onclick={toggleTagColorLegend}
 	>
 		Tag colors
 	</button>
 
 	<button
 		type="button"
-		class="graph-query-button"
+		class="toolbar-button graph-query-button"
 		aria-haspopup="dialog"
 		aria-expanded={graphQueryPanelOpen}
-		onclick={() => {
-			closeOverlays();
-			graphQueryPanelOpen = true;
-		}}
+		onclick={toggleGraphQueryPanel}
 	>
 		Find / Filter
 	</button>
@@ -1140,24 +1146,9 @@
 		position: absolute;
 	}
 
-	.tag-color-button {
+	.toolbar-button {
 		position: absolute;
 		z-index: 25;
-		right: 0.75rem;
-		bottom: 0.75rem;
-		border: 0;
-		border-radius: 999px;
-		padding: 0.625rem 0.875rem;
-		background: #0f172a;
-		color: #ffffff;
-		font: inherit;
-		box-shadow: 0 8px 24px rgb(15 23 42 / 18%);
-	}
-
-	.graph-query-button {
-		position: absolute;
-		z-index: 25;
-		left: 0.75rem;
 		bottom: 0.75rem;
 		border: 0;
 		border-radius: 999px;
@@ -1166,6 +1157,14 @@
 		color: #0f172a;
 		font: inherit;
 		box-shadow: 0 8px 24px rgb(15 23 42 / 18%);
+	}
+
+	.tag-color-button {
+		right: 0.75rem;
+	}
+
+	.graph-query-button {
+		left: 0.75rem;
 	}
 
 	.edges {

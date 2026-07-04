@@ -1909,6 +1909,54 @@
 />
 
 <Story
+	name="ToolbarButtonsShareVisualStyle"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [{ id: 'n0', title: 'Topic', description: '', tags: [] }]
+		}),
+		defaultPrimaryNodeId: 'n0'
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const canvas = within(canvasElement);
+		const tagColorButton = canvas.getByRole('button', { name: 'Tag colors' });
+		const graphQueryButton = canvas.getByRole('button', { name: 'Find / Filter' });
+
+		const tagColorStyle = getComputedStyle(tagColorButton);
+		const graphQueryStyle = getComputedStyle(graphQueryButton);
+		expect(tagColorStyle.backgroundColor).toBe(graphQueryStyle.backgroundColor);
+		expect(tagColorStyle.color).toBe(graphQueryStyle.color);
+		expect(tagColorStyle.borderRadius).toBe(graphQueryStyle.borderRadius);
+		expect(tagColorStyle.padding).toBe(graphQueryStyle.padding);
+	}}
+/>
+
+<Story
+	name="UserClosesGraphQueryPanelFromToolbarButton"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [{ id: 'n0', title: 'Topic', description: '', tags: [] }]
+		}),
+		defaultPrimaryNodeId: 'n0'
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const canvas = within(canvasElement);
+		const graphQueryButton = canvas.getByRole('button', { name: 'Find / Filter' });
+
+		graphQueryButton.click();
+		await sleep();
+		expect(canvas.getByLabelText('Graph query')).toBeInTheDocument();
+		expect(graphQueryButton).toHaveAttribute('aria-expanded', 'true');
+
+		graphQueryButton.click();
+		await sleep();
+		expect(canvas.queryByLabelText('Graph query')).not.toBeInTheDocument();
+		expect(graphQueryButton).toHaveAttribute('aria-expanded', 'false');
+	}}
+/>
+
+<Story
 	name="UserFiltersGraphByNodeTag"
 	args={{
 		multigraphData: makeGraph({
