@@ -1,8 +1,8 @@
-# Milestone 06: Multiplayer
+# Milestone 07: Multiplayer
 
 **Status:** not started
 **Depends on:** milestones 01 (mutations), 04 (persistence interface),
-and 05 (local filter/find semantics).
+05 (local filter/find semantics), and 06 (node focus and rich media).
 **Plan:** _none yet._
 
 ## Goal

@@ -158,7 +158,7 @@ transition and status indicator.
   one-shot attention feedback and persistent quiet state.
 - **Mobile density.** Token chips, suggestions, and results need a bottom-sheet
   layout that does not cover the whole graph for simple queries.
-- **Index freshness with multiplayer.** After milestone 06, remote edits need to
+- **Index freshness with multiplayer.** After milestone 07, remote edits need to
   rebuild the local query model without changing the query semantics.
 
 ## References

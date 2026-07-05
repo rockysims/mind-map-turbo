@@ -55,8 +55,8 @@ individual PR-sized tasks.
 | 04m | Single-document save UX                            | complete    | [milestone](milestones/04m-single-document-save-ux.md), [plan](plans/2026-06-21%2004m-single-document-save-ux.md)                               |
 | 04n | Reliable propagated HTML app shell                 | complete    | [milestone](milestones/04n-reliable-propagated-html-app-shell.md), [plan](plans/2026-07-04%2004n-reliable-propagated-html-app-shell.md)         |
 | 05  | Filter / find / search                             | complete    | [milestone](milestones/05-filter-find-search.md), [plan](plans/2026-06-22%2005-filter-find-search.md)                                           |
-| 06  | Multiplayer                                        | not started | [milestones/06-multiplayer.md](milestones/06-multiplayer.md)                                                                                    |
-| 07  | Node focus and rich media                          | not started | [milestone](milestones/07-node-focus-and-rich-media.md), [plan](plans/2026-07-05%2007-node-focus-and-rich-media.md)                             |
+| 06  | Node focus and rich media                          | not started | [milestone](milestones/06-node-focus-and-rich-media.md), [plan](plans/2026-07-05%2006-node-focus-and-rich-media.md)                             |
+| 07  | Multiplayer                                        | not started | [milestones/07-multiplayer.md](milestones/07-multiplayer.md)                                                                                    |
 
 Milestones 04a-04m deepen the local-first graph experience before multiplayer.
 Milestone 04b intentionally supersedes 04a's Fibonacci reveal and dimming
@@ -73,12 +73,11 @@ status instead of graph-library controls. Milestone 04n hardens the propagated
 HTML shell so descendant downloads carry app code forward without serializing
 hydrated runtime UI.
 Milestone 05 intentionally lands before milestone 06 so local filter/find
-semantics, visual query states, and camera navigation are settled before those
-states need to respond to remote multiplayer edits.
-Milestone 07 adds a transient zoom-through node focus mode and offline image
-attachments carried inside self-contained HTML save files. It is intentionally
-separated from milestone 06 so rich local document behavior can be built without
-blocking multiplayer planning.
+semantics, visual query states, and camera navigation are settled before the
+zoom-through node focus mode reuses camera geometry. Milestone 06 adds a
+transient zoom-through node focus mode and offline image attachments carried
+inside self-contained HTML save files. Milestone 07 follows with multiplayer
+after rich local document behavior is settled.
 
 ## How this directory is organized
 
@@ -99,9 +98,9 @@ we change approach mid-stream — old plans stay as historical record.
 
 ## Out of scope (for now)
 
-- Authentication and accounts (deferred; blocks Multiplayer #6).
+- Authentication and accounts (deferred; blocks Multiplayer #7).
 - Rich text / markdown in node descriptions (post-MVP). Image attachments are
-  tracked separately in milestone 07.
+  tracked separately in milestone 06.
 - Versioning / undo-redo UI (the immutable-update pattern enables it; a
   UI for it can come later).
 - AI-generated nodes / auto-suggest edges (interesting future direction;

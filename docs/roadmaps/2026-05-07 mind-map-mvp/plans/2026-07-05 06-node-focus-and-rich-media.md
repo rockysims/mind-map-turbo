@@ -2,7 +2,7 @@
 
 **Created:** 2026-07-05
 **Author:** Codex agent
-**Milestone:** [milestones/07-node-focus-and-rich-media.md](../milestones/07-node-focus-and-rich-media.md)
+**Milestone:** [milestones/06-node-focus-and-rich-media.md](../milestones/06-node-focus-and-rich-media.md)
 **Status:** draft
 **Total estimated effort:** L (8 tasks; focus-mode foundation, asset storage,
 HTML asset propagation, and image zoom)
@@ -314,7 +314,7 @@ action-menu wiring.
 
 ## Definition of Done (this plan)
 
-- All 8 tasks are merged to `main`; milestone 07 acceptance criteria are
+- All 8 tasks are merged to `main`; milestone 06 acceptance criteria are
   satisfied.
 - `pnpm --filter mind-map-sv lint` passes.
 - `pnpm --filter mind-map-sv check` passes.
@@ -324,7 +324,7 @@ action-menu wiring.
 - Storybook behavior tests for focus mode, image attachment UI, and image zoom
   pass.
 - Plan status is `done`, milestone status is `complete`, and the roadmap row for
-  milestone 07 is updated to `complete`.
+  milestone 06 is updated to `complete`.
 - The finished work has been committed unless the user explicitly asks not to
   commit yet.
 

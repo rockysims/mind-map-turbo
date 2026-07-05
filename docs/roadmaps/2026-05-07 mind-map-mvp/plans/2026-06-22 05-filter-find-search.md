@@ -24,7 +24,7 @@ region navigation into the existing Multigraph surfaces.
   small screens.** The query UI needs to stay available without turning into a
   full settings modal.
 - **Index freshness with multiplayer.** **Keep query state local and derived
-  from current graph data.** Milestone 06 can rebuild query results from remote
+  from current graph data.** Milestone 07 can rebuild query results from remote
   graph changes without changing the query semantics.
 
 ## Out of scope
