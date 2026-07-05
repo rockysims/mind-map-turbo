@@ -556,7 +556,19 @@ test('deep zoom enters focus, image inspection, and exits by wheel gestures', as
 		.poll(async () => Number(await image.getAttribute('data-image-zoom-scale')))
 		.toBe(initialImageScale);
 
-	await page.waitForTimeout(250);
+	await page.waitForTimeout(120);
+	await image.dispatchEvent('wheel', {
+		deltaY: -500,
+		clientX: imageCenter.x,
+		clientY: imageCenter.y,
+		bubbles: true,
+		cancelable: true
+	});
+	await expect
+		.poll(async () => Number(await image.getAttribute('data-image-zoom-scale')))
+		.toBe(initialImageScale);
+
+	await page.waitForTimeout(220);
 	await image.dispatchEvent('wheel', {
 		deltaY: -500,
 		clientX: imageCenter.x,

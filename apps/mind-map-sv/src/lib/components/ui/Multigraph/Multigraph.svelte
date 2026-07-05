@@ -195,7 +195,7 @@
 	let reduceMotion = $derived(prefersReducedMotion());
 	let focusMorphSource = $state<NodeFocusMorphSource | null>(null);
 	let focusExiting = $state(false);
-	let focusEntryGestureSwallowMs = $state(0);
+	let focusEntryGestureIdleMs = $state(0);
 	const focusRuntime = new FocusRuntime();
 	let focusExitTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
@@ -570,13 +570,13 @@
 	function openFocus(
 		node: NodeData,
 		source: NodeFocusMorphSource | null = null,
-		entryGestureSwallowMs = 0
+		entryGestureIdleMs = 0
 	) {
 		closeOverlays();
 		clearFocusExitTimeout();
 		focusExiting = false;
 		focusMorphSource = source;
-		focusEntryGestureSwallowMs = entryGestureSwallowMs;
+		focusEntryGestureIdleMs = entryGestureIdleMs;
 		focusRuntime.open(node);
 	}
 
@@ -601,7 +601,7 @@
 		clearFocusExitTimeout();
 		focusRuntime.close();
 		focusMorphSource = null;
-		focusEntryGestureSwallowMs = 0;
+		focusEntryGestureIdleMs = 0;
 		focusExiting = false;
 		focusOvershoot = resetOvershootAfterCommit(layoutRuntime.now());
 	}
@@ -698,7 +698,7 @@
 			openFocus(
 				candidate.node,
 				captureFocusMorphSource(candidate, input.viewState),
-				APP_CONFIG.multigraph.focus.entryGestureSwallowMs
+				APP_CONFIG.multigraph.focus.entryGestureIdleMs
 			);
 			focusOvershoot = resetOvershootAfterCommit(layoutRuntime.now());
 			focusPreviewNodeId = null;
@@ -1337,7 +1337,7 @@
 			{reduceMotion}
 			morphSource={focusMorphSource}
 			exiting={focusExiting}
-			entryGestureSwallowMs={focusEntryGestureSwallowMs}
+			entryGestureIdleMs={focusEntryGestureIdleMs}
 			onClose={closeFocus}
 			onZoomOutBoundary={handleFocusZoomOutBoundary}
 		/>

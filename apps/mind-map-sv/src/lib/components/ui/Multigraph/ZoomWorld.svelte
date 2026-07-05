@@ -3,6 +3,12 @@
 	import type { Snippet } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import type { Point } from '../types/multigraph';
+	import {
+		beginEntryGestureGate,
+		EMPTY_ENTRY_GESTURE_GATE,
+		stepEntryGestureGate,
+		type EntryGestureGateState
+	} from './lib/entryGestureGate';
 	import { pointerDistance } from './lib/hitTest';
 	import {
 		clampZoomWorldState,
@@ -15,14 +21,14 @@
 	let {
 		minScale = 1,
 		maxScale = 8,
-		entryGestureSwallowMs = 0,
+		entryGestureIdleMs = 0,
 		onExitBoundary,
 		onStateChange,
 		children
 	}: {
 		minScale?: number;
 		maxScale?: number;
-		entryGestureSwallowMs?: number;
+		entryGestureIdleMs?: number;
 		onExitBoundary?: (delta: number) => void;
 		onStateChange?: (state: ZoomWorldState) => void;
 		children?: Snippet;
@@ -42,7 +48,7 @@
 		scale: number;
 		state: ZoomWorldState;
 	} | null>(null);
-	let swallowZoomInUntilMs = $state(0);
+	let entryGestureGate = $state<EntryGestureGateState>(EMPTY_ENTRY_GESTURE_GATE);
 
 	const activePointers = new SvelteMap<number, { clientX: number; clientY: number }>();
 	const transformStyle = $derived(
@@ -50,7 +56,7 @@
 	);
 
 	onMount(() => {
-		swallowZoomInUntilMs = Date.now() + entryGestureSwallowMs;
+		entryGestureGate = beginEntryGestureGate(Date.now(), entryGestureIdleMs);
 	});
 
 	function currentBounds(): ZoomWorldBounds | null {
@@ -76,8 +82,15 @@
 		onStateChange?.(next);
 	}
 
-	function isSwallowingZoomInInput(deltaY: number): boolean {
-		return deltaY < 0 && Date.now() < swallowZoomInUntilMs;
+	function shouldSwallowEntryZoomIn(zoomingIn: boolean): boolean {
+		const step = stepEntryGestureGate(
+			entryGestureGate,
+			{ zoomingIn },
+			Date.now(),
+			entryGestureIdleMs
+		);
+		entryGestureGate = step.state;
+		return step.swallow;
 	}
 
 	function handleWheel(event: WheelEvent) {
@@ -86,7 +99,7 @@
 		if (!bounds || !point) return;
 		event.preventDefault();
 		event.stopPropagation();
-		if (isSwallowingZoomInInput(event.deltaY)) return;
+		if (shouldSwallowEntryZoomIn(event.deltaY < 0)) return;
 		const step = wheelZoomWorld(worldState, event.deltaY, point, bounds);
 		commitState(step.state);
 		if (step.exitBoundaryDelta > 0) onExitBoundary?.(step.exitBoundaryDelta);
@@ -145,7 +158,10 @@
 				pinchStart = { distance, scale: worldState.scale, state: worldState };
 				return;
 			}
-			if (distance > pinchStart.distance && Date.now() < swallowZoomInUntilMs) return;
+			if (shouldSwallowEntryZoomIn(distance > pinchStart.distance)) {
+				pinchStart = { distance, scale: worldState.scale, state: worldState };
+				return;
+			}
 			commitState(
 				pinchZoomWorld(
 					pinchStart.state,

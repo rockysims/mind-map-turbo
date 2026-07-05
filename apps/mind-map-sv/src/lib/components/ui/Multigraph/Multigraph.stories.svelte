@@ -655,7 +655,12 @@
 		await sleep();
 		expect(Number(image.dataset.imageZoomScale)).toBe(initialImageScale);
 
-		await sleep(APP_CONFIG.multigraph.focus.entryGestureSwallowMs + 20);
+		await sleep(Math.max(0, APP_CONFIG.multigraph.focus.entryGestureIdleMs - 30));
+		dispatchWheel(image, -500, imageCenter.x, imageCenter.y);
+		await sleep();
+		expect(Number(image.dataset.imageZoomScale)).toBe(initialImageScale);
+
+		await sleep(APP_CONFIG.multigraph.focus.entryGestureIdleMs + 20);
 		dispatchWheel(image, -500, imageCenter.x, imageCenter.y);
 		await waitFor(() => {
 			expect(Number(image.dataset.imageZoomScale)).toBeGreaterThan(initialImageScale);
@@ -707,7 +712,12 @@
 		await sleep();
 		expect(Number(world.dataset.zoomWorldScale)).toBe(1);
 
-		await sleep(APP_CONFIG.multigraph.focus.entryGestureSwallowMs + 20);
+		await sleep(Math.max(0, APP_CONFIG.multigraph.focus.entryGestureIdleMs - 30));
+		dispatchWheel(world, -800, center.x, center.y);
+		await sleep();
+		expect(Number(world.dataset.zoomWorldScale)).toBe(1);
+
+		await sleep(APP_CONFIG.multigraph.focus.entryGestureIdleMs + 20);
 		dispatchWheel(world, -800, center.x, center.y);
 		await waitFor(() => {
 			expect(Number(world.dataset.zoomWorldScale)).toBeGreaterThan(1);
