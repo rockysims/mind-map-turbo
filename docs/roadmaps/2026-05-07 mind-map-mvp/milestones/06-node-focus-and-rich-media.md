@@ -3,7 +3,7 @@
 **Status:** not started
 **Depends on:** milestones 03 (node editing UX), 04l/04m/04n
 (self-contained HTML document saves), and 05 (find/filter camera navigation).
-**Plan:** [2026-07-05 06-node-focus-and-rich-media.md](../plans/2026-07-05%2006-node-focus-and-rich-media.md)
+**Plan:** [2026-07-04 06-node-focus-and-rich-media.md](../plans/2026-07-04%2006-node-focus-and-rich-media.md)
 
 ## Goal
 
@@ -22,10 +22,12 @@ hard cut.
 
 ### Zoom-triggered node focus mode
 
-- Detect when the node under the zoom focal point has grown large enough that
-  its projected border fully contains the viewport.
-- Use hysteresis and explicit exit behavior so focus mode cannot flicker around
-  the threshold.
+- Trigger focus with a zoom-through gesture: once graph zoom reaches its
+  maximum with the focal point over a node, continued deliberate zoom input
+  past the clamp commits the transition.
+- Make entry and exit bump-proof: brief zoom input at the boundary must not
+  trigger a transition, while a bold sustained gesture commits it, and focus
+  mode cannot flicker around the threshold.
 - Provide a discoverable "Focus" action from the node action menu in addition
   to the zoom-through gesture.
 - Keep focus mode transient; opening a graph from persisted `ViewState` should
@@ -35,8 +37,8 @@ hard cut.
   morphs the circle into a rounded rectangular content surface.
 - Keep `Stage` responsible for camera gestures and let `Multigraph` orchestrate
   focus-mode state and rendering.
-- Exit via Escape, Back, an explicit close control, or zooming out from focus
-  mode.
+- Exit via Escape, an explicit close control in the upper right, or a bold
+  zoom-out from focus mode. Browser Back/history integration is a non-goal.
 
 ### Focus content surface
 
@@ -60,8 +62,7 @@ hard cut.
   embedded, so a saved document works offline with no adjacent asset files.
 - Import/open saved `.html` documents with embedded assets and hydrate the
   local draft asset store safely.
-- Show estimated storage use and handle quota failures with recoverable user
-  feedback.
+- Handle quota failures with recoverable user feedback.
 
 ### Image viewing
 
@@ -86,8 +87,8 @@ hard cut.
   graph pointer events leaking through.
 - A schema migration adds node content/asset metadata while older graph files
   load with empty content/assets.
-- IndexedDB-backed draft asset storage handles image blobs, reports
-  `navigator.storage.estimate()` data when available, and catches quota errors.
+- IndexedDB-backed draft asset storage handles image blobs and catches quota
+  errors with recoverable feedback.
 - Node edit UI supports adding, previewing, captioning, reordering, and removing
   image attachments.
 - Self-contained `.html` export embeds all referenced image bytes; opening or
@@ -107,6 +108,8 @@ hard cut.
 - Silent save-in-place over the opened `.html` file.
 - Compression or deduplicated app-code bundles across save documents.
 - Server persistence, accounts, or multiplayer asset synchronization.
+- Browser Back/history integration for exiting focus mode or image zoom.
+- Storage-use display or export-size estimates.
 
 ## Risks and open questions
 
