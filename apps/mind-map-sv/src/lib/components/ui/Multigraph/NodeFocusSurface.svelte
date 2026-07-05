@@ -34,6 +34,7 @@
 		morphSource = null,
 		detailsProgress = 1,
 		exiting = false,
+		entryGestureSwallowMs = 0,
 		onClose,
 		onZoomOutBoundary
 	}: {
@@ -46,6 +47,7 @@
 		morphSource?: NodeFocusMorphSource | null;
 		detailsProgress?: number;
 		exiting?: boolean;
+		entryGestureSwallowMs?: number;
 		onClose: () => void;
 		onZoomOutBoundary?: (delta: number) => void;
 	} = $props();
@@ -56,6 +58,7 @@
 	let activeImageFitScale = $state(1);
 	let imageZoom = $state<ImageZoomState>({ panX: 0, panY: 0, scale: 1 });
 	let imageOvershoot = $state<OvershootState>(EMPTY_OVERSHOOT_STATE);
+	let imageEntrySwallowUntilMs = $state(0);
 	let imageDragStart = $state<{
 		clientX: number;
 		clientY: number;
@@ -138,6 +141,7 @@
 		activeImageAssetId = assetId;
 		activeImageFitScale = imageFitScale(bounds);
 		imageZoom = { panX: 0, panY: 0, scale: activeImageFitScale };
+		imageEntrySwallowUntilMs = Date.now() + APP_CONFIG.multigraph.focus.entryGestureSwallowMs;
 		imageOvershoot = resetOvershootAfterCommit(Date.now());
 	}
 
@@ -145,6 +149,7 @@
 		activeImageAssetId = null;
 		activeImageFitScale = 1;
 		imageZoom = { panX: 0, panY: 0, scale: 1 };
+		imageEntrySwallowUntilMs = 0;
 		imageOvershoot = resetOvershootAfterCommit(Date.now());
 	}
 
@@ -169,6 +174,7 @@
 
 		event.preventDefault();
 		event.stopPropagation();
+		if (event.deltaY < 0 && Date.now() < imageEntrySwallowUntilMs) return;
 		const limits = imageZoomLimits(bounds);
 		if (event.deltaY > 0 && imageZoom.scale <= limits.minScale + 0.001) {
 			imageOvershoot = overshootInput(
@@ -253,7 +259,7 @@
 	<button class="close-button" type="button" aria-label="Close node focus" onclick={onClose}>
 		Close
 	</button>
-	<ZoomWorld onExitBoundary={handleWorldExitBoundary}>
+	<ZoomWorld {entryGestureSwallowMs} onExitBoundary={handleWorldExitBoundary}>
 		<div
 			bind:this={surfaceRef}
 			class="focus-surface"

@@ -195,6 +195,7 @@
 	let reduceMotion = $derived(prefersReducedMotion());
 	let focusMorphSource = $state<NodeFocusMorphSource | null>(null);
 	let focusExiting = $state(false);
+	let focusEntryGestureSwallowMs = $state(0);
 	const focusRuntime = new FocusRuntime();
 	let focusExitTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
@@ -566,11 +567,16 @@
 		editNodeId = nodeId;
 	}
 
-	function openFocus(node: NodeData, source: NodeFocusMorphSource | null = null) {
+	function openFocus(
+		node: NodeData,
+		source: NodeFocusMorphSource | null = null,
+		entryGestureSwallowMs = 0
+	) {
 		closeOverlays();
 		clearFocusExitTimeout();
 		focusExiting = false;
 		focusMorphSource = source;
+		focusEntryGestureSwallowMs = entryGestureSwallowMs;
 		focusRuntime.open(node);
 	}
 
@@ -595,6 +601,7 @@
 		clearFocusExitTimeout();
 		focusRuntime.close();
 		focusMorphSource = null;
+		focusEntryGestureSwallowMs = 0;
 		focusExiting = false;
 		focusOvershoot = resetOvershootAfterCommit(layoutRuntime.now());
 	}
@@ -688,7 +695,11 @@
 		focusPreviewNodeId = candidate.node.id;
 		focusRuntime.preview(focusOvershoot.progress);
 		if (focusOvershoot.committed) {
-			openFocus(candidate.node, captureFocusMorphSource(candidate, input.viewState));
+			openFocus(
+				candidate.node,
+				captureFocusMorphSource(candidate, input.viewState),
+				APP_CONFIG.multigraph.focus.entryGestureSwallowMs
+			);
 			focusOvershoot = resetOvershootAfterCommit(layoutRuntime.now());
 			focusPreviewNodeId = null;
 		}
@@ -1326,6 +1337,7 @@
 			{reduceMotion}
 			morphSource={focusMorphSource}
 			exiting={focusExiting}
+			entryGestureSwallowMs={focusEntryGestureSwallowMs}
 			onClose={closeFocus}
 			onZoomOutBoundary={handleFocusZoomOutBoundary}
 		/>

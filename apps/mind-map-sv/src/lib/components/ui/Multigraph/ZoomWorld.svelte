@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import type { Snippet } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import type { Point } from '../types/multigraph';
@@ -14,12 +15,14 @@
 	let {
 		minScale = 1,
 		maxScale = 8,
+		entryGestureSwallowMs = 0,
 		onExitBoundary,
 		onStateChange,
 		children
 	}: {
 		minScale?: number;
 		maxScale?: number;
+		entryGestureSwallowMs?: number;
 		onExitBoundary?: (delta: number) => void;
 		onStateChange?: (state: ZoomWorldState) => void;
 		children?: Snippet;
@@ -39,11 +42,16 @@
 		scale: number;
 		state: ZoomWorldState;
 	} | null>(null);
+	let swallowZoomInUntilMs = $state(0);
 
 	const activePointers = new SvelteMap<number, { clientX: number; clientY: number }>();
 	const transformStyle = $derived(
 		`translate(${worldState.panX}px, ${worldState.panY}px) scale(${worldState.scale})`
 	);
+
+	onMount(() => {
+		swallowZoomInUntilMs = Date.now() + entryGestureSwallowMs;
+	});
 
 	function currentBounds(): ZoomWorldBounds | null {
 		if (!worldRef || !subjectRef) return null;
@@ -68,12 +76,17 @@
 		onStateChange?.(next);
 	}
 
+	function isSwallowingZoomInInput(deltaY: number): boolean {
+		return deltaY < 0 && Date.now() < swallowZoomInUntilMs;
+	}
+
 	function handleWheel(event: WheelEvent) {
 		const bounds = currentBounds();
 		const point = localPoint(event.clientX, event.clientY);
 		if (!bounds || !point) return;
 		event.preventDefault();
 		event.stopPropagation();
+		if (isSwallowingZoomInInput(event.deltaY)) return;
 		const step = wheelZoomWorld(worldState, event.deltaY, point, bounds);
 		commitState(step.state);
 		if (step.exitBoundaryDelta > 0) onExitBoundary?.(step.exitBoundaryDelta);
@@ -132,6 +145,7 @@
 				pinchStart = { distance, scale: worldState.scale, state: worldState };
 				return;
 			}
+			if (distance > pinchStart.distance && Date.now() < swallowZoomInUntilMs) return;
 			commitState(
 				pinchZoomWorld(
 					pinchStart.state,

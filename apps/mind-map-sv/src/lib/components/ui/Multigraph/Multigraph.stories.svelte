@@ -652,6 +652,11 @@
 		});
 		const initialImageScale = Number(image.dataset.imageZoomScale);
 		dispatchWheel(image, -500, imageCenter.x, imageCenter.y);
+		await sleep();
+		expect(Number(image.dataset.imageZoomScale)).toBe(initialImageScale);
+
+		await sleep(APP_CONFIG.multigraph.focus.entryGestureSwallowMs + 20);
+		dispatchWheel(image, -500, imageCenter.x, imageCenter.y);
 		await waitFor(() => {
 			expect(Number(image.dataset.imageZoomScale)).toBeGreaterThan(initialImageScale);
 		});
@@ -694,8 +699,19 @@
 
 		const dialog = await within(canvasElement).findByRole('dialog');
 		const surface = dialog.querySelector('.focus-surface') as HTMLElement;
+		const world = dialog.querySelector('.zoom-world') as HTMLElement;
 		expect(surface.dataset.morphSourceNodeId).toBe('n0');
 		expect(canvasElement.querySelector('.graph')).toHaveClass('focus-active');
+
+		dispatchWheel(world, -800, center.x, center.y);
+		await sleep();
+		expect(Number(world.dataset.zoomWorldScale)).toBe(1);
+
+		await sleep(APP_CONFIG.multigraph.focus.entryGestureSwallowMs + 20);
+		dispatchWheel(world, -800, center.x, center.y);
+		await waitFor(() => {
+			expect(Number(world.dataset.zoomWorldScale)).toBeGreaterThan(1);
+		});
 
 		within(dialog).getByRole('button', { name: 'Close node focus' }).click();
 		await waitFor(() => {
