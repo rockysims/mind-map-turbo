@@ -1,6 +1,6 @@
 # Plan: Deep zoom continuity polish
 
-**Created:** 2026-07-05
+**Created:** 2026-07-04
 **Author:** Codex agent
 **Milestone:** [milestones/06-node-focus-and-rich-media.md](../milestones/06-node-focus-and-rich-media.md)
 **Status:** done
@@ -221,8 +221,13 @@ runtime and must stay sequential to avoid competing transition semantics.
 
 ## Notes
 
-- 2026-07-05: Created from follow-up UX discussion after milestone 06 landed.
+- 2026-07-04: Created from follow-up UX discussion after milestone 06 landed.
   Decision: treat image inspection as continuous focus-surface zoom, not a
   separate visible mode, while preserving image-specific pure math if useful.
-- 2026-07-05: Implemented conditional focus overzoom, node-to-focus morph,
+- 2026-07-04: Implemented conditional focus overzoom, node-to-focus morph,
   in-surface image zoom, and removal of the visible image viewer surface.
+- 2026-07-04: Superseded by
+  [2026-07-04 06a-continuous-deep-zoom.md](<2026-07-04 06a-continuous-deep-zoom.md>):
+  the shipped result still gated entry on an arbitrary overzoom cap, the morph
+  replica's border did not match the real node, image zoom scaled only the
+  inner content layer, and the focus surface handled wheel only.
