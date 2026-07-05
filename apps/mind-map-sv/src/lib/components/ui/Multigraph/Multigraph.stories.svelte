@@ -723,10 +723,31 @@
 			expect(Number(world.dataset.zoomWorldScale)).toBeGreaterThan(1);
 		});
 
-		within(dialog).getByRole('button', { name: 'Close node focus' }).click();
+		const stageTransformBeforeExit = getStageTransform(canvasElement);
+		dispatchWheel(world, 5000, center.x, center.y);
+		await waitFor(() => {
+			expect(Number(world.dataset.zoomWorldScale)).toBe(1);
+		});
+
+		dispatchWheel(world, 5000, center.x, center.y);
 		await waitFor(() => {
 			expect(canvasElement.querySelector('.graph')).not.toHaveClass('focus-active');
 			expect(surface).toHaveClass('exiting');
+		});
+
+		dispatchWheel(stage, 5000, center.x, center.y);
+		await sleep();
+		expect(getStageTransform(canvasElement)).toBe(stageTransformBeforeExit);
+
+		await sleep(Math.max(0, APP_CONFIG.multigraph.focus.entryGestureIdleMs - 30));
+		dispatchWheel(stage, 5000, center.x, center.y);
+		await sleep();
+		expect(getStageTransform(canvasElement)).toBe(stageTransformBeforeExit);
+
+		await sleep(APP_CONFIG.multigraph.focus.entryGestureIdleMs + 20);
+		dispatchWheel(stage, 5000, center.x, center.y);
+		await waitFor(() => {
+			expect(getStageTransform(canvasElement)).not.toBe(stageTransformBeforeExit);
 		});
 		await sleep(APP_CONFIG.multigraph.focus.entryTransitionMs + 40);
 		expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();

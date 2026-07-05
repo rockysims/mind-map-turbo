@@ -11,6 +11,7 @@
 		beginEntryGestureGate,
 		EMPTY_ENTRY_GESTURE_GATE,
 		stepEntryGestureGate,
+		type EntryGestureDirection,
 		type EntryGestureGateState
 	} from './lib/entryGestureGate';
 	import {
@@ -148,6 +149,7 @@
 		activeImageFitScale = imageFitScale(bounds);
 		imageZoom = { panX: 0, panY: 0, scale: activeImageFitScale };
 		imageEntryGestureGate = beginEntryGestureGate(
+			'in',
 			Date.now(),
 			APP_CONFIG.multigraph.focus.entryGestureIdleMs
 		);
@@ -162,10 +164,10 @@
 		imageOvershoot = resetOvershootAfterCommit(Date.now());
 	}
 
-	function shouldSwallowImageEntryZoomIn(deltaY: number): boolean {
+	function shouldSwallowImageEntryZoom(direction: EntryGestureDirection): boolean {
 		const step = stepEntryGestureGate(
 			imageEntryGestureGate,
-			{ zoomingIn: deltaY < 0 },
+			{ direction },
 			Date.now(),
 			APP_CONFIG.multigraph.focus.entryGestureIdleMs
 		);
@@ -194,7 +196,7 @@
 
 		event.preventDefault();
 		event.stopPropagation();
-		if (shouldSwallowImageEntryZoomIn(event.deltaY)) return;
+		if (shouldSwallowImageEntryZoom(event.deltaY < 0 ? 'in' : 'out')) return;
 		const limits = imageZoomLimits(bounds);
 		if (event.deltaY > 0 && imageZoom.scale <= limits.minScale + 0.001) {
 			imageOvershoot = overshootInput(

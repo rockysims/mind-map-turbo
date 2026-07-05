@@ -7,6 +7,7 @@
 		beginEntryGestureGate,
 		EMPTY_ENTRY_GESTURE_GATE,
 		stepEntryGestureGate,
+		type EntryGestureDirection,
 		type EntryGestureGateState
 	} from './lib/entryGestureGate';
 	import { pointerDistance } from './lib/hitTest';
@@ -56,7 +57,7 @@
 	);
 
 	onMount(() => {
-		entryGestureGate = beginEntryGestureGate(Date.now(), entryGestureIdleMs);
+		entryGestureGate = beginEntryGestureGate('in', Date.now(), entryGestureIdleMs);
 	});
 
 	function currentBounds(): ZoomWorldBounds | null {
@@ -82,10 +83,10 @@
 		onStateChange?.(next);
 	}
 
-	function shouldSwallowEntryZoomIn(zoomingIn: boolean): boolean {
+	function shouldSwallowEntryZoom(direction: EntryGestureDirection): boolean {
 		const step = stepEntryGestureGate(
 			entryGestureGate,
-			{ zoomingIn },
+			{ direction },
 			Date.now(),
 			entryGestureIdleMs
 		);
@@ -99,7 +100,7 @@
 		if (!bounds || !point) return;
 		event.preventDefault();
 		event.stopPropagation();
-		if (shouldSwallowEntryZoomIn(event.deltaY < 0)) return;
+		if (shouldSwallowEntryZoom(event.deltaY < 0 ? 'in' : 'out')) return;
 		const step = wheelZoomWorld(worldState, event.deltaY, point, bounds);
 		commitState(step.state);
 		if (step.exitBoundaryDelta > 0) onExitBoundary?.(step.exitBoundaryDelta);
@@ -158,7 +159,7 @@
 				pinchStart = { distance, scale: worldState.scale, state: worldState };
 				return;
 			}
-			if (shouldSwallowEntryZoomIn(distance > pinchStart.distance)) {
+			if (shouldSwallowEntryZoom(distance > pinchStart.distance ? 'in' : 'out')) {
 				pinchStart = { distance, scale: worldState.scale, state: worldState };
 				return;
 			}

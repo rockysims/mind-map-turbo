@@ -605,6 +605,9 @@ test('deep zoom enters focus, image inspection, and exits by wheel gestures', as
 		cancelable: true
 	});
 	await page.waitForTimeout(350);
+	const stage = page.locator('.stage');
+	const stageContent = page.locator('.stage-content');
+	const stageTransformBeforeFocusExit = await stageContent.getAttribute('style');
 	await page.locator('.zoom-world').dispatchEvent('wheel', {
 		deltaY: 5000,
 		clientX: imageCenter.x,
@@ -612,6 +615,27 @@ test('deep zoom enters focus, image inspection, and exits by wheel gestures', as
 		bubbles: true,
 		cancelable: true
 	});
+	await stage.dispatchEvent('wheel', {
+		deltaY: 5000,
+		clientX: imageCenter.x,
+		clientY: imageCenter.y,
+		bubbles: true,
+		cancelable: true
+	});
+	await page.waitForTimeout(20);
+	expect(await stageContent.getAttribute('style')).toBe(stageTransformBeforeFocusExit);
+
+	await page.waitForTimeout(120);
+	await stage.dispatchEvent('wheel', {
+		deltaY: 5000,
+		clientX: imageCenter.x,
+		clientY: imageCenter.y,
+		bubbles: true,
+		cancelable: true
+	});
+	await page.waitForTimeout(20);
+	expect(await stageContent.getAttribute('style')).toBe(stageTransformBeforeFocusExit);
+
 	await expect(dialog).not.toBeVisible();
 });
 

@@ -65,6 +65,7 @@
 	} from './lib/boundedVisibility.js';
 	import { LayoutRuntime } from './lib/layoutRuntime.svelte.js';
 	import { externalGraphSyncToken } from './lib/graphSync.js';
+	import type { EntryGestureDirection } from './lib/entryGestureGate.js';
 	import {
 		collectLegendTags,
 		edgeStrokeColor,
@@ -196,6 +197,12 @@
 	let focusMorphSource = $state<NodeFocusMorphSource | null>(null);
 	let focusExiting = $state(false);
 	let focusEntryGestureIdleMs = $state(0);
+	let stageEntryGestureGateRequest = $state<{
+		id: number;
+		direction: EntryGestureDirection;
+		idleMs: number;
+	} | null>(null);
+	let stageEntryGestureGateRequestId = $state(0);
 	const focusRuntime = new FocusRuntime();
 	let focusExitTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
@@ -606,6 +613,15 @@
 		focusOvershoot = resetOvershootAfterCommit(layoutRuntime.now());
 	}
 
+	function armStageEntryGestureGate(direction: EntryGestureDirection) {
+		stageEntryGestureGateRequestId += 1;
+		stageEntryGestureGateRequest = {
+			id: stageEntryGestureGateRequestId,
+			direction,
+			idleMs: APP_CONFIG.multigraph.focus.entryGestureIdleMs
+		};
+	}
+
 	function closeOverlays() {
 		actionMenu = null;
 		editNodeId = null;
@@ -707,7 +723,10 @@
 
 	function handleFocusZoomOutBoundary(delta: number) {
 		focusOvershoot = overshootInput(focusOvershoot, delta, layoutRuntime.now());
-		if (focusOvershoot.committed) closeFocus();
+		if (focusOvershoot.committed) {
+			armStageEntryGestureGate('out');
+			closeFocus();
+		}
 	}
 
 	function toggleTagColorLegend() {
@@ -985,6 +1004,7 @@
 		{fitViewRequest}
 		{canOverzoomForFocus}
 		{focusOverzoomMaxScaleForPoint}
+		entryGestureGateRequest={stageEntryGestureGateRequest}
 		initialScale={initialViewState?.scale}
 		initialPanX={initialViewState?.panX}
 		initialPanY={initialViewState?.panY}

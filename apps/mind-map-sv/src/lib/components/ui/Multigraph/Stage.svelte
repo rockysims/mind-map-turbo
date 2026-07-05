@@ -19,6 +19,13 @@
 		focusOverzoomScale,
 		persistedScaleForFocusOverzoom
 	} from './lib/nodeFocus.js';
+	import {
+		beginEntryGestureGate,
+		EMPTY_ENTRY_GESTURE_GATE,
+		stepEntryGestureGate,
+		type EntryGestureDirection,
+		type EntryGestureGateState
+	} from './lib/entryGestureGate.js';
 	import { clientPointToGraphPoint } from './lib/stageCoordinates.js';
 	import {
 		DRAG_THRESHOLD,
@@ -45,6 +52,12 @@
 		id: number;
 		bounds: GraphBounds;
 		paddingPx?: number;
+	}
+
+	interface EntryGestureGateRequest {
+		id: number;
+		direction: EntryGestureDirection;
+		idleMs: number;
 	}
 
 	interface Props {
@@ -96,6 +109,8 @@
 		onViewStateChange?: (state: ViewStateSnapshot) => void;
 		/** One-shot request to fit graph-local bounds into the stage viewport. */
 		fitViewRequest?: FitViewRequest | null;
+		/** One-shot request to swallow residual entry/exit zoom input at the stage boundary. */
+		entryGestureGateRequest?: EntryGestureGateRequest | null;
 	}
 
 	let {
@@ -117,11 +132,14 @@
 		onBlockedZoom,
 		onViewStateChange,
 		fitViewRequest,
+		entryGestureGateRequest,
 		children
 	}: Props & { children?: Snippet } = $props();
 
 	let stageRef = $state<HTMLElement | null>(null);
 	let lastFitViewRequestId = $state<number | null>(null);
+	let lastEntryGestureGateRequestId = $state<number | null>(null);
+	let entryGestureGate = $state<EntryGestureGateState>(EMPTY_ENTRY_GESTURE_GATE);
 
 	// Pan
 	// svelte-ignore state_referenced_locally
@@ -168,6 +186,13 @@
 		panY = next.panY;
 		scale = next.scale;
 		onViewStateChange?.({ panX, panY, scale });
+	});
+
+	$effect(() => {
+		const request = entryGestureGateRequest;
+		if (!request || request.id === lastEntryGestureGateRequestId) return;
+		lastEntryGestureGateRequestId = request.id;
+		entryGestureGate = beginEntryGestureGate(request.direction, Date.now(), request.idleMs);
 	});
 
 	// Node drag
@@ -335,6 +360,7 @@
 
 	function onWheel(e: WheelEvent) {
 		e.preventDefault();
+		if (shouldSwallowEntryGesture(e.deltaY < 0 ? 'in' : 'out')) return;
 		const stage = e.currentTarget as HTMLElement;
 		const rect = stage.getBoundingClientRect();
 		const focalPoint = { x: e.clientX, y: e.clientY };
@@ -384,6 +410,17 @@
 			panY,
 			scale: persistedScaleForFocusOverzoom(scale, DEFAULT_MAX_SCALE)
 		});
+	}
+
+	function shouldSwallowEntryGesture(direction: EntryGestureDirection): boolean {
+		const step = stepEntryGestureGate(
+			entryGestureGate,
+			{ direction },
+			Date.now(),
+			entryGestureGateRequest?.idleMs ?? 0
+		);
+		entryGestureGate = step.state;
+		return step.swallow;
 	}
 
 	// Pinch: track two active pointers and update scale from distance ratio
