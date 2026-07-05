@@ -107,6 +107,7 @@
 		overshootInput,
 		resetOvershootAfterCommit,
 		focalNodeForPoint,
+		focusOverzoomMaxScaleForNode,
 		nodeScreenCircle,
 		type NodeFocusCandidate,
 		type NodeFocusMorphSource,
@@ -190,6 +191,7 @@
 	let stageViewState = $state<ViewState>({ panX: 0, panY: 0, scale: 1 });
 	const stageScale = $derived(stageViewState.scale);
 	let focusOvershoot = $state<OvershootState>(EMPTY_OVERSHOOT_STATE);
+	let focusPreviewNodeId = $state<string | null>(null);
 	let reduceMotion = $derived(prefersReducedMotion());
 	let focusMorphSource = $state<NodeFocusMorphSource | null>(null);
 	let focusExiting = $state(false);
@@ -629,6 +631,23 @@
 		return focusCandidateForPoint(input.focalPoint, stageViewState) !== null;
 	}
 
+	function focusOverzoomMaxScaleForPoint(input: {
+		focalPoint: Point;
+		requestedScale: number;
+	}): number | null {
+		if (input.requestedScale <= stageViewState.scale || focusRuntime.isFocused || !graphRef) {
+			return null;
+		}
+		const candidate = focusCandidateForPoint(input.focalPoint, stageViewState);
+		if (!candidate) return null;
+		const rect = graphRef.getBoundingClientRect();
+		return focusOverzoomMaxScaleForNode(
+			candidate.radius,
+			{ width: rect.width, height: rect.height },
+			APP_CONFIG.multigraph.zoom.maxScale
+		);
+	}
+
 	function captureFocusMorphSource(
 		candidate: NodeFocusCandidate,
 		view: ViewTransform
@@ -642,21 +661,12 @@
 			rect,
 			view
 		);
-		const circleElement = graphRef.querySelector(
-			`.node-wrapper[data-node-id="${candidate.node.id}"] .circle`
-		) as HTMLElement | null;
-		const styles = circleElement ? getComputedStyle(circleElement) : null;
 		return {
 			nodeId: candidate.node.id,
 			left: circle.center.x - circle.radius,
 			top: circle.center.y - circle.radius,
 			width: circle.radius * 2,
-			height: circle.radius * 2,
-			borderRadius: circle.radius,
-			background: styles?.background ?? '#ccc',
-			borderColor: styles?.borderColor ?? '#aaa',
-			borderWidth: styles?.borderWidth ?? '0px',
-			boxShadow: styles?.boxShadow ?? 'none'
+			height: circle.radius * 2
 		};
 	}
 
@@ -670,14 +680,17 @@
 		const candidate = focusCandidateForPoint(input.focalPoint, input.viewState);
 		if (!candidate) {
 			focusOvershoot = EMPTY_OVERSHOOT_STATE;
+			focusPreviewNodeId = null;
 			focusRuntime.preview(0);
 			return;
 		}
 		focusOvershoot = overshootInput(focusOvershoot, input.blockedFactor, layoutRuntime.now());
+		focusPreviewNodeId = candidate.node.id;
 		focusRuntime.preview(focusOvershoot.progress);
 		if (focusOvershoot.committed) {
 			openFocus(candidate.node, captureFocusMorphSource(candidate, input.viewState));
 			focusOvershoot = resetOvershootAfterCommit(layoutRuntime.now());
+			focusPreviewNodeId = null;
 		}
 	}
 
@@ -960,6 +973,7 @@
 		{getNodeAt}
 		{fitViewRequest}
 		{canOverzoomForFocus}
+		{focusOverzoomMaxScaleForPoint}
 		initialScale={initialViewState?.scale}
 		initialPanX={initialViewState?.panX}
 		initialPanY={initialViewState?.panY}
@@ -1197,6 +1211,7 @@
 					<Node
 						nodeData={node}
 						isTitleEditing={titleEditContext?.nodeId === node.id}
+						detailsProgress={focusPreviewNodeId === node.id ? focusRuntime.entryProgress : 0}
 						borderSegments={nodeBorderSegments(node, graph.tagColorConfig.nodeTags)}
 						spotlightColor={queryNodeState?.role === 'spotlight'
 							? queryNodeState.spotlightColor
@@ -1304,6 +1319,8 @@
 		<NodeFocusSurface
 			node={focusedNode}
 			assets={graph.assets ?? {}}
+			borderSegments={nodeBorderSegments(focusedNode, graph.tagColorConfig.nodeTags)}
+			detailsProgress={Math.max(0, 1 - focusOvershoot.progress)}
 			{assetStore}
 			{assetScope}
 			{reduceMotion}

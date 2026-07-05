@@ -14,9 +14,19 @@
 	} from './lib/graphMath.js';
 	import { pointerDistance } from './lib/hitTest.js';
 	import { recognizeLongPress } from './lib/longPress.js';
-	import { focusOverzoomScale, persistedScaleForFocusOverzoom } from './lib/nodeFocus.js';
+	import {
+		focusOverzoomMaxScaleForNode,
+		focusOverzoomScale,
+		persistedScaleForFocusOverzoom
+	} from './lib/nodeFocus.js';
 	import { clientPointToGraphPoint } from './lib/stageCoordinates.js';
-	import { DRAG_THRESHOLD, DBL_CLICK_MS, LONG_PRESS_DIST, LONG_PRESS_MS } from '$lib/constants.js';
+	import {
+		DRAG_THRESHOLD,
+		DBL_CLICK_MS,
+		LONG_PRESS_DIST,
+		LONG_PRESS_MS,
+		NODE_RADIUS
+	} from '$lib/constants.js';
 
 	interface ViewStateSnapshot {
 		panX: number;
@@ -70,6 +80,12 @@
 			requestedScale: number;
 			clampedScale: number;
 		}) => boolean;
+		/** Return the geometric max visual scale for focus overzoom at this point. */
+		focusOverzoomMaxScaleForPoint?: (input: {
+			focalPoint: Point;
+			requestedScale: number;
+			clampedScale: number;
+		}) => number | null;
 		/** Fired when zoom input continues past the configured scale clamps. */
 		onBlockedZoom?: (input: BlockedZoomInput) => void;
 		/**
@@ -97,6 +113,7 @@
 		onNodeLongPress,
 		onViewStateLiveChange,
 		canOverzoomForFocus,
+		focusOverzoomMaxScaleForPoint,
 		onBlockedZoom,
 		onViewStateChange,
 		fitViewRequest,
@@ -329,18 +346,22 @@
 			Number.POSITIVE_INFINITY
 		);
 		const clampedScale = clampScale(requestedScale, DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE);
-		const canOverzoom =
-			requestedScale > DEFAULT_MAX_SCALE &&
-			(scale > DEFAULT_MAX_SCALE ||
-				(canOverzoomForFocus?.({
-					focalPoint,
-					requestedScale,
-					clampedScale
-				}) ??
-					getNodeAt(e.clientX, e.clientY) !== null));
+		const dynamicMaxScale = overzoomMaxScaleForPoint(
+			{
+				focalPoint,
+				requestedScale,
+				clampedScale
+			},
+			rect
+		);
+		const canOverzoom = requestedScale > DEFAULT_MAX_SCALE && dynamicMaxScale !== null;
 		const nextScale =
 			requestedScale > DEFAULT_MAX_SCALE
-				? focusOverzoomScale(requestedScale, { maxScale: DEFAULT_MAX_SCALE }, canOverzoom)
+				? focusOverzoomScale(
+						requestedScale,
+						{ maxScale: DEFAULT_MAX_SCALE, dynamicMaxScale: dynamicMaxScale ?? undefined },
+						canOverzoom
+					)
 				: clampedScale;
 		const nextView = zoomViewTransformAtPoint({ panX, panY, scale }, nextScale, focalPoint, {
 			x: rect.left + rect.width / 2,
@@ -350,11 +371,11 @@
 		panX = nextView.panX;
 		panY = nextView.panY;
 		scale = nextView.scale;
-		if (requestedScale !== clampedScale) {
+		if (requestedScale > nextScale) {
 			onBlockedZoom?.({
-				direction: requestedScale > clampedScale ? 'in' : 'out',
+				direction: 'in',
 				focalPoint,
-				blockedFactor: Math.abs(requestedScale - clampedScale) / Math.max(clampedScale, 0.001),
+				blockedFactor: Math.abs(requestedScale - nextScale) / Math.max(nextScale, 0.001),
 				viewState: { panX, panY, scale }
 			});
 		}
@@ -414,18 +435,25 @@
 					const requestedScale = pinchStart.scale * factor;
 					const clampedScale = clampScale(requestedScale, DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE);
 					const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-					const canOverzoom =
-						requestedScale > DEFAULT_MAX_SCALE &&
-						(scale > DEFAULT_MAX_SCALE ||
-							(canOverzoomForFocus?.({
-								focalPoint: pinchStart.centroid,
-								requestedScale,
-								clampedScale
-							}) ??
-								getNodeAt(pinchStart.centroid.x, pinchStart.centroid.y) !== null));
+					const dynamicMaxScale = overzoomMaxScaleForPoint(
+						{
+							focalPoint: pinchStart.centroid,
+							requestedScale,
+							clampedScale
+						},
+						rect
+					);
+					const canOverzoom = requestedScale > DEFAULT_MAX_SCALE && dynamicMaxScale !== null;
 					const nextScale =
 						requestedScale > DEFAULT_MAX_SCALE
-							? focusOverzoomScale(requestedScale, { maxScale: DEFAULT_MAX_SCALE }, canOverzoom)
+							? focusOverzoomScale(
+									requestedScale,
+									{
+										maxScale: DEFAULT_MAX_SCALE,
+										dynamicMaxScale: dynamicMaxScale ?? undefined
+									},
+									canOverzoom
+								)
 							: clampedScale;
 					const nextView = zoomViewTransformAtPoint(
 						{ panX: pinchStart.panX, panY: pinchStart.panY, scale: pinchStart.scale },
@@ -436,12 +464,11 @@
 					panX = nextView.panX;
 					panY = nextView.panY;
 					scale = nextView.scale;
-					if (requestedScale !== clampedScale) {
+					if (requestedScale > nextScale) {
 						onBlockedZoom?.({
-							direction: requestedScale > clampedScale ? 'in' : 'out',
+							direction: 'in',
 							focalPoint: pinchStart.centroid,
-							blockedFactor:
-								Math.abs(requestedScale - clampedScale) / Math.max(clampedScale, 0.001),
+							blockedFactor: Math.abs(requestedScale - nextScale) / Math.max(nextScale, 0.001),
 							viewState: { panX, panY, scale }
 						});
 					}
@@ -467,6 +494,30 @@
 	}
 
 	const transformStyle = $derived(`translate(${panX}px, ${panY}px) scale(${scale})`);
+
+	function overzoomMaxScaleForPoint(
+		input: {
+			focalPoint: Point;
+			requestedScale: number;
+			clampedScale: number;
+		},
+		rect: DOMRect
+	): number | null {
+		if (input.requestedScale <= DEFAULT_MAX_SCALE) return null;
+		const fromParent = focusOverzoomMaxScaleForPoint?.(input);
+		if (fromParent !== undefined && fromParent !== null) {
+			return Math.max(DEFAULT_MAX_SCALE, fromParent);
+		}
+		const canOverzoom =
+			scale > DEFAULT_MAX_SCALE ||
+			(canOverzoomForFocus?.(input) ?? getNodeAt(input.focalPoint.x, input.focalPoint.y) !== null);
+		if (!canOverzoom) return null;
+		return focusOverzoomMaxScaleForNode(
+			NODE_RADIUS,
+			{ width: rect.width, height: rect.height },
+			DEFAULT_MAX_SCALE
+		);
+	}
 </script>
 
 <div

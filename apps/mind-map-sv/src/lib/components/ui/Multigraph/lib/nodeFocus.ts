@@ -2,6 +2,7 @@ import { APP_CONFIG } from '$lib/appConfig';
 import type { Point } from '../../types/multigraph';
 import type { NodeData } from '../../types/node';
 import { graphPointToClientPoint, type StageRect } from './stageCoordinates';
+import { inscribeScaleForCircle, type ViewportSize } from './zoomBoundary';
 
 export interface ViewTransform {
 	panX: number;
@@ -28,16 +29,11 @@ export interface NodeFocusMorphSource {
 	top: number;
 	width: number;
 	height: number;
-	borderRadius: number;
-	background: string;
-	borderColor: string;
-	borderWidth: string;
-	boxShadow: string;
 }
 
 export interface FocusOverzoomOptions {
 	maxScale: number;
-	maxScaleMultiplier?: number;
+	dynamicMaxScale?: number;
 }
 
 export interface OvershootState {
@@ -58,8 +54,6 @@ export const DEFAULT_OVERSHOOT_OPTIONS = {
 	decayHalfLifeMs: APP_CONFIG.multigraph.focus.overshootDecayHalfLifeMs,
 	hysteresisMs: APP_CONFIG.multigraph.focus.overshootHysteresisMs
 };
-
-export const DEFAULT_FOCUS_OVERZOOM_MAX_SCALE_MULTIPLIER = 1.65;
 
 export const EMPTY_OVERSHOOT_STATE: OvershootState = {
 	progress: 0,
@@ -116,13 +110,20 @@ export function focusOverzoomScale(
 	canEnterFocus: boolean
 ): number {
 	if (!canEnterFocus || requestedScale <= options.maxScale) return options.maxScale;
-	const maxScaleMultiplier =
-		options.maxScaleMultiplier ?? DEFAULT_FOCUS_OVERZOOM_MAX_SCALE_MULTIPLIER;
-	return Math.min(requestedScale, options.maxScale * maxScaleMultiplier);
+	const dynamicMaxScale = Math.max(options.maxScale, options.dynamicMaxScale ?? options.maxScale);
+	return Math.min(requestedScale, dynamicMaxScale);
 }
 
 export function persistedScaleForFocusOverzoom(visualScale: number, maxScale: number): number {
 	return Math.min(visualScale, maxScale);
+}
+
+export function focusOverzoomMaxScaleForNode(
+	radius: number,
+	viewport: ViewportSize,
+	maxScale: number
+): number {
+	return Math.max(maxScale, inscribeScaleForCircle(radius, viewport));
 }
 
 export function overshootInput(

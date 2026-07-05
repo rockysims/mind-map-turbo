@@ -220,7 +220,7 @@
 />
 
 <Story
-	name="WheelOverNodeCanVisuallyOverzoomPastMax"
+	name="WheelOverInscribedNodeFeedsBoundaryAtMax"
 	args={{ nodes: [NODES[0]], initialScale: 4 }}
 	play={async ({ canvasElement }) => {
 		const wrapper = canvasElement.querySelector('[data-testid="stage-callbacks"]') as HTMLElement;
@@ -235,7 +235,7 @@
 
 		const liveViewState = parseViewStateCallback(wrapper.dataset.lastLiveViewState ?? '');
 		const persistedViewState = parseViewStateCallback(wrapper.dataset.lastViewState ?? '');
-		expect(liveViewState.scale).toBeGreaterThan(4);
+		expect(liveViewState.scale).toBe(4);
 		expect(persistedViewState.scale).toBe(4);
 		expect(wrapper.dataset.lastBlockedZoom?.startsWith('in,')).toBe(true);
 		expect(getStageTransform(canvasElement)).toContain(`scale(${liveViewState.scale})`);

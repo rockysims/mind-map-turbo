@@ -4,6 +4,7 @@ import {
 	EMPTY_OVERSHOOT_STATE,
 	decayOvershoot,
 	focalNodeForPoint,
+	focusOverzoomMaxScaleForNode,
 	focusOverzoomScale,
 	nodeScreenCircle,
 	overshootInput,
@@ -53,18 +54,23 @@ describe('node focus geometry', () => {
 });
 
 describe('focus overzoom scale', () => {
-	it('allows visual scale past max only for eligible focus input', () => {
-		expect(focusOverzoomScale(5, { maxScale: 4 }, true)).toBe(5);
+	it('allows visual scale past max up to the dynamic cap for eligible focus input', () => {
+		expect(focusOverzoomScale(5, { maxScale: 4, dynamicMaxScale: 6 }, true)).toBe(5);
 		expect(focusOverzoomScale(5, { maxScale: 4 }, false)).toBe(4);
 	});
 
-	it('caps visual overzoom to a bounded corridor', () => {
-		expect(focusOverzoomScale(12, { maxScale: 4, maxScaleMultiplier: 1.5 }, true)).toBe(6);
+	it('caps visual overzoom at the geometric inscribed scale', () => {
+		expect(focusOverzoomScale(12, { maxScale: 4, dynamicMaxScale: 6 }, true)).toBe(6);
 	});
 
 	it('keeps persisted scale clamped while visual scale overzooms', () => {
 		expect(persistedScaleForFocusOverzoom(5.5, 4)).toBe(4);
 		expect(persistedScaleForFocusOverzoom(3.5, 4)).toBe(3.5);
+	});
+
+	it('derives a dynamic cap from node radius and viewport size', () => {
+		expect(focusOverzoomMaxScaleForNode(20, { width: 300, height: 200 }, 4)).toBe(5);
+		expect(focusOverzoomMaxScaleForNode(80, { width: 300, height: 200 }, 4)).toBe(4);
 	});
 });
 

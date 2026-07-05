@@ -1,34 +1,50 @@
 <script lang="ts">
 	import { APP_CONFIG } from '$lib/appConfig';
+	import Node from '$lib/components/ui/Node/Node.svelte';
+	import ZoomWorld from './ZoomWorld.svelte';
 	import type { GraphAssetMetadata } from '../types/multigraph';
 	import type { NodeData, NodeImageContent } from '../types/node';
 	import type { GraphAssetStore } from '$lib/assets/assetStore';
-	import { scaleFromWheelDelta } from './lib/graphMath.js';
+	import type { TagColorSegment } from './lib/tagColors';
+	import { scaleFromWheelDelta } from './lib/graphMath';
 	import {
 		clampImageZoomState,
+		imageFitScale,
+		imageZoomLimits,
 		zoomImageAtPoint,
 		type ImageZoomBounds,
 		type ImageZoomState
-	} from './lib/imageZoom.js';
-	import type { NodeFocusMorphSource } from './lib/nodeFocus.js';
+	} from './lib/imageZoom';
+	import {
+		EMPTY_OVERSHOOT_STATE,
+		overshootInput,
+		resetOvershootAfterCommit,
+		type NodeFocusMorphSource,
+		type OvershootState
+	} from './lib/nodeFocus.js';
+	import { inscribedContactForRect } from './lib/zoomBoundary';
 
 	let {
 		node,
 		assets = {},
+		borderSegments = [],
 		assetStore = null,
 		assetScope = '',
 		reduceMotion = false,
 		morphSource = null,
+		detailsProgress = 1,
 		exiting = false,
 		onClose,
 		onZoomOutBoundary
 	}: {
 		node: NodeData;
 		assets?: Record<string, GraphAssetMetadata>;
+		borderSegments?: TagColorSegment[];
 		assetStore?: GraphAssetStore | null;
 		assetScope?: string;
 		reduceMotion?: boolean;
 		morphSource?: NodeFocusMorphSource | null;
+		detailsProgress?: number;
 		exiting?: boolean;
 		onClose: () => void;
 		onZoomOutBoundary?: (delta: number) => void;
@@ -36,12 +52,13 @@
 
 	let imageUrls = $state<Record<string, string>>({});
 	let surfaceRef = $state<HTMLElement | null>(null);
-	let contentRef = $state<HTMLElement | null>(null);
 	let activeImageAssetId = $state<string | null>(null);
-	let focusZoom = $state<ImageZoomState>({ panX: 0, panY: 0, scale: 1 });
-	let dragStart = $state<{
-		x: number;
-		y: number;
+	let activeImageFitScale = $state(1);
+	let imageZoom = $state<ImageZoomState>({ panX: 0, panY: 0, scale: 1 });
+	let imageOvershoot = $state<OvershootState>(EMPTY_OVERSHOOT_STATE);
+	let imageDragStart = $state<{
+		clientX: number;
+		clientY: number;
 		panX: number;
 		panY: number;
 	} | null>(null);
@@ -49,27 +66,8 @@
 	const imageBlocks = $derived(
 		(node.content ?? []).filter((block): block is NodeImageContent => block.type === 'image')
 	);
-	const hasMorph = $derived(morphSource !== null && !reduceMotion);
 	const focusTransitionMs = APP_CONFIG.multigraph.focus.entryTransitionMs;
-	const morphStyle = $derived(
-		morphSource
-			? [
-					`--focus-transition-duration: ${focusTransitionMs}ms`,
-					`--morph-left: ${morphSource.left}px`,
-					`--morph-top: ${morphSource.top}px`,
-					`--morph-width: ${morphSource.width}px`,
-					`--morph-height: ${morphSource.height}px`,
-					`--morph-radius: ${morphSource.borderRadius}px`,
-					`--morph-background: ${morphSource.background}`,
-					`--morph-border-color: ${morphSource.borderColor}`,
-					`--morph-border-width: ${morphSource.borderWidth}`,
-					`--morph-box-shadow: ${morphSource.boxShadow}`
-				].join('; ')
-			: `--focus-transition-duration: ${focusTransitionMs}ms`
-	);
-	const contentTransform = $derived(
-		`translate(${focusZoom.panX}px, ${focusZoom.panY}px) scale(${focusZoom.scale})`
-	);
+	const morphStyle = $derived(`--focus-transition-duration: ${focusTransitionMs}ms`);
 
 	$effect(() => {
 		let cancelled = false;
@@ -97,173 +95,228 @@
 		if (event.key === 'Escape') onClose();
 	}
 
-	function imageElementAt(clientX: number, clientY: number): HTMLImageElement | null {
-		const element = document.elementFromPoint(clientX, clientY);
-		return element instanceof HTMLImageElement && element.classList.contains('focus-image')
-			? element
-			: null;
+	function handleWorldExitBoundary(delta: number) {
+		onZoomOutBoundary?.(delta);
 	}
 
-	function imageElementByAssetId(assetId: string | null): HTMLImageElement | null {
-		if (!assetId || !contentRef) return null;
-		const images = Array.from(contentRef.querySelectorAll('.focus-image')) as HTMLImageElement[];
-		return images.find((image) => image.dataset.assetId === assetId) ?? null;
+	function imageElementByAssetId(assetId: string): HTMLImageElement | null {
+		if (!surfaceRef) return null;
+		const image = surfaceRef.querySelector(`.focus-image[data-asset-id="${assetId}"]`);
+		return image instanceof HTMLImageElement ? image : null;
 	}
 
 	function boundsForImage(image: HTMLImageElement): ImageZoomBounds | null {
-		if (!surfaceRef) return null;
-		const surfaceRect = surfaceRef.getBoundingClientRect();
-		const imageRect = image.getBoundingClientRect();
+		const frame = image.closest('.image-frame');
+		if (!(frame instanceof HTMLElement)) return null;
+		const frameRect = frame.getBoundingClientRect();
 		return {
-			viewportWidth: surfaceRect.width,
-			viewportHeight: surfaceRect.height,
-			naturalWidth: imageRect.width,
-			naturalHeight: imageRect.height,
-			minScale: 1,
-			maxScale: APP_CONFIG.multigraph.focus.imageZoomMaxScale
+			viewportWidth: frameRect.width,
+			viewportHeight: frameRect.height,
+			naturalWidth: image.naturalWidth || image.getBoundingClientRect().width,
+			naturalHeight: image.naturalHeight || image.getBoundingClientRect().height
 		};
 	}
 
-	function handleWheel(event: WheelEvent) {
-		const targetImage = imageElementAt(event.clientX, event.clientY);
-		const activeImage =
-			targetImage ??
-			imageElementByAssetId(activeImageAssetId) ??
-			imageElementByAssetId(imageBlocks[0]?.assetId);
-		if (event.deltaY < 0 && !activeImage) return;
-		event.preventDefault();
+	function imageIsInscribed(image: HTMLImageElement): boolean {
+		const rect = image.getBoundingClientRect();
+		const margin = APP_CONFIG.multigraph.focus.boundaryNearTouchMarginPx;
+		const contact = inscribedContactForRect(
+			{
+				left: rect.left,
+				top: rect.top,
+				width: rect.width,
+				height: rect.height
+			},
+			{ width: window.innerWidth, height: window.innerHeight }
+		);
+		const coversX = rect.left <= margin && rect.right >= window.innerWidth - margin;
+		const coversY = rect.top <= margin && rect.bottom >= window.innerHeight - margin;
+		return contact.inscribed || coversX || coversY;
+	}
 
-		if (event.deltaY > 0 && focusZoom.scale <= 1.001) {
-			focusZoom = { panX: 0, panY: 0, scale: 1 };
-			activeImageAssetId = null;
-			onZoomOutBoundary?.(Math.min(1, event.deltaY / 500));
+	function enterImageZoom(assetId: string, bounds: ImageZoomBounds) {
+		activeImageAssetId = assetId;
+		activeImageFitScale = imageFitScale(bounds);
+		imageZoom = { panX: 0, panY: 0, scale: activeImageFitScale };
+		imageOvershoot = resetOvershootAfterCommit(Date.now());
+	}
+
+	function exitImageZoom() {
+		activeImageAssetId = null;
+		activeImageFitScale = 1;
+		imageZoom = { panX: 0, panY: 0, scale: 1 };
+		imageOvershoot = resetOvershootAfterCommit(Date.now());
+	}
+
+	function handleImageWheel(event: WheelEvent, assetId: string) {
+		const image = imageElementByAssetId(assetId);
+		if (!image) return;
+		const bounds = boundsForImage(image);
+		if (!bounds) return;
+
+		if (activeImageAssetId !== assetId) {
+			if (event.deltaY >= 0 || !imageIsInscribed(image)) return;
+			event.preventDefault();
+			event.stopPropagation();
+			imageOvershoot = overshootInput(
+				imageOvershoot,
+				Math.min(1, Math.abs(event.deltaY) / APP_CONFIG.multigraph.focus.exitOvershootDeltaScale),
+				Date.now()
+			);
+			if (imageOvershoot.committed) enterImageZoom(assetId, bounds);
 			return;
 		}
 
-		if (!activeImage || !surfaceRef) return;
-		activeImageAssetId = activeImage.dataset.assetId ?? null;
-		const bounds = boundsForImage(activeImage);
-		if (!bounds) return;
-		const surfaceRect = surfaceRef.getBoundingClientRect();
+		event.preventDefault();
+		event.stopPropagation();
+		const limits = imageZoomLimits(bounds);
+		if (event.deltaY > 0 && imageZoom.scale <= limits.minScale + 0.001) {
+			imageOvershoot = overshootInput(
+				imageOvershoot,
+				Math.min(1, event.deltaY / APP_CONFIG.multigraph.focus.exitOvershootDeltaScale),
+				Date.now()
+			);
+			if (imageOvershoot.committed) exitImageZoom();
+			return;
+		}
+
+		const frame = image.closest('.image-frame');
+		if (!(frame instanceof HTMLElement)) return;
+		const frameRect = frame.getBoundingClientRect();
 		const nextScale = scaleFromWheelDelta(
-			focusZoom.scale,
+			imageZoom.scale,
 			event.deltaY,
-			0.002,
-			1,
-			APP_CONFIG.multigraph.focus.imageZoomMaxScale
+			APP_CONFIG.multigraph.focus.worldWheelSensitivity,
+			limits.minScale,
+			limits.maxScale
 		);
-		const nextZoom = zoomImageAtPoint(
-			focusZoom,
+		imageZoom = zoomImageAtPoint(
+			imageZoom,
 			nextScale,
-			{ x: event.clientX - surfaceRect.left, y: event.clientY - surfaceRect.top },
-			{ x: surfaceRect.width / 2, y: surfaceRect.height / 2 },
+			{ x: event.clientX - frameRect.left, y: event.clientY - frameRect.top },
+			{ x: frameRect.width / 2, y: frameRect.height / 2 },
 			bounds
 		);
-		focusZoom = nextZoom.scale <= 1.001 ? { panX: 0, panY: 0, scale: 1 } : nextZoom;
-		if (focusZoom.scale <= 1.001) activeImageAssetId = null;
 	}
 
-	function handlePointerDown(event: PointerEvent) {
+	function handleImagePointerDown(event: PointerEvent, assetId: string) {
+		if (activeImageAssetId !== assetId) return;
 		event.stopPropagation();
-		if (focusZoom.scale <= 1.001) return;
-		dragStart = { x: event.clientX, y: event.clientY, panX: focusZoom.panX, panY: focusZoom.panY };
-		// The handler is bound to the fixed focus layer, which supports pointer capture.
+		imageDragStart = {
+			clientX: event.clientX,
+			clientY: event.clientY,
+			panX: imageZoom.panX,
+			panY: imageZoom.panY
+		};
 		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
 	}
 
-	function handlePointerMove(event: PointerEvent) {
-		if (!dragStart) return;
-		const activeImage = imageElementByAssetId(activeImageAssetId);
-		if (!activeImage) return;
-		const bounds = boundsForImage(activeImage);
+	function handleImagePointerMove(event: PointerEvent, assetId: string) {
+		if (activeImageAssetId !== assetId || !imageDragStart) return;
+		event.stopPropagation();
+		const image = imageElementByAssetId(assetId);
+		const bounds = image ? boundsForImage(image) : null;
 		if (!bounds) return;
-		focusZoom = clampImageZoomState(
+		imageZoom = clampImageZoomState(
 			{
-				...focusZoom,
-				panX: dragStart.panX + event.clientX - dragStart.x,
-				panY: dragStart.panY + event.clientY - dragStart.y
+				...imageZoom,
+				panX: imageDragStart.panX + event.clientX - imageDragStart.clientX,
+				panY: imageDragStart.panY + event.clientY - imageDragStart.clientY
 			},
 			bounds
 		);
 	}
 
-	function handlePointerUp(event: PointerEvent) {
-		dragStart = null;
-		// The handler is bound to the fixed focus layer, which supports pointer capture.
+	function handleImagePointerUp(event: PointerEvent) {
+		imageDragStart = null;
 		const target = event.currentTarget as HTMLElement;
 		if (target.hasPointerCapture(event.pointerId)) target.releasePointerCapture(event.pointerId);
+	}
+
+	function imageTransformStyle(assetId: string): string {
+		if (activeImageAssetId !== assetId) return '';
+		const relativeScale = imageZoom.scale / activeImageFitScale;
+		return `transform: translate(${imageZoom.panX}px, ${imageZoom.panY}px) scale(${relativeScale});`;
 	}
 </script>
 
 <div
 	class="focus-layer"
 	class:reduced-motion={reduceMotion}
-	class:zooming={focusZoom.scale > 1.001}
 	class:exiting
 	role="dialog"
 	aria-modal="true"
 	aria-labelledby="node-focus-title"
 	tabindex="-1"
 	onkeydown={handleKeydown}
-	onwheel={handleWheel}
-	onpointerdown={handlePointerDown}
-	onpointermove={handlePointerMove}
-	onpointerup={handlePointerUp}
-	onpointercancel={handlePointerUp}
 >
-	<div
-		bind:this={surfaceRef}
-		class="focus-surface"
-		class:has-morph={hasMorph}
-		class:exiting
-		style={morphStyle}
-		data-morph-source-node-id={morphSource?.nodeId}
-	>
-		<button class="close-button" type="button" aria-label="Close node focus" onclick={onClose}>
-			Close
-		</button>
-		<article
-			bind:this={contentRef}
-			class="focus-content"
-			style={`transform: ${contentTransform};`}
-			data-focus-zoom-scale={focusZoom.scale}
-			data-active-image-asset-id={activeImageAssetId ?? undefined}
+	<button class="close-button" type="button" aria-label="Close node focus" onclick={onClose}>
+		Close
+	</button>
+	<ZoomWorld onExitBoundary={handleWorldExitBoundary}>
+		<div
+			bind:this={surfaceRef}
+			class="focus-surface"
+			class:exiting
+			style={morphStyle}
+			data-morph-source-node-id={morphSource?.nodeId}
 		>
-			<header>
-				<h1 id="node-focus-title">{node.title}</h1>
-			</header>
-			{#if node.description.trim()}
-				<p class="description">{node.description}</p>
-			{/if}
+			<Node
+				nodeData={node}
+				{borderSegments}
+				detailsMode
+				{detailsProgress}
+				detailsTitleId="node-focus-title"
+			>
+				<div class="focus-content" data-focus-zoom-scale="1">
+					{#if node.description.trim()}
+						<p class="description">{node.description}</p>
+					{/if}
 
-			{#if imageBlocks.length > 0}
-				<div class="image-grid" aria-label="Node images">
-					{#each imageBlocks as image (image.assetId)}
-						{@const asset = assets[image.assetId]}
-						<figure>
-							{#if imageUrls[image.assetId]}
-								<div class="image-frame">
-									<img
-										class="focus-image"
-										data-asset-id={image.assetId}
-										src={imageUrls[image.assetId]}
-										alt={image.alt}
-									/>
-								</div>
-							{:else}
-								<div class="missing-image" role="img" aria-label={image.alt || 'Missing image'}>
-									{asset?.name ?? 'Image unavailable'}
-								</div>
-							{/if}
-							{#if image.caption}
-								<figcaption>{image.caption}</figcaption>
-							{/if}
-						</figure>
-					{/each}
+					{#if imageBlocks.length > 0}
+						<div class="image-grid" aria-label="Node images">
+							{#each imageBlocks as image (image.assetId)}
+								{@const asset = assets[image.assetId]}
+								<figure>
+									{#if imageUrls[image.assetId]}
+										<div
+											class="image-frame"
+											class:image-focused={activeImageAssetId === image.assetId}
+											role="presentation"
+											onwheel={(event) => handleImageWheel(event, image.assetId)}
+											onpointerdown={(event) => handleImagePointerDown(event, image.assetId)}
+											onpointermove={(event) => handleImagePointerMove(event, image.assetId)}
+											onpointerup={handleImagePointerUp}
+											onpointercancel={handleImagePointerUp}
+											data-image-focused={activeImageAssetId === image.assetId ? 'true' : undefined}
+										>
+											<img
+												class="focus-image"
+												data-asset-id={image.assetId}
+												data-image-zoom-scale={activeImageAssetId === image.assetId
+													? imageZoom.scale
+													: undefined}
+												src={imageUrls[image.assetId]}
+												alt={image.alt}
+												style={imageTransformStyle(image.assetId)}
+											/>
+										</div>
+									{:else}
+										<div class="missing-image" role="img" aria-label={image.alt || 'Missing image'}>
+											{asset?.name ?? 'Image unavailable'}
+										</div>
+									{/if}
+									{#if image.caption}
+										<figcaption>{image.caption}</figcaption>
+									{/if}
+								</figure>
+							{/each}
+						</div>
+					{/if}
 				</div>
-			{/if}
-		</article>
-	</div>
+			</Node>
+		</div>
+	</ZoomWorld>
 </div>
 
 <style>
@@ -284,67 +337,27 @@
 	}
 
 	.focus-surface {
-		position: fixed;
-		left: 50%;
-		top: 50%;
+		position: relative;
 		box-sizing: border-box;
-		width: min(calc(100% - 2rem), 52rem);
-		height: min(calc(100% - 2rem), 46rem);
-		overflow: auto;
-		border: 2px solid #334155;
-		border-radius: 1.25rem;
-		background: #ffffff;
-		box-shadow: 0 24px 80px rgb(15 23 42 / 22%);
-		transform: translate(-50%, -50%);
 	}
 
-	.focus-surface:not(.has-morph) {
+	.focus-surface {
 		animation: focus-surface-fade var(--focus-transition-duration) ease-out both;
 	}
 
-	.focus-surface.has-morph {
-		animation: surface-morph var(--focus-transition-duration) ease-out both;
-	}
-
-	.focus-surface.exiting:not(.has-morph) {
+	.focus-surface.exiting {
 		animation: focus-surface-fade var(--focus-transition-duration) ease-in reverse both;
 	}
 
-	.focus-surface.has-morph.exiting {
-		animation: surface-morph var(--focus-transition-duration) ease-in reverse both;
-	}
-
-	article {
-		display: grid;
-		gap: 1rem;
-		padding: clamp(1.25rem, 4vw, 3rem);
-	}
-
 	.focus-content {
-		min-height: 100%;
 		transform-origin: 50% 50%;
 		will-change: transform;
-	}
-
-	.focus-surface.has-morph .focus-content {
 		animation: focus-content-in var(--focus-transition-duration) ease-out both;
 	}
 
-	.focus-surface.has-morph.exiting .focus-content {
-		animation: focus-content-in var(--focus-transition-duration) ease-in reverse both;
-	}
-
-	h1,
 	p,
 	figure {
 		margin: 0;
-	}
-
-	h1 {
-		padding-right: 4rem;
-		color: #111827;
-		font-size: clamp(2rem, 8vw, 4rem);
-		line-height: 1.05;
 	}
 
 	.description {
@@ -355,14 +368,13 @@
 	}
 
 	.close-button {
-		position: sticky;
-		top: 0.75rem;
-		float: right;
+		position: fixed;
+		top: calc(1rem + env(safe-area-inset-top));
+		right: calc(1rem + env(safe-area-inset-right));
 		z-index: 2;
 		min-height: 2.5rem;
 		border: 0;
 		border-radius: 999px;
-		margin: 0.75rem 0.75rem 0 0;
 		padding: 0.5rem 0.875rem;
 		background: #0f172a;
 		color: white;
@@ -397,6 +409,16 @@
 		object-fit: contain;
 	}
 
+	.focus-image {
+		transform-origin: 50% 50%;
+		will-change: transform;
+	}
+
+	.image-frame.image-focused {
+		cursor: grab;
+		touch-action: none;
+	}
+
 	.missing-image {
 		display: grid;
 		place-items: center;
@@ -413,9 +435,8 @@
 	}
 
 	@media (prefers-reduced-motion: reduce) {
-		.focus-surface.has-morph,
-		.focus-surface:not(.has-morph),
-		.focus-surface.has-morph .focus-content {
+		.focus-surface,
+		.focus-content {
 			animation: none;
 		}
 	}
@@ -423,38 +444,11 @@
 	@keyframes focus-surface-fade {
 		from {
 			opacity: 0;
-			transform: translate(-50%, -50%) scale(0.96);
+			transform: scale(0.96);
 		}
 		to {
 			opacity: 1;
-			transform: translate(-50%, -50%) scale(1);
-		}
-	}
-
-	@keyframes surface-morph {
-		from {
-			left: var(--morph-left);
-			top: var(--morph-top);
-			width: var(--morph-width);
-			height: var(--morph-height);
-			border-color: var(--morph-border-color);
-			border-radius: var(--morph-radius);
-			border-width: var(--morph-border-width);
-			background: var(--morph-background);
-			box-shadow: var(--morph-box-shadow);
-			transform: none;
-		}
-		to {
-			left: 50%;
-			top: 50%;
-			width: min(calc(100% - 2rem), 52rem);
-			height: min(calc(100% - 2rem), 46rem);
-			border-color: #334155;
-			border-radius: 1.25rem;
-			border-width: 2px;
-			background: #ffffff;
-			box-shadow: 0 24px 80px rgb(15 23 42 / 22%);
-			transform: translate(-50%, -50%);
+			transform: scale(1);
 		}
 	}
 

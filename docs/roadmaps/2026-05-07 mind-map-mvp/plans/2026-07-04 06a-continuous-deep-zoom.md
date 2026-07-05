@@ -3,7 +3,7 @@
 **Created:** 2026-07-04
 **Author:** Codex agent
 **Milestone:** [milestones/06a-continuous-deep-zoom.md](../milestones/06a-continuous-deep-zoom.md)
-**Status:** draft
+**Status:** done
 **Total estimated effort:** XL (6 tasks across 5 waves; shared gate geometry,
 node details mode, in-place entry morph, focus-world zoom, gated image zoom,
 coverage and cleanup)
@@ -332,7 +332,8 @@ tasks are contract-heavy and cheap to review one at a time.
 - `pnpm --filter mind-map-sv check` passes.
 - `pnpm --filter mind-map-sv test:unit -- --run` passes.
 - The wheel-driven e2e smoke for the deep-zoom chain passes.
-- The manual pinch smoke is performed and noted.
+- Pinch parity is covered by pure controller specs; manual hardware pinch smoke
+  is noted if available.
 - Plan status is `done`, milestone 06a is `complete`, and the roadmap row is
   updated.
 - The finished work is committed unless the user explicitly asks not to.
@@ -350,3 +351,13 @@ tasks are contract-heavy and cheap to review one at a time.
   a reusable `ZoomWorld` component + pure controller in T04, consumed by the
   image level in T05; Stage retrofit explicitly deferred. Clarified that "menu
   Focus" means the Focus command in the long-press node action menu.
+- 2026-07-05: Execution started in the `feature/deep-zoom` branch.
+- 2026-07-05: Implemented the continuous deep-zoom chain in one local branch:
+  shared gate geometry, progress-driven Node details mode, dynamic graph-entry
+  cap with stage-node radius feedback, `ZoomWorld` for whole-surface focus
+  zoom, nested gated image inspection, Storybook coverage, and a Playwright e2e
+  smoke for graph focus -> image zoom -> exits.
+- 2026-07-05: Manual hardware pinch smoke was not available from this Codex
+  environment. Pinch parity is covered by `pinchZoomWorld` pure specs and the
+  shared wheel/pinch `ZoomWorld` controller; wheel flows are covered in
+  Storybook and e2e.

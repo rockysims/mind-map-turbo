@@ -56,7 +56,7 @@ individual PR-sized tasks.
 | 04n | Reliable propagated HTML app shell                 | complete    | [milestone](milestones/04n-reliable-propagated-html-app-shell.md), [plan](plans/2026-07-04%2004n-reliable-propagated-html-app-shell.md)         |
 | 05  | Filter / find / search                             | complete    | [milestone](milestones/05-filter-find-search.md), [plan](plans/2026-06-22%2005-filter-find-search.md)                                           |
 | 06  | Node focus and rich media                          | complete    | [milestone](milestones/06-node-focus-and-rich-media.md), [plan](plans/2026-07-04%2006-node-focus-and-rich-media.md)                             |
-| 06a | Continuous deep zoom                               | not started | [milestone](milestones/06a-continuous-deep-zoom.md), [plan](plans/2026-07-04%2006a-continuous-deep-zoom.md)                                     |
+| 06a | Continuous deep zoom                               | complete    | [milestone](milestones/06a-continuous-deep-zoom.md), [plan](plans/2026-07-04%2006a-continuous-deep-zoom.md)                                     |
 | 07  | Multiplayer                                        | not started | [milestones/07-multiplayer.md](milestones/07-multiplayer.md)                                                                                    |
 
 Milestones 04a-04m deepen the local-first graph experience before multiplayer.

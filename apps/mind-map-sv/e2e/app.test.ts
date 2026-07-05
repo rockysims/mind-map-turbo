@@ -485,6 +485,112 @@ test('reload restores graph data and viewState from localStorage without file im
 	expect(transform).toContain(`scale(${savedViewState.scale})`);
 });
 
+test('deep zoom enters focus, image inspection, and exits by wheel gestures', async ({ page }) => {
+	const graphId = `e2e-deep-zoom-${Date.now()}`;
+	const assetId = 'deep-zoom-image';
+	const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 480">
+		<rect width="640" height="480" fill="#e0f2fe"/>
+		<circle cx="220" cy="230" r="120" fill="#fb7185"/>
+		<rect x="330" y="145" width="190" height="190" rx="26" fill="#22c55e"/>
+	</svg>`;
+
+	await page.goto('/');
+	await page.evaluate(() => localStorage.clear());
+	await seedImageGraph(page, {
+		graphId,
+		assetId,
+		svg,
+		title: 'Deep Zoom Image Node'
+	});
+	await page.goto(graphUrl(graphId));
+	await expect(page.getByText('Deep Zoom Image Node')).toBeVisible();
+
+	await openFocusForFirstNode(page);
+	const dialog = page.getByRole('dialog');
+	await expect(dialog).toBeVisible();
+	const image = page.locator('.focus-image').first();
+	await expect(image).toBeVisible();
+
+	const imageBox = await image.boundingBox();
+	if (!imageBox) throw new Error('Focused image did not have a bounding box');
+	const imageCenter = {
+		x: imageBox.x + imageBox.width / 2,
+		y: imageBox.y + imageBox.height / 2
+	};
+
+	await image.dispatchEvent('wheel', {
+		deltaY: -700,
+		clientX: imageCenter.x,
+		clientY: imageCenter.y,
+		bubbles: true,
+		cancelable: true
+	});
+	await expect(page.locator('.zoom-world')).toHaveAttribute(
+		'data-zoom-world-scale',
+		/^(?!1(?:\.0*)?$).+/
+	);
+
+	const frame = page.locator('.image-frame').first();
+	for (let attempt = 0; attempt < 5; attempt += 1) {
+		if ((await frame.getAttribute('data-image-focused')) === 'true') break;
+		await image.dispatchEvent('wheel', {
+			deltaY: -1000,
+			clientX: imageCenter.x,
+			clientY: imageCenter.y,
+			bubbles: true,
+			cancelable: true
+		});
+		await page.waitForTimeout(20);
+	}
+	await expect(frame).toHaveAttribute('data-image-focused', 'true');
+
+	const initialImageScale = Number(await image.getAttribute('data-image-zoom-scale'));
+	await image.dispatchEvent('wheel', {
+		deltaY: -500,
+		clientX: imageCenter.x,
+		clientY: imageCenter.y,
+		bubbles: true,
+		cancelable: true
+	});
+	await expect
+		.poll(async () => Number(await image.getAttribute('data-image-zoom-scale')))
+		.toBeGreaterThan(initialImageScale);
+
+	await page.waitForTimeout(350);
+	await image.dispatchEvent('wheel', {
+		deltaY: 5000,
+		clientX: imageCenter.x,
+		clientY: imageCenter.y,
+		bubbles: true,
+		cancelable: true
+	});
+	await image.dispatchEvent('wheel', {
+		deltaY: 5000,
+		clientX: imageCenter.x,
+		clientY: imageCenter.y,
+		bubbles: true,
+		cancelable: true
+	});
+	await expect(frame).not.toHaveAttribute('data-image-focused', 'true');
+
+	await page.locator('.zoom-world').dispatchEvent('wheel', {
+		deltaY: 5000,
+		clientX: imageCenter.x,
+		clientY: imageCenter.y,
+		bubbles: true,
+		cancelable: true
+	});
+	await page.waitForTimeout(350);
+	await page.locator('.zoom-world').dispatchEvent('wheel', {
+		deltaY: 5000,
+		clientX: imageCenter.x,
+		clientY: imageCenter.y,
+		bubbles: true,
+		cancelable: true
+	});
+	await expect(dialog).not.toBeVisible();
+});
+
 async function editFirstNodeTitle(page: Page, title: string) {
 	// .stage-content has pointer-events:none; all clicks pass to the stage handler.
 	// The editor opens via long-press (>1000ms), then action menu, then Edit.
@@ -526,6 +632,128 @@ async function editFirstNodeTitle(page: Page, title: string) {
 	await page.getByLabel('Title').fill(title);
 	await page.getByRole('button', { name: 'Save' }).click();
 	await expect(page.getByText(title)).toBeVisible();
+}
+
+async function openFocusForFirstNode(page: Page) {
+	const circle = page.locator('.node-wrapper .circle').first();
+	const box = await circle.boundingBox();
+	if (!box) throw new Error('Node .circle element not found');
+	const cx = Math.round(box.x + box.width / 2);
+	const cy = Math.round(box.y + box.height / 2);
+	const stage = page.locator('.stage');
+	await stage.dispatchEvent('pointerdown', {
+		pointerId: 1,
+		isPrimary: true,
+		button: 0,
+		buttons: 1,
+		clientX: cx,
+		clientY: cy,
+		bubbles: true,
+		cancelable: true
+	});
+	await page.waitForTimeout(1300);
+	await stage.dispatchEvent('pointerup', {
+		pointerId: 1,
+		isPrimary: true,
+		button: 0,
+		buttons: 0,
+		clientX: cx,
+		clientY: cy,
+		bubbles: true,
+		cancelable: true
+	});
+	await page.getByRole('menuitem', { name: 'Focus' }).click();
+}
+
+async function seedImageGraph(
+	page: Page,
+	{
+		graphId,
+		assetId,
+		svg,
+		title
+	}: {
+		graphId: string;
+		assetId: string;
+		svg: string;
+		title: string;
+	}
+) {
+	await page.evaluate(
+		async ({ graphId, assetId, svg, title, schemaVersion }) => {
+			localStorage.setItem(
+				`mind-map:graph:${encodeURIComponent(graphId)}`,
+				JSON.stringify({
+					schemaVersion,
+					data: {
+						nodes: [
+							{
+								id: 'image-node',
+								title,
+								description: 'Deep zoom e2e image node',
+								tags: [],
+								pinned: true,
+								content: [
+									{
+										type: 'image',
+										assetId,
+										alt: 'Color blocks',
+										caption: 'Deep zoom test image'
+									}
+								]
+							}
+						],
+						edges: [],
+						posByNodeId: { 'image-node': { x: 0, y: 0 } },
+						tagColorConfig: { nodeTags: {}, edgeTags: {} },
+						assets: {
+							[assetId]: {
+								id: assetId,
+								kind: 'image',
+								mimeType: 'image/svg+xml',
+								name: 'deep-zoom.svg',
+								size: svg.length,
+								createdAt: Date.now()
+							}
+						}
+					},
+					viewState: { panX: 0, panY: 0, scale: 1 },
+					updatedAt: Date.now()
+				})
+			);
+			const db = await new Promise<IDBDatabase>((resolve, reject) => {
+				const request = indexedDB.open('mind-map-assets', 1);
+				request.onupgradeneeded = () => {
+					const db = request.result;
+					const store = db.objectStoreNames.contains('assets')
+						? request.transaction?.objectStore('assets')
+						: db.createObjectStore('assets', { keyPath: 'key' });
+					if (store && !store.indexNames.contains('scope')) {
+						store.createIndex('scope', 'scope', { unique: false });
+					}
+				};
+				request.onsuccess = () => resolve(request.result);
+				request.onerror = () => reject(request.error);
+			});
+			await new Promise<void>((resolve, reject) => {
+				const tx = db.transaction('assets', 'readwrite');
+				tx.objectStore('assets').put({
+					key: `${encodeURIComponent(graphId)}:${encodeURIComponent(assetId)}`,
+					scope: graphId,
+					assetId,
+					blob: new Blob([svg], { type: 'image/svg+xml' }),
+					mimeType: 'image/svg+xml',
+					name: 'deep-zoom.svg',
+					size: svg.length,
+					updatedAt: Date.now()
+				});
+				tx.oncomplete = () => resolve();
+				tx.onerror = () => reject(tx.error);
+			});
+			db.close();
+		},
+		{ graphId, assetId, svg, title, schemaVersion: CURRENT_SCHEMA_VERSION }
+	);
 }
 
 async function waitForStoredTitle(page: Page, graphId: string, title: string) {

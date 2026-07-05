@@ -576,7 +576,7 @@
 />
 
 <Story
-	name="UserZoomsNodeImageInsideFocus"
+	name="UserZoomsFocusWorldOverNodeImage"
 	args={{
 		multigraphData: {
 			...makeGraph({
@@ -633,17 +633,40 @@
 
 		const image = dialog.querySelector('.focus-image') as HTMLElement;
 		const imageCenter = getCenter(image);
-		dispatchWheel(dialog as HTMLElement, -500, imageCenter.x, imageCenter.y);
+		const world = dialog.querySelector('.zoom-world') as HTMLElement;
+		const surface = dialog.querySelector('.focus-surface') as HTMLElement;
+		const initialSurfaceRect = surface.getBoundingClientRect();
+		dispatchWheel(image, -500, imageCenter.x, imageCenter.y);
 		await waitFor(() => {
-			const content = dialog.querySelector('.focus-content') as HTMLElement;
-			expect(Number(content.dataset.focusZoomScale)).toBeGreaterThan(1);
-			expect(content.dataset.activeImageAssetId).toBe(FOCUS_IMAGE_ASSET_ID);
+			expect(Number(world.dataset.zoomWorldScale)).toBeGreaterThan(1);
+			expect(surface.getBoundingClientRect().width).toBeGreaterThan(initialSurfaceRect.width);
 		});
 
-		dispatchWheel(dialog as HTMLElement, 2000, imageCenter.x, imageCenter.y);
+		const frame = image.closest('.image-frame') as HTMLElement;
+		for (let attempt = 0; attempt < 4 && frame.dataset.imageFocused !== 'true'; attempt += 1) {
+			dispatchWheel(image, -1000, imageCenter.x, imageCenter.y);
+			await sleep();
+		}
 		await waitFor(() => {
-			const content = dialog.querySelector('.focus-content') as HTMLElement;
-			expect(Number(content.dataset.focusZoomScale)).toBe(1);
+			expect(frame.dataset.imageFocused).toBe('true');
+		});
+		const initialImageScale = Number(image.dataset.imageZoomScale);
+		dispatchWheel(image, -500, imageCenter.x, imageCenter.y);
+		await waitFor(() => {
+			expect(Number(image.dataset.imageZoomScale)).toBeGreaterThan(initialImageScale);
+		});
+
+		await sleep(APP_CONFIG.multigraph.focus.overshootHysteresisMs + 20);
+		dispatchWheel(image, 5000, imageCenter.x, imageCenter.y);
+		await sleep();
+		dispatchWheel(image, 5000, imageCenter.x, imageCenter.y);
+		await waitFor(() => {
+			expect(frame.dataset.imageFocused).not.toBe('true');
+		});
+
+		dispatchWheel(world, 2000, imageCenter.x, imageCenter.y);
+		await waitFor(() => {
+			expect(Number(world.dataset.zoomWorldScale)).toBe(1);
 		});
 		expect(dialog).toBeInTheDocument();
 	}}

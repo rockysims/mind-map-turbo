@@ -36,8 +36,12 @@ export const APP_CONFIG = {
 			overshootCommitThreshold: 0.95, // accumulated blocked zoom needed to enter/exit
 			overshootDecayHalfLifeMs: 180, // decay speed after a boundary bump pauses
 			overshootHysteresisMs: 320, // cooldown after a committed transition
+			boundaryNearTouchMarginPx: 8, // tolerance for treating zoom subjects as inscribed
+			detailsCornerRadiusPx: 18, // fully focused node corner radius
 			eligibilityCoverageRatio: 1, // focal point must be inside the projected node circle
 			entryTransitionMs: 660, // focus overlay morph duration
+			worldWheelSensitivity: 0.002, // wheel delta to scale factor inside focus/image worlds
+			exitOvershootDeltaScale: 500, // wheel delta divisor for focus/image exit gates
 			imageZoomMaxScale: 8, // deepest image inspection zoom
 			imageZoomMinScale: 1 // image fit floor
 		},

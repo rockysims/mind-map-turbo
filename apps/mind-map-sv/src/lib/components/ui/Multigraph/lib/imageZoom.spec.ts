@@ -51,4 +51,16 @@ describe('image zoom math', () => {
 		expect(next.panX).toBe(0);
 		expect(next.panY).toBe(0);
 	});
+
+	it('derives deep-zoom limits from natural image dimensions', () => {
+		const naturalBounds = {
+			viewportWidth: 500,
+			viewportHeight: 250,
+			naturalWidth: 2000,
+			naturalHeight: 1000
+		};
+
+		expect(imageFitScale(naturalBounds)).toBe(0.25);
+		expect(imageZoomLimits(naturalBounds)).toEqual({ minScale: 0.25, maxScale: 2 });
+	});
 });

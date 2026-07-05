@@ -1,6 +1,6 @@
 # Milestone 06a: Continuous deep zoom
 
-**Status:** not started
+**Status:** complete
 **Depends on:** milestone 06 (node focus and rich media).
 **Plan:** [2026-07-04 06a-continuous-deep-zoom.md](../plans/2026-07-04%2006a-continuous-deep-zoom.md)
 

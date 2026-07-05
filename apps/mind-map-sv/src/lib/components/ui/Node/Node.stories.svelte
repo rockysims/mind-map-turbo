@@ -12,7 +12,9 @@
 		tags: [],
 		argTypes: {
 			nodeData: { control: 'object' },
-			borderSegments: { control: 'object' }
+			borderSegments: { control: 'object' },
+			detailsMode: { control: 'boolean' },
+			detailsProgress: { control: 'number' }
 		},
 		args: {
 			nodeData: {
@@ -21,7 +23,9 @@
 				description: 'Node description',
 				tags: []
 			},
-			borderSegments: []
+			borderSegments: [],
+			detailsMode: false,
+			detailsProgress: 0
 		}
 	});
 
@@ -127,6 +131,32 @@
 			APP_CONFIG.multigraph.pinnedNodeBorderWidthPx
 		);
 	}
+
+	async function midProgressPlayHandler({ canvasElement }: PlayArgs) {
+		const node = canvasElement.querySelector('.node');
+		const circle = canvasElement.querySelector('.node .circle') as HTMLElement | null;
+		expect(node).toHaveAttribute('data-details-progress', '0.5');
+		expect(node).not.toHaveAttribute('data-details-mode');
+		expect(circle).toBeInTheDocument();
+		expect(parseFloat(window.getComputedStyle(circle!).borderRadius)).toBeCloseTo(109);
+		expect(canvasElement.querySelector('.node .details')).toBeNull();
+	}
+
+	async function detailsPlayHandler({ canvasElement, args }: PlayArgs) {
+		const node = canvasElement.querySelector('.node');
+		const circle = canvasElement.querySelector('.node .circle') as HTMLElement | null;
+		expect(node).toHaveAttribute('data-details-mode', 'true');
+		expect(node).toHaveAttribute('data-details-progress', '1');
+		expect(circle).toBeInTheDocument();
+		expect(parseFloat(window.getComputedStyle(circle!).borderRadius)).toBe(
+			APP_CONFIG.multigraph.focus.detailsCornerRadiusPx
+		);
+		expect(canvasElement.querySelector('.node .title')).toBeNull();
+		expect(canvasElement.querySelector('.node .details-title')?.textContent).toBe(
+			args.nodeData.title
+		);
+		expect(canvasElement.querySelector('.details-body')).toBeInTheDocument();
+	}
 </script>
 
 <Story
@@ -192,3 +222,65 @@
 		expect(node).toHaveAttribute('data-tag-border', 'true');
 	}}
 />
+
+<Story
+	name="MidProgress"
+	args={{
+		nodeData: {
+			id: 'node id mid progress',
+			title: 'Zooming toward focus',
+			description: 'The real graph node is spending zoom at the boundary.',
+			tags: []
+		},
+		detailsProgress: 0.5
+	}}
+	play={midProgressPlayHandler}
+/>
+
+<Story
+	name="Details"
+	args={{
+		nodeData: {
+			id: 'node id details',
+			title: 'Node details',
+			description: 'Detailed node description',
+			tags: []
+		},
+		detailsMode: true,
+		detailsProgress: 1
+	}}
+	play={detailsPlayHandler}
+>
+	<p class="description">Detailed node description rendered by the parent.</p>
+</Story>
+
+<Story
+	name="PinnedTaggedDetails"
+	args={{
+		nodeData: {
+			id: 'node id pinned tagged details',
+			title: 'Pinned tagged details',
+			description: 'Pinned tagged details description',
+			tags: ['topic', 'urgent'],
+			pinned: true
+		},
+		borderSegments: [
+			{ color: '#ff0000', startTurn: 0, endTurn: 0.5 },
+			{ color: '#00ff00', startTurn: 0.5, endTurn: 1 }
+		],
+		detailsMode: true,
+		detailsProgress: 1
+	}}
+	play={async (ctx) => {
+		await detailsPlayHandler(ctx);
+		const node = ctx.canvasElement.querySelector('.node');
+		const circle = ctx.canvasElement.querySelector('.node .circle') as HTMLElement | null;
+		expect(node).toHaveAttribute('data-pinned', 'true');
+		expect(node).toHaveAttribute('data-tag-border', 'true');
+		expect(parseFloat(window.getComputedStyle(circle!).borderWidth)).toBe(
+			APP_CONFIG.multigraph.pinnedNodeBorderWidthPx
+		);
+	}}
+>
+	<p class="description">Shared border styling carries into details mode.</p>
+</Story>
