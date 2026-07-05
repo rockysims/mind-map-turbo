@@ -42,6 +42,7 @@
 		detailsProgress = 1,
 		exiting = false,
 		entryGestureIdleMs = 0,
+		entryGestureMaxMs = 0,
 		onClose,
 		onZoomOutBoundary
 	}: {
@@ -55,6 +56,7 @@
 		detailsProgress?: number;
 		exiting?: boolean;
 		entryGestureIdleMs?: number;
+		entryGestureMaxMs?: number;
 		onClose: () => void;
 		onZoomOutBoundary?: (delta: number) => void;
 	} = $props();
@@ -151,7 +153,8 @@
 		imageEntryGestureGate = beginEntryGestureGate(
 			'in',
 			Date.now(),
-			APP_CONFIG.multigraph.focus.entryGestureIdleMs
+			APP_CONFIG.multigraph.focus.entryGestureIdleMs,
+			APP_CONFIG.multigraph.focus.entryGestureMaxMs
 		);
 		imageOvershoot = resetOvershootAfterCommit(Date.now());
 	}
@@ -169,7 +172,8 @@
 			imageEntryGestureGate,
 			{ direction },
 			Date.now(),
-			APP_CONFIG.multigraph.focus.entryGestureIdleMs
+			APP_CONFIG.multigraph.focus.entryGestureIdleMs,
+			APP_CONFIG.multigraph.focus.entryGestureMaxMs
 		);
 		imageEntryGestureGate = step.state;
 		return step.swallow;
@@ -281,7 +285,7 @@
 	<button class="close-button" type="button" aria-label="Close node focus" onclick={onClose}>
 		Close
 	</button>
-	<ZoomWorld {entryGestureIdleMs} onExitBoundary={handleWorldExitBoundary}>
+	<ZoomWorld {entryGestureIdleMs} {entryGestureMaxMs} onExitBoundary={handleWorldExitBoundary}>
 		<div
 			bind:this={surfaceRef}
 			class="focus-surface"

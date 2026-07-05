@@ -201,6 +201,7 @@
 		id: number;
 		direction: EntryGestureDirection;
 		idleMs: number;
+		maxMs: number;
 	} | null>(null);
 	let stageEntryGestureGateRequestId = $state(0);
 	const focusRuntime = new FocusRuntime();
@@ -618,7 +619,8 @@
 		stageEntryGestureGateRequest = {
 			id: stageEntryGestureGateRequestId,
 			direction,
-			idleMs: APP_CONFIG.multigraph.focus.entryGestureIdleMs
+			idleMs: APP_CONFIG.multigraph.focus.entryGestureIdleMs,
+			maxMs: APP_CONFIG.multigraph.focus.entryGestureMaxMs
 		};
 	}
 
@@ -1358,6 +1360,7 @@
 			morphSource={focusMorphSource}
 			exiting={focusExiting}
 			entryGestureIdleMs={focusEntryGestureIdleMs}
+			entryGestureMaxMs={APP_CONFIG.multigraph.focus.entryGestureMaxMs}
 			onClose={closeFocus}
 			onZoomOutBoundary={handleFocusZoomOutBoundary}
 		/>

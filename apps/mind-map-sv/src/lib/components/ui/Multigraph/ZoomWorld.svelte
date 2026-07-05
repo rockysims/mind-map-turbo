@@ -23,6 +23,7 @@
 		minScale = 1,
 		maxScale = 8,
 		entryGestureIdleMs = 0,
+		entryGestureMaxMs = 0,
 		onExitBoundary,
 		onStateChange,
 		children
@@ -30,6 +31,7 @@
 		minScale?: number;
 		maxScale?: number;
 		entryGestureIdleMs?: number;
+		entryGestureMaxMs?: number;
 		onExitBoundary?: (delta: number) => void;
 		onStateChange?: (state: ZoomWorldState) => void;
 		children?: Snippet;
@@ -57,7 +59,12 @@
 	);
 
 	onMount(() => {
-		entryGestureGate = beginEntryGestureGate('in', Date.now(), entryGestureIdleMs);
+		entryGestureGate = beginEntryGestureGate(
+			'in',
+			Date.now(),
+			entryGestureIdleMs,
+			entryGestureMaxMs
+		);
 	});
 
 	function currentBounds(): ZoomWorldBounds | null {
@@ -88,7 +95,8 @@
 			entryGestureGate,
 			{ direction },
 			Date.now(),
-			entryGestureIdleMs
+			entryGestureIdleMs,
+			entryGestureMaxMs
 		);
 		entryGestureGate = step.state;
 		return step.swallow;

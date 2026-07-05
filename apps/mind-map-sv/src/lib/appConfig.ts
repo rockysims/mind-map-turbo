@@ -36,7 +36,8 @@ export const APP_CONFIG = {
 			overshootCommitThreshold: 0.95, // accumulated blocked zoom needed to enter/exit
 			overshootDecayHalfLifeMs: 180, // decay speed after a boundary bump pauses
 			overshootHysteresisMs: 320, // cooldown after a committed transition
-			entryGestureIdleMs: 180, // quiet gap before residual zoom-in input becomes a fresh gesture
+			entryGestureIdleMs: 180, // initial quiet gap before residual zoom input becomes fresh
+			entryGestureMaxMs: 420, // hard cap for swallowing residual boundary-crossing zoom input
 			boundaryNearTouchMarginPx: 8, // tolerance for treating zoom subjects as inscribed
 			detailsCornerRadiusPx: 18, // fully focused node corner radius
 			eligibilityCoverageRatio: 1, // focal point must be inside the projected node circle

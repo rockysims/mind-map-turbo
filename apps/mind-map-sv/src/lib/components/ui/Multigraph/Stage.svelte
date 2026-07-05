@@ -58,6 +58,7 @@
 		id: number;
 		direction: EntryGestureDirection;
 		idleMs: number;
+		maxMs: number;
 	}
 
 	interface Props {
@@ -192,7 +193,12 @@
 		const request = entryGestureGateRequest;
 		if (!request || request.id === lastEntryGestureGateRequestId) return;
 		lastEntryGestureGateRequestId = request.id;
-		entryGestureGate = beginEntryGestureGate(request.direction, Date.now(), request.idleMs);
+		entryGestureGate = beginEntryGestureGate(
+			request.direction,
+			Date.now(),
+			request.idleMs,
+			request.maxMs
+		);
 	});
 
 	// Node drag
@@ -417,7 +423,8 @@
 			entryGestureGate,
 			{ direction },
 			Date.now(),
-			entryGestureGateRequest?.idleMs ?? 0
+			entryGestureGateRequest?.idleMs ?? 0,
+			entryGestureGateRequest?.maxMs ?? 0
 		);
 		entryGestureGate = step.state;
 		return step.swallow;
