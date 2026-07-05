@@ -8,6 +8,7 @@
 	import NodeFocusSurface from './NodeFocusSurface.svelte';
 	import Stage from './Stage.svelte';
 	import TagColorLegend from './TagColorLegend.svelte';
+	import { APP_CONFIG } from '$lib/appConfig';
 	import type { GraphAssetStore } from '$lib/assets/assetStore';
 	import { prefersReducedMotion } from '$lib/reducedMotion';
 	import type { NodeData } from '../types/node';
@@ -114,6 +115,7 @@
 	} from './lib/nodeFocus.js';
 
 	const CENTERED_POSITION: Point = { x: 0, y: 0 };
+	const FOCUS_TRANSITION_MS = APP_CONFIG.multigraph.focus.entryTransitionMs;
 
 	let {
 		multigraphData = {
@@ -190,7 +192,9 @@
 	let focusOvershoot = $state<OvershootState>(EMPTY_OVERSHOOT_STATE);
 	let reduceMotion = $derived(prefersReducedMotion());
 	let focusMorphSource = $state<NodeFocusMorphSource | null>(null);
+	let focusExiting = $state(false);
 	const focusRuntime = new FocusRuntime();
+	let focusExitTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
 	/** Internal enter animations for nodes added by the user (scale 0 → target). */
 	let nodeEnterAnimations = $state<Record<string, NodeEnterAnimation>>({});
@@ -412,6 +416,7 @@
 
 	$effect(() => {
 		return () => {
+			clearFocusExitTimeout();
 			layoutRuntime.stop();
 		};
 	});
@@ -561,13 +566,34 @@
 
 	function openFocus(node: NodeData, source: NodeFocusMorphSource | null = null) {
 		closeOverlays();
+		clearFocusExitTimeout();
+		focusExiting = false;
 		focusMorphSource = source;
 		focusRuntime.open(node);
 	}
 
 	function closeFocus() {
+		if (!focusRuntime.isFocused || focusExiting) return;
+		focusOvershoot = resetOvershootAfterCommit(layoutRuntime.now());
+		if (reduceMotion || FOCUS_TRANSITION_MS <= 0 || typeof window === 'undefined') {
+			finishCloseFocus();
+			return;
+		}
+		focusExiting = true;
+		focusExitTimeoutId = setTimeout(finishCloseFocus, FOCUS_TRANSITION_MS);
+	}
+
+	function clearFocusExitTimeout() {
+		if (focusExitTimeoutId === null) return;
+		clearTimeout(focusExitTimeoutId);
+		focusExitTimeoutId = null;
+	}
+
+	function finishCloseFocus() {
+		clearFocusExitTimeout();
 		focusRuntime.close();
 		focusMorphSource = null;
+		focusExiting = false;
 		focusOvershoot = resetOvershootAfterCommit(layoutRuntime.now());
 	}
 
@@ -901,8 +927,9 @@
 
 <div
 	class="graph"
-	class:focus-active={focusRuntime.isFocused}
+	class:focus-active={focusRuntime.isFocused && !focusExiting}
 	bind:this={graphRef}
+	style={`--focus-transition-duration: ${FOCUS_TRANSITION_MS}ms;`}
 	data-settling={layoutRuntime.isSettling ? 'true' : undefined}
 	data-scale-change-focal={layoutRuntime.scaleAnchoredNodeIds[0]}
 	data-scale-animation-active={layoutRuntime.hasActiveScaleAnimations ? 'true' : undefined}
@@ -1281,6 +1308,7 @@
 			{assetScope}
 			{reduceMotion}
 			morphSource={focusMorphSource}
+			exiting={focusExiting}
 			onClose={closeFocus}
 			onZoomOutBoundary={handleFocusZoomOutBoundary}
 		/>
@@ -1361,10 +1389,14 @@
 		position: absolute;
 	}
 
+	.graph :global(.stage),
+	.graph > .toolbar-button {
+		transition: opacity var(--focus-transition-duration) ease-out;
+	}
+
 	.graph.focus-active :global(.stage),
 	.graph.focus-active > .toolbar-button {
 		opacity: 0;
-		transition: opacity 220ms ease-out;
 	}
 
 	.toolbar-button {

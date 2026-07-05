@@ -37,7 +37,7 @@ export const APP_CONFIG = {
 			overshootDecayHalfLifeMs: 180, // decay speed after a boundary bump pauses
 			overshootHysteresisMs: 320, // cooldown after a committed transition
 			eligibilityCoverageRatio: 1, // focal point must be inside the projected node circle
-			entryTransitionMs: 220, // focus overlay morph duration
+			entryTransitionMs: 660, // focus overlay morph duration
 			imageZoomMaxScale: 8, // deepest image inspection zoom
 			imageZoomMinScale: 1 // image fit floor
 		},

@@ -673,6 +673,14 @@
 		const surface = dialog.querySelector('.focus-surface') as HTMLElement;
 		expect(surface.dataset.morphSourceNodeId).toBe('n0');
 		expect(canvasElement.querySelector('.graph')).toHaveClass('focus-active');
+
+		within(dialog).getByRole('button', { name: 'Close node focus' }).click();
+		await waitFor(() => {
+			expect(canvasElement.querySelector('.graph')).not.toHaveClass('focus-active');
+			expect(surface).toHaveClass('exiting');
+		});
+		await sleep(APP_CONFIG.multigraph.focus.entryTransitionMs + 40);
+		expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
 	}}
 />
 

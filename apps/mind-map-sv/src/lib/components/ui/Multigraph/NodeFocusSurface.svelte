@@ -19,6 +19,7 @@
 		assetScope = '',
 		reduceMotion = false,
 		morphSource = null,
+		exiting = false,
 		onClose,
 		onZoomOutBoundary
 	}: {
@@ -28,6 +29,7 @@
 		assetScope?: string;
 		reduceMotion?: boolean;
 		morphSource?: NodeFocusMorphSource | null;
+		exiting?: boolean;
 		onClose: () => void;
 		onZoomOutBoundary?: (delta: number) => void;
 	} = $props();
@@ -48,9 +50,11 @@
 		(node.content ?? []).filter((block): block is NodeImageContent => block.type === 'image')
 	);
 	const hasMorph = $derived(morphSource !== null && !reduceMotion);
+	const focusTransitionMs = APP_CONFIG.multigraph.focus.entryTransitionMs;
 	const morphStyle = $derived(
 		morphSource
 			? [
+					`--focus-transition-duration: ${focusTransitionMs}ms`,
 					`--morph-left: ${morphSource.left}px`,
 					`--morph-top: ${morphSource.top}px`,
 					`--morph-width: ${morphSource.width}px`,
@@ -61,7 +65,7 @@
 					`--morph-border-width: ${morphSource.borderWidth}`,
 					`--morph-box-shadow: ${morphSource.boxShadow}`
 				].join('; ')
-			: ''
+			: `--focus-transition-duration: ${focusTransitionMs}ms`
 	);
 	const contentTransform = $derived(
 		`translate(${focusZoom.panX}px, ${focusZoom.panY}px) scale(${focusZoom.scale})`
@@ -195,6 +199,7 @@
 	class="focus-layer"
 	class:reduced-motion={reduceMotion}
 	class:zooming={focusZoom.scale > 1.001}
+	class:exiting
 	role="dialog"
 	aria-modal="true"
 	aria-labelledby="node-focus-title"
@@ -210,6 +215,7 @@
 		bind:this={surfaceRef}
 		class="focus-surface"
 		class:has-morph={hasMorph}
+		class:exiting
 		style={morphStyle}
 		data-morph-source-node-id={morphSource?.nodeId}
 	>
@@ -273,6 +279,10 @@
 		touch-action: none;
 	}
 
+	.focus-layer.exiting {
+		pointer-events: none;
+	}
+
 	.focus-surface {
 		position: fixed;
 		left: 50%;
@@ -288,8 +298,20 @@
 		transform: translate(-50%, -50%);
 	}
 
+	.focus-surface:not(.has-morph) {
+		animation: focus-surface-fade var(--focus-transition-duration) ease-out both;
+	}
+
 	.focus-surface.has-morph {
-		animation: surface-morph 220ms ease-out both;
+		animation: surface-morph var(--focus-transition-duration) ease-out both;
+	}
+
+	.focus-surface.exiting:not(.has-morph) {
+		animation: focus-surface-fade var(--focus-transition-duration) ease-in reverse both;
+	}
+
+	.focus-surface.has-morph.exiting {
+		animation: surface-morph var(--focus-transition-duration) ease-in reverse both;
 	}
 
 	article {
@@ -305,7 +327,11 @@
 	}
 
 	.focus-surface.has-morph .focus-content {
-		animation: focus-content-in 220ms ease-out both;
+		animation: focus-content-in var(--focus-transition-duration) ease-out both;
+	}
+
+	.focus-surface.has-morph.exiting .focus-content {
+		animation: focus-content-in var(--focus-transition-duration) ease-in reverse both;
 	}
 
 	h1,
@@ -388,8 +414,20 @@
 
 	@media (prefers-reduced-motion: reduce) {
 		.focus-surface.has-morph,
+		.focus-surface:not(.has-morph),
 		.focus-surface.has-morph .focus-content {
 			animation: none;
+		}
+	}
+
+	@keyframes focus-surface-fade {
+		from {
+			opacity: 0;
+			transform: translate(-50%, -50%) scale(0.96);
+		}
+		to {
+			opacity: 1;
+			transform: translate(-50%, -50%) scale(1);
 		}
 	}
 
