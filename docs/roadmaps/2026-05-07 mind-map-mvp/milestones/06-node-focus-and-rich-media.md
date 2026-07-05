@@ -1,6 +1,6 @@
 # Milestone 06: Node focus and rich media
 
-**Status:** not started
+**Status:** complete
 **Depends on:** milestones 03 (node editing UX), 04l/04m/04n
 (self-contained HTML document saves), and 05 (find/filter camera navigation).
 **Plan:** [2026-07-04 06-node-focus-and-rich-media.md](../plans/2026-07-04%2006-node-focus-and-rich-media.md)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clientPointToGraphPoint } from './stageCoordinates';
+import { clientPointToGraphPoint, graphPointToClientPoint } from './stageCoordinates';
 
 describe('clientPointToGraphPoint', () => {
 	const stageRect = { left: 0, top: 0, width: 100, height: 100 };
@@ -20,5 +20,16 @@ describe('clientPointToGraphPoint', () => {
 			x: 10,
 			y: -10
 		});
+	});
+
+	it('round-trips graph and client points across stage rect, pan, and scale', () => {
+		const rect = { left: 24, top: 12, width: 320, height: 180 };
+		const pan = { x: -40, y: 65 };
+		const scale = 2.5;
+		const graphPoint = { x: 18, y: -36 };
+		const clientPoint = graphPointToClientPoint(graphPoint, rect, pan, scale);
+
+		expect(clientPointToGraphPoint(clientPoint, rect, pan, scale).x).toBeCloseTo(graphPoint.x);
+		expect(clientPointToGraphPoint(clientPoint, rect, pan, scale).y).toBeCloseTo(graphPoint.y);
 	});
 });

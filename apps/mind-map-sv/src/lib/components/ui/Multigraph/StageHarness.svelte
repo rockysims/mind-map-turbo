@@ -66,6 +66,8 @@
 	let lastDoubleClickDropNodeIds = $state<string | null>(null);
 	let lastNodeLongPress = $state<{ nodeId: string; point: Point } | null>(null);
 	let lastViewState = $state<{ panX: number; panY: number; scale: number } | null>(null);
+	let lastLiveViewState = $state<{ panX: number; panY: number; scale: number } | null>(null);
+	let lastBlockedZoom = $state<string>('');
 </script>
 
 <div
@@ -89,6 +91,10 @@
 	data-last-view-state={lastViewState
 		? `${lastViewState.panX},${lastViewState.panY},${lastViewState.scale}`
 		: ''}
+	data-last-live-view-state={lastLiveViewState
+		? `${lastLiveViewState.panX},${lastLiveViewState.panY},${lastLiveViewState.scale}`
+		: ''}
+	data-last-blocked-zoom={lastBlockedZoom}
 	{...rest}
 >
 	<Stage
@@ -121,6 +127,12 @@
 		onViewStateChange={(state) => {
 			lastViewState = state;
 		}}
+		onViewStateLiveChange={(state) => {
+			lastLiveViewState = state;
+		}}
+		onBlockedZoom={(input) => {
+			lastBlockedZoom = `${input.direction},${input.focalPoint.x},${input.focalPoint.y},${input.blockedFactor}`;
+		}}
 	>
 		{#each nodes as node (node.id)}
 			{@const pos = positions[node.id] ?? { left: '50%', top: '50%' }}
@@ -129,7 +141,7 @@
 				style="position: absolute; left: {pos.left}; top: {pos.top}; transform: translate(-50%, -50%);"
 				data-node-id={node.id}
 			>
-				<Node nodeData={node} isOpen={false} />
+				<Node nodeData={node} />
 			</div>
 		{/each}
 	</Stage>

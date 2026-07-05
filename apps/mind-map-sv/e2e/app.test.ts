@@ -4,7 +4,7 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { expect, test, type Page } from '@playwright/test';
 
-const CURRENT_SCHEMA_VERSION = 3;
+const CURRENT_SCHEMA_VERSION = 4;
 const GRAPH_HTML_PAYLOAD_SCRIPT_ID = 'mind-map-embedded-graph';
 
 function graphUrl(graphId: string): string {

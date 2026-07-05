@@ -23,6 +23,12 @@
 		scale: number;
 	}
 
+	interface BlockedZoomInput {
+		direction: 'in' | 'out';
+		focalPoint: Point;
+		blockedFactor: number;
+	}
+
 	interface FitViewRequest {
 		id: number;
 		bounds: GraphBounds;
@@ -56,6 +62,8 @@
 		onNodeLongPress?: (node: NodeData, point: Point) => void;
 		/** Fired whenever the internal pan/zoom state changes, including initial mount. */
 		onViewStateLiveChange?: (state: ViewStateSnapshot) => void;
+		/** Fired when zoom input continues past the configured scale clamps. */
+		onBlockedZoom?: (input: BlockedZoomInput) => void;
 		/**
 		 * Fired after a user pan/zoom gesture completes (pointer-up after pan, wheel event,
 		 * or pinch end). Moving camera does not mutate graph data, so this callback is kept
@@ -80,6 +88,7 @@
 		onNodeDoubleClickDropOntoBackground,
 		onNodeLongPress,
 		onViewStateLiveChange,
+		onBlockedZoom,
 		onViewStateChange,
 		fitViewRequest,
 		children
@@ -103,7 +112,13 @@
 	// Zoom: mount-only seed from initialScale; user gestures own scale afterward.
 	// svelte-ignore state_referenced_locally
 	let scale = $state(clampScale(initialScale));
-	let pinchStart = $state<{ distance: number; scale: number } | null>(null);
+	let pinchStart = $state<{
+		distance: number;
+		scale: number;
+		centroid: Point;
+		panX: number;
+		panY: number;
+	} | null>(null);
 
 	$effect(() => {
 		const state = { panX, panY, scale };
@@ -296,9 +311,17 @@
 		e.preventDefault();
 		const stage = e.currentTarget as HTMLElement;
 		const rect = stage.getBoundingClientRect();
+		const requestedScale = scaleFromWheelDelta(
+			scale,
+			e.deltaY,
+			undefined,
+			Number.NEGATIVE_INFINITY,
+			Number.POSITIVE_INFINITY
+		);
+		const nextScale = clampScale(requestedScale, DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE);
 		const nextView = zoomViewTransformAtPoint(
 			{ panX, panY, scale },
-			scaleFromWheelDelta(scale, e.deltaY, undefined, DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE),
+			nextScale,
 			{ x: e.clientX, y: e.clientY },
 			{ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
 		);
@@ -306,6 +329,13 @@
 		panX = nextView.panX;
 		panY = nextView.panY;
 		scale = nextView.scale;
+		if (requestedScale !== nextScale) {
+			onBlockedZoom?.({
+				direction: requestedScale > nextScale ? 'in' : 'out',
+				focalPoint: { x: e.clientX, y: e.clientY },
+				blockedFactor: Math.abs(requestedScale - nextScale) / Math.max(nextScale, 0.001)
+			});
+		}
 		onViewStateChange?.({ panX, panY, scale });
 	}
 
@@ -318,6 +348,15 @@
 		return pointerDistance(pts[0].clientX, pts[0].clientY, pts[1].clientX, pts[1].clientY);
 	}
 
+	function getTwoPointerCentroid(): Point | null {
+		const pts = [...activePointers.values()];
+		if (pts.length !== 2) return null;
+		return {
+			x: (pts[0].clientX + pts[1].clientX) / 2,
+			y: (pts[0].clientY + pts[1].clientY) / 2
+		};
+	}
+
 	function onPointerDownStage(e: PointerEvent) {
 		activePointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
 		if (activePointers.size === 1) {
@@ -326,7 +365,10 @@
 			panStart = null;
 			cancelActiveNodeGesture();
 			const dist = getTwoPointerDistance();
-			if (dist !== null) pinchStart = { distance: dist, scale };
+			const centroid = getTwoPointerCentroid();
+			if (dist !== null && centroid !== null) {
+				pinchStart = { distance: dist, scale, centroid, panX, panY };
+			}
 		}
 		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
 	}
@@ -339,10 +381,29 @@
 			const dist = getTwoPointerDistance();
 			if (dist !== null) {
 				if (!pinchStart) {
-					pinchStart = { distance: dist, scale };
+					const centroid = getTwoPointerCentroid();
+					if (centroid !== null) pinchStart = { distance: dist, scale, centroid, panX, panY };
 				} else {
 					const factor = dist / pinchStart.distance;
-					scale = clampScale(pinchStart.scale * factor, DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE);
+					const requestedScale = pinchStart.scale * factor;
+					const nextScale = clampScale(requestedScale, DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE);
+					const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+					const nextView = zoomViewTransformAtPoint(
+						{ panX: pinchStart.panX, panY: pinchStart.panY, scale: pinchStart.scale },
+						nextScale,
+						pinchStart.centroid,
+						{ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+					);
+					panX = nextView.panX;
+					panY = nextView.panY;
+					scale = nextView.scale;
+					if (requestedScale !== nextScale) {
+						onBlockedZoom?.({
+							direction: requestedScale > nextScale ? 'in' : 'out',
+							focalPoint: pinchStart.centroid,
+							blockedFactor: Math.abs(requestedScale - nextScale) / Math.max(nextScale, 0.001)
+						});
+					}
 				}
 			}
 		} else {

@@ -9,7 +9,6 @@
 	import type { NodeData } from '$lib/components/ui/types/node';
 	import type { TagColorSegment } from '$lib/components/ui/Multigraph/lib/tagColors';
 
-	let descriptionRef = $state<HTMLElement | null>(null);
 	let titleInputRef = $state<HTMLInputElement | null>(null);
 
 	const {
@@ -19,14 +18,12 @@
 			description: 'description_fallback',
 			tags: []
 		},
-		isOpen = false,
 		isTitleEditing = false,
 		borderSegments = [],
 		spotlightColor,
 		onTitleCommit
 	} = $props<{
 		nodeData: NodeData;
-		isOpen: boolean;
 		isTitleEditing?: boolean;
 		borderSegments?: TagColorSegment[];
 		spotlightColor?: string;
@@ -43,21 +40,6 @@
 			.join(', ')})`;
 	}
 
-	function updateVerticalScrollClass() {
-		if (!descriptionRef) return;
-		const hasVerticalScrollbar = descriptionRef.scrollHeight > descriptionRef.clientHeight;
-		if (hasVerticalScrollbar) {
-			descriptionRef.classList.add('vScroll');
-		} else {
-			descriptionRef.classList.remove('vScroll');
-		}
-	}
-
-	$effect(() => {
-		if (!isOpen) return;
-		updateVerticalScrollClass();
-	});
-
 	$effect(() => {
 		if (!isTitleEditing || !titleInputRef) return;
 		const el = titleInputRef;
@@ -70,7 +52,6 @@
 
 <div
 	class="node"
-	class:open={isOpen}
 	data-node-id={nodeData.id}
 	data-pinned={nodeData.pinned ? 'true' : undefined}
 	data-tag-border={borderSegments.length > 0 ? 'true' : undefined}
@@ -80,44 +61,27 @@
 		'transparent'};"
 >
 	<div class="circle">
-		<!-- closed -->
-		{#if !isOpen}
-			<div class="square">
-				{#if isTitleEditing}
-					<input
-						bind:this={titleInputRef}
-						class="title-input"
-						type="text"
-						value={nodeData.title}
-						onblur={(e) => onTitleCommit?.(e.currentTarget.value)}
-						onkeydown={(e) => {
-							if (e.key === 'Enter') {
-								e.preventDefault();
-								onTitleCommit?.(e.currentTarget.value);
-							}
-						}}
-						onclick={(e) => e.stopPropagation()}
-						onpointerdown={(e) => e.stopPropagation()}
-					/>
-				{:else}
-					<SquareText classList={['title']} text={nodeData.title} />
-				{/if}
-			</div>
-		{/if}
-
-		<!-- open -->
-		{#if isOpen}
-			<div class="square">
-				<div class="title">
-					{nodeData.title}
-				</div>
-				<div class="descriptionContainer">
-					<div class="description vScroll" bind:this={descriptionRef}>
-						{nodeData.description}
-					</div>
-				</div>
-			</div>
-		{/if}
+		<div class="square">
+			{#if isTitleEditing}
+				<input
+					bind:this={titleInputRef}
+					class="title-input"
+					type="text"
+					value={nodeData.title}
+					onblur={(e) => onTitleCommit?.(e.currentTarget.value)}
+					onkeydown={(e) => {
+						if (e.key === 'Enter') {
+							e.preventDefault();
+							onTitleCommit?.(e.currentTarget.value);
+						}
+					}}
+					onclick={(e) => e.stopPropagation()}
+					onpointerdown={(e) => e.stopPropagation()}
+				/>
+			{:else}
+				<SquareText classList={['title']} text={nodeData.title} />
+			{/if}
+		</div>
 	</div>
 </div>
 
@@ -182,46 +146,5 @@
 		padding: 4px 6px;
 		box-sizing: border-box;
 		touch-action: none;
-	}
-
-	.node .description {
-		display: none;
-	}
-
-	.node.open :global(.title) {
-		overflow: clip;
-		text-wrap-mode: nowrap;
-		text-overflow: ellipsis;
-		width: 100%;
-		padding: 0 8px 8px 8px;
-	}
-
-	.node.open .descriptionContainer {
-		width: 100%;
-		max-height: 80%;
-		border-radius: 5px;
-		overflow: hidden;
-	}
-
-	.node.open .description {
-		display: flex;
-		width: 100%;
-		max-height: 100%;
-		font-size: var(--node-text-font-size);
-		padding: 0 8px;
-		overflow-y: auto;
-		text-align: center;
-	}
-
-	.node.open .square > * {
-		box-sizing: border-box;
-	}
-
-	/* vScroll is added at runtime when description has vertical scrollbar */
-	.node.open .description.vScroll {
-		text-align: left;
-		border-radius: 3px;
-		box-shadow: 0px 0px 2px 0px #aaaaaa;
-		background-color: #dddddd;
 	}
 </style>

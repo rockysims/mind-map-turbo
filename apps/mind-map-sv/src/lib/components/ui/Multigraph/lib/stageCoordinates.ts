@@ -21,3 +21,18 @@ export function clientPointToGraphPoint(
 		y: (clientPoint.y - centerY) / scale
 	};
 }
+
+export function graphPointToClientPoint(
+	graphPoint: Point,
+	stageRect: StageRect,
+	pan: Point = { x: 0, y: 0 },
+	scale = 1
+): Point {
+	const centerX = stageRect.left + stageRect.width / 2 + pan.x;
+	const centerY = stageRect.top + stageRect.height / 2 + pan.y;
+
+	return {
+		x: centerX + graphPoint.x * scale,
+		y: centerY + graphPoint.y * scale
+	};
+}

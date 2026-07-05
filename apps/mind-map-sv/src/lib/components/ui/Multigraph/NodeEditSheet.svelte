@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import type { EdgeData } from '../types/edge';
-	import type { NodeData } from '../types/node';
+	import type { GraphAssetMetadata } from '../types/multigraph';
+	import type { NodeData, NodeImageContent } from '../types/node';
+	import { prefersReducedMotion } from '$lib/reducedMotion';
 	import { normalizeNodeTitle, type EdgePatch } from './lib/graph';
 	import { normalizeTagList } from './lib/titleSyntax';
 
@@ -12,7 +14,12 @@
 		node,
 		nodes,
 		edges,
+		assets = {},
 		onSave,
+		onAddImage,
+		onSaveImage,
+		onMoveImage,
+		onDeleteImage,
 		onSaveEdge,
 		onCancel,
 		onTogglePinned,
@@ -21,7 +28,15 @@
 		node: NodeData;
 		nodes: NodeData[];
 		edges: EdgeData[];
+		assets?: Record<string, GraphAssetMetadata>;
 		onSave: (content: { title: string; description: string; tags: string[] }) => void;
+		onAddImage?: (
+			file: File,
+			details: { alt: string; caption?: string }
+		) => Promise<'added' | 'unsupported' | 'store-failed'>;
+		onSaveImage?: (assetId: string, details: { alt: string; caption?: string }) => void;
+		onMoveImage?: (fromIndex: number, direction: -1 | 1) => void;
+		onDeleteImage?: (assetId: string) => void;
 		onSaveEdge: (edgeId: string, patch: EdgePatch) => void;
 		onCancel: () => void;
 		onTogglePinned: () => void;
@@ -33,10 +48,17 @@
 	let description = $state('');
 	let nodeTags = $state('');
 	let edgeTagTextById = $state<Record<string, string>>({});
+	let imageDraftByAssetId = $state<Record<string, { alt: string; caption: string }>>({});
+	let imageStatus = $state('');
 	let titleInput = $state<HTMLInputElement | null>(null);
+	let imageInput = $state<HTMLInputElement | null>(null);
+	let reduceMotion = $derived(prefersReducedMotion());
 
 	const incidentEdges = $derived(
 		edges.filter((edge) => edge.sourceNodeId === node.id || edge.targetNodeId === node.id)
+	);
+	const imageBlocks = $derived(
+		(node.content ?? []).filter((block): block is NodeImageContent => block.type === 'image')
 	);
 
 	$effect(() => {
@@ -53,6 +75,16 @@
 		);
 	});
 
+	$effect(() => {
+		const currentDrafts = untrack(() => imageDraftByAssetId);
+		imageDraftByAssetId = Object.fromEntries(
+			imageBlocks.map((image) => [
+				image.assetId,
+				currentDrafts[image.assetId] ?? { alt: image.alt, caption: image.caption ?? '' }
+			])
+		);
+	});
+
 	function save() {
 		onSave({
 			title: normalizeNodeTitle(title),
@@ -63,6 +95,30 @@
 
 	function saveEdgeTags(edge: EdgeData) {
 		onSaveEdge(edge.id, { tags: normalizeTagList(edgeTagTextById[edge.id] ?? '') });
+	}
+
+	async function addSelectedImage(event: Event) {
+		// Svelte types currentTarget broadly, but this handler is attached to the file input.
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file || !onAddImage) return;
+		imageStatus = '';
+		const result = await onAddImage(file, { alt: file.name, caption: '' });
+		if (result === 'unsupported') imageStatus = 'Unsupported image type.';
+		if (result === 'store-failed') imageStatus = 'Unable to store image.';
+		if (result === 'added') imageStatus = 'Image added.';
+		if (imageInput) imageInput.value = '';
+	}
+
+	function saveImage(image: NodeImageContent) {
+		const draft = imageDraftByAssetId[image.assetId] ?? {
+			alt: image.alt,
+			caption: image.caption ?? ''
+		};
+		onSaveImage?.(image.assetId, {
+			alt: draft.alt,
+			caption: draft.caption.trim() ? draft.caption : undefined
+		});
 	}
 
 	function edgeTagsFor(edge: EdgeData): string[] {
@@ -130,6 +186,7 @@
 	></button>
 	<div
 		class="node-edit-sheet"
+		class:reduced-motion={reduceMotion}
 		role="dialog"
 		aria-modal="true"
 		aria-labelledby="node-edit-sheet-title"
@@ -189,6 +246,101 @@
 					Node tags
 					<input bind:value={nodeTags} name="node-tags" placeholder="abc urgent" />
 				</label>
+
+				<section class="images-panel" aria-label="Image attachments">
+					<div class="images-header">
+						<h3>Images</h3>
+						<label class="image-upload">
+							Add image
+							<input
+								bind:this={imageInput}
+								type="file"
+								accept="image/*"
+								onchange={addSelectedImage}
+							/>
+						</label>
+					</div>
+
+					{#if imageBlocks.length === 0}
+						<p class="empty-state">No images attached.</p>
+					{:else}
+						<ol class="image-list" aria-label="Attached images">
+							{#each imageBlocks as image, index (image.assetId)}
+								{@const asset = assets[image.assetId]}
+								{@const draft = imageDraftByAssetId[image.assetId] ?? {
+									alt: image.alt,
+									caption: image.caption ?? ''
+								}}
+								<li>
+									<div class="image-meta">
+										<strong>{asset?.name ?? image.assetId}</strong>
+										<span>{asset?.mimeType ?? 'image'}</span>
+									</div>
+									<label>
+										Alt text
+										<input
+											value={draft.alt}
+											oninput={(event) =>
+												(imageDraftByAssetId = {
+													...imageDraftByAssetId,
+													[image.assetId]: {
+														...draft,
+														alt: event.currentTarget.value
+													}
+												})}
+										/>
+									</label>
+									<label>
+										Caption
+										<input
+											value={draft.caption}
+											oninput={(event) =>
+												(imageDraftByAssetId = {
+													...imageDraftByAssetId,
+													[image.assetId]: {
+														...draft,
+														caption: event.currentTarget.value
+													}
+												})}
+										/>
+									</label>
+									<div class="image-actions">
+										<button
+											type="button"
+											class="secondary"
+											disabled={index === 0}
+											onclick={() => onMoveImage?.(index, -1)}
+										>
+											Up
+										</button>
+										<button
+											type="button"
+											class="secondary"
+											disabled={index === imageBlocks.length - 1}
+											onclick={() => onMoveImage?.(index, 1)}
+										>
+											Down
+										</button>
+										<button type="button" class="secondary" onclick={() => saveImage(image)}>
+											Save image
+										</button>
+										<button
+											type="button"
+											class="danger"
+											onclick={() => onDeleteImage?.(image.assetId)}
+										>
+											Remove
+										</button>
+									</div>
+								</li>
+							{/each}
+						</ol>
+					{/if}
+
+					{#if imageStatus}
+						<p class="image-status" role="status">{imageStatus}</p>
+					{/if}
+				</section>
 
 				<div class="actions">
 					<button type="button" class="secondary" onclick={onTogglePinned}>
@@ -424,6 +576,74 @@
 		list-style: none;
 	}
 
+	.images-panel,
+	.image-list {
+		display: grid;
+		gap: 0.75rem;
+	}
+
+	.images-header,
+	.image-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.images-header {
+		justify-content: space-between;
+	}
+
+	.images-header h3,
+	.image-status {
+		margin: 0;
+	}
+
+	.image-upload {
+		display: inline-flex;
+		min-height: 44px;
+		align-items: center;
+		border-radius: 999px;
+		padding: 0.625rem 0.875rem;
+		background: #e2e8f0;
+		color: #0f172a;
+		font-weight: 400;
+		cursor: pointer;
+	}
+
+	.image-upload input {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip: rect(0 0 0 0);
+	}
+
+	.image-list {
+		padding: 0;
+		margin: 0;
+		list-style: none;
+	}
+
+	.image-list li {
+		display: grid;
+		gap: 0.625rem;
+		border: 1px solid #e2e8f0;
+		border-radius: 0.75rem;
+		padding: 0.75rem;
+	}
+
+	.image-meta {
+		display: flex;
+		justify-content: space-between;
+		gap: 0.75rem;
+		color: #475569;
+	}
+
+	.image-actions {
+		justify-content: flex-end;
+		flex-wrap: wrap;
+	}
+
 	.edge-tag-list li,
 	.edge-tag-actions {
 		display: flex;
@@ -478,6 +698,10 @@
 			border-radius: 1rem;
 			box-shadow: 0 20px 60px rgb(0 0 0 / 24%);
 		}
+	}
+
+	.node-edit-sheet.reduced-motion {
+		animation: none;
 	}
 
 	@media (prefers-reduced-motion: reduce) {

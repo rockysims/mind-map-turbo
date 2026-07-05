@@ -26,10 +26,11 @@ describe('persisted graph migrations', () => {
 		};
 
 		expect(unwrapPersistedGraph({ schemaVersion: 1, data: graph })).toEqual({
-			nodes: [{ ...graph.nodes[0], tags: [] }],
+			nodes: [{ ...graph.nodes[0], tags: [], content: [] }],
 			edges: [],
 			posByNodeId: graph.posByNodeId,
-			tagColorConfig: { nodeTags: {}, edgeTags: {} }
+			tagColorConfig: { nodeTags: {}, edgeTags: {} },
+			assets: {}
 		});
 	});
 
@@ -69,7 +70,7 @@ describe('persisted graph migrations', () => {
 		};
 
 		expect(unwrapPersistedGraph({ schemaVersion: 2, data: graph })).toEqual({
-			nodes: graph.nodes,
+			nodes: graph.nodes.map((node) => ({ ...node, content: [] })),
 			edges: [
 				{
 					id: 'e0',
@@ -80,7 +81,8 @@ describe('persisted graph migrations', () => {
 				}
 			],
 			posByNodeId: graph.posByNodeId,
-			tagColorConfig: { nodeTags: {}, edgeTags: {} }
+			tagColorConfig: { nodeTags: {}, edgeTags: {} },
+			assets: {}
 		});
 	});
 
@@ -97,8 +99,13 @@ describe('persisted graph migrations', () => {
 	});
 
 	it('rejects unsupported schema versions with a typed error', () => {
-		expect(() => unwrapPersistedGraph({ schemaVersion: 4, data: makeGraph() })).toThrow(
-			new PersistedGraphError('Unsupported graph schema version: 4', 'unsupported-version')
+		expect(() =>
+			unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION + 1, data: makeGraph() })
+		).toThrow(
+			new PersistedGraphError(
+				`Unsupported graph schema version: ${CURRENT_SCHEMA_VERSION + 1}`,
+				'unsupported-version'
+			)
 		);
 	});
 

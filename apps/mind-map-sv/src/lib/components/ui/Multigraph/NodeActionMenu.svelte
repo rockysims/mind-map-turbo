@@ -6,6 +6,7 @@
 		node,
 		position,
 		onTogglePinned,
+		onFocus,
 		onEdit,
 		onDelete,
 		onClose
@@ -13,6 +14,7 @@
 		node: NodeData;
 		position: Point;
 		onTogglePinned: () => void;
+		onFocus: () => void;
 		onEdit: () => void;
 		onDelete: () => void;
 		onClose: () => void;
@@ -37,6 +39,7 @@
 		<button type="button" role="menuitem" onclick={onTogglePinned}>
 			{node.pinned ? 'Unpin' : 'Pin'}
 		</button>
+		<button type="button" role="menuitem" onclick={onFocus}>Focus</button>
 		<button type="button" role="menuitem" onclick={onEdit}>Edit</button>
 		<button type="button" role="menuitem" onclick={onDelete}>Delete</button>
 	</div>

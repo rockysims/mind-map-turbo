@@ -13,9 +13,19 @@ export interface TagColorConfig {
 
 export type TagColorNamespace = keyof TagColorConfig;
 
+export interface GraphAssetMetadata {
+	id: string;
+	kind: 'image';
+	mimeType: string;
+	name?: string;
+	size: number;
+	createdAt: number;
+}
+
 export interface MultigraphData {
 	nodes: NodeData[];
 	edges: EdgeData[];
 	posByNodeId: Record<string, Point>;
 	tagColorConfig: TagColorConfig;
+	assets?: Record<string, GraphAssetMetadata>;
 }

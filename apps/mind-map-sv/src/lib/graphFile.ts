@@ -8,8 +8,10 @@ import {
 } from './migrations';
 
 export const GRAPH_HTML_DOCUMENT_VERSION = 1;
-export const GRAPH_HTML_READER_VERSION = 1;
+export const GRAPH_HTML_READER_VERSION = 2;
 export const GRAPH_HTML_PAYLOAD_SCRIPT_ID = 'mind-map-embedded-graph';
+export const GRAPH_HTML_ASSET_SCRIPT_TYPE = 'application/x-mind-map-asset';
+export const GRAPH_HTML_ASSET_ID_ATTRIBUTE = 'data-mind-map-asset-id';
 
 /** The in-memory representation of a graph backup file. */
 export type GraphFileDocument = {
@@ -17,6 +19,15 @@ export type GraphFileDocument = {
 	viewState: ViewState;
 	documentId?: string;
 	exportedAt?: number;
+	embeddedAssets?: GraphFileEmbeddedAsset[];
+};
+
+export type GraphFileEmbeddedAsset = {
+	assetId: string;
+	mimeType: string;
+	name?: string;
+	size: number;
+	base64: string;
 };
 
 export type GraphFileArtifact = {
@@ -83,28 +94,32 @@ export function serializeGraphHtmlFile(
 	htmlShell = defaultHtmlShell()
 ): string {
 	const payloadScript = graphPayloadScript(doc);
+	const assetScripts = (doc.embeddedAssets ?? []).map(assetPayloadScript).join('\n');
+	const replacement = assetScripts ? `${payloadScript}\n${assetScripts}` : payloadScript;
 	const existingPayloadPattern = graphPayloadScriptPattern();
 
 	if (existingPayloadPattern.test(htmlShell)) {
-		return htmlShell.replace(existingPayloadPattern, payloadScript);
+		return htmlShell
+			.replace(assetPayloadScriptPattern(), '')
+			.replace(existingPayloadPattern, replacement);
 	}
 
 	const bootScriptIndex = firstExecutableScriptIndex(htmlShell);
 	if (bootScriptIndex !== -1) {
-		return `${htmlShell.slice(0, bootScriptIndex)}${payloadScript}\n${htmlShell.slice(bootScriptIndex)}`;
+		return `${htmlShell.slice(0, bootScriptIndex)}${replacement}\n${htmlShell.slice(bootScriptIndex)}`;
 	}
 
 	const bodyCloseIndex = lastClosingTagIndex(htmlShell, 'body');
 	if (bodyCloseIndex !== -1) {
-		return `${htmlShell.slice(0, bodyCloseIndex)}${payloadScript}\n${htmlShell.slice(bodyCloseIndex)}`;
+		return `${htmlShell.slice(0, bodyCloseIndex)}${replacement}\n${htmlShell.slice(bodyCloseIndex)}`;
 	}
 
 	const htmlCloseIndex = lastClosingTagIndex(htmlShell, 'html');
 	if (htmlCloseIndex !== -1) {
-		return `${htmlShell.slice(0, htmlCloseIndex)}${payloadScript}\n${htmlShell.slice(htmlCloseIndex)}`;
+		return `${htmlShell.slice(0, htmlCloseIndex)}${replacement}\n${htmlShell.slice(htmlCloseIndex)}`;
 	}
 
-	return `${htmlShell}\n${payloadScript}`;
+	return `${htmlShell}\n${replacement}`;
 }
 
 /**
@@ -132,7 +147,9 @@ export function parseGraphFileText(
 	opts: { minScale?: number; maxScale?: number } = {}
 ): GraphFileDocument {
 	if (looksLikeHtml(text)) {
-		return parseGraphFilePayload(extractHtmlGraphPayload(text), opts);
+		const doc = parseGraphFilePayload(extractHtmlGraphPayload(text), opts);
+		const embeddedAssets = extractHtmlAssetPayloads(text);
+		return embeddedAssets.length > 0 ? { ...doc, embeddedAssets } : doc;
 	}
 
 	return parseGraphFilePayload(text, opts);
@@ -191,10 +208,27 @@ function graphPayloadScript(doc: GraphFileDocument): string {
 	return `<script id="${GRAPH_HTML_PAYLOAD_SCRIPT_ID}" type="application/json">${json}</script>`;
 }
 
+function assetPayloadScript(asset: GraphFileEmbeddedAsset): string {
+	const attrs = [
+		`${GRAPH_HTML_ASSET_ID_ATTRIBUTE}="${escapeAttribute(asset.assetId)}"`,
+		`data-mime-type="${escapeAttribute(asset.mimeType)}"`,
+		`data-size="${asset.size}"`
+	];
+	if (asset.name) attrs.push(`data-name="${escapeAttribute(asset.name)}"`);
+	return `<script type="${GRAPH_HTML_ASSET_SCRIPT_TYPE}" ${attrs.join(' ')}>${asset.base64}</script>`;
+}
+
 function graphPayloadScriptPattern(): RegExp {
 	return new RegExp(
 		`<script\\b(?=[^>]*\\bid=(["'])${GRAPH_HTML_PAYLOAD_SCRIPT_ID}\\1)(?=[^>]*\\btype=(["'])application/json\\2)[^>]*>[\\s\\S]*?<\\/script>`,
 		'i'
+	);
+}
+
+function assetPayloadScriptPattern(): RegExp {
+	return new RegExp(
+		`<script\\b(?=[^>]*\\btype=(["'])${escapeRegExp(GRAPH_HTML_ASSET_SCRIPT_TYPE)}\\1)(?=[^>]*\\b${GRAPH_HTML_ASSET_ID_ATTRIBUTE}=)[^>]*>[\\s\\S]*?<\\/script>\\s*`,
+		'gi'
 	);
 }
 
@@ -228,13 +262,69 @@ function extractHtmlGraphPayload(html: string): string {
 	return content;
 }
 
+function extractHtmlAssetPayloads(html: string): GraphFileEmbeddedAsset[] {
+	const assets: GraphFileEmbeddedAsset[] = [];
+	for (const match of html.matchAll(assetPayloadScriptPattern())) {
+		const script = match[0];
+		const contentMatch = script.match(/<script\b[^>]*>([\s\S]*?)<\/script>/i);
+		const assetId = readScriptAttribute(script, GRAPH_HTML_ASSET_ID_ATTRIBUTE);
+		const mimeType = readScriptAttribute(script, 'data-mime-type');
+		const sizeText = readScriptAttribute(script, 'data-size');
+		const name = readScriptAttribute(script, 'data-name') ?? undefined;
+		const base64 = contentMatch?.[1]?.trim() ?? '';
+		const size = Number(sizeText);
+		if (!assetId || !mimeType || !mimeType.startsWith('image/') || !Number.isFinite(size)) {
+			throw new PersistedGraphError(
+				'Graph HTML file embedded asset is malformed.',
+				'malformed-payload'
+			);
+		}
+		if (!/^[a-zA-Z0-9+/=\s]*$/.test(base64)) {
+			throw new PersistedGraphError(
+				'Graph HTML file embedded asset is malformed.',
+				'malformed-payload'
+			);
+		}
+		assets.push({ assetId, mimeType, name, size, base64: base64.replace(/\s+/g, '') });
+	}
+	return assets;
+}
+
 function looksLikeHtml(text: string): boolean {
 	const trimmed = text.trimStart().slice(0, 128).toLowerCase();
 	return (
 		trimmed.startsWith('<!doctype html') ||
 		trimmed.startsWith('<html') ||
-		text.includes(GRAPH_HTML_PAYLOAD_SCRIPT_ID)
+		text.includes(GRAPH_HTML_PAYLOAD_SCRIPT_ID) ||
+		text.includes(GRAPH_HTML_ASSET_SCRIPT_TYPE)
 	);
+}
+
+function readScriptAttribute(script: string, name: string): string | null {
+	const match = script.match(new RegExp(`\\b${escapeRegExp(name)}=(["'])(.*?)\\1`, 'i'));
+	return match ? unescapeAttribute(match[2] ?? '') : null;
+}
+
+function escapeAttribute(value: string): string {
+	return value
+		.replaceAll('&', '&amp;')
+		.replaceAll('"', '&quot;')
+		.replaceAll("'", '&#39;')
+		.replaceAll('<', '&lt;')
+		.replaceAll('>', '&gt;');
+}
+
+function unescapeAttribute(value: string): string {
+	return value
+		.replaceAll('&quot;', '"')
+		.replaceAll('&#39;', "'")
+		.replaceAll('&lt;', '<')
+		.replaceAll('&gt;', '>')
+		.replaceAll('&amp;', '&');
+}
+
+function escapeRegExp(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function assertSupportedHtmlDocument(raw: unknown): void {

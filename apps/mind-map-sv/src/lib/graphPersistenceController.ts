@@ -1,4 +1,7 @@
 import type { MultigraphData } from './components/ui/types/multigraph';
+import { base64ToBlob, blobToBase64 } from './assets/assetEncoding';
+import type { GraphAssetStore } from './assets/assetStore';
+import { referencedAssetIds } from './components/ui/Multigraph/lib/graph';
 import {
 	documentStatusHasUndownloadedChanges,
 	documentStatusForGraph,
@@ -88,6 +91,7 @@ export type GraphPersistenceControllerDeps = {
 	createDocumentId?: () => string;
 	now?: () => number;
 	openUnsupportedHtmlFile?: (html: string) => boolean;
+	assetStore?: GraphAssetStore;
 	chooseEmbeddedDocumentConflict?: (context: {
 		documentId: string;
 		draftGraph: MultigraphData;
@@ -201,6 +205,9 @@ export class GraphPersistenceController {
 		const recoveredDraft = shouldRecoverDraft && !graphDataEquals(savedDraft.data, doc.data);
 		const nextGraph = shouldRecoverDraft ? savedDraft.data : doc.data;
 		const nextViewState = shouldRecoverDraft ? savedDraft.viewState : doc.viewState;
+		if (shouldOpenFile) {
+			await this.hydrateEmbeddedAssets(graphId, doc);
+		}
 
 		this.baseline = { kind: 'file', graph: doc.data };
 		this.recoveredDraft = recoveredDraft;
@@ -250,18 +257,24 @@ export class GraphPersistenceController {
 		}
 	}
 
-	exportGraphDocument(htmlShell?: string): GraphFileArtifact {
+	async exportGraphDocument(htmlShell?: string): Promise<GraphFileArtifact> {
 		const documentId = this.view.documentId ?? this.nextDocumentId();
 		if (this.view.documentId === null) {
 			this.update({ documentId });
 		}
+		const embeddedAssets = await this.embeddedAssetsForExport(this.view.graph, [
+			this.assetScope(),
+			this.view.loadedGraphId || DEFAULT_GRAPH_ID,
+			documentDraftGraphId(documentId)
+		]);
 		const artifact = createGraphFileArtifact(
 			this.view.loadedGraphId || DEFAULT_GRAPH_ID,
 			{
 				data: this.view.graph,
 				viewState: this.view.viewState,
 				documentId,
-				exportedAt: this.deps.now?.() ?? Date.now()
+				exportedAt: this.deps.now?.() ?? Date.now(),
+				embeddedAssets
 			},
 			{
 				htmlShell
@@ -347,6 +360,7 @@ export class GraphPersistenceController {
 			graphGeneration: this.graphGeneration
 		});
 		this.scheduler.schedule(graphId, imported.data, imported.viewState);
+		await this.hydrateEmbeddedAssets(graphId, imported);
 		await this.flushPendingSave();
 		await this.refreshGraphList();
 		this.update({
@@ -473,6 +487,53 @@ export class GraphPersistenceController {
 
 	private async refreshGraphList(): Promise<void> {
 		this.update({ graphSummaries: await this.deps.persistence.list() });
+	}
+
+	private assetScope(): string {
+		if (this.view.documentId) return documentDraftGraphId(this.view.documentId);
+		return this.view.loadedGraphId || DEFAULT_GRAPH_ID;
+	}
+
+	private async embeddedAssetsForExport(
+		graph: MultigraphData,
+		scopes: string[]
+	): Promise<NonNullable<GraphFileDocument['embeddedAssets']>> {
+		const store = this.deps.assetStore;
+		if (!store) return [];
+		const embeddedAssets: NonNullable<GraphFileDocument['embeddedAssets']> = [];
+		for (const assetId of referencedAssetIds(graph)) {
+			let storedAsset: Awaited<ReturnType<GraphAssetStore['get']>> | null = null;
+			for (const scope of [...new Set(scopes)]) {
+				storedAsset = await store.get(scope, assetId);
+				if (storedAsset.ok) break;
+			}
+			if (!storedAsset?.ok) continue;
+			embeddedAssets.push({
+				assetId,
+				mimeType: storedAsset.value.mimeType,
+				name: storedAsset.value.name,
+				size: storedAsset.value.size,
+				base64: await blobToBase64(storedAsset.value.blob)
+			});
+		}
+		return embeddedAssets;
+	}
+
+	private async hydrateEmbeddedAssets(scope: string, doc: GraphFileDocument): Promise<void> {
+		const store = this.deps.assetStore;
+		if (!store) return;
+		for (const asset of doc.embeddedAssets ?? []) {
+			await store.put({
+				scope,
+				assetId: asset.assetId,
+				blob: base64ToBlob(asset.base64, asset.mimeType),
+				mimeType: asset.mimeType,
+				name: asset.name,
+				size: asset.size,
+				updatedAt: this.deps.now?.() ?? Date.now()
+			});
+		}
+		await store.deleteUnreferenced(scope, referencedAssetIds(doc.data));
 	}
 
 	private update(patch: Partial<ControllerView>): void {

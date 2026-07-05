@@ -3,13 +3,22 @@
 	import Node from '$lib/components/ui/Node/Node.svelte';
 	import DuplicateEdgeDialog from './DuplicateEdgeDialog.svelte';
 	import GraphQueryPanel from './GraphQueryPanel.svelte';
+	import ImageZoomSurface from './ImageZoomSurface.svelte';
 	import NodeActionMenu from './NodeActionMenu.svelte';
 	import NodeEditSheet from './NodeEditSheet.svelte';
+	import NodeFocusSurface from './NodeFocusSurface.svelte';
 	import Stage from './Stage.svelte';
 	import TagColorLegend from './TagColorLegend.svelte';
-	import type { NodeData } from '../types/node';
+	import type { GraphAssetStore } from '$lib/assets/assetStore';
+	import { prefersReducedMotion } from '$lib/reducedMotion';
+	import type { NodeData, NodeImageContent } from '../types/node';
 	import type { EdgeData } from '../types/edge';
-	import type { MultigraphData, Point, TagColorNamespace } from '../types/multigraph';
+	import type {
+		GraphAssetMetadata,
+		MultigraphData,
+		Point,
+		TagColorNamespace
+	} from '../types/multigraph';
 	import { effectiveHitRadius, isPointInCircle } from './lib/hitTest.js';
 	import {
 		edgeArrowScale,
@@ -26,6 +35,7 @@
 	} from './lib/edgeOcclusion.js';
 	import {
 		addEdge,
+		addNodeImageContent,
 		addNode,
 		commitInlineTitleSyntax,
 		deleteTagEverywhere,
@@ -34,10 +44,13 @@
 		moveNode,
 		removeEdge,
 		removeNode,
+		removeNodeImageContent,
+		moveNodeContentBlock,
 		setNodePinned,
 		setTagColor,
 		togglePinned,
 		updateEdge,
+		updateNodeImageContent,
 		updateNodeContent
 	} from './lib/graph.js';
 	import { deriveGraphLayout, withSettledGraphPositions } from './lib/graphLayout.js';
@@ -88,6 +101,14 @@
 		type NodeEnterAnimation
 	} from './lib/elementTransitions.js';
 	import { computeParallelEdgeOffsets } from './lib/parallelEdges.js';
+	import { FocusRuntime } from './lib/focusRuntime.svelte.js';
+	import {
+		EMPTY_OVERSHOOT_STATE,
+		overshootInput,
+		resetOvershootAfterCommit,
+		focalNodeForPoint,
+		type OvershootState
+	} from './lib/nodeFocus.js';
 
 	const CENTERED_POSITION: Point = { x: 0, y: 0 };
 
@@ -96,7 +117,8 @@
 			nodes: [],
 			edges: [],
 			posByNodeId: {},
-			tagColorConfig: { nodeTags: {}, edgeTags: {} }
+			tagColorConfig: { nodeTags: {}, edgeTags: {} },
+			assets: {}
 		},
 		graphGeneration = 0,
 		defaultPrimaryNodeId = '',
@@ -107,7 +129,9 @@
 		onViewStateChange,
 		nodeRenderOverrides,
 		edgeRenderOverrides,
-		exitingBuffer
+		exitingBuffer,
+		assetStore = null,
+		assetScope = ''
 	}: {
 		multigraphData: MultigraphData;
 		graphGeneration?: number;
@@ -123,13 +147,16 @@
 		edgeRenderOverrides?: Record<string, { opacity?: number }>;
 		/** Elements that have left the visible set but are still animating out. Rendered but non-interactive. */
 		exitingBuffer?: ExitingBuffer;
+		assetStore?: GraphAssetStore | null;
+		assetScope?: string;
 	} = $props();
 
 	let graph = $state<MultigraphData>({
 		nodes: [],
 		edges: [],
 		posByNodeId: {},
-		tagColorConfig: { nodeTags: {}, edgeTags: {} }
+		tagColorConfig: { nodeTags: {}, edgeTags: {} },
+		assets: {}
 	});
 	let primaryNodeId = $state('');
 	let activeDragNodeId = $state<string | null>(null);
@@ -155,7 +182,13 @@
 	let lastPinnedNodeId = $state<string | null>(null);
 	let lastSyncedGeneration = $state(-1);
 	let lastInitialTitleEditKey = $state('');
-	let stageScale = $state(1);
+	let stageViewState = $state<ViewState>({ panX: 0, panY: 0, scale: 1 });
+	const stageScale = $derived(stageViewState.scale);
+	let focusOvershoot = $state<OvershootState>(EMPTY_OVERSHOOT_STATE);
+	let imageZoomOvershoot = $state<OvershootState>(EMPTY_OVERSHOOT_STATE);
+	let reduceMotion = $derived(prefersReducedMotion());
+	let imageZoom = $state<{ image: NodeImageContent; url: string } | null>(null);
+	const focusRuntime = new FocusRuntime();
 
 	/** Internal enter animations for nodes added by the user (scale 0 → target). */
 	let nodeEnterAnimations = $state<Record<string, NodeEnterAnimation>>({});
@@ -277,6 +310,11 @@
 		const menu = actionMenu;
 		return menu ? (graph.nodes.find((node) => node.id === menu.nodeId) ?? null) : null;
 	});
+	const focusedNode = $derived.by(() =>
+		focusRuntime.focusedNodeId
+			? (graph.nodes.find((node) => node.id === focusRuntime.focusedNodeId) ?? null)
+			: null
+	);
 
 	/** Merged exiting buffer: external prop (stories/T03 testing) + internal (user actions). */
 	const effectiveExitingBuffer = $derived.by((): ExitingBuffer => {
@@ -344,6 +382,14 @@
 	$effect(() => {
 		if (typeof window === 'undefined') return;
 		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key === 'Escape' && imageZoom) {
+				imageZoom = null;
+				return;
+			}
+			if (event.key === 'Escape' && focusRuntime.isFocused) {
+				closeFocus();
+				return;
+			}
 			if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'k') return;
 			event.preventDefault();
 			closeOverlays();
@@ -515,6 +561,17 @@
 		editNodeId = nodeId;
 	}
 
+	function openFocus(node: NodeData) {
+		closeOverlays();
+		focusRuntime.open(node);
+	}
+
+	function closeFocus() {
+		focusRuntime.close();
+		imageZoom = null;
+		focusOvershoot = resetOvershootAfterCommit(layoutRuntime.now());
+	}
+
 	function closeOverlays() {
 		actionMenu = null;
 		editNodeId = null;
@@ -523,6 +580,46 @@
 		tagColorLegendOpen = false;
 		graphQueryPanelOpen = false;
 		graphQueryPreviewText = null;
+	}
+
+	function handleBlockedStageZoom(input: {
+		direction: 'in' | 'out';
+		focalPoint: Point;
+		blockedFactor: number;
+	}) {
+		if (input.direction !== 'in' || focusRuntime.isFocused || !graphRef) return;
+		const rect = graphRef.getBoundingClientRect();
+		const candidates = visibleGraph.nodes.flatMap((node, index) => {
+			const position = graphLayout.posByNodeId[node.id];
+			const radius = graphLayout.radiusByNodeId[node.id];
+			if (!position || radius === undefined) return [];
+			return [{ node, position, radius, zIndex: index }];
+		});
+		const candidate = focalNodeForPoint(candidates, input.focalPoint, rect, stageViewState);
+		if (!candidate) {
+			focusOvershoot = EMPTY_OVERSHOOT_STATE;
+			focusRuntime.preview(0);
+			return;
+		}
+		focusOvershoot = overshootInput(focusOvershoot, input.blockedFactor, layoutRuntime.now());
+		focusRuntime.preview(focusOvershoot.progress);
+		if (focusOvershoot.committed) {
+			openFocus(candidate.node);
+			focusOvershoot = resetOvershootAfterCommit(layoutRuntime.now());
+		}
+	}
+
+	function handleFocusZoomOutBoundary(delta: number) {
+		focusOvershoot = overshootInput(focusOvershoot, delta, layoutRuntime.now());
+		if (focusOvershoot.committed) closeFocus();
+	}
+
+	function handleImageZoomOutBoundary(delta: number) {
+		imageZoomOvershoot = overshootInput(imageZoomOvershoot, delta, layoutRuntime.now());
+		if (imageZoomOvershoot.committed) {
+			imageZoom = null;
+			imageZoomOvershoot = resetOvershootAfterCommit(layoutRuntime.now());
+		}
 	}
 
 	function toggleTagColorLegend() {
@@ -615,6 +712,67 @@
 	) {
 		commitUserGraph(updateNodeContent(graph, nodeId, content));
 		closeOverlays();
+	}
+
+	async function addImageToNode(
+		nodeId: string,
+		file: File,
+		details: { alt: string; caption?: string }
+	): Promise<'added' | 'unsupported' | 'store-failed'> {
+		if (!file.type.startsWith('image/')) return 'unsupported';
+		if (!assetStore || !assetScope) return 'store-failed';
+		const assetId =
+			typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+				? crypto.randomUUID()
+				: `asset-${Date.now().toString(36)}`;
+		const stored = await assetStore.put({
+			scope: assetScope,
+			assetId,
+			blob: file,
+			mimeType: file.type,
+			name: file.name,
+			size: file.size,
+			updatedAt: Date.now()
+		});
+		if (!stored.ok) return 'store-failed';
+		const asset: GraphAssetMetadata = {
+			id: assetId,
+			kind: 'image',
+			mimeType: file.type,
+			name: file.name,
+			size: file.size,
+			createdAt: Date.now()
+		};
+		commitUserGraph(
+			addNodeImageContent(
+				graph,
+				nodeId,
+				{ type: 'image', assetId, alt: details.alt, caption: details.caption },
+				asset
+			)
+		);
+		return 'added';
+	}
+
+	function saveNodeImage(
+		nodeId: string,
+		assetId: string,
+		details: { alt: string; caption?: string }
+	) {
+		commitUserGraph(updateNodeImageContent(graph, nodeId, assetId, details));
+	}
+
+	function moveNodeImage(nodeId: string, fromIndex: number, direction: -1 | 1) {
+		commitUserGraph(moveNodeContentBlock(graph, nodeId, fromIndex, fromIndex + direction));
+	}
+
+	async function deleteNodeImage(nodeId: string, assetId: string) {
+		const result = removeNodeImageContent(graph, nodeId, assetId);
+		commitUserGraph(result.graph);
+		if (!assetStore || !assetScope) return;
+		for (const removedAssetId of result.removedAssetIds) {
+			await assetStore.delete(assetScope, removedAssetId);
+		}
 	}
 
 	function saveEdgeContent(edgeId: string, patch: Parameters<typeof updateEdge>[2]) {
@@ -746,8 +904,9 @@
 		onNodeDoubleClickDropOntoBackground={handleNodeDoubleClickDropOntoBackground}
 		onNodeLongPress={handleNodeLongPress}
 		onViewStateLiveChange={(state) => {
-			stageScale = state.scale;
+			stageViewState = state;
 		}}
+		onBlockedZoom={handleBlockedStageZoom}
 		{onViewStateChange}
 	>
 		<div class="edges" aria-hidden="true">
@@ -970,7 +1129,6 @@
 				>
 					<Node
 						nodeData={node}
-						isOpen={false}
 						isTitleEditing={titleEditContext?.nodeId === node.id}
 						borderSegments={nodeBorderSegments(node, graph.tagColorConfig.nodeTags)}
 						spotlightColor={queryNodeState?.role === 'spotlight'
@@ -1013,7 +1171,6 @@
 				>
 					<Node
 						nodeData={bufferedNode}
-						isOpen={false}
 						isTitleEditing={false}
 						borderSegments={nodeBorderSegments(bufferedNode, graph.tagColorConfig.nodeTags)}
 					/>
@@ -1035,7 +1192,6 @@
 			>
 				<Node
 					nodeData={entry.nodeData}
-					isOpen={false}
 					isTitleEditing={false}
 					borderSegments={nodeBorderSegments(entry.nodeData, graph.tagColorConfig.nodeTags)}
 				/>
@@ -1052,6 +1208,7 @@
 				closeOverlays();
 			}}
 			onEdit={() => openEditSheet(actionMenuNode.id)}
+			onFocus={() => openFocus(actionMenuNode)}
 			onDelete={() => deleteNode(actionMenuNode.id)}
 			onClose={() => (actionMenu = null)}
 		/>
@@ -1062,12 +1219,42 @@
 			node={editNode}
 			nodes={graph.nodes}
 			edges={graph.edges}
+			assets={graph.assets ?? {}}
 			onSave={(content: { title: string; description: string; tags: string[] }) =>
 				saveNodeContent(editNode.id, content)}
+			onAddImage={(file, details) => addImageToNode(editNode.id, file, details)}
+			onSaveImage={(assetId, details) => saveNodeImage(editNode.id, assetId, details)}
+			onMoveImage={(fromIndex, direction) => moveNodeImage(editNode.id, fromIndex, direction)}
+			onDeleteImage={(assetId) => void deleteNodeImage(editNode.id, assetId)}
 			onSaveEdge={saveEdgeContent}
 			onCancel={() => (editNodeId = null)}
 			onTogglePinned={() => toggleNodePinned(editNode.id)}
 			onDelete={() => deleteNode(editNode.id)}
+		/>
+	{/if}
+
+	{#if focusedNode}
+		<NodeFocusSurface
+			node={focusedNode}
+			assets={graph.assets ?? {}}
+			{assetStore}
+			{assetScope}
+			{reduceMotion}
+			onClose={closeFocus}
+			onZoomOutBoundary={handleFocusZoomOutBoundary}
+			onImageOpen={(image, url) => {
+				imageZoom = { image, url };
+				imageZoomOvershoot = EMPTY_OVERSHOOT_STATE;
+			}}
+		/>
+	{/if}
+
+	{#if imageZoom}
+		<ImageZoomSurface
+			image={imageZoom.image}
+			url={imageZoom.url}
+			onClose={() => (imageZoom = null)}
+			onZoomOutBoundary={handleImageZoomOutBoundary}
 		/>
 	{/if}
 

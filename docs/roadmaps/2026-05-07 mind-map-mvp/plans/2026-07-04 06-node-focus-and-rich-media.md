@@ -3,7 +3,7 @@
 **Created:** 2026-07-04
 **Author:** Codex agent
 **Milestone:** [milestones/06-node-focus-and-rich-media.md](../milestones/06-node-focus-and-rich-media.md)
-**Status:** draft
+**Status:** done
 **Total estimated effort:** XL (13 tasks across 7 waves; pre-work wave,
 focus-mode foundation, asset storage, HTML asset propagation, and image zoom)
 
@@ -531,3 +531,11 @@ interface is stable; coordinate on shared asset types before starting wave 6.
   use `fake-indexeddb` in the server Vitest project. Dropped browser-Back exit
   and the storage-use display from scope. Fixed the plan date (was dated
   2026-07-05, created 2026-07-04).
+- 2026-07-05: Execution started in a single Codex thread. Parallel subagents
+  were not used because the current task did not explicitly request delegation.
+- 2026-07-05: Implemented in one local branch with focus overlays, v4 content
+  and asset metadata, IndexedDB-backed draft blobs, HTML asset embedding, image
+  attachment editing, and deep image zoom. Validation passed: `CI=true pnpm
+--filter mind-map-sv lint`, `CI=true pnpm --filter mind-map-sv check`, `pnpm
+--filter mind-map-sv test:unit -- --run`, `pnpm --filter mind-map-sv build`,
+  and `CI=true pnpm --filter mind-map-sv test:e2e`.

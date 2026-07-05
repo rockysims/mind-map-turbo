@@ -3,6 +3,7 @@
 	import { onMount } from 'svelte';
 	import { SvelteURLSearchParams } from 'svelte/reactivity';
 	import { APP_CONFIG } from '$lib/appConfig';
+	import { IndexedDbGraphAssetStore } from '$lib/assets/assetStore';
 	import {
 		downloadFileArtifact,
 		OPEN_HTML_FILE_FROM_PICKER_SESSION_KEY,
@@ -43,6 +44,7 @@
 	const EDIT_ROOT_PARAM = 'editRoot';
 
 	let persisted = $state<PersistedGraph | null>(null);
+	let graphAssetStore = $state<IndexedDbGraphAssetStore | null>(null);
 	let selectedGraphId = $state(graphIdFromUrl(page.url));
 	let initialTitleEditNodeId = $state<string | null>(null);
 	let embeddedDocumentConflict = $state<{
@@ -61,6 +63,8 @@
 			storage: localStorage,
 			namespace: APP_CONFIG.persistence.storageNamespace
 		});
+		const assetStore = new IndexedDbGraphAssetStore();
+		graphAssetStore = assetStore;
 
 		const selectedGraphFileText = consumeOpenFileWindowName() ?? consumeOpenFileText();
 		const embeddedGraph =
@@ -107,6 +111,7 @@
 				),
 			minScale: APP_CONFIG.multigraph.zoom.minScale,
 			maxScale: APP_CONFIG.multigraph.zoom.maxScale,
+			assetStore,
 			createDocumentId: () =>
 				typeof crypto.randomUUID === 'function'
 					? crypto.randomUUID()
@@ -221,7 +226,7 @@
 
 	async function handleDownload(): Promise<void> {
 		if (!persisted) return;
-		downloadFileArtifact(persisted.exportGraphDocument(await exportHtmlShell()));
+		downloadFileArtifact(await persisted.exportGraphDocument(await exportHtmlShell()));
 	}
 
 	function readEmbeddedGraphDocument(): GraphFileDocument | null {
@@ -413,6 +418,8 @@
 				initialViewState={persisted.viewState}
 				{initialTitleEditNodeId}
 				{defaultPrimaryNodeId}
+				assetStore={graphAssetStore}
+				assetScope={persisted.loadedGraphId}
 				onMultigraphChange={(graph) => persisted?.notifyGraphChanged(graph, { syncView: true })}
 				onViewStateChange={(viewState) =>
 					persisted?.notifyViewStateChanged(viewState, { syncView: true })}

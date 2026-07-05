@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { makeGraph } from './components/ui/Multigraph/lib/testFixtures';
 import type { MultigraphData } from './components/ui/types/multigraph';
-import { parseGraphFileText, serializeGraphHtmlFile } from './graphFile';
+import { GRAPH_HTML_READER_VERSION, parseGraphFileText, serializeGraphHtmlFile } from './graphFile';
 import { CURRENT_SCHEMA_VERSION, NEUTRAL_VIEW_STATE, type ViewState } from './migrations';
 import {
 	GraphPersistenceController,
@@ -241,7 +241,7 @@ describe('GraphPersistenceController', () => {
 		const confirmNewGraphReplace = vi.fn(() => true);
 		const { controller } = setup({ confirmNewGraphReplace });
 		await controller.load('active');
-		controller.exportGraphDocument();
+		await controller.exportGraphDocument();
 
 		await controller.createGraph();
 
@@ -507,7 +507,9 @@ describe('GraphPersistenceController', () => {
 		controller.notifyGraphChanged(graph, { syncView: true });
 		controller.notifyViewStateChanged(viewState, { syncView: true });
 
-		const artifact = controller.exportGraphDocument('<!doctype html><html><body></body></html>');
+		const artifact = await controller.exportGraphDocument(
+			'<!doctype html><html><body></body></html>'
+		);
 		const exported = parseGraphFileText(artifact.content);
 		expect(artifact).toMatchObject({
 			filename: 'active.html',
@@ -617,7 +619,7 @@ describe('GraphPersistenceController', () => {
 		const html = serializeGraphHtmlFile({
 			data: makeGraph({ nodeCount: 1 }),
 			viewState: NEUTRAL_VIEW_STATE
-		}).replace('"minReaderVersion": 1', '"minReaderVersion": 999');
+		}).replace(`"minReaderVersion": ${GRAPH_HTML_READER_VERSION}`, '"minReaderVersion": 999');
 
 		const result = await controller.importGraphDocument(html);
 

@@ -32,6 +32,15 @@ export const APP_CONFIG = {
 			minScale: 0.05, // minimum stage zoom scale
 			maxScale: 4 // maximum stage zoom scale
 		},
+		focus: {
+			overshootCommitThreshold: 0.95, // accumulated blocked zoom needed to enter/exit
+			overshootDecayHalfLifeMs: 180, // decay speed after a boundary bump pauses
+			overshootHysteresisMs: 320, // cooldown after a committed transition
+			eligibilityCoverageRatio: 1, // focal point must be inside the projected node circle
+			entryTransitionMs: 220, // focus overlay morph duration
+			imageZoomMaxScale: 8, // deepest image inspection zoom
+			imageZoomMinScale: 1 // image fit floor
+		},
 		tagSyntax: {
 			nodeTagMarker: '#', // leading marker for node tags in title/query shortcuts
 			edgeTagMarker: '@' // leading marker for edge tags in title/query shortcuts

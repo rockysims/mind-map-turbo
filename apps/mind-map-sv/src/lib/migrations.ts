@@ -1,8 +1,13 @@
 import type { EdgeData } from './components/ui/types/edge';
-import type { MultigraphData, Point, TagColorConfig } from './components/ui/types/multigraph';
-import type { NodeData } from './components/ui/types/node';
+import type {
+	GraphAssetMetadata,
+	MultigraphData,
+	Point,
+	TagColorConfig
+} from './components/ui/types/multigraph';
+import type { NodeContentBlock, NodeData } from './components/ui/types/node';
 
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 const EMPTY_TAG_COLOR_CONFIG: TagColorConfig = {
 	nodeTags: {},
@@ -53,7 +58,9 @@ export function unwrapPersistedGraph(payload: unknown): MultigraphData {
 			!isMultigraphData(payload.data, {
 				allowLegacyTags: true,
 				allowLegacyEdgeColor: true,
-				allowMissingTagColorConfig: true
+				allowMissingTagColorConfig: true,
+				allowMissingContent: true,
+				allowMissingAssets: true
 			})
 		) {
 			throw new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload');
@@ -65,12 +72,26 @@ export function unwrapPersistedGraph(payload: unknown): MultigraphData {
 		if (
 			!isMultigraphData(payload.data, {
 				allowLegacyEdgeColor: true,
-				allowMissingTagColorConfig: true
+				allowMissingTagColorConfig: true,
+				allowMissingContent: true,
+				allowMissingAssets: true
 			})
 		) {
 			throw new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload');
 		}
 		return migrateLegacyGraphData(payload.data);
+	}
+
+	if (payload.schemaVersion === 3) {
+		if (
+			!isMultigraphData(payload.data, {
+				allowMissingContent: true,
+				allowMissingAssets: true
+			})
+		) {
+			throw new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload');
+		}
+		return migrateGraphDataToV4(payload.data);
 	}
 
 	if (payload.schemaVersion !== CURRENT_SCHEMA_VERSION) {
@@ -80,7 +101,12 @@ export function unwrapPersistedGraph(payload: unknown): MultigraphData {
 		);
 	}
 
-	if (!isMultigraphData(payload.data)) {
+	if (
+		!isMultigraphData(payload.data, {
+			allowMissingContent: true,
+			allowMissingAssets: true
+		})
+	) {
 		throw new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload');
 	}
 
@@ -100,7 +126,7 @@ function migrateLegacyGraphData(
 	data: MultigraphData,
 	options: { allowMissingTags?: boolean } = {}
 ): MultigraphData {
-	return {
+	return migrateGraphDataToV4({
 		...data,
 		nodes: data.nodes.map((node) => ({
 			...node,
@@ -108,6 +134,18 @@ function migrateLegacyGraphData(
 		})),
 		edges: data.edges.map(migrateLegacyEdge),
 		tagColorConfig: { ...EMPTY_TAG_COLOR_CONFIG }
+	});
+}
+
+function migrateGraphDataToV4(data: MultigraphData): MultigraphData {
+	return {
+		...data,
+		nodes: data.nodes.map((node) => ({
+			...node,
+			content: node.content ?? []
+		})),
+		tagColorConfig: data.tagColorConfig ?? { ...EMPTY_TAG_COLOR_CONFIG },
+		assets: data.assets ?? {}
 	};
 }
 
@@ -117,6 +155,8 @@ function isMultigraphData(
 		allowLegacyTags?: boolean;
 		allowLegacyEdgeColor?: boolean;
 		allowMissingTagColorConfig?: boolean;
+		allowMissingContent?: boolean;
+		allowMissingAssets?: boolean;
 	} = {}
 ): value is MultigraphData {
 	if (!isRecord(value)) return false;
@@ -130,13 +170,16 @@ function isMultigraphData(
 		Object.values(value.posByNodeId).every(isPoint) &&
 		(options.allowMissingTagColorConfig
 			? value.tagColorConfig === undefined || isTagColorConfig(value.tagColorConfig)
-			: isTagColorConfig(value.tagColorConfig))
+			: isTagColorConfig(value.tagColorConfig)) &&
+		(options.allowMissingAssets
+			? value.assets === undefined || isAssetMetadataRecord(value.assets)
+			: isAssetMetadataRecord(value.assets))
 	);
 }
 
 function isNodeData(
 	value: unknown,
-	options: { allowLegacyTags?: boolean } = {}
+	options: { allowLegacyTags?: boolean; allowMissingContent?: boolean } = {}
 ): value is NodeData {
 	return (
 		isRecord(value) &&
@@ -146,7 +189,10 @@ function isNodeData(
 		(options.allowLegacyTags
 			? value.tags === undefined || isStringArray(value.tags)
 			: isStringArray(value.tags)) &&
-		(value.pinned === undefined || typeof value.pinned === 'boolean')
+		(value.pinned === undefined || typeof value.pinned === 'boolean') &&
+		(options.allowMissingContent
+			? value.content === undefined || isNodeContent(value.content)
+			: isNodeContent(value.content))
 	);
 }
 
@@ -189,6 +235,40 @@ function isStringArray(value: unknown): value is string[] {
 
 function isTagColorConfig(value: unknown): value is TagColorConfig {
 	return isRecord(value) && isStringRecord(value.nodeTags) && isStringRecord(value.edgeTags);
+}
+
+function isNodeContent(value: unknown): value is NodeContentBlock[] {
+	return Array.isArray(value) && value.every(isNodeContentBlock);
+}
+
+function isNodeContentBlock(value: unknown): value is NodeContentBlock {
+	return (
+		isRecord(value) &&
+		value.type === 'image' &&
+		typeof value.assetId === 'string' &&
+		typeof value.alt === 'string' &&
+		(value.caption === undefined || typeof value.caption === 'string')
+	);
+}
+
+function isAssetMetadataRecord(value: unknown): value is Record<string, GraphAssetMetadata> {
+	return isRecord(value) && Object.values(value).every(isAssetMetadata);
+}
+
+function isAssetMetadata(value: unknown): value is GraphAssetMetadata {
+	return (
+		isRecord(value) &&
+		typeof value.id === 'string' &&
+		value.kind === 'image' &&
+		typeof value.mimeType === 'string' &&
+		value.mimeType.startsWith('image/') &&
+		(value.name === undefined || typeof value.name === 'string') &&
+		typeof value.size === 'number' &&
+		Number.isFinite(value.size) &&
+		value.size >= 0 &&
+		typeof value.createdAt === 'number' &&
+		Number.isFinite(value.createdAt)
+	);
 }
 
 function isStringRecord(value: unknown): value is Record<string, string> {

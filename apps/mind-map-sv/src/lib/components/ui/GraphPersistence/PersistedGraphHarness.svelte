@@ -125,8 +125,8 @@
 		};
 	}
 
-	function handleDownload(): void {
-		lastDownload = persisted.exportGraphDocument().content;
+	async function handleDownload(): Promise<void> {
+		lastDownload = (await persisted.exportGraphDocument()).content;
 	}
 
 	async function handleImportLastDownload(): Promise<void> {
@@ -159,7 +159,7 @@
 	<GraphToolbar
 		notice={persisted.notice}
 		onNewGraph={() => void persisted.createGraph()}
-		onDownload={handleDownload}
+		onDownload={() => void handleDownload()}
 	/>
 
 	<div class="harness-actions" aria-label="Story harness controls">

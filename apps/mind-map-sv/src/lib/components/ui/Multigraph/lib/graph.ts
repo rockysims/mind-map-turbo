@@ -1,6 +1,11 @@
 import type { EdgeData } from '../../types/edge';
-import type { MultigraphData, Point, TagColorNamespace } from '../../types/multigraph';
-import type { NodeData } from '../../types/node';
+import type {
+	GraphAssetMetadata,
+	MultigraphData,
+	Point,
+	TagColorNamespace
+} from '../../types/multigraph';
+import type { NodeData, NodeImageContent } from '../../types/node';
 import { parseTitleSyntax } from './titleSyntax';
 
 export interface AddNodeInput {
@@ -177,7 +182,7 @@ export function setNodePinned(
 export function updateNodeContent(
 	data: MultigraphData,
 	nodeId: string,
-	content: Pick<NodeData, 'title' | 'description'> & Partial<Pick<NodeData, 'tags'>>
+	content: Pick<NodeData, 'title' | 'description'> & Partial<Pick<NodeData, 'tags' | 'content'>>
 ): MultigraphData {
 	if (!hasNode(data, nodeId)) return data;
 
@@ -187,6 +192,108 @@ export function updateNodeContent(
 			node.id === nodeId ? { ...node, ...content, title: normalizeNodeTitle(content.title) } : node
 		)
 	};
+}
+
+export function addNodeImageContent(
+	data: MultigraphData,
+	nodeId: string,
+	image: NodeImageContent,
+	asset: GraphAssetMetadata
+): MultigraphData {
+	if (!hasNode(data, nodeId)) return data;
+
+	return {
+		...data,
+		assets: {
+			...(data.assets ?? {}),
+			[asset.id]: asset
+		},
+		nodes: data.nodes.map((node) =>
+			node.id === nodeId ? { ...node, content: [...(node.content ?? []), image] } : node
+		)
+	};
+}
+
+export function updateNodeImageContent(
+	data: MultigraphData,
+	nodeId: string,
+	assetId: string,
+	patch: Pick<NodeImageContent, 'alt'> & Partial<Pick<NodeImageContent, 'caption'>>
+): MultigraphData {
+	if (!hasNode(data, nodeId)) return data;
+
+	return {
+		...data,
+		nodes: data.nodes.map((node) =>
+			node.id === nodeId
+				? {
+						...node,
+						content: (node.content ?? []).map((block) =>
+							block.type === 'image' && block.assetId === assetId ? { ...block, ...patch } : block
+						)
+					}
+				: node
+		)
+	};
+}
+
+export function moveNodeContentBlock(
+	data: MultigraphData,
+	nodeId: string,
+	fromIndex: number,
+	toIndex: number
+): MultigraphData {
+	const node = data.nodes.find((candidate) => candidate.id === nodeId);
+	if (!node) return data;
+	const content = node.content ?? [];
+	if (fromIndex < 0 || fromIndex >= content.length || toIndex < 0 || toIndex >= content.length) {
+		return data;
+	}
+	const nextContent = [...content];
+	const [block] = nextContent.splice(fromIndex, 1);
+	if (!block) return data;
+	nextContent.splice(toIndex, 0, block);
+	return {
+		...data,
+		nodes: data.nodes.map((candidate) =>
+			candidate.id === nodeId ? { ...candidate, content: nextContent } : candidate
+		)
+	};
+}
+
+export function removeNodeImageContent(
+	data: MultigraphData,
+	nodeId: string,
+	assetId: string
+): { graph: MultigraphData; removedAssetIds: string[] } {
+	if (!hasNode(data, nodeId)) return { graph: data, removedAssetIds: [] };
+	const nextGraph = {
+		...data,
+		nodes: data.nodes.map((node) =>
+			node.id === nodeId
+				? {
+						...node,
+						content: (node.content ?? []).filter(
+							(block) => !(block.type === 'image' && block.assetId === assetId)
+						)
+					}
+				: node
+		)
+	};
+	if (isAssetReferenced(nextGraph, assetId)) return { graph: nextGraph, removedAssetIds: [] };
+	const nextAssets = { ...(nextGraph.assets ?? {}) };
+	delete nextAssets[assetId];
+	return { graph: { ...nextGraph, assets: nextAssets }, removedAssetIds: [assetId] };
+}
+
+export function referencedAssetIds(data: MultigraphData): Set<string> {
+	const ids = new Set<string>();
+	for (const node of data.nodes) {
+		for (const block of node.content ?? []) {
+			if (block.type === 'image') ids.add(block.assetId);
+		}
+	}
+	return ids;
 }
 
 export function setTagColor(
@@ -298,6 +405,10 @@ export function neighborsOf(data: MultigraphData, nodeId: string): NodeData[] {
 
 function hasNode(data: MultigraphData, nodeId: string): boolean {
 	return data.nodes.some((node) => node.id === nodeId);
+}
+
+function isAssetReferenced(data: MultigraphData, assetId: string): boolean {
+	return referencedAssetIds(data).has(assetId);
 }
 
 function isIncidentEdge(edge: EdgeData, nodeId: string): boolean {

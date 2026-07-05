@@ -5,6 +5,7 @@ import {
 } from './components/ui/Multigraph/lib/testFixtures';
 import {
 	GRAPH_HTML_PAYLOAD_SCRIPT_ID,
+	GRAPH_HTML_READER_VERSION,
 	createGraphFileArtifact,
 	parseGraphFile,
 	parseGraphFileText,
@@ -125,7 +126,7 @@ describe('HTML graph files', () => {
 
 	it('throws unsupported-app-version for newer HTML document readers', () => {
 		const html = serializeGraphHtmlFile(makeDoc()).replace(
-			'"minReaderVersion": 1',
+			`"minReaderVersion": ${GRAPH_HTML_READER_VERSION}`,
 			'"minReaderVersion": 999'
 		);
 

@@ -1,6 +1,6 @@
 <script module lang="ts">
 	import { defineMeta } from '@storybook/addon-svelte-csf';
-	import { expect, within } from 'storybook/test';
+	import { expect } from 'storybook/test';
 
 	import { APP_CONFIG } from '$lib/appConfig';
 	import Node from '$lib/components/ui/Node/Node.svelte';
@@ -12,7 +12,6 @@
 		tags: [],
 		argTypes: {
 			nodeData: { control: 'object' },
-			isOpen: { control: 'boolean' },
 			borderSegments: { control: 'object' }
 		},
 		args: {
@@ -22,22 +21,16 @@
 				description: 'Node description',
 				tags: []
 			},
-			isOpen: false,
 			borderSegments: []
 		}
 	});
 
 	type PlayArgs = {
 		canvasElement: HTMLElement;
-		args: { nodeData: NodeData; isOpen: boolean };
+		args: { nodeData: NodeData };
 	};
 
-	async function playHandler(
-		{ canvasElement, args }: PlayArgs,
-		options: { short: boolean; open: boolean }
-	) {
-		const canvas = within(canvasElement);
-
+	async function playHandler({ canvasElement, args }: PlayArgs) {
 		// Get the node element and its children
 		const node = canvasElement.querySelector('.node');
 		expect(node).toBeInTheDocument();
@@ -54,37 +47,11 @@
 		const titleElement = titleEl as HTMLElement;
 		const expectedNodeTextFontSize = `${APP_CONFIG.multigraph.nodeTextFontSizePx}px`;
 		expect(window.getComputedStyle(titleElement).fontSize).toBe(expectedNodeTextFontSize);
-		if (!options.open || options.short) {
-			expect(titleElement.textContent).toBe(args.nodeData.title);
-		} else {
-			const displayedTitle = titleElement.textContent || '';
-			expect(args.nodeData.title.startsWith(displayedTitle)).toBe(true);
-		}
-
-		// Get description element (only for open nodes)
-		let descriptionElement: HTMLElement | null = null;
-		if (options.open) {
-			const descEl = canvasElement.querySelector('.node .description');
-			expect(descEl).not.toBeNull();
-			if (descEl === null) throw new Error('descriptionElement is null');
-			descriptionElement = descEl as HTMLElement;
-			if (options.short) {
-				descriptionElement = canvas.getByText(args.nodeData.description);
-			} else {
-				expect(descriptionElement.textContent).toBe(args.nodeData.description);
-			}
-		} else {
-			// Closed: description should not be visible
-			const descEl = canvasElement.querySelector('.node .description');
-			expect(descEl).toBeNull();
-		}
+		expect(titleElement.textContent).toBe(args.nodeData.title);
+		expect(canvasElement.querySelector('.node .description')).toBeNull();
 
 		// Test 1: Title is visible
 		expect(titleElement).toBeInTheDocument();
-
-		if (options.open) {
-			expect(descriptionElement).toBeInTheDocument();
-		}
 
 		// Check that title is within the square bounds
 		const squareRect = square!.getBoundingClientRect();
@@ -97,30 +64,10 @@
 		expect(titleRect.top).toBeGreaterThanOrEqual(squareRect.top - tolerance);
 		expect(titleRect.bottom).toBeLessThanOrEqual(squareRect.bottom + tolerance);
 
-		// For closed nodes: title should be centered vertically and horizontally in the square
-		if (!options.open) {
-			const squareCenterX = squareRect.left + squareRect.width / 2;
-			const squareCenterY = squareRect.top + squareRect.height / 2;
-			const titleCenterX = titleRect.left + titleRect.width / 2;
-			const titleCenterY = titleRect.top + titleRect.height / 2;
-
-			// Title center should be very close to square center (within 2px tolerance)
-			expect(Math.abs(titleCenterX - squareCenterX)).toBeLessThan(2);
-			expect(Math.abs(titleCenterY - squareCenterY)).toBeLessThan(2);
-		}
-
-		// Description checks (only for open nodes)
-		if (options.open && descriptionElement) {
-			const descriptionRect = descriptionElement.getBoundingClientRect();
-			const descriptionStyles = window.getComputedStyle(descriptionElement);
-			const marginRight = parseFloat(descriptionStyles.marginRight);
-			const descriptionEffectiveRight = descriptionRect.right + marginRight;
-			expect(descriptionStyles.fontSize).toBe(expectedNodeTextFontSize);
-			expect(descriptionRect.left).toBeGreaterThanOrEqual(squareRect.left);
-			expect(descriptionEffectiveRight).toBeLessThanOrEqual(squareRect.right);
-			expect(descriptionRect.top).toBeGreaterThanOrEqual(squareRect.top);
-			expect(descriptionRect.bottom).toBeLessThanOrEqual(squareRect.bottom);
-		}
+		const titleCenterX = titleRect.left + titleRect.width / 2;
+		const titleCenterY = titleRect.top + titleRect.height / 2;
+		expect(Math.abs(titleCenterX - (squareRect.left + squareRect.width / 2))).toBeLessThan(2);
+		expect(Math.abs(titleCenterY - (squareRect.top + squareRect.height / 2))).toBeLessThan(2);
 
 		// Test 2: Square is visibly centered in the circle
 		const circleRect = circle!.getBoundingClientRect();
@@ -165,28 +112,10 @@
 			: APP_CONFIG.multigraph.nodeBorderWidthPx;
 		expect(parseFloat(circleStyles.borderWidth)).toBe(expectedBorderWidth);
 		expect(radiusPercent).toBeGreaterThanOrEqual(0.5);
-
-		// Test 5–7: Description scrollbar, styling, and title-above-description (open only)
-		if (options.open && descriptionElement) {
-			const descriptionStyles = window.getComputedStyle(descriptionElement);
-			const hasVerticalScroll = descriptionElement.scrollHeight > descriptionElement.clientHeight;
-			if (options.short) {
-				expect(hasVerticalScroll).toBe(false);
-				expect(descriptionStyles.overflowY).not.toBe('scroll');
-			} else {
-				expect(hasVerticalScroll).toBe(true);
-			}
-			if (!options.short) {
-				expect(descriptionStyles.boxShadow).not.toBe('');
-				expect(parseFloat(descriptionStyles.borderRadius)).toBeGreaterThan(0);
-			}
-			const descriptionRect = descriptionElement.getBoundingClientRect();
-			expect(titleRect.bottom).toBeLessThanOrEqual(descriptionRect.top);
-		}
 	}
 
 	async function pinnedClosedPlayHandler(ctx: PlayArgs) {
-		await playHandler(ctx, { short: true, open: false });
+		await playHandler(ctx);
 
 		const node = ctx.canvasElement.querySelector('.node');
 		expect(node).toHaveAttribute('data-pinned', 'true');
@@ -209,10 +138,9 @@
 			description:
 				'Node description and of course the description is probably going to be fairly long. Certainly multiple sentences. Maybe more.',
 			tags: []
-		},
-		isOpen: false
+		}
 	}}
-	play={(ctx) => playHandler(ctx, { short: true, open: false })}
+	play={playHandler}
 />
 
 <Story
@@ -226,10 +154,9 @@
 					10
 				),
 			tags: []
-		},
-		isOpen: false
+		}
 	}}
-	play={(ctx) => playHandler(ctx, { short: false, open: false })}
+	play={playHandler}
 />
 
 <Story
@@ -241,24 +168,9 @@
 			description: 'Pinned node description',
 			tags: [],
 			pinned: true
-		},
-		isOpen: false
+		}
 	}}
 	play={pinnedClosedPlayHandler}
-/>
-
-<Story
-	name="ShortOpen"
-	args={{
-		nodeData: {
-			id: 'node id short open',
-			title: 'Node title short open',
-			description: 'Short description.',
-			tags: []
-		},
-		isOpen: true
-	}}
-	play={(ctx) => playHandler(ctx, { short: true, open: true })}
 />
 
 <Story
@@ -270,7 +182,6 @@
 			description: 'Tagged node description',
 			tags: ['topic', 'urgent']
 		},
-		isOpen: false,
 		borderSegments: [
 			{ color: '#ff0000', startTurn: 0, endTurn: 0.5 },
 			{ color: '#00ff00', startTurn: 0.5, endTurn: 1 }
@@ -280,21 +191,4 @@
 		const node = canvasElement.querySelector('.node');
 		expect(node).toHaveAttribute('data-tag-border', 'true');
 	}}
-/>
-
-<Story
-	name="LongOpen"
-	args={{
-		nodeData: {
-			id: 'node id long open',
-			title: 'Node title long open. '.repeat(10),
-			description:
-				'Node description and of course the description is probably going to be fairly long. Likely multiple sentences long. Maybe even more. '.repeat(
-					10
-				),
-			tags: []
-		},
-		isOpen: true
-	}}
-	play={(ctx) => playHandler(ctx, { short: false, open: true })}
 />

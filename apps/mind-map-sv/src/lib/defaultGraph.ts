@@ -9,7 +9,8 @@ export function createDefaultGraph(): MultigraphData {
 				title: 'Root',
 				description: 'Description for root node',
 				tags: [],
-				pinned: true
+				pinned: true,
+				content: []
 			}
 		],
 		edges: [],
@@ -17,7 +18,8 @@ export function createDefaultGraph(): MultigraphData {
 		tagColorConfig: {
 			nodeTags: {},
 			edgeTags: {}
-		}
+		},
+		assets: {}
 	};
 }
 

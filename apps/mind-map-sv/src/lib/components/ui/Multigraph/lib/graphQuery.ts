@@ -312,7 +312,14 @@ function matchingTag(tags: string[], queryTag: string): string | undefined {
 
 function nodeTextMatches(node: NodeData, queryText: string): boolean {
 	const needle = normalize(queryText);
-	return normalize(node.title).includes(needle) || normalize(node.description).includes(needle);
+	const contentText = (node.content ?? [])
+		.flatMap((block) => (block.type === 'image' ? [block.alt, block.caption ?? ''] : []))
+		.join(' ');
+	return (
+		normalize(node.title).includes(needle) ||
+		normalize(node.description).includes(needle) ||
+		normalize(contentText).includes(needle)
+	);
 }
 
 function isFocusedRole(role: GraphQueryRole | undefined): boolean {
