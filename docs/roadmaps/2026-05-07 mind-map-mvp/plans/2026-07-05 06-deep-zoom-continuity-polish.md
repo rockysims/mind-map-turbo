@@ -3,7 +3,7 @@
 **Created:** 2026-07-05
 **Author:** Codex agent
 **Milestone:** [milestones/06-node-focus-and-rich-media.md](../milestones/06-node-focus-and-rich-media.md)
-**Status:** draft
+**Status:** done
 **Total estimated effort:** L (4 tasks across 3 waves; conditional overzoom,
 node-to-focus morph, in-surface image zoom, and focused validation)
 
@@ -224,3 +224,5 @@ runtime and must stay sequential to avoid competing transition semantics.
 - 2026-07-05: Created from follow-up UX discussion after milestone 06 landed.
   Decision: treat image inspection as continuous focus-surface zoom, not a
   separate visible mode, while preserving image-specific pure math if useful.
+- 2026-07-05: Implemented conditional focus overzoom, node-to-focus morph,
+  in-surface image zoom, and removal of the visible image viewer surface.

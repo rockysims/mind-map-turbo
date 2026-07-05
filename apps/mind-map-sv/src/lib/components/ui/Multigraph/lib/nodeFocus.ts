@@ -22,6 +22,24 @@ export interface ScreenCircle {
 	radius: number;
 }
 
+export interface NodeFocusMorphSource {
+	nodeId: string;
+	left: number;
+	top: number;
+	width: number;
+	height: number;
+	borderRadius: number;
+	background: string;
+	borderColor: string;
+	borderWidth: string;
+	boxShadow: string;
+}
+
+export interface FocusOverzoomOptions {
+	maxScale: number;
+	maxScaleMultiplier?: number;
+}
+
 export interface OvershootState {
 	progress: number;
 	lastInputAt: number | null;
@@ -40,6 +58,8 @@ export const DEFAULT_OVERSHOOT_OPTIONS = {
 	decayHalfLifeMs: APP_CONFIG.multigraph.focus.overshootDecayHalfLifeMs,
 	hysteresisMs: APP_CONFIG.multigraph.focus.overshootHysteresisMs
 };
+
+export const DEFAULT_FOCUS_OVERZOOM_MAX_SCALE_MULTIPLIER = 1.65;
 
 export const EMPTY_OVERSHOOT_STATE: OvershootState = {
 	progress: 0,
@@ -88,6 +108,21 @@ export function focalNodeForPoint(
 	});
 	if (hits.length === 0) return null;
 	return hits.toSorted((left, right) => (right.zIndex ?? 0) - (left.zIndex ?? 0))[0] ?? null;
+}
+
+export function focusOverzoomScale(
+	requestedScale: number,
+	options: FocusOverzoomOptions,
+	canEnterFocus: boolean
+): number {
+	if (!canEnterFocus || requestedScale <= options.maxScale) return options.maxScale;
+	const maxScaleMultiplier =
+		options.maxScaleMultiplier ?? DEFAULT_FOCUS_OVERZOOM_MAX_SCALE_MULTIPLIER;
+	return Math.min(requestedScale, options.maxScale * maxScaleMultiplier);
+}
+
+export function persistedScaleForFocusOverzoom(visualScale: number, maxScale: number): number {
+	return Math.min(visualScale, maxScale);
 }
 
 export function overshootInput(

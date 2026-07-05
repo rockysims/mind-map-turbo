@@ -28,4 +28,27 @@ describe('image zoom math', () => {
 		expect(next.scale).toBe(1);
 		expect(next.panX).toBeLessThan(0);
 	});
+
+	it('supports focus-surface content zoom with a fit floor of one', () => {
+		const focusBounds = {
+			viewportWidth: 800,
+			viewportHeight: 600,
+			naturalWidth: 320,
+			naturalHeight: 240,
+			minScale: 1,
+			maxScale: 8
+		};
+
+		const next = zoomImageAtPoint(
+			{ panX: 0, panY: 0, scale: 2 },
+			0.5,
+			{ x: 400, y: 300 },
+			{ x: 400, y: 300 },
+			focusBounds
+		);
+
+		expect(next.scale).toBe(1);
+		expect(next.panX).toBe(0);
+		expect(next.panY).toBe(0);
+	});
 });

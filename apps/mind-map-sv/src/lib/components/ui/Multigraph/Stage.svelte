@@ -14,6 +14,7 @@
 	} from './lib/graphMath.js';
 	import { pointerDistance } from './lib/hitTest.js';
 	import { recognizeLongPress } from './lib/longPress.js';
+	import { focusOverzoomScale, persistedScaleForFocusOverzoom } from './lib/nodeFocus.js';
 	import { clientPointToGraphPoint } from './lib/stageCoordinates.js';
 	import { DRAG_THRESHOLD, DBL_CLICK_MS, LONG_PRESS_DIST, LONG_PRESS_MS } from '$lib/constants.js';
 
@@ -27,6 +28,7 @@
 		direction: 'in' | 'out';
 		focalPoint: Point;
 		blockedFactor: number;
+		viewState: ViewStateSnapshot;
 	}
 
 	interface FitViewRequest {
@@ -62,6 +64,12 @@
 		onNodeLongPress?: (node: NodeData, point: Point) => void;
 		/** Fired whenever the internal pan/zoom state changes, including initial mount. */
 		onViewStateLiveChange?: (state: ViewStateSnapshot) => void;
+		/** Return true when zoom-in past max scale should keep moving toward focus. */
+		canOverzoomForFocus?: (input: {
+			focalPoint: Point;
+			requestedScale: number;
+			clampedScale: number;
+		}) => boolean;
 		/** Fired when zoom input continues past the configured scale clamps. */
 		onBlockedZoom?: (input: BlockedZoomInput) => void;
 		/**
@@ -88,6 +96,7 @@
 		onNodeDoubleClickDropOntoBackground,
 		onNodeLongPress,
 		onViewStateLiveChange,
+		canOverzoomForFocus,
 		onBlockedZoom,
 		onViewStateChange,
 		fitViewRequest,
@@ -311,6 +320,7 @@
 		e.preventDefault();
 		const stage = e.currentTarget as HTMLElement;
 		const rect = stage.getBoundingClientRect();
+		const focalPoint = { x: e.clientX, y: e.clientY };
 		const requestedScale = scaleFromWheelDelta(
 			scale,
 			e.deltaY,
@@ -318,25 +328,41 @@
 			Number.NEGATIVE_INFINITY,
 			Number.POSITIVE_INFINITY
 		);
-		const nextScale = clampScale(requestedScale, DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE);
-		const nextView = zoomViewTransformAtPoint(
-			{ panX, panY, scale },
-			nextScale,
-			{ x: e.clientX, y: e.clientY },
-			{ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
-		);
+		const clampedScale = clampScale(requestedScale, DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE);
+		const canOverzoom =
+			requestedScale > DEFAULT_MAX_SCALE &&
+			(scale > DEFAULT_MAX_SCALE ||
+				(canOverzoomForFocus?.({
+					focalPoint,
+					requestedScale,
+					clampedScale
+				}) ??
+					getNodeAt(e.clientX, e.clientY) !== null));
+		const nextScale =
+			requestedScale > DEFAULT_MAX_SCALE
+				? focusOverzoomScale(requestedScale, { maxScale: DEFAULT_MAX_SCALE }, canOverzoom)
+				: clampedScale;
+		const nextView = zoomViewTransformAtPoint({ panX, panY, scale }, nextScale, focalPoint, {
+			x: rect.left + rect.width / 2,
+			y: rect.top + rect.height / 2
+		});
 
 		panX = nextView.panX;
 		panY = nextView.panY;
 		scale = nextView.scale;
-		if (requestedScale !== nextScale) {
+		if (requestedScale !== clampedScale) {
 			onBlockedZoom?.({
-				direction: requestedScale > nextScale ? 'in' : 'out',
-				focalPoint: { x: e.clientX, y: e.clientY },
-				blockedFactor: Math.abs(requestedScale - nextScale) / Math.max(nextScale, 0.001)
+				direction: requestedScale > clampedScale ? 'in' : 'out',
+				focalPoint,
+				blockedFactor: Math.abs(requestedScale - clampedScale) / Math.max(clampedScale, 0.001),
+				viewState: { panX, panY, scale }
 			});
 		}
-		onViewStateChange?.({ panX, panY, scale });
+		onViewStateChange?.({
+			panX,
+			panY,
+			scale: persistedScaleForFocusOverzoom(scale, DEFAULT_MAX_SCALE)
+		});
 	}
 
 	// Pinch: track two active pointers and update scale from distance ratio
@@ -386,8 +412,21 @@
 				} else {
 					const factor = dist / pinchStart.distance;
 					const requestedScale = pinchStart.scale * factor;
-					const nextScale = clampScale(requestedScale, DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE);
+					const clampedScale = clampScale(requestedScale, DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE);
 					const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+					const canOverzoom =
+						requestedScale > DEFAULT_MAX_SCALE &&
+						(scale > DEFAULT_MAX_SCALE ||
+							(canOverzoomForFocus?.({
+								focalPoint: pinchStart.centroid,
+								requestedScale,
+								clampedScale
+							}) ??
+								getNodeAt(pinchStart.centroid.x, pinchStart.centroid.y) !== null));
+					const nextScale =
+						requestedScale > DEFAULT_MAX_SCALE
+							? focusOverzoomScale(requestedScale, { maxScale: DEFAULT_MAX_SCALE }, canOverzoom)
+							: clampedScale;
 					const nextView = zoomViewTransformAtPoint(
 						{ panX: pinchStart.panX, panY: pinchStart.panY, scale: pinchStart.scale },
 						nextScale,
@@ -397,11 +436,13 @@
 					panX = nextView.panX;
 					panY = nextView.panY;
 					scale = nextView.scale;
-					if (requestedScale !== nextScale) {
+					if (requestedScale !== clampedScale) {
 						onBlockedZoom?.({
-							direction: requestedScale > nextScale ? 'in' : 'out',
+							direction: requestedScale > clampedScale ? 'in' : 'out',
 							focalPoint: pinchStart.centroid,
-							blockedFactor: Math.abs(requestedScale - nextScale) / Math.max(nextScale, 0.001)
+							blockedFactor:
+								Math.abs(requestedScale - clampedScale) / Math.max(clampedScale, 0.001),
+							viewState: { panX, panY, scale }
 						});
 					}
 				}
@@ -417,7 +458,11 @@
 		if (activePointers.size < 2) pinchStart = null;
 		onPointerUp(e);
 		if (pinchWasActive && activePointers.size < 2) {
-			onViewStateChange?.({ panX, panY, scale });
+			onViewStateChange?.({
+				panX,
+				panY,
+				scale: persistedScaleForFocusOverzoom(scale, DEFAULT_MAX_SCALE)
+			});
 		}
 	}
 

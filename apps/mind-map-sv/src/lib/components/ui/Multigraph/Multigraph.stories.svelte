@@ -21,6 +21,7 @@
 	import type { MultigraphData, Point } from '../types/multigraph';
 	import type { ViewState } from '$lib/migrations';
 	import type { ExitingBuffer } from './lib/elementTransitions';
+	import type { GraphAssetStore, StoredGraphAsset } from '$lib/assets/assetStore';
 
 	const { Story } = defineMeta({
 		title: 'Components/Multigraph',
@@ -61,6 +62,44 @@
 
 	type ViewStateSpy = {
 		mock: { calls: Array<[ViewState]> };
+	};
+
+	const FOCUS_IMAGE_ASSET_ID = 'focus-image-asset';
+	const FOCUS_IMAGE_SCOPE = 'focus-story';
+	const FOCUS_IMAGE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 480">
+		<rect width="640" height="480" fill="#e0f2fe"/>
+		<circle cx="220" cy="230" r="120" fill="#fb7185"/>
+		<rect x="330" y="145" width="190" height="190" rx="26" fill="#22c55e"/>
+	</svg>`;
+	const focusImageAssetStore: GraphAssetStore = {
+		async put() {
+			return { ok: true, value: undefined };
+		},
+		async get(scope: string, assetId: string) {
+			if (scope !== FOCUS_IMAGE_SCOPE || assetId !== FOCUS_IMAGE_ASSET_ID) {
+				return { ok: false, reason: 'not-found' };
+			}
+			const blob = new Blob([FOCUS_IMAGE_SVG], { type: 'image/svg+xml' });
+			const asset: StoredGraphAsset = {
+				scope,
+				assetId,
+				blob,
+				mimeType: 'image/svg+xml',
+				name: 'focus-image.svg',
+				size: FOCUS_IMAGE_SVG.length,
+				updatedAt: 0
+			};
+			return { ok: true, value: asset };
+		},
+		async delete() {
+			return { ok: true, value: undefined };
+		},
+		async deleteUnreferenced() {
+			return { ok: true, value: [] };
+		},
+		async list() {
+			return { ok: true, value: [] };
+		}
 	};
 
 	function getStage(el: HTMLElement): HTMLElement {
@@ -533,6 +572,107 @@
 		const canvas = within(canvasElement);
 		expect(canvas.queryByLabelText('Title')).not.toBeInTheDocument();
 		expect(canvas.queryByRole('menu')).not.toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="UserZoomsNodeImageInsideFocus"
+	args={{
+		multigraphData: {
+			...makeGraph({
+				nodes: [
+					{
+						id: 'image-node',
+						title: 'Image node',
+						description: 'Zoom directly into the image inside focus.',
+						tags: ['visual'],
+						content: [
+							{
+								type: 'image',
+								assetId: FOCUS_IMAGE_ASSET_ID,
+								alt: 'Color blocks',
+								caption: 'A small test image'
+							}
+						]
+					}
+				],
+				pinned: ['image-node']
+			}),
+			assets: {
+				[FOCUS_IMAGE_ASSET_ID]: {
+					id: FOCUS_IMAGE_ASSET_ID,
+					kind: 'image',
+					mimeType: 'image/svg+xml',
+					name: 'focus-image.svg',
+					size: FOCUS_IMAGE_SVG.length,
+					createdAt: 0
+				}
+			}
+		},
+		defaultPrimaryNodeId: 'image-node',
+		assetStore: focusImageAssetStore,
+		assetScope: FOCUS_IMAGE_SCOPE,
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const circle = getCircle(canvasElement, 'image-node');
+		const center = getCenter(circle);
+		const canvas = within(canvasElement);
+
+		dispatchPointer(circle, 'pointerdown', center.x, center.y);
+		await sleep(LONG_PRESS_MS + 20);
+		dispatchPointer(circle, 'pointerup', center.x, center.y);
+		canvas.getByRole('menuitem', { name: 'Focus' }).click();
+
+		const dialog = await canvas.findByRole('dialog');
+		await waitFor(() => {
+			expect(dialog.querySelector('.focus-image')).toBeInTheDocument();
+		});
+		expect(canvas.queryByRole('button', { name: /Inspect/i })).not.toBeInTheDocument();
+
+		const image = dialog.querySelector('.focus-image') as HTMLElement;
+		const imageCenter = getCenter(image);
+		dispatchWheel(dialog as HTMLElement, -500, imageCenter.x, imageCenter.y);
+		await waitFor(() => {
+			const content = dialog.querySelector('.focus-content') as HTMLElement;
+			expect(Number(content.dataset.focusZoomScale)).toBeGreaterThan(1);
+			expect(content.dataset.activeImageAssetId).toBe(FOCUS_IMAGE_ASSET_ID);
+		});
+
+		dispatchWheel(dialog as HTMLElement, 2000, imageCenter.x, imageCenter.y);
+		await waitFor(() => {
+			const content = dialog.querySelector('.focus-content') as HTMLElement;
+			expect(Number(content.dataset.focusZoomScale)).toBe(1);
+		});
+		expect(dialog).toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="UserOverzoomsNodeIntoFocus"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 1,
+			pinned: [0],
+			posByNodeId: { n0: { x: 0, y: 0 } }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: { panX: 0, panY: 0, scale: APP_CONFIG.multigraph.zoom.maxScale },
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+
+		dispatchWheel(stage, -800, center.x, center.y);
+
+		const dialog = await within(canvasElement).findByRole('dialog');
+		const surface = dialog.querySelector('.focus-surface') as HTMLElement;
+		expect(surface.dataset.morphSourceNodeId).toBe('n0');
+		expect(canvasElement.querySelector('.graph')).toHaveClass('focus-active');
 	}}
 />
 

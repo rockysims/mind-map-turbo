@@ -3,7 +3,6 @@
 	import Node from '$lib/components/ui/Node/Node.svelte';
 	import DuplicateEdgeDialog from './DuplicateEdgeDialog.svelte';
 	import GraphQueryPanel from './GraphQueryPanel.svelte';
-	import ImageZoomSurface from './ImageZoomSurface.svelte';
 	import NodeActionMenu from './NodeActionMenu.svelte';
 	import NodeEditSheet from './NodeEditSheet.svelte';
 	import NodeFocusSurface from './NodeFocusSurface.svelte';
@@ -11,7 +10,7 @@
 	import TagColorLegend from './TagColorLegend.svelte';
 	import type { GraphAssetStore } from '$lib/assets/assetStore';
 	import { prefersReducedMotion } from '$lib/reducedMotion';
-	import type { NodeData, NodeImageContent } from '../types/node';
+	import type { NodeData } from '../types/node';
 	import type { EdgeData } from '../types/edge';
 	import type {
 		GraphAssetMetadata,
@@ -107,7 +106,11 @@
 		overshootInput,
 		resetOvershootAfterCommit,
 		focalNodeForPoint,
-		type OvershootState
+		nodeScreenCircle,
+		type NodeFocusCandidate,
+		type NodeFocusMorphSource,
+		type OvershootState,
+		type ViewTransform
 	} from './lib/nodeFocus.js';
 
 	const CENTERED_POSITION: Point = { x: 0, y: 0 };
@@ -185,9 +188,8 @@
 	let stageViewState = $state<ViewState>({ panX: 0, panY: 0, scale: 1 });
 	const stageScale = $derived(stageViewState.scale);
 	let focusOvershoot = $state<OvershootState>(EMPTY_OVERSHOOT_STATE);
-	let imageZoomOvershoot = $state<OvershootState>(EMPTY_OVERSHOOT_STATE);
 	let reduceMotion = $derived(prefersReducedMotion());
-	let imageZoom = $state<{ image: NodeImageContent; url: string } | null>(null);
+	let focusMorphSource = $state<NodeFocusMorphSource | null>(null);
 	const focusRuntime = new FocusRuntime();
 
 	/** Internal enter animations for nodes added by the user (scale 0 → target). */
@@ -382,10 +384,6 @@
 	$effect(() => {
 		if (typeof window === 'undefined') return;
 		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.key === 'Escape' && imageZoom) {
-				imageZoom = null;
-				return;
-			}
 			if (event.key === 'Escape' && focusRuntime.isFocused) {
 				closeFocus();
 				return;
@@ -561,14 +559,15 @@
 		editNodeId = nodeId;
 	}
 
-	function openFocus(node: NodeData) {
+	function openFocus(node: NodeData, source: NodeFocusMorphSource | null = null) {
 		closeOverlays();
+		focusMorphSource = source;
 		focusRuntime.open(node);
 	}
 
 	function closeFocus() {
 		focusRuntime.close();
-		imageZoom = null;
+		focusMorphSource = null;
 		focusOvershoot = resetOvershootAfterCommit(layoutRuntime.now());
 	}
 
@@ -582,20 +581,67 @@
 		graphQueryPreviewText = null;
 	}
 
-	function handleBlockedStageZoom(input: {
-		direction: 'in' | 'out';
-		focalPoint: Point;
-		blockedFactor: number;
-	}) {
-		if (input.direction !== 'in' || focusRuntime.isFocused || !graphRef) return;
-		const rect = graphRef.getBoundingClientRect();
-		const candidates = visibleGraph.nodes.flatMap((node, index) => {
+	function focusCandidates(): NodeFocusCandidate[] {
+		return visibleGraph.nodes.flatMap((node, index) => {
 			const position = graphLayout.posByNodeId[node.id];
 			const radius = graphLayout.radiusByNodeId[node.id];
 			if (!position || radius === undefined) return [];
 			return [{ node, position, radius, zIndex: index }];
 		});
-		const candidate = focalNodeForPoint(candidates, input.focalPoint, rect, stageViewState);
+	}
+
+	function focusCandidateForPoint(
+		focalPoint: Point,
+		view: ViewTransform
+	): NodeFocusCandidate | null {
+		if (!graphRef) return null;
+		return focalNodeForPoint(focusCandidates(), focalPoint, graphRef.getBoundingClientRect(), view);
+	}
+
+	function canOverzoomForFocus(input: { focalPoint: Point; requestedScale: number }): boolean {
+		if (input.requestedScale <= stageViewState.scale || focusRuntime.isFocused) return false;
+		return focusCandidateForPoint(input.focalPoint, stageViewState) !== null;
+	}
+
+	function captureFocusMorphSource(
+		candidate: NodeFocusCandidate,
+		view: ViewTransform
+	): NodeFocusMorphSource | null {
+		if (!graphRef) return null;
+		const rect = graphRef.getBoundingClientRect();
+		const circle = nodeScreenCircle(
+			candidate.node.id,
+			candidate.position,
+			candidate.radius,
+			rect,
+			view
+		);
+		const circleElement = graphRef.querySelector(
+			`.node-wrapper[data-node-id="${candidate.node.id}"] .circle`
+		) as HTMLElement | null;
+		const styles = circleElement ? getComputedStyle(circleElement) : null;
+		return {
+			nodeId: candidate.node.id,
+			left: circle.center.x - circle.radius,
+			top: circle.center.y - circle.radius,
+			width: circle.radius * 2,
+			height: circle.radius * 2,
+			borderRadius: circle.radius,
+			background: styles?.background ?? '#ccc',
+			borderColor: styles?.borderColor ?? '#aaa',
+			borderWidth: styles?.borderWidth ?? '0px',
+			boxShadow: styles?.boxShadow ?? 'none'
+		};
+	}
+
+	function handleBlockedStageZoom(input: {
+		direction: 'in' | 'out';
+		focalPoint: Point;
+		blockedFactor: number;
+		viewState: ViewTransform;
+	}) {
+		if (input.direction !== 'in' || focusRuntime.isFocused || !graphRef) return;
+		const candidate = focusCandidateForPoint(input.focalPoint, input.viewState);
 		if (!candidate) {
 			focusOvershoot = EMPTY_OVERSHOOT_STATE;
 			focusRuntime.preview(0);
@@ -604,7 +650,7 @@
 		focusOvershoot = overshootInput(focusOvershoot, input.blockedFactor, layoutRuntime.now());
 		focusRuntime.preview(focusOvershoot.progress);
 		if (focusOvershoot.committed) {
-			openFocus(candidate.node);
+			openFocus(candidate.node, captureFocusMorphSource(candidate, input.viewState));
 			focusOvershoot = resetOvershootAfterCommit(layoutRuntime.now());
 		}
 	}
@@ -612,14 +658,6 @@
 	function handleFocusZoomOutBoundary(delta: number) {
 		focusOvershoot = overshootInput(focusOvershoot, delta, layoutRuntime.now());
 		if (focusOvershoot.committed) closeFocus();
-	}
-
-	function handleImageZoomOutBoundary(delta: number) {
-		imageZoomOvershoot = overshootInput(imageZoomOvershoot, delta, layoutRuntime.now());
-		if (imageZoomOvershoot.committed) {
-			imageZoom = null;
-			imageZoomOvershoot = resetOvershootAfterCommit(layoutRuntime.now());
-		}
 	}
 
 	function toggleTagColorLegend() {
@@ -863,6 +901,7 @@
 
 <div
 	class="graph"
+	class:focus-active={focusRuntime.isFocused}
 	bind:this={graphRef}
 	data-settling={layoutRuntime.isSettling ? 'true' : undefined}
 	data-scale-change-focal={layoutRuntime.scaleAnchoredNodeIds[0]}
@@ -893,6 +932,7 @@
 	<Stage
 		{getNodeAt}
 		{fitViewRequest}
+		{canOverzoomForFocus}
 		initialScale={initialViewState?.scale}
 		initialPanX={initialViewState?.panX}
 		initialPanY={initialViewState?.panY}
@@ -1240,21 +1280,9 @@
 			{assetStore}
 			{assetScope}
 			{reduceMotion}
+			morphSource={focusMorphSource}
 			onClose={closeFocus}
 			onZoomOutBoundary={handleFocusZoomOutBoundary}
-			onImageOpen={(image, url) => {
-				imageZoom = { image, url };
-				imageZoomOvershoot = EMPTY_OVERSHOOT_STATE;
-			}}
-		/>
-	{/if}
-
-	{#if imageZoom}
-		<ImageZoomSurface
-			image={imageZoom.image}
-			url={imageZoom.url}
-			onClose={() => (imageZoom = null)}
-			onZoomOutBoundary={handleImageZoomOutBoundary}
 		/>
 	{/if}
 
@@ -1331,6 +1359,12 @@
 
 	.node-wrapper {
 		position: absolute;
+	}
+
+	.graph.focus-active :global(.stage),
+	.graph.focus-active > .toolbar-button {
+		opacity: 0;
+		transition: opacity 220ms ease-out;
 	}
 
 	.toolbar-button {
