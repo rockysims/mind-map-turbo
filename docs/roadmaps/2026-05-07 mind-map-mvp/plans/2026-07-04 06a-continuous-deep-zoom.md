@@ -47,10 +47,17 @@ and serving as the focus dialog so borders match by construction.
   mode but stays presentational; details content (description, images) is
   injected via a Svelte 5 snippet prop.** Asset object-URL logic stays in the
   focus surface/Multigraph layer, so Node never touches the asset store.
-- **Explicit Focus action.** **The menu Focus command plays the same commit
-  animation starting from the node's current screen geometry, with no zoom
-  prerequisite.** One transition implementation, two entry points; the current
-  no-morph fade path is removed.
+- **Explicit Focus action.** **The Focus command in the long-press node action
+  menu plays the same commit animation starting from the node's current screen
+  geometry, with no zoom prerequisite.** One transition implementation, two
+  entry points; the current no-morph fade path for menu entry is removed.
+- **Gesture-shell abstraction.** **Extract a reusable `ZoomWorld` component
+  (thin shell over a pure gesture controller) that owns wheel/pinch handling,
+  transform state, boundary clamps, and gate events; the focus world and the
+  image level are its two instances.** `Stage.svelte` is deliberately not
+  retrofitted in this milestone — its zoom is entangled with node drag,
+  long-press, and hit-testing, and two consumers are enough to prove the
+  shape; Stage can adopt it in a follow-up if it earns its keep.
 - **Border parity after commit.** **The details surface keeps the node's own
   border styling (width, pinned ring, tag conic gradient) exactly; no separate
   dialog frame styling remains.** Any future "thinner reading border" easing is
@@ -74,6 +81,8 @@ and serving as the focus dialog so borders match by construction.
 - Reworking focus content layout/visual design beyond the details mode and
   zoom continuity.
 - Post-commit border-thickness easing on the details surface.
+- Retrofitting `Stage.svelte` onto the `ZoomWorld` abstraction (follow-up
+  candidate once two consumers have proven the interface).
 
 ## Tasks
 
@@ -157,7 +166,8 @@ accumulator and `focusRuntime.entryProgress` (currently dead) drives the real
 in-stage node's `detailsProgress`; commit animates the node to the dialog
 bounds and hands off to the focus world using the shared geometry math. Remove
 the computed-style morph-source capture and the `surface-morph` keyframes. The
-menu Focus command triggers the same commit animation from current geometry.
+Focus command in the long-press node action menu triggers the same commit
+animation from the node's current geometry.
 
 **Acceptance**
 
@@ -169,29 +179,35 @@ menu Focus command triggers the same commit animation from current geometry.
   side comes into contact under continued zoom.
 - Persisted `ViewState.scale` stays clamped at `maxScale` throughout overzoom
   and after exit.
-- Menu Focus lands in the same details state via the same animation.
+- The action-menu Focus command lands in the same details state via the same
+  animation.
 - Reduced motion skips the morph but reaches identical end states.
 - No `getComputedStyle`-based morph capture remains.
 
-### T04 - Zoom the focus world and gate the exit
+### T04 - Add ZoomWorld and zoom the whole focus surface
 
-|                |                                                                                         |
-| -------------- | --------------------------------------------------------------------------------------- |
-| **Depends on** | T03                                                                                     |
-| **Wave**       | 3                                                                                       |
-| **Agent**      | High-reasoning                                                                          |
-| **Effort**     | L                                                                                       |
-| **Files**      | `NodeFocusSurface.svelte`, `focusRuntime.svelte.ts`, `zoomBoundary.ts` if gaps, stories |
-| **PR title**   | `feat(focus): zoom the whole focus surface`                                             |
+|                |                                                                                                                                          |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **Depends on** | T03                                                                                                                                      |
+| **Wave**       | 3                                                                                                                                        |
+| **Agent**      | High-reasoning                                                                                                                           |
+| **Effort**     | L                                                                                                                                        |
+| **Files**      | new `ZoomWorld.svelte`, new `Multigraph/lib/zoomWorldController.ts` + spec, `NodeFocusSurface.svelte`, `focusRuntime.svelte.ts`, stories |
+| **PR title**   | `feat(focus): zoom the whole focus surface`                                                                                              |
 
-Rebuild `NodeFocusSurface` as a thin zoom-world shell hosting the details-mode
-`Node`: the world transform applies to the entire dialog (frame and border
-included) so zooming in moves the border off screen. Wheel and pinch both feed
-the world. Zoom-out applies the cover clamp (recentering the dialog so it fills
-the screen as long as possible), reaches centered fit, then feeds the exit
-accumulator while the details surface re-rounds toward a circle; commit exits
-to the graph via the reverse handoff. Close button and dismiss affordances stay
-outside the transformed layer.
+Extract the reusable gesture shell: a pure `zoomWorldController.ts` (wheel and
+pointer input to transform state, clamps, and gate events, composed from
+`zoomBoundary.ts` and the overshoot accumulator) wrapped by a thin
+`ZoomWorld.svelte` component (props: clamps and gate config; events: gate
+progress and commit in/out; content via snippet). Rebuild `NodeFocusSurface` as
+its first consumer: the details-mode `Node` lives inside a `ZoomWorld`, so the
+world transform applies to the entire dialog (frame and border included) and
+zooming in moves the border off screen. Wheel and pinch both feed the world.
+Zoom-out applies the cover clamp (recentering the dialog so it fills the screen
+as long as possible), reaches centered fit, then feeds the exit accumulator
+while the details surface re-rounds toward a circle; commit exits to the graph
+via the reverse handoff. Close button and dismiss affordances stay outside the
+transformed layer.
 
 **Acceptance**
 
@@ -205,6 +221,9 @@ outside the transformed layer.
   never scales off screen.
 - The dialog has no independent border styling: the frame is the details-mode
   `Node`.
+- `ZoomWorld` and its controller contain no focus-specific knowledge; the
+  controller has its own spec and the component is exercised through the
+  focus stories.
 
 ### T05 - Gate image-focused zoom inside the focus world
 
@@ -217,13 +236,15 @@ outside the transformed layer.
 | **Files**      | `NodeFocusSurface.svelte`, `imageZoom.ts`, `imageZoom.spec.ts`, stories |
 | **PR title**   | `feat(focus): gate image inspection behind bold zoom`                   |
 
-Apply the same gate at the image boundary: focus-world zoom is free until the
-image under the focal point is inscribed; a bold zoom then enters image-focused
-zoom with natural-size clamps (fix `boundsForImage` to use
-`naturalWidth`/`naturalHeight` instead of the rendered rect) and pan bounds
-that keep the image in view. Zoom-out cover-clamps the image back to centered
-fit before the exit accumulator engages; a bold zoom-out returns to the focus
-world at dialog scale.
+Apply the same gate at the image boundary as a second `ZoomWorld` consumer:
+focus-world zoom is free until the image under the focal point is inscribed; a
+bold zoom then enters image-focused zoom with natural-size clamps (fix
+`boundsForImage` to use `naturalWidth`/`naturalHeight` instead of the rendered
+rect) and pan bounds that keep the image in view. Zoom-out cover-clamps the
+image back to centered fit before the exit accumulator engages; a bold zoom-out
+returns to the focus world at dialog scale. If the image level exposes a gap in
+the `ZoomWorld` interface, fix the interface rather than special-casing around
+it.
 
 **Acceptance**
 
@@ -325,3 +346,7 @@ tasks are contract-heavy and cheap to review one at a time.
   width captured unscaled -> visible mismatch); image zoom transformed an inner
   content layer while the frame stayed fixed; and the focus surface handled
   wheel only, leaving pinch users without image zoom or gesture exits.
+- 2026-07-04: Revised after review discussion: extracted the gesture shell as
+  a reusable `ZoomWorld` component + pure controller in T04, consumed by the
+  image level in T05; Stage retrofit explicitly deferred. Clarified that "menu
+  Focus" means the Focus command in the long-press node action menu.
