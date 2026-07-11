@@ -6,7 +6,10 @@
 		PINNED_NODE_BORDER_WIDTH
 	} from '$lib/constants';
 	import type { NodeData } from '$lib/components/ui/types/node';
-	import type { TagColorSegment } from '$lib/components/ui/Multigraph/lib/tagColors';
+	import {
+		tagBorderBackground,
+		type TagColorSegment
+	} from '$lib/components/ui/Multigraph/lib/tagColors';
 	import NodeChrome from './NodeChrome.svelte';
 	import NodeCompactContent from './NodeCompactContent.svelte';
 
@@ -29,15 +32,7 @@
 		onTitleCommit?: (title: string) => void;
 	}>();
 
-	const borderBackground = $derived(
-		borderSegments.length === 0 ? 'transparent' : borderGradient(borderSegments)
-	);
-
-	function borderGradient(segments: TagColorSegment[]): string {
-		return `conic-gradient(${segments
-			.map((segment) => `${segment.color} ${segment.startTurn}turn ${segment.endTurn}turn`)
-			.join(', ')})`;
-	}
+	const borderBackground = $derived(tagBorderBackground(borderSegments));
 </script>
 
 <div

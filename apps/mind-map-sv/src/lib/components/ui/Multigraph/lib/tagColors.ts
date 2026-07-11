@@ -40,6 +40,13 @@ export function colorForTag(
 	};
 }
 
+export function tagBorderBackground(segments: TagColorSegment[]): string {
+	if (segments.length === 0) return 'transparent';
+	return `conic-gradient(${segments
+		.map((segment) => `${segment.color} ${segment.startTurn}turn ${segment.endTurn}turn`)
+		.join(', ')})`;
+}
+
 export function nodeBorderSegments(
 	node: NodeData,
 	nodeTagColors: Record<string, string>

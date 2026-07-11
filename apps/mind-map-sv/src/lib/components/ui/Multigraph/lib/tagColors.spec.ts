@@ -5,11 +5,31 @@ import {
 	edgeStrokeColor,
 	fallbackTagColor,
 	nodeBorderSegments,
+	tagBorderBackground,
 	tagUsageCount
 } from './tagColors';
 import { makeGraph } from './testFixtures';
 
 describe('tag color helpers', () => {
+	it('returns transparent for empty tag border segments', () => {
+		expect(tagBorderBackground([])).toBe('transparent');
+	});
+
+	it('builds a conic gradient for a single tag border segment', () => {
+		expect(tagBorderBackground([{ color: '#123456', startTurn: 0, endTurn: 1 }])).toBe(
+			'conic-gradient(#123456 0turn 1turn)'
+		);
+	});
+
+	it('builds a conic gradient for multiple tag border segments', () => {
+		expect(
+			tagBorderBackground([
+				{ color: '#111111', startTurn: 0, endTurn: 0.5 },
+				{ color: '#222222', startTurn: 0.5, endTurn: 1 }
+			])
+		).toBe('conic-gradient(#111111 0turn 0.5turn, #222222 0.5turn 1turn)');
+	});
+
 	it('returns deterministic hex fallback colors from tag names', () => {
 		expect(fallbackTagColor('topic')).toMatch(/^#[0-9a-f]{6}$/);
 		expect(fallbackTagColor('topic')).toBe(fallbackTagColor('topic'));

@@ -74,8 +74,8 @@
 		collectLegendTags,
 		edgeStrokeColor,
 		nodeBorderSegments,
-		tagUsageCount,
-		type TagColorSegment
+		tagBorderBackground,
+		tagUsageCount
 	} from './lib/tagColors.js';
 	import {
 		EDGE_ARROW_HALF_HEIGHT,
@@ -830,14 +830,6 @@
 			detailsWidthPx: fill.width,
 			detailsHeightPx: fill.height
 		};
-	}
-
-	/** Conic-gradient tag border, matching how `Node.svelte` paints the chrome. */
-	function focusTagBorderBackground(segments: TagColorSegment[]): string {
-		if (segments.length === 0) return 'transparent';
-		return `conic-gradient(${segments
-			.map((segment) => `${segment.color} ${segment.startTurn}turn ${segment.endTurn}turn`)
-			.join(', ')})`;
 	}
 
 	function handleBlockedStageZoom(input: {
@@ -1599,7 +1591,7 @@
 				pinnedBorderWidthPx={borderWidthPx}
 				pinned={frameNode.pinned ?? false}
 				hasTagBorder={segments.length > 0}
-				tagBorderBackground={focusTagBorderBackground(segments)}
+				tagBorderBackground={tagBorderBackground(segments)}
 				detailsMode
 				surfaceBackground="#ffffff"
 			>
