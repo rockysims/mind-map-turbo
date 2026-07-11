@@ -33,6 +33,14 @@
 	data-morph-width={geometry.width}
 	data-morph-height={geometry.height}
 	data-morph-radius={geometry.borderRadiusPx}
+	data-source-x={sourceRect.left}
+	data-source-y={sourceRect.top}
+	data-source-width={sourceRect.width}
+	data-source-height={sourceRect.height}
+	data-fill-x={fillRect.left}
+	data-fill-y={fillRect.top}
+	data-fill-width={fillRect.width}
+	data-fill-height={fillRect.height}
 >
 	<div class="deep-zoom-layer-subject">
 		{#if children}

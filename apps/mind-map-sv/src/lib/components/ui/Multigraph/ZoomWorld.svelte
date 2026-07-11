@@ -52,6 +52,7 @@
 		state: ZoomWorldState;
 	} | null>(null);
 	let entryGestureGate = $state<EntryGestureGateState>(EMPTY_ENTRY_GESTURE_GATE);
+	let exitBoundaryAmount = $state(0);
 
 	const activePointers = new SvelteMap<number, { clientX: number; clientY: number }>();
 	const transformStyle = $derived(
@@ -109,9 +110,20 @@
 		event.preventDefault();
 		event.stopPropagation();
 		if (shouldSwallowEntryZoom(event.deltaY < 0 ? 'in' : 'out')) return;
+		if (exitBoundaryAmount > 0 && event.deltaY < 0) {
+			exitBoundaryAmount = 0;
+			onExitBoundary?.(0);
+			return;
+		}
 		const step = wheelZoomWorld(worldState, event.deltaY, point, bounds);
 		commitState(step.state);
-		if (step.exitBoundaryDelta > 0) onExitBoundary?.(step.exitBoundaryDelta);
+		if (step.exitBoundaryDelta > 0) {
+			exitBoundaryAmount = Math.min(1, exitBoundaryAmount + step.exitBoundaryDelta);
+			onExitBoundary?.(exitBoundaryAmount);
+		} else if (exitBoundaryAmount > 0) {
+			exitBoundaryAmount = 0;
+			onExitBoundary?.(0);
+		}
 	}
 
 	function getTwoPointerDistance(): number | null {
@@ -171,6 +183,10 @@
 				pinchStart = { distance, scale: worldState.scale, state: worldState };
 				return;
 			}
+			if (exitBoundaryAmount > 0) {
+				exitBoundaryAmount = 0;
+				onExitBoundary?.(0);
+			}
 			commitState(
 				pinchZoomWorld(
 					pinchStart.state,
@@ -185,6 +201,10 @@
 		if (!dragStart) return;
 		const bounds = currentBounds();
 		if (!bounds) return;
+		if (exitBoundaryAmount > 0) {
+			exitBoundaryAmount = 0;
+			onExitBoundary?.(0);
+		}
 		commitState(
 			clampZoomWorldState(
 				{

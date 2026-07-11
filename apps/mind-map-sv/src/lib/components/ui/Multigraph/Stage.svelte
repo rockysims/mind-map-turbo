@@ -16,6 +16,11 @@
 	import { recognizeLongPress } from './lib/longPress.js';
 	import { focusOverzoomMaxScaleForNode, persistedScaleForFocusOverzoom } from './lib/nodeFocus.js';
 	import {
+		boundaryReleaseDelta,
+		solveFocusEntryBoundary,
+		type FocusEntryBoundaryCandidate
+	} from './lib/focusEntryBoundary.js';
+	import {
 		beginEntryGestureGate,
 		EMPTY_ENTRY_GESTURE_GATE,
 		stepEntryGestureGate,
@@ -43,6 +48,7 @@
 		blockedFactor: number;
 		boundaryProgress?: number;
 		committed?: boolean;
+		nodeId?: string;
 		viewState: ViewStateSnapshot;
 	}
 
@@ -98,6 +104,13 @@
 			requestedScale: number;
 			clampedScale: number;
 		}) => number | null;
+		/** Return the graph-space focus candidate for boundary camera steering. */
+		focusEntryBoundaryCandidateForPoint?: (input: {
+			focalPoint: Point;
+			requestedScale: number;
+			clampedScale: number;
+			viewState: ViewStateSnapshot;
+		}) => FocusEntryBoundaryCandidate | null;
 		/** Fired when zoom input continues past the configured scale clamps. */
 		onBlockedZoom?: (input: BlockedZoomInput) => void;
 		/**
@@ -128,6 +141,7 @@
 		onViewStateLiveChange,
 		canOverzoomForFocus,
 		focusOverzoomMaxScaleForPoint,
+		focusEntryBoundaryCandidateForPoint,
 		onBlockedZoom,
 		onViewStateChange,
 		fitViewRequest,
@@ -139,6 +153,7 @@
 	let lastFitViewRequestId = $state<number | null>(null);
 	let lastEntryGestureGateRequestId = $state<number | null>(null);
 	let entryGestureGate = $state<EntryGestureGateState>(EMPTY_ENTRY_GESTURE_GATE);
+	let focusEntryBoundaryProgress = $state<{ nodeId: string; progress: number } | null>(null);
 
 	// Pan
 	// svelte-ignore state_referenced_locally
@@ -368,6 +383,7 @@
 		const stage = e.currentTarget as HTMLElement;
 		const rect = stage.getBoundingClientRect();
 		const focalPoint = { x: e.clientX, y: e.clientY };
+		if (releaseFocusEntryBoundaryProgress(e.deltaY, focalPoint)) return;
 		const requestedScale = scaleFromWheelDelta(
 			scale,
 			e.deltaY,
@@ -376,6 +392,22 @@
 			Number.POSITIVE_INFINITY
 		);
 		const clampedScale = clampScale(requestedScale, DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE);
+		if (
+			applyFocusEntryBoundary({
+				focalPoint,
+				requestedScale,
+				clampedScale,
+				rect,
+				startView: { panX, panY, scale }
+			})
+		) {
+			onViewStateChange?.({
+				panX,
+				panY,
+				scale: persistedScaleForFocusOverzoom(scale, DEFAULT_MAX_SCALE)
+			});
+			return;
+		}
 		const dynamicMaxScale = overzoomMaxScaleForPoint(
 			{
 				focalPoint,
@@ -400,6 +432,7 @@
 		panX = nextView.panX;
 		panY = nextView.panY;
 		scale = nextView.scale;
+		focusEntryBoundaryProgress = null;
 		if (focusBoundaryScale !== null) {
 			onBlockedZoom?.({
 				direction: 'in',
@@ -485,6 +518,27 @@
 					const requestedScale = pinchStart.scale * factor;
 					const clampedScale = clampScale(requestedScale, DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE);
 					const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+					if (
+						releaseFocusEntryBoundaryProgress(requestedScale < scale ? 1 : -1, pinchStart.centroid)
+					) {
+						pinchStart = { distance: dist, scale, centroid: pinchStart.centroid, panX, panY };
+						return;
+					}
+					if (
+						applyFocusEntryBoundary({
+							focalPoint: pinchStart.centroid,
+							requestedScale,
+							clampedScale,
+							rect,
+							startView: {
+								panX: pinchStart.panX,
+								panY: pinchStart.panY,
+								scale: pinchStart.scale
+							}
+						})
+					) {
+						return;
+					}
 					const dynamicMaxScale = overzoomMaxScaleForPoint(
 						{
 							focalPoint: pinchStart.centroid,
@@ -510,6 +564,7 @@
 					panX = nextView.panX;
 					panY = nextView.panY;
 					scale = nextView.scale;
+					focusEntryBoundaryProgress = null;
 					if (focusBoundaryScale !== null) {
 						onBlockedZoom?.({
 							direction: 'in',
@@ -550,6 +605,96 @@
 	}
 
 	const transformStyle = $derived(`translate(${panX}px, ${panY}px) scale(${scale})`);
+
+	function applyFocusEntryBoundary({
+		focalPoint,
+		requestedScale,
+		clampedScale,
+		rect,
+		startView
+	}: {
+		focalPoint: Point;
+		requestedScale: number;
+		clampedScale: number;
+		rect: DOMRect;
+		startView: ViewStateSnapshot;
+	}): boolean {
+		const resolveCandidate = focusEntryBoundaryCandidateForPoint;
+		if (requestedScale <= startView.scale || !resolveCandidate) return false;
+		const candidate = resolveCandidate({
+			focalPoint,
+			requestedScale,
+			clampedScale,
+			viewState: startView
+		});
+		if (!candidate) {
+			focusEntryBoundaryProgress = null;
+			return false;
+		}
+		const step = solveFocusEntryBoundary({
+			currentView: startView,
+			requestedScale,
+			focalPoint: { x: focalPoint.x - rect.left, y: focalPoint.y - rect.top },
+			viewport: { width: rect.width, height: rect.height },
+			candidate
+		});
+
+		panX = step.view.panX;
+		panY = step.view.panY;
+		scale = step.view.scale;
+
+		if (step.phase === 'free') {
+			focusEntryBoundaryProgress = null;
+			return true;
+		}
+
+		const previousProgress =
+			focusEntryBoundaryProgress?.nodeId === candidate.nodeId
+				? focusEntryBoundaryProgress.progress
+				: 0;
+		const boundaryProgress =
+			step.phase === 'boundary' ? Math.min(1, previousProgress + step.progressDelta) : 0;
+		focusEntryBoundaryProgress =
+			boundaryProgress > 0 && boundaryProgress < 1
+				? { nodeId: candidate.nodeId, progress: boundaryProgress }
+				: null;
+
+		onBlockedZoom?.({
+			direction: 'in',
+			focalPoint,
+			blockedFactor: step.progressDelta,
+			boundaryProgress,
+			committed: boundaryProgress >= 1,
+			nodeId: candidate.nodeId,
+			viewState: { panX, panY, scale }
+		});
+		return true;
+	}
+
+	function releaseFocusEntryBoundaryProgress(deltaY: number, focalPoint: Point): boolean {
+		if (!focusEntryBoundaryProgress || deltaY <= 0) return false;
+		const requestedScale = scaleFromWheelDelta(
+			scale,
+			deltaY,
+			undefined,
+			Number.NEGATIVE_INFINITY,
+			Number.POSITIVE_INFINITY
+		);
+		const releaseDelta = boundaryReleaseDelta(requestedScale, scale);
+		const nextProgress = Math.max(0, focusEntryBoundaryProgress.progress - releaseDelta);
+		const nodeId = focusEntryBoundaryProgress.nodeId;
+		focusEntryBoundaryProgress = nextProgress > 0 ? { nodeId, progress: nextProgress } : null;
+		onBlockedZoom?.({
+			direction: 'out',
+			focalPoint,
+			blockedFactor: releaseDelta,
+			boundaryProgress: nextProgress,
+			committed: false,
+			nodeId,
+			viewState: { panX, panY, scale }
+		});
+		return true;
+	}
 
 	function overzoomMaxScaleForPoint(
 		input: {

@@ -105,13 +105,13 @@
 	import { FocusRuntime } from './lib/focusRuntime.svelte.js';
 	import {
 		focalNodeForPoint,
-		focusOverzoomMaxScaleForNode,
 		nodeScreenCircle,
 		type NodeFocusCandidate,
 		type NodeFocusMorphSource,
 		type ViewTransform
 	} from './lib/nodeFocus.js';
-	import { entryProgress, type Rect } from './lib/zoomBoundary.js';
+	import type { FocusEntryBoundaryCandidate } from './lib/focusEntryBoundary.js';
+	import type { Rect } from './lib/zoomBoundary.js';
 
 	const CENTERED_POSITION: Point = { x: 0, y: 0 };
 	const FOCUS_TRANSITION_MS = APP_CONFIG.multigraph.focus.entryTransitionMs;
@@ -190,6 +190,7 @@
 	const stageScale = $derived(stageViewState.scale);
 	let focusPreviewNodeId = $state<string | null>(null);
 	let focusPreviewProgress = $state(0);
+	let pendingFocusCommitNodeId = $state<string | null>(null);
 	let reduceMotion = $derived(prefersReducedMotion());
 	let focusExiting = $state(false);
 	let focusExitProgress = $state(1);
@@ -584,6 +585,7 @@
 		focusExitProgress = 1;
 		focusPreviewNodeId = null;
 		focusPreviewProgress = 0;
+		pendingFocusCommitNodeId = null;
 		focusEntryGestureIdleMs = entryGestureIdleMs;
 		const sourceRect = source ? rectFromMorphSource(source) : nodeRectForNodeId(node.id);
 		const fillRect = focusFillRect();
@@ -653,26 +655,21 @@
 		return focalNodeForPoint(focusCandidates(), focalPoint, graphRef.getBoundingClientRect(), view);
 	}
 
-	function canOverzoomForFocus(input: { focalPoint: Point; requestedScale: number }): boolean {
-		if (input.requestedScale <= stageViewState.scale || focusRuntime.isFocused) return false;
-		return focusCandidateForPoint(input.focalPoint, stageViewState) !== null;
-	}
-
-	function focusOverzoomMaxScaleForPoint(input: {
+	function focusEntryBoundaryCandidateForPoint(input: {
 		focalPoint: Point;
 		requestedScale: number;
-	}): number | null {
-		if (input.requestedScale <= stageViewState.scale || focusRuntime.isFocused || !graphRef) {
+		viewState: ViewTransform;
+	}): FocusEntryBoundaryCandidate | null {
+		if (input.requestedScale <= input.viewState.scale || focusRuntime.isFocused || !graphRef) {
 			return null;
 		}
-		const candidate = focusCandidateForPoint(input.focalPoint, stageViewState);
+		const candidate = focusCandidateForPoint(input.focalPoint, input.viewState);
 		if (!candidate) return null;
-		const rect = graphRef.getBoundingClientRect();
-		return focusOverzoomMaxScaleForNode(
-			candidate.radius,
-			{ width: rect.width, height: rect.height },
-			APP_CONFIG.multigraph.zoom.maxScale
-		);
+		return {
+			nodeId: candidate.node.id,
+			position: candidate.position,
+			radius: candidate.radius
+		};
 	}
 
 	function captureFocusMorphSource(
@@ -703,6 +700,16 @@
 			top: source.top,
 			width: source.width,
 			height: source.height
+		};
+	}
+
+	function morphSourceFromRect(nodeId: string, rect: Rect): NodeFocusMorphSource {
+		return {
+			nodeId,
+			left: rect.left,
+			top: rect.top,
+			width: rect.width,
+			height: rect.height
 		};
 	}
 
@@ -741,32 +748,58 @@
 		blockedFactor: number;
 		boundaryProgress?: number;
 		committed?: boolean;
+		nodeId?: string;
 		viewState: ViewTransform;
 	}) {
-		if (input.direction !== 'in' || focusRuntime.isFocused || !graphRef) return;
-		const candidate = focusCandidateForPoint(input.focalPoint, input.viewState);
+		if (focusRuntime.isFocused || !graphRef) return;
+		const candidate =
+			(input.nodeId
+				? focusCandidates().find((entry) => entry.node.id === input.nodeId)
+				: focusCandidateForPoint(input.focalPoint, input.viewState)) ?? null;
 		if (!candidate) {
 			focusPreviewNodeId = null;
 			focusPreviewProgress = 0;
 			return;
 		}
-		const graphRect = graphRef.getBoundingClientRect();
-		const boundaryScale = focusOverzoomMaxScaleForNode(
-			candidate.radius,
-			{ width: graphRect.width, height: graphRect.height },
-			APP_CONFIG.multigraph.zoom.maxScale
-		);
-		const progress = entryProgress(input.viewState.scale, boundaryScale);
-		focusPreviewNodeId = candidate.node.id;
-		focusPreviewProgress = progress;
+		const progress = Math.min(1, Math.max(0, input.boundaryProgress ?? 0));
+		if (progress <= 0) {
+			if (!input.nodeId || input.nodeId === focusPreviewNodeId) {
+				focusPreviewNodeId = null;
+				focusPreviewProgress = 0;
+			}
+			return;
+		}
 		if (progress >= 1 || input.committed === true) {
-			openFocus(
-				candidate.node,
-				captureFocusMorphSource(candidate, input.viewState),
-				APP_CONFIG.multigraph.focus.entryGestureIdleMs
-			);
+			commitFocusFromCandidate(candidate, input.viewState);
 			focusPreviewNodeId = null;
 			focusPreviewProgress = 0;
+			return;
+		}
+		focusPreviewNodeId = candidate.node.id;
+		focusPreviewProgress = progress;
+	}
+
+	function commitFocusFromCandidate(candidate: NodeFocusCandidate, fallbackView: ViewTransform) {
+		if (pendingFocusCommitNodeId !== null) return;
+		pendingFocusCommitNodeId = candidate.node.id;
+		const fallbackSource = captureFocusMorphSource(candidate, fallbackView);
+		const commit = () => {
+			if (pendingFocusCommitNodeId !== candidate.node.id || focusRuntime.isFocused) {
+				pendingFocusCommitNodeId = null;
+				return;
+			}
+			const measuredRect = nodeRectForNodeId(candidate.node.id);
+			openFocus(
+				candidate.node,
+				measuredRect ? morphSourceFromRect(candidate.node.id, measuredRect) : fallbackSource,
+				APP_CONFIG.multigraph.focus.entryGestureIdleMs
+			);
+			pendingFocusCommitNodeId = null;
+		};
+		if (typeof requestAnimationFrame === 'function') {
+			requestAnimationFrame(commit);
+		} else {
+			commit();
 		}
 	}
 
@@ -1052,8 +1085,7 @@
 	<Stage
 		{getNodeAt}
 		{fitViewRequest}
-		{canOverzoomForFocus}
-		{focusOverzoomMaxScaleForPoint}
+		{focusEntryBoundaryCandidateForPoint}
 		entryGestureGateRequest={stageEntryGestureGateRequest}
 		initialScale={initialViewState?.scale}
 		initialPanX={initialViewState?.panX}

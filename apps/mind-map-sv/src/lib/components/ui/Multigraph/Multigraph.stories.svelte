@@ -675,13 +675,19 @@
 		const stage = getStage(canvasElement);
 		const circle = getCircle(canvasElement, 'n0');
 		const center = getCenter(circle);
+		const sourceRect = circle.getBoundingClientRect();
 
 		dispatchWheel(stage, -800, center.x, center.y);
 
 		const dialog = await within(canvasElement).findByRole('dialog');
 		const surface = dialog.querySelector('.focus-surface') as HTMLElement;
+		const layer = dialog.querySelector('.deep-zoom-layer') as HTMLElement;
 		const world = dialog.querySelector('.zoom-world') as HTMLElement;
 		expect(surface.dataset.morphSourceNodeId).toBe('n0');
+		expect(Number(layer.dataset.sourceX)).toBeCloseTo(sourceRect.left, 0);
+		expect(Number(layer.dataset.sourceY)).toBeCloseTo(sourceRect.top, 0);
+		expect(Number(layer.dataset.sourceWidth)).toBeCloseTo(sourceRect.width, 0);
+		expect(Number(layer.dataset.sourceHeight)).toBeCloseTo(sourceRect.height, 0);
 		expect(canvasElement.querySelector('.graph')).toHaveClass('focus-active');
 
 		dispatchWheel(world, -800, center.x, center.y);
@@ -722,6 +728,78 @@
 		});
 		await sleep(APP_CONFIG.multigraph.focus.entryTransitionMs + 40);
 		expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="NodeFocusPreviewResetsWhenBoundaryZoomReverses"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 1,
+			pinned: [0],
+			posByNodeId: { n0: { x: 0, y: 0 } }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: { panX: 0, panY: 0, scale: APP_CONFIG.multigraph.zoom.maxScale },
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+
+		dispatchWheel(stage, -80, center.x, center.y);
+		await waitFor(() => {
+			const node = getCircle(canvasElement, 'n0').closest('.node') as HTMLElement;
+			expect(Number(node.dataset.detailsProgress)).toBeGreaterThan(0);
+		});
+
+		dispatchWheel(stage, 160, center.x, center.y);
+		await waitFor(() => {
+			const node = getCircle(canvasElement, 'n0').closest('.node') as HTMLElement;
+			expect(Number(node.dataset.detailsProgress)).toBe(0);
+		});
+		expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="FocusedWorldExitsWithGradualZoomOut"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 1,
+			pinned: [0],
+			posByNodeId: { n0: { x: 0, y: 0 } }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: { panX: 0, panY: 0, scale: APP_CONFIG.multigraph.zoom.maxScale },
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+
+		dispatchWheel(stage, -800, center.x, center.y);
+		const dialog = await within(canvasElement).findByRole('dialog');
+		const world = dialog.querySelector('.zoom-world') as HTMLElement;
+		const surface = dialog.querySelector('.focus-surface') as HTMLElement;
+
+		dispatchWheel(world, 70, center.x, center.y);
+		await waitFor(() => {
+			const progress = Number(surface.dataset.detailsProgress);
+			expect(progress).toBeGreaterThan(0);
+			expect(progress).toBeLessThan(1);
+		});
+		expect(canvasElement.querySelector('.graph')).toHaveClass('focus-active');
+
+		dispatchWheel(world, 70, center.x, center.y);
+		await waitFor(() => {
+			expect(canvasElement.querySelector('.graph')).not.toHaveClass('focus-active');
+			expect(surface).toHaveClass('exiting');
+		});
 	}}
 />
 
