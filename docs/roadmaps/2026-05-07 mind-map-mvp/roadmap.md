@@ -34,32 +34,33 @@ scope, acceptance criteria, and risks. When work on a milestone is about
 to start, we write a dated **plan** in `plans/` that breaks it into
 individual PR-sized tasks.
 
-| #   | Milestone                                          | Status      | Doc                                                                                                                                             |
-| --- | -------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| 01  | Graph mutations and pinning                        | complete    | [milestone](milestones/01-graph-mutations-and-pinning.md), [plan](plans/2026-05-15 01-graph-mutations-and-pinning.md)                           |
-| 02  | Layout: hop-distance scaling and overlap repulsion | complete    | [milestone](milestones/02-layout-and-repulsion.md), [plan](plans/2026-05-15 02-layout-and-repulsion.md)                                         |
-| 03  | Mobile polish and node editing UX                  | in progress | [milestone](milestones/03-mobile-polish-and-editing.md), [plan](plans/2026-05-17%2003-mobile-polish-and-editing.md)                             |
-| 04  | Persistence (local-first → server)                 | complete    | [milestone](milestones/04-persistence.md), [plan](plans/2026-05-17%2004-persistence.md)                                                         |
-| 04a | Layered pin relayout                               | complete    | [milestone](milestones/04a-layered-pin-relayout.md), [plan](plans/2026-05-25%2004a-layered-pin-relayout.md)                                     |
-| 04b | Bounded pinned-neighborhood visibility             | complete    | [milestone](milestones/04b-bounded-pinned-neighborhood-visibility.md), [plan](plans/2026-05-30%2004b-bounded-pinned-neighborhood-visibility.md) |
-| 04c | JSON file import/export                            | complete    | [milestone](milestones/04c-json-file-import-export.md), [plan](plans/2026-05-30%2004c-json-file-import-export.md)                               |
-| 04d | Edge toggle and inline node creation               | complete    | [milestone](milestones/04d-edge-toggle-and-inline-node-creation.md), [plan](plans/2026-06-12%2004d-edge-toggle-and-inline-node-creation.md)     |
-| 04e | Title syntax for direction and tags                | complete    | [milestone](milestones/04e-title-syntax-for-direction-and-tags.md), [plan](plans/2026-06-12%2004e-title-syntax-for-direction-and-tags.md)       |
-| 04f | Tag colors and graph tag config                    | complete    | [milestone](milestones/04f-tag-colors-and-graph-tag-config.md), [plan](plans/2026-06-12%2004f-node-and-edge-tag-colors.md)                      |
-| 04g | Layout settle: eliminate endless drift/rotation    | complete    | [milestone](milestones/04g-layout-settle-eliminate-drift.md), [plan](plans/2026-06-13%2004g-layout-settle-rigid-motion.md)                      |
-| 04h | Thin the Multigraph component (refactor)           | complete    | [milestone](milestones/04h-multigraph-thin-component-refactor.md), [plan](plans/2026-06-13%2004h-multigraph-thin-component-refactor.md)         |
-| 04i | Eliminate appearance/disappearance abruptness      | complete    | [milestone](milestones/04i-eliminate-appearance-abruptness.md), [plan](plans/2026-06-13%2004i-enter-exit-and-reveal-wave.md)                    |
-| 04j | Edge occlusion fade near unrelated nodes           | complete    | [milestone](milestones/04j-edge-occlusion-fade.md), [plan](plans/2026-06-13%2004j-edge-occlusion-fade.md)                                       |
-| 04k | Parallel edge visualization                        | complete    | [milestone](milestones/04k-parallel-edge-visualization.md), [plan](plans/2026-06-18%2004k-parallel-edge-visualization.md)                       |
-| 04l | Self-contained HTML save files                     | complete    | [milestone](milestones/04l-self-contained-html-save-files.md), [plan](plans/2026-06-21%2004l-self-contained-html-save-files.md)                 |
-| 04m | Single-document save UX                            | complete    | [milestone](milestones/04m-single-document-save-ux.md), [plan](plans/2026-06-21%2004m-single-document-save-ux.md)                               |
-| 04n | Reliable propagated HTML app shell                 | complete    | [milestone](milestones/04n-reliable-propagated-html-app-shell.md), [plan](plans/2026-07-04%2004n-reliable-propagated-html-app-shell.md)         |
-| 05  | Filter / find / search                             | complete    | [milestone](milestones/05-filter-find-search.md), [plan](plans/2026-06-22%2005-filter-find-search.md)                                           |
-| 06  | Node focus and rich media                          | complete    | [milestone](milestones/06-node-focus-and-rich-media.md), [plan](plans/2026-07-04%2006-node-focus-and-rich-media.md)                             |
-| 06a | Continuous deep zoom                               | complete    | [milestone](milestones/06a-continuous-deep-zoom.md), [plan](plans/2026-07-04%2006a-continuous-deep-zoom.md)                                     |
-| 06b | Recursive deep zoom (single-element morph)         | complete    | [milestone](milestones/06b-recursive-deep-zoom.md), [plan](plans/2026-07-10%2006b-recursive-deep-zoom.md)                                       |
-| 06c | Single-surface morph (one frame element)           | complete    | [milestone](milestones/06c-single-surface-morph.md), [plan](plans/2026-07-10%2006c-single-surface-morph.md)                                     |
-| 07  | Multiplayer                                        | not started | [milestones/07-multiplayer.md](milestones/07-multiplayer.md)                                                                                    |
+| #   | Milestone                                          | Status      | Doc                                                                                                                                                   |
+| --- | -------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 01  | Graph mutations and pinning                        | complete    | [milestone](milestones/01-graph-mutations-and-pinning.md), [plan](plans/2026-05-15 01-graph-mutations-and-pinning.md)                                 |
+| 02  | Layout: hop-distance scaling and overlap repulsion | complete    | [milestone](milestones/02-layout-and-repulsion.md), [plan](plans/2026-05-15 02-layout-and-repulsion.md)                                               |
+| 03  | Mobile polish and node editing UX                  | in progress | [milestone](milestones/03-mobile-polish-and-editing.md), [plan](plans/2026-05-17%2003-mobile-polish-and-editing.md)                                   |
+| 04  | Persistence (local-first → server)                 | complete    | [milestone](milestones/04-persistence.md), [plan](plans/2026-05-17%2004-persistence.md)                                                               |
+| 04a | Layered pin relayout                               | complete    | [milestone](milestones/04a-layered-pin-relayout.md), [plan](plans/2026-05-25%2004a-layered-pin-relayout.md)                                           |
+| 04b | Bounded pinned-neighborhood visibility             | complete    | [milestone](milestones/04b-bounded-pinned-neighborhood-visibility.md), [plan](plans/2026-05-30%2004b-bounded-pinned-neighborhood-visibility.md)       |
+| 04c | JSON file import/export                            | complete    | [milestone](milestones/04c-json-file-import-export.md), [plan](plans/2026-05-30%2004c-json-file-import-export.md)                                     |
+| 04d | Edge toggle and inline node creation               | complete    | [milestone](milestones/04d-edge-toggle-and-inline-node-creation.md), [plan](plans/2026-06-12%2004d-edge-toggle-and-inline-node-creation.md)           |
+| 04e | Title syntax for direction and tags                | complete    | [milestone](milestones/04e-title-syntax-for-direction-and-tags.md), [plan](plans/2026-06-12%2004e-title-syntax-for-direction-and-tags.md)             |
+| 04f | Tag colors and graph tag config                    | complete    | [milestone](milestones/04f-tag-colors-and-graph-tag-config.md), [plan](plans/2026-06-12%2004f-node-and-edge-tag-colors.md)                            |
+| 04g | Layout settle: eliminate endless drift/rotation    | complete    | [milestone](milestones/04g-layout-settle-eliminate-drift.md), [plan](plans/2026-06-13%2004g-layout-settle-rigid-motion.md)                            |
+| 04h | Thin the Multigraph component (refactor)           | complete    | [milestone](milestones/04h-multigraph-thin-component-refactor.md), [plan](plans/2026-06-13%2004h-multigraph-thin-component-refactor.md)               |
+| 04i | Eliminate appearance/disappearance abruptness      | complete    | [milestone](milestones/04i-eliminate-appearance-abruptness.md), [plan](plans/2026-06-13%2004i-enter-exit-and-reveal-wave.md)                          |
+| 04j | Edge occlusion fade near unrelated nodes           | complete    | [milestone](milestones/04j-edge-occlusion-fade.md), [plan](plans/2026-06-13%2004j-edge-occlusion-fade.md)                                             |
+| 04k | Parallel edge visualization                        | complete    | [milestone](milestones/04k-parallel-edge-visualization.md), [plan](plans/2026-06-18%2004k-parallel-edge-visualization.md)                             |
+| 04l | Self-contained HTML save files                     | complete    | [milestone](milestones/04l-self-contained-html-save-files.md), [plan](plans/2026-06-21%2004l-self-contained-html-save-files.md)                       |
+| 04m | Single-document save UX                            | complete    | [milestone](milestones/04m-single-document-save-ux.md), [plan](plans/2026-06-21%2004m-single-document-save-ux.md)                                     |
+| 04n | Reliable propagated HTML app shell                 | complete    | [milestone](milestones/04n-reliable-propagated-html-app-shell.md), [plan](plans/2026-07-04%2004n-reliable-propagated-html-app-shell.md)               |
+| 05  | Filter / find / search                             | complete    | [milestone](milestones/05-filter-find-search.md), [plan](plans/2026-06-22%2005-filter-find-search.md)                                                 |
+| 06  | Node focus and rich media                          | complete    | [milestone](milestones/06-node-focus-and-rich-media.md), [plan](plans/2026-07-04%2006-node-focus-and-rich-media.md)                                   |
+| 06a | Continuous deep zoom                               | complete    | [milestone](milestones/06a-continuous-deep-zoom.md), [plan](plans/2026-07-04%2006a-continuous-deep-zoom.md)                                           |
+| 06b | Recursive deep zoom (single-element morph)         | complete    | [milestone](milestones/06b-recursive-deep-zoom.md), [plan](plans/2026-07-10%2006b-recursive-deep-zoom.md)                                             |
+| 06c | Single-surface morph (one frame element)           | complete    | [milestone](milestones/06c-single-surface-morph.md), [plan](plans/2026-07-10%2006c-single-surface-morph.md)                                           |
+| 06d | Deep zoom hardening and nested image zoom          | planned     | [milestone](milestones/06d-deep-zoom-hardening-and-nested-image-zoom.md), [plan](plans/2026-07-11%2006d-deep-zoom-hardening-and-nested-image-zoom.md) |
+| 07  | Multiplayer                                        | not started | [milestones/07-multiplayer.md](milestones/07-multiplayer.md)                                                                                          |
 
 Milestones 04a-04m deepen the local-first graph experience before multiplayer.
 Milestone 04b intentionally supersedes 04a's Fibonacci reveal and dimming
@@ -92,7 +93,11 @@ primitives. Milestone 06c finishes 06b's single-element intent: one morph
 surface owns the frame for the entire deep-zoom round trip (driven by a pure
 frame-geometry function with a derived, never-measured source rect), content
 crossfades inside it as fixed-layout transform-scaled layers, and the
-recursive stack becomes the production focus path. Milestone 07 follows with
+recursive stack becomes the production focus path. Milestone 06d hardens that
+mechanic — removing 06a/06b/06c scaffolding, unifying the split focus ownership
+into one `FocusController` with a single input surface — and then proves the
+recursive stack for real by making images inside a focused node their own nested
+zoom level (the first production consumer at depth 2). Milestone 07 follows with
 multiplayer after rich local document behavior is settled.
 
 ## How this directory is organized
