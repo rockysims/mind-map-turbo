@@ -6,7 +6,6 @@ import { FocusRuntime, type FocusLevel } from './focusRuntime.svelte';
 import { focalNodeForPoint, type NodeFocusCandidate, type ViewTransform } from './nodeFocus';
 import type { Rect } from './zoomBoundary';
 import type { StageRect } from './stageCoordinates';
-import { wheelZoomWorld } from './zoomWorldController';
 
 /** Timing constants the controller needs; sourced from `APP_CONFIG.multigraph.focus`. */
 export interface FocusControllerConfig {
@@ -122,8 +121,10 @@ export class FocusController {
 	/**
 	 * A partial exit scrub is in flight: the frame is shrinking, so wheel input
 	 * can land outside it (past the rounded corners, or on the exposed stage).
-	 * While this is true the focus root captures those wheels and keeps driving
-	 * the exit, instead of letting them zoom the stage or scroll the page.
+	 * The single focus input surface (DeepZoomStack) captures those off-frame
+	 * wheels and forwards them to the active world, so the exit keeps scrubbing
+	 * instead of zooming the stage or scrolling the page. Exposed for the
+	 * `data-exit-scrub` marker the exit-scrub e2e asserts on.
 	 */
 	get exitScrubActive(): boolean {
 		const active = this.activeLevel;
@@ -218,34 +219,6 @@ export class FocusController {
 		// Partial exit scrub: morph the frame down while staying committed so the
 		// world keeps driving and the graph stays marked focus-active.
 		this.#runtime.setProgress(Math.max(0, 1 - delta), 'exiting');
-	}
-
-	/** Continue/reverse the exit scrub for wheels the shrinking frame missed. */
-	handleRootWheel(event: WheelEvent): void {
-		const level = this.activeLevel;
-		if (!this.exitScrubActive || !level) return;
-		event.preventDefault();
-		event.stopPropagation();
-		if (event.deltaY < 0) {
-			this.handleExit(level, 0);
-			return;
-		}
-		const fill = this.#deps.getFillRect();
-		// Same wheel-to-exit-delta math the focused ZoomWorld uses at fit scale,
-		// so the scrub feels identical wherever the cursor is.
-		const step = wheelZoomWorld(
-			{ panX: 0, panY: 0, scale: 1 },
-			event.deltaY,
-			{ x: fill.width / 2, y: fill.height / 2 },
-			{
-				width: fill.width,
-				height: fill.height,
-				subjectWidth: fill.width,
-				subjectHeight: fill.height
-			}
-		);
-		const amount = Math.min(1, Math.max(0, 1 - level.morphProgress) + step.exitBoundaryDelta);
-		this.handleExit(level, amount);
 	}
 
 	/**

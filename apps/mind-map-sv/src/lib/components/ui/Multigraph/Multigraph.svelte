@@ -1362,14 +1362,12 @@
 		<div
 			class="focus-root"
 			class:reduced-motion={reduceMotion}
-			class:exit-scrub={focus.exitScrubActive}
 			role={focus.dialogOpen ? 'dialog' : undefined}
 			aria-modal={focus.dialogOpen ? 'true' : undefined}
 			aria-labelledby={focus.dialogOpen ? DETAILS_TITLE_ID : undefined}
 			tabindex="-1"
 			data-focus-depth={focus.depth}
 			data-exit-scrub={focus.exitScrubActive ? 'true' : undefined}
-			onwheel={(event) => focus.handleRootWheel(event)}
 			onkeydown={(event) => {
 				if (event.key === 'Escape') focus.closeFocus();
 			}}
@@ -1484,13 +1482,6 @@
 		z-index: 60;
 		pointer-events: none;
 		touch-action: none;
-	}
-
-	/* During a partial exit scrub the shrinking frame no longer covers the
-	   viewport; catch wheel input everywhere so the exit keeps scrubbing
-	   instead of zooming the stage underneath. */
-	.focus-root.exit-scrub {
-		pointer-events: auto;
 	}
 
 	.focus-root.reduced-motion :global(.deep-zoom-layer) {

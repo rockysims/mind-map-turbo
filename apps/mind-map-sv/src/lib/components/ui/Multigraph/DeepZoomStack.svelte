@@ -22,7 +22,6 @@
 <script lang="ts">
 	import DeepZoomLayer, { type FrameSnippetArgs } from './DeepZoomLayer.svelte';
 	import ZoomWorld from './ZoomWorld.svelte';
-	import type { ZoomWorldState } from './lib/zoomWorldController';
 
 	let {
 		levels = [],
@@ -34,8 +33,7 @@
 		frame,
 		compact,
 		details,
-		onAscend,
-		onWorldStateChange
+		onAscend
 	}: {
 		levels?: FocusLevel[];
 		reduceMotion?: boolean;
@@ -47,8 +45,20 @@
 		compact?: Snippet<[FocusLevel]>;
 		details?: Snippet<[FocusLevel]>;
 		onAscend?: (level: FocusLevel, delta: number) => void;
-		onWorldStateChange?: (level: FocusLevel, state: ZoomWorldState) => void;
 	} = $props();
+
+	// Single focus input surface: the active (top) level owns wheel input once it
+	// is committed or exiting. This one fullscreen element sits BEHIND the frame
+	// layers but above the stage, so it captures only the wheels the shrinking
+	// exit-scrub frame no longer covers and forwards them to the active level's
+	// world (the frame's own `ZoomWorld` still handles wheels over it — never
+	// both, since only the topmost element under the cursor gets the event).
+	// Pointer drag/pinch stays inside `ZoomWorld`; the surface handles wheel only.
+	let activeWorld = $state<ZoomWorld | null>(null);
+	const activeLevel = $derived(levels.length > 0 ? levels[levels.length - 1] : null);
+	const activeWorldActive = $derived(
+		activeLevel != null && (activeLevel.morphProgress >= 1 || activeLevel.phase === 'exiting')
+	);
 </script>
 
 <div class="deep-zoom-stack" data-depth={levels.length}>
@@ -75,13 +85,10 @@
 		{#snippet levelDetails()}
 			{#if worldActive}
 				<ZoomWorld
+					bind:this={activeWorld}
 					{entryGestureIdleMs}
 					{entryGestureMaxMs}
-					exitBoundarySync={level.phase === 'exiting'
-						? Math.min(1, Math.max(0, 1 - level.morphProgress))
-						: 0}
 					onExitBoundary={(delta) => onAscend?.(level, delta)}
-					onStateChange={(state) => onWorldStateChange?.(level, state)}
 				>
 					{@render details?.(level)}
 				</ZoomWorld>
@@ -105,6 +112,14 @@
 			details={details ? levelDetails : undefined}
 		/>
 	{/each}
+
+	<div
+		class="focus-input-surface"
+		class:active={activeWorldActive}
+		data-focus-input-surface="true"
+		aria-hidden="true"
+		onwheel={(event) => activeWorld?.dispatchWheel(event)}
+	></div>
 </div>
 
 <style>
@@ -120,5 +135,22 @@
 		height: 100%;
 		overflow: hidden;
 		pointer-events: none;
+	}
+
+	/* One fullscreen wheel catcher. It has no `z-index`, so it paints BELOW the
+	   positioned `.deep-zoom-layer` frames (z-index 60) but still above the
+	   stage: wheels over the frame reach the frame's own world, while wheels the
+	   shrinking exit-scrub frame no longer covers land here and are forwarded to
+	   the active world. Inert (`pointer-events: none`) during entry so the stage
+	   keeps driving the entry scrub. */
+	.focus-input-surface {
+		position: fixed;
+		inset: 0;
+		touch-action: none;
+		pointer-events: none;
+	}
+
+	.focus-input-surface.active {
+		pointer-events: auto;
 	}
 </style>

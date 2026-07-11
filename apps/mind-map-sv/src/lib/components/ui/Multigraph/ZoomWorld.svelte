@@ -24,24 +24,14 @@
 		maxScale = 8,
 		entryGestureIdleMs = 0,
 		entryGestureMaxMs = 0,
-		exitBoundarySync = undefined,
 		onExitBoundary,
-		onStateChange,
 		children
 	}: {
 		minScale?: number;
 		maxScale?: number;
 		entryGestureIdleMs?: number;
 		entryGestureMaxMs?: number;
-		/**
-		 * Authoritative exit-boundary amount from the consumer. The exit scrub
-		 * can also be driven from outside this world (e.g. wheel events landing
-		 * off the shrinking frame); syncing keeps the internal accumulator from
-		 * going stale and jumping on the next wheel handled here.
-		 */
-		exitBoundarySync?: number;
 		onExitBoundary?: (delta: number) => void;
-		onStateChange?: (state: ZoomWorldState) => void;
 		children?: Snippet;
 	} = $props();
 
@@ -76,13 +66,6 @@
 		);
 	});
 
-	$effect(() => {
-		if (exitBoundarySync === undefined) return;
-		if (Math.abs(exitBoundarySync - exitBoundaryAmount) > 1e-6) {
-			exitBoundaryAmount = exitBoundarySync;
-		}
-	});
-
 	function currentBounds(): ZoomWorldBounds | null {
 		if (!worldRef || !subjectRef) return null;
 		return {
@@ -103,7 +86,18 @@
 
 	function commitState(next: ZoomWorldState) {
 		worldState = next;
-		onStateChange?.(next);
+	}
+
+	/**
+	 * Called by the single fullscreen focus input surface (DeepZoomStack) so a
+	 * wheel that lands off the shrinking frame still drives THIS world — the
+	 * event's `clientX/clientY` become the focal point via `localPoint`. The
+	 * surface is the sole external wheel source; the element's own `onwheel`
+	 * still handles wheels physically over the frame (never both, since only
+	 * the topmost element under the cursor receives the event).
+	 */
+	export function dispatchWheel(event: WheelEvent) {
+		handleWheel(event);
 	}
 
 	function shouldSwallowEntryZoom(direction: EntryGestureDirection): boolean {
