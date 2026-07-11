@@ -58,6 +58,7 @@ individual PR-sized tasks.
 | 06  | Node focus and rich media                          | complete    | [milestone](milestones/06-node-focus-and-rich-media.md), [plan](plans/2026-07-04%2006-node-focus-and-rich-media.md)                             |
 | 06a | Continuous deep zoom                               | complete    | [milestone](milestones/06a-continuous-deep-zoom.md), [plan](plans/2026-07-04%2006a-continuous-deep-zoom.md)                                     |
 | 06b | Recursive deep zoom (single-element morph)         | complete    | [milestone](milestones/06b-recursive-deep-zoom.md), [plan](plans/2026-07-10%2006b-recursive-deep-zoom.md)                                       |
+| 06c | Single-surface morph (one frame element)           | not started | [milestone](milestones/06c-single-surface-morph.md), [plan](plans/2026-07-10%2006c-single-surface-morph.md)                                     |
 | 07  | Multiplayer                                        | not started | [milestones/07-multiplayer.md](milestones/07-multiplayer.md)                                                                                    |
 
 Milestones 04a-04m deepen the local-first graph experience before multiplayer.
@@ -87,8 +88,12 @@ crossfading to a viewport-centered replica node, the real element genuinely
 morphs into the fullscreen surface via a single 0→1 geometry function, on a
 depth-agnostic focus stack so deep zoom nests to any number of levels; the node
 level lands first and images/other blocks follow as consumers of the same
-primitives. Milestone 07 follows with multiplayer after rich local document
-behavior is settled.
+primitives. Milestone 06c finishes 06b's single-element intent: one morph
+surface owns the frame for the entire deep-zoom round trip (driven by a pure
+frame-geometry function with a derived, never-measured source rect), content
+crossfades inside it as fixed-layout transform-scaled layers, and the
+recursive stack becomes the production focus path. Milestone 07 follows with
+multiplayer after rich local document behavior is settled.
 
 ## How this directory is organized
 
