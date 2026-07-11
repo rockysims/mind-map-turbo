@@ -206,10 +206,6 @@
 	/** Stage element's live on-screen rect, reported by Stage — never measured here. */
 	let stageRect = $state<StageRect | null>(null);
 	let reduceMotion = $derived(prefersReducedMotion());
-	/** True once the morph reached the committed (progress 1) state. Drives the dialog. */
-	let focusCommitted = $state(false);
-	/** True while the focus is animating/scrubbing back down to close. */
-	let focusExiting = $state(false);
 	let focusEntryGestureIdleMs = $state(0);
 	let stageEntryGestureGateRequest = $state<{
 		id: number;
@@ -222,6 +218,19 @@
 	let focusTweenRaf: number | null = null;
 	let focusIdleUnmountTimeoutId: ReturnType<typeof setTimeout> | null = null;
 	const activeFocusLevel = $derived(focusRuntime.activeLevel);
+	/**
+	 * True once the morph reached committed state (active or partial exit scrub).
+	 * Derived from the active level's phase — cannot disagree with FocusLevel.phase.
+	 */
+	const focusCommitted = $derived(
+		activeFocusLevel != null &&
+			(activeFocusLevel.phase === 'active' || activeFocusLevel.phase === 'exiting')
+	);
+	/**
+	 * True while the terminal close tween is in flight (phase 'closing').
+	 * Derived from the active level's phase — cannot disagree with FocusLevel.phase.
+	 */
+	const focusExiting = $derived(activeFocusLevel?.phase === 'closing');
 	/** Dialog chrome (role, close affordance) shows only from commit through close. */
 	const focusDialogOpen = $derived(focusRuntime.isFocused && (focusCommitted || focusExiting));
 
@@ -606,30 +615,36 @@
 		clearFocusIdleUnmount();
 		cancelFocusTween();
 		closeOverlays();
-		focusExiting = false;
 		if (focusRuntime.focusedNodeId === node.id) {
 			focusRuntime.setProgress(1, 'active');
 		} else {
 			const fill = focusFillRect();
 			focusRuntime.open(node, fill, fill, { morphProgress: 1, phase: 'active' });
 		}
-		focusCommitted = true;
 		focusEntryGestureIdleMs = entryGestureIdleMs;
 	}
 
+	/**
+	 * Unified close: used by Escape, the close button, and wheel-out completion
+	 * (handleFocusExit delta >= 1). Tweens progress to 0 then unmounts. Arms the
+	 * residual-gesture gate on every close for consistent wheel swallowing.
+	 */
 	function closeFocus() {
 		if (!focusRuntime.isFocused || focusExiting) return;
 		clearFocusIdleUnmount();
 		cancelFocusTween();
-		focusExiting = true;
-		focusCommitted = false;
+		armStageEntryGestureGate('out');
 		const from = activeFocusLevel?.morphProgress ?? 1;
 		if (reduceMotion || FOCUS_TRANSITION_MS <= 0 || typeof requestAnimationFrame !== 'function') {
-			focusRuntime.setProgress(0, 'exiting');
+			focusRuntime.setProgress(0, 'closing');
 			finishCloseFocus();
 			return;
 		}
-		tweenFocusProgress(from, 0, FOCUS_TRANSITION_MS, 'exiting', finishCloseFocus);
+		// Defer finishCloseFocus by one rAF so the DOM renders at progress 0 (the
+		// node handoff geometry) before the level unmounts.
+		tweenFocusProgress(from, 0, FOCUS_TRANSITION_MS, 'closing', () => {
+			requestAnimationFrame(finishCloseFocus);
+		});
 	}
 
 	function finishCloseFocus() {
@@ -637,8 +652,6 @@
 		clearFocusIdleUnmount();
 		focusRuntime.close();
 		focusEntryGestureIdleMs = 0;
-		focusExiting = false;
-		focusCommitted = false;
 	}
 
 	function tweenFocusProgress(
@@ -877,8 +890,6 @@
 			return;
 		}
 		closeOverlays();
-		focusExiting = false;
-		focusCommitted = false;
 		focusEntryGestureIdleMs = 0;
 		const fill = focusFillRect();
 		focusRuntime.open(node, fill, fill, { morphProgress: progress, phase: 'entering' });
@@ -886,30 +897,21 @@
 
 	/** Exit scrub from the focused world's zoom-out boundary (via DeepZoomStack). */
 	function handleFocusExit(_level: FocusLevel, delta: number) {
-		if (!focusRuntime.isFocused) return;
+		// Guard also blocks reversals while the terminal close tween is running.
+		if (!focusRuntime.isFocused || focusExiting) return;
 		cancelFocusTween();
 		if (delta <= 0) {
+			// Revert to committed state (user zoomed back in past the exit boundary).
 			focusRuntime.setProgress(1, 'active');
-			focusCommitted = true;
-			focusExiting = false;
 			return;
 		}
 		if (delta >= 1) {
-			armStageEntryGestureGate('out');
-			focusExiting = true;
-			focusCommitted = false;
-			focusRuntime.setProgress(0, 'exiting');
-			if (typeof requestAnimationFrame === 'function') {
-				requestAnimationFrame(() => requestAnimationFrame(finishCloseFocus));
-			} else {
-				finishCloseFocus();
-			}
+			// Wheel-out crossed the full exit threshold — use the unified close path.
+			closeFocus();
 			return;
 		}
 		// Partial exit scrub: morph the frame down while staying committed so the
 		// world keeps driving and the graph stays marked focus-active.
-		focusExiting = false;
-		focusCommitted = true;
 		focusRuntime.setProgress(Math.max(0, 1 - delta), 'exiting');
 	}
 
@@ -923,13 +925,11 @@
 	 * While this is true the focus root captures those wheels and keeps driving
 	 * the exit, instead of letting them zoom the stage or scroll the page.
 	 */
+	// 'exiting' now exclusively means partial exit scrub (still committed), so
+	// checking the phase is sufficient — the committed && !closing guards are redundant.
 	const focusExitScrubActive = $derived(
 		Boolean(
-			focusCommitted &&
-			!focusExiting &&
-			activeFocusLevel &&
-			activeFocusLevel.phase === 'exiting' &&
-			activeFocusLevel.morphProgress < 1
+			activeFocusLevel && activeFocusLevel.phase === 'exiting' && activeFocusLevel.morphProgress < 1
 		)
 	);
 

@@ -876,17 +876,23 @@
 		);
 		expect(canvasElement.querySelector('.graph')).toHaveClass('focus-active');
 
-		// A bold flick out crosses the exit boundary: one gesture, immediate exit.
+		// A bold flick out crosses the exit boundary: the unified close tween runs
+		// progress to 0 then unmounts the surface one frame later.
 		dispatchWheel(world, 5000, center.x, center.y);
 		await waitForFrames(1);
 		expect(dialog).toBeInTheDocument();
 		expect(canvasElement.querySelector('.graph')).not.toHaveClass('focus-active');
+		// Tween completes: progress reaches 0 (frame is the node's circle).
+		await waitFor(() => {
+			expect(morphRectOf(layer).progress).toBe(0);
+		});
 		const exited = morphRectOf(layer);
-		expect(exited.progress).toBe(0);
 		// At progress 0 the frame is the node's circle: radius === half its width.
 		expect(exited.radius).toBeCloseTo(exited.width / 2, 0);
-		await waitForFrames(3);
-		expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
+		// One rAF later the surface unmounts.
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
+		});
 	}}
 />
 
@@ -1004,6 +1010,59 @@
 			expect(p).toBeLessThan(1);
 		});
 		expect(getFocusLayer(canvasElement)).toBe(surfaceEl);
+	}}
+/>
+
+<Story
+	name="AllCloseRoutesReachSameUnfocusedState"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 1,
+			pinned: [0],
+			posByNodeId: { n0: { x: 0, y: 0 } }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: { panX: 0, panY: 0, scale: APP_CONFIG.multigraph.zoom.maxScale },
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+
+		/** Commit focus via a bold in-zoom at max scale. */
+		const commitFocusViaWheel = async () => {
+			dispatchWheel(stage, -800, center.x, center.y);
+			await within(canvasElement).findByRole('dialog');
+			expect(canvasElement.querySelector('.graph')).toHaveClass('focus-active');
+			expect(canvasElement.querySelector('.deep-zoom-layer')).toBeInTheDocument();
+		};
+
+		/** Assert the focus surface has fully unmounted and the graph is unfocused. */
+		const assertUnfocused = async () => {
+			await waitFor(() => {
+				expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
+				expect(canvasElement.querySelector('.deep-zoom-layer')).not.toBeInTheDocument();
+			});
+			expect(canvasElement.querySelector('.graph')).not.toHaveClass('focus-active');
+		};
+
+		// Route A: Escape key dispatched to window (mirrors the $effect keydown listener).
+		await commitFocusViaWheel();
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+		await assertUnfocused();
+
+		// Route B: Close button (aria-label "Close node focus").
+		await commitFocusViaWheel();
+		within(canvasElement).getByRole('button', { name: 'Close node focus' }).click();
+		await assertUnfocused();
+
+		// Route C: Wheel-out completion (delta >= 1 triggers unified closeFocus).
+		await commitFocusViaWheel();
+		const world = canvasElement.querySelector('.zoom-world') as HTMLElement;
+		dispatchWheel(world, 5000, center.x, center.y);
+		await assertUnfocused();
 	}}
 />
 

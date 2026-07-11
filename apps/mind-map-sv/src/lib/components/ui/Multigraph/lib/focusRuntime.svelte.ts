@@ -4,7 +4,7 @@ import type { ZoomWorldState } from './zoomWorldController';
 
 export type FocusSubjectKind = 'node' | 'placeholder' | (string & {});
 
-export type FocusLevelPhase = 'entering' | 'active' | 'exiting';
+export type FocusLevelPhase = 'entering' | 'active' | 'exiting' | 'closing';
 
 export interface FocusLevel {
 	id: string;
