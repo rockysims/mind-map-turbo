@@ -81,7 +81,11 @@
 		align-items: stretch;
 		width: 100%;
 		height: 100%;
-		overflow: auto;
+		/* The frame only clips; panning/zooming oversized details content is the
+		   wrapped ZoomWorld's job. A scroll container here (the old dialog model,
+		   when .circle lived inside the world) would swallow wheel input meant
+		   for zoom now that the frame wraps the world. */
+		overflow: hidden;
 		box-shadow: 0 24px 80px rgb(15 23 42 / 22%);
 	}
 </style>

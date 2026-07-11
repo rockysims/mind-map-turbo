@@ -730,6 +730,11 @@
 			committed.borderWidth,
 			0
 		);
+		// The frame must not be a scroll container: it wraps the ZoomWorld, so an
+		// `overflow: auto/scroll` here would swallow wheel input meant for zoom.
+		const focusedCircleStyle = window.getComputedStyle(focusedCircle);
+		expect(['auto', 'scroll']).not.toContain(focusedCircleStyle.overflowX);
+		expect(['auto', 'scroll']).not.toContain(focusedCircleStyle.overflowY);
 		// The overzoomed in-stage circle is larger than the committed source
 		// diameter would be — proving the surface used derived (not measured) geometry.
 		expect(oversizedRect.width).toBeGreaterThan(0);
