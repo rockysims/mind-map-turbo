@@ -3,7 +3,7 @@
 **Created:** 2026-07-10
 **Author:** Cursor agent
 **Milestone:** [milestones/06c-single-surface-morph.md](../milestones/06c-single-surface-morph.md)
-**Status:** executing
+**Status:** done
 **Total estimated effort:** L (5 tasks across 4 waves; pure frame geometry,
 shared chrome extraction, morph surface component, production rewiring,
 cleanup/closeout)
@@ -204,7 +204,7 @@ frame. Explicit Focus pushes the same level from the node's derived rect.
 - Focus accessibility (dialog role, labelled title, close affordance, Escape)
   is preserved on the stack/surface.
 
-### T05 — Node cleanup, dead code removal, coverage, closeout
+### T05 — Node cleanup, dead code removal, coverage, closeout — ✓ done
 
 |                |                                                                                                                                            |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -317,3 +317,20 @@ waiting on any design validation from T01/T03.
   task was validated independently by the orchestrator (lint + check + full
   618-test suite) before committing. The production focus path is still the
   legacy `NodeFocusSurface` (untouched, still green) until T04 swaps it.
+- 2026-07-10: T05 executed. Removed from `Node.svelte`: props
+  `detailsProgress`, `detailsWidthPx`, `detailsHeightPx`, `detailsMode`,
+  `borderWidthPx`, `detailsTitleId`, `children`; derived values
+  `clampedDetailsProgress`, `borderRadiusPx`, `previewDetailsShape`,
+  `previewWidthPx`, `previewHeightPx`, `showDetailsLayer`, `showCompactLayer`,
+  `compactOpacity`, `detailsOpacity`, `nodeBorderWidthPx`,
+  `pinnedNodeBorderWidthPx`; helper `lerp`; `NodeDetailsLayer` import and
+  render block; dead CSS. Removed from `NodeChrome.svelte`: `detailsPreview`,
+  `previewWidthPx`, `previewHeightPx` props and the
+  `[data-details-preview='true']` CSS rule. Deleted `borderRadiusForProgress`
+  from `zoomBoundary.ts` and its two spec cases. Deleted `NodeFocusMorphSource`
+  interface from `nodeFocus.ts` (defined only, never imported). Removed
+  dead MidProgress, Details, and PinnedTaggedDetails stories from
+  `Node.stories.svelte` (intermediate-progress rendering no longer exists in
+  `Node`); kept ShortClosed, LongClosed, PinnedClosed, MultiTagBorder.
+  `rg` confirms zero surviving callers of all removed symbols in source.
+  Milestone 06c set to `complete`; roadmap row updated.

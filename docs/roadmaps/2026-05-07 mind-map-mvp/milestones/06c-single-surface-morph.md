@@ -1,6 +1,6 @@
 # Milestone 06c: Single-surface morph (one frame element for deep zoom)
 
-**Status:** not started
+**Status:** complete
 **Depends on:** milestone 06b (recursive deep zoom).
 **Plan:** [2026-07-10 06c-single-surface-morph.md](../plans/2026-07-10%2006c-single-surface-morph.md)
 

@@ -58,7 +58,7 @@ individual PR-sized tasks.
 | 06  | Node focus and rich media                          | complete    | [milestone](milestones/06-node-focus-and-rich-media.md), [plan](plans/2026-07-04%2006-node-focus-and-rich-media.md)                             |
 | 06a | Continuous deep zoom                               | complete    | [milestone](milestones/06a-continuous-deep-zoom.md), [plan](plans/2026-07-04%2006a-continuous-deep-zoom.md)                                     |
 | 06b | Recursive deep zoom (single-element morph)         | complete    | [milestone](milestones/06b-recursive-deep-zoom.md), [plan](plans/2026-07-10%2006b-recursive-deep-zoom.md)                                       |
-| 06c | Single-surface morph (one frame element)           | not started | [milestone](milestones/06c-single-surface-morph.md), [plan](plans/2026-07-10%2006c-single-surface-morph.md)                                     |
+| 06c | Single-surface morph (one frame element)           | complete    | [milestone](milestones/06c-single-surface-morph.md), [plan](plans/2026-07-10%2006c-single-surface-morph.md)                                     |
 | 07  | Multiplayer                                        | not started | [milestones/07-multiplayer.md](milestones/07-multiplayer.md)                                                                                    |
 
 Milestones 04a-04m deepen the local-first graph experience before multiplayer.
