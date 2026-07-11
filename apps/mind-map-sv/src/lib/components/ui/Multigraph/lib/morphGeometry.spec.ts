@@ -51,4 +51,28 @@ describe('single-element morph geometry', () => {
 		expect(interpolateMorph(source, fill, 2, { targetRadiusPx: 16 }).width).toBe(320);
 		expect(interpolateMorph(source, fill, -1, { targetRadiusPx: 16 }).width).toBe(120);
 	});
+
+	it('omits the border-width channel when no border widths are supplied', () => {
+		expect(interpolateMorph(source, fill, 0.5, { targetRadiusPx: 16 })).not.toHaveProperty(
+			'borderWidthPx'
+		);
+	});
+
+	it('interpolates the border-width channel when both ends are supplied', () => {
+		const options = { targetRadiusPx: 16, sourceBorderWidthPx: 4, targetBorderWidthPx: 12 };
+		expect(interpolateMorph(source, fill, 0, options).borderWidthPx).toBe(4);
+		expect(interpolateMorph(source, fill, 0.5, options).borderWidthPx).toBe(8);
+		expect(interpolateMorph(source, fill, 1, options).borderWidthPx).toBe(12);
+	});
+
+	it('eases the border-width channel with every other channel', () => {
+		expect(
+			interpolateMorph(source, fill, 0.5, {
+				targetRadiusPx: 16,
+				sourceBorderWidthPx: 4,
+				targetBorderWidthPx: 12,
+				ease: (t) => t * t
+			}).borderWidthPx
+		).toBe(6);
+	});
 });

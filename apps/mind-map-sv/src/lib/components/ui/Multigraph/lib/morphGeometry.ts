@@ -7,12 +7,16 @@ export interface MorphGeometry {
 	width: number;
 	height: number;
 	borderRadiusPx: number;
+	// Present only when both source and target border widths are supplied via options.
+	borderWidthPx?: number;
 }
 
 export interface MorphGeometryOptions {
 	ease?: (progress: number) => number;
 	sourceRadiusPx?: number;
 	targetRadiusPx?: number;
+	sourceBorderWidthPx?: number;
+	targetBorderWidthPx?: number;
 }
 
 export function interpolateMorph(
@@ -26,13 +30,23 @@ export function interpolateMorph(
 	const targetRadiusPx =
 		options.targetRadiusPx ?? APP_CONFIG.multigraph.focus.detailsCornerRadiusPx;
 
-	return {
+	const geometry: MorphGeometry = {
 		x: lerp(source.left, fill.left, easedProgress),
 		y: lerp(source.top, fill.top, easedProgress),
 		width: lerp(source.width, fill.width, easedProgress),
 		height: lerp(source.height, fill.height, easedProgress),
 		borderRadiusPx: lerp(sourceRadiusPx, targetRadiusPx, easedProgress)
 	};
+
+	if (options.sourceBorderWidthPx !== undefined && options.targetBorderWidthPx !== undefined) {
+		geometry.borderWidthPx = lerp(
+			options.sourceBorderWidthPx,
+			options.targetBorderWidthPx,
+			easedProgress
+		);
+	}
+
+	return geometry;
 }
 
 function lerp(from: number, to: number, progress: number): number {

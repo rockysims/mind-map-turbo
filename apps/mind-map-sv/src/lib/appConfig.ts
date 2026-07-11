@@ -37,6 +37,7 @@ export const APP_CONFIG = {
 			entryGestureMaxMs: 420, // hard cap for swallowing residual boundary-crossing zoom input
 			boundaryNearTouchMarginPx: 8, // tolerance for treating zoom subjects as inscribed
 			detailsCornerRadiusPx: 18, // fully focused node corner radius
+			detailsBorderWidthPx: 8, // fully focused node frame border width (matches node border)
 			preInscribeZoneFraction: 0.22, // fraction of inscribe scale used for entry scrub
 			subFitExitZoneFraction: 0.18, // fraction below fit scale used for exit scrub
 			eligibilityCoverageRatio: 1, // focal point must be inside the projected node circle
