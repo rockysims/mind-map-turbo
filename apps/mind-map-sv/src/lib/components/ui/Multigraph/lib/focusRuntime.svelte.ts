@@ -1,6 +1,5 @@
 import type { NodeData } from '../../types/node';
 import type { Rect } from './zoomBoundary';
-import type { ZoomWorldState } from './zoomWorldController';
 
 export type FocusSubjectKind = 'node' | 'placeholder' | (string & {});
 
@@ -13,7 +12,6 @@ export interface FocusLevel {
 	sourceRect: Rect;
 	fillRect: Rect;
 	borderWidthPx?: number;
-	worldState: ZoomWorldState;
 	morphProgress: number;
 	phase: FocusLevelPhase;
 }
@@ -24,7 +22,6 @@ export interface PushFocusLevelInput {
 	sourceRect: Rect;
 	fillRect: Rect;
 	borderWidthPx?: number;
-	worldState?: ZoomWorldState;
 	morphProgress?: number;
 	phase?: FocusLevelPhase;
 }
@@ -36,7 +33,6 @@ export interface OpenFocusInput {
 }
 
 const DEFAULT_RECT: Rect = { left: 0, top: 0, width: 0, height: 0 };
-const DEFAULT_WORLD_STATE: ZoomWorldState = { panX: 0, panY: 0, scale: 1 };
 
 export class FocusRuntime {
 	levels = $state<FocusLevel[]>([]);
@@ -66,7 +62,6 @@ export class FocusRuntime {
 			sourceRect: input.sourceRect,
 			fillRect: input.fillRect,
 			borderWidthPx: input.borderWidthPx,
-			worldState: input.worldState ?? DEFAULT_WORLD_STATE,
 			morphProgress: clamp01(input.morphProgress ?? 1),
 			phase: input.phase ?? 'active'
 		};
@@ -90,10 +85,6 @@ export class FocusRuntime {
 			morphProgress: clamp01(progress),
 			phase
 		}));
-	}
-
-	setWorldState(worldState: ZoomWorldState): void {
-		this.updateActive((level) => ({ ...level, worldState }));
 	}
 
 	open(

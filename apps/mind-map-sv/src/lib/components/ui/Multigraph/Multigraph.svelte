@@ -107,9 +107,9 @@
 		type NodeEnterAnimation
 	} from './lib/elementTransitions.js';
 	import { computeParallelEdgeOffsets } from './lib/parallelEdges.js';
-	import { FocusRuntime, type FocusLevel } from './lib/focusRuntime.svelte.js';
+	import type { FocusLevel } from './lib/focusRuntime.svelte.js';
+	import { FocusController } from './lib/focusController.svelte.js';
 	import {
-		focalNodeForPoint,
 		nodeScreenCircle,
 		type NodeFocusCandidate,
 		type ViewTransform
@@ -120,10 +120,8 @@
 		type FrameViewState,
 		type NodeFrameLayout
 	} from './lib/frameGeometry.js';
-	import type { FocusEntryBoundaryCandidate } from './lib/focusEntryBoundary.js';
 	import type { Rect } from './lib/zoomBoundary.js';
 	import type { StageRect } from './lib/stageCoordinates.js';
-	import { wheelZoomWorld, type ZoomWorldState } from './lib/zoomWorldController.js';
 	import { NODE_RADIUS, NODE_TEXT_FONT_SIZE } from '$lib/constants.js';
 
 	const CENTERED_POSITION: Point = { x: 0, y: 0 };
@@ -206,7 +204,6 @@
 	/** Stage element's live on-screen rect, reported by Stage — never measured here. */
 	let stageRect = $state<StageRect | null>(null);
 	let reduceMotion = $derived(prefersReducedMotion());
-	let focusEntryGestureIdleMs = $state(0);
 	let stageEntryGestureGateRequest = $state<{
 		id: number;
 		direction: EntryGestureDirection;
@@ -214,25 +211,24 @@
 		maxMs: number;
 	} | null>(null);
 	let stageEntryGestureGateRequestId = $state(0);
-	const focusRuntime = new FocusRuntime();
-	let focusTweenRaf: number | null = null;
-	let focusIdleUnmountTimeoutId: ReturnType<typeof setTimeout> | null = null;
-	const activeFocusLevel = $derived(focusRuntime.activeLevel);
 	/**
-	 * True once the morph reached committed state (active or partial exit scrub).
-	 * Derived from the active level's phase — cannot disagree with FocusLevel.phase.
+	 * Owns the focus state machine (runtime stack, phase, commit/exit/idle). This
+	 * component only feeds it live geometry/view deps and renders from its getters.
 	 */
-	const focusCommitted = $derived(
-		activeFocusLevel != null &&
-			(activeFocusLevel.phase === 'active' || activeFocusLevel.phase === 'exiting')
-	);
-	/**
-	 * True while the terminal close tween is in flight (phase 'closing').
-	 * Derived from the active level's phase — cannot disagree with FocusLevel.phase.
-	 */
-	const focusExiting = $derived(activeFocusLevel?.phase === 'closing');
-	/** Dialog chrome (role, close affordance) shows only from commit through close. */
-	const focusDialogOpen = $derived(focusRuntime.isFocused && (focusCommitted || focusExiting));
+	const focus = new FocusController({
+		getStageRect: () => stageRect,
+		getViewState: () => stageViewState,
+		getFillRect: () => focusFillRect(),
+		getFocusCandidates: () => focusCandidates(),
+		getReduceMotion: () => reduceMotion,
+		armEntryGate: (direction) => armStageEntryGestureGate(direction),
+		closeOverlays: () => closeOverlays(),
+		config: {
+			transitionMs: FOCUS_TRANSITION_MS,
+			entryGestureIdleMs: APP_CONFIG.multigraph.focus.entryGestureIdleMs,
+			entryGestureMaxMs: APP_CONFIG.multigraph.focus.entryGestureMaxMs
+		}
+	});
 
 	/** Internal enter animations for nodes added by the user (scale 0 → target). */
 	let nodeEnterAnimations = $state<Record<string, NodeEnterAnimation>>({});
@@ -420,8 +416,8 @@
 	$effect(() => {
 		if (typeof window === 'undefined') return;
 		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.key === 'Escape' && focusRuntime.isFocused) {
-				closeFocus();
+			if (event.key === 'Escape' && focus.isFocused) {
+				focus.closeFocus();
 				return;
 			}
 			if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'k') return;
@@ -448,8 +444,7 @@
 
 	$effect(() => {
 		return () => {
-			clearFocusIdleUnmount();
-			cancelFocusTween();
+			focus.dispose();
 			layoutRuntime.stop();
 		};
 	});
@@ -597,118 +592,6 @@
 		editNodeId = nodeId;
 	}
 
-	/**
-	 * Explicit Focus (long-press menu): there is no zoom gesture, so enter the
-	 * committed state directly through the same single morph surface. Reduced
-	 * motion behaves identically (no intermediate frames to skip).
-	 */
-	function openFocus(node: NodeData) {
-		commitFocus(node, 0);
-	}
-
-	/**
-	 * Drive the shared morph surface to the committed (progress 1) state for a
-	 * node, reusing the already-mounted entry-scrub level when present so the
-	 * SAME surface element spans entry → committed.
-	 */
-	function commitFocus(node: NodeData, entryGestureIdleMs: number) {
-		clearFocusIdleUnmount();
-		cancelFocusTween();
-		closeOverlays();
-		if (focusRuntime.focusedNodeId === node.id) {
-			focusRuntime.setProgress(1, 'active');
-		} else {
-			const fill = focusFillRect();
-			focusRuntime.open(node, fill, fill, { morphProgress: 1, phase: 'active' });
-		}
-		focusEntryGestureIdleMs = entryGestureIdleMs;
-	}
-
-	/**
-	 * Unified close: used by Escape, the close button, and wheel-out completion
-	 * (handleFocusExit delta >= 1). Tweens progress to 0 then unmounts. Arms the
-	 * residual-gesture gate on every close for consistent wheel swallowing.
-	 */
-	function closeFocus() {
-		if (!focusRuntime.isFocused || focusExiting) return;
-		clearFocusIdleUnmount();
-		cancelFocusTween();
-		armStageEntryGestureGate('out');
-		const from = activeFocusLevel?.morphProgress ?? 1;
-		if (reduceMotion || FOCUS_TRANSITION_MS <= 0 || typeof requestAnimationFrame !== 'function') {
-			focusRuntime.setProgress(0, 'closing');
-			finishCloseFocus();
-			return;
-		}
-		// Defer finishCloseFocus by one rAF so the DOM renders at progress 0 (the
-		// node handoff geometry) before the level unmounts.
-		tweenFocusProgress(from, 0, FOCUS_TRANSITION_MS, 'closing', () => {
-			requestAnimationFrame(finishCloseFocus);
-		});
-	}
-
-	function finishCloseFocus() {
-		cancelFocusTween();
-		clearFocusIdleUnmount();
-		focusRuntime.close();
-		focusEntryGestureIdleMs = 0;
-	}
-
-	function tweenFocusProgress(
-		from: number,
-		to: number,
-		durationMs: number,
-		phase: FocusLevel['phase'],
-		onDone?: () => void
-	) {
-		cancelFocusTween();
-		const startedAt = Date.now();
-		const step = () => {
-			const elapsed = Date.now() - startedAt;
-			const t = durationMs > 0 ? Math.min(1, elapsed / durationMs) : 1;
-			focusRuntime.setProgress(from + (to - from) * t, phase);
-			if (t < 1) {
-				focusTweenRaf = requestAnimationFrame(step);
-			} else {
-				focusTweenRaf = null;
-				onDone?.();
-			}
-		};
-		focusTweenRaf = requestAnimationFrame(step);
-	}
-
-	function cancelFocusTween() {
-		if (focusTweenRaf !== null && typeof cancelAnimationFrame === 'function') {
-			cancelAnimationFrame(focusTweenRaf);
-		}
-		focusTweenRaf = null;
-	}
-
-	function clearFocusIdleUnmount() {
-		if (focusIdleUnmountTimeoutId === null) return;
-		clearTimeout(focusIdleUnmountTimeoutId);
-		focusIdleUnmountTimeoutId = null;
-	}
-
-	/**
-	 * The entry-scrub surface stays mounted while progress is 0 so a gentle
-	 * scrub hovering at the zone edge reuses one surface. Only after the entry
-	 * gesture idles (reusing `entryGestureIdleMs`) do we unmount and hand the
-	 * frame back to the in-stage node — pixel-identically, since at progress 0
-	 * the surface geometry equals the node's derived on-screen rect.
-	 */
-	function scheduleFocusIdleUnmount() {
-		clearFocusIdleUnmount();
-		if (focusCommitted || focusExiting || typeof window === 'undefined') return;
-		focusIdleUnmountTimeoutId = setTimeout(() => {
-			focusIdleUnmountTimeoutId = null;
-			const level = focusRuntime.activeLevel;
-			if (!focusCommitted && !focusExiting && level && level.morphProgress <= 0) {
-				focusRuntime.close();
-			}
-		}, APP_CONFIG.multigraph.focus.entryGestureIdleMs);
-	}
-
 	function armStageEntryGestureGate(direction: EntryGestureDirection) {
 		stageEntryGestureGateRequestId += 1;
 		stageEntryGestureGateRequest = {
@@ -736,45 +619,6 @@
 			if (!position || radius === undefined) return [];
 			return [{ node, position, radius, zIndex: index }];
 		});
-	}
-
-	function focusCandidateForPoint(
-		focalPoint: Point,
-		view: ViewTransform
-	): NodeFocusCandidate | null {
-		if (!stageRect) return null;
-		return focalNodeForPoint(focusCandidates(), focalPoint, stageRect, view);
-	}
-
-	function focusEntryBoundaryCandidateForPoint(input: {
-		focalPoint: Point;
-		requestedScale: number;
-		viewState: ViewTransform;
-		stickyNodeId?: string;
-	}): FocusEntryBoundaryCandidate | null {
-		if (
-			input.requestedScale <= input.viewState.scale ||
-			focusCommitted ||
-			focusExiting ||
-			!stageRect
-		) {
-			return null;
-		}
-		// Once the boundary is steering toward a subject, that gesture owns it:
-		// steering slides the node around the screen (often out from under the
-		// cursor, sometimes over other nodes' circles), so re-hit-testing every
-		// wheel event would drop or flip the subject mid-scrub. The sticky
-		// subject wins until the gesture releases (zoom-out) or it disappears.
-		const sticky = input.stickyNodeId
-			? (focusCandidates().find((entry) => entry.node.id === input.stickyNodeId) ?? null)
-			: null;
-		const candidate = sticky ?? focusCandidateForPoint(input.focalPoint, input.viewState);
-		if (!candidate) return null;
-		return {
-			nodeId: candidate.node.id,
-			position: candidate.position,
-			radius: candidate.radius
-		};
 	}
 
 	/** Live view state feeding `frameGeometry`; the stage rect is reported, not measured. */
@@ -843,122 +687,6 @@
 			detailsWidthPx: fill.width,
 			detailsHeightPx: fill.height
 		};
-	}
-
-	function handleBlockedStageZoom(input: {
-		direction: 'in' | 'out';
-		focalPoint: Point;
-		boundaryProgress?: number;
-		committed?: boolean;
-		nodeId?: string;
-		viewState: ViewTransform;
-	}) {
-		if (focusCommitted || focusExiting || !stageRect) return;
-		const candidate =
-			(input.nodeId
-				? focusCandidates().find((entry) => entry.node.id === input.nodeId)
-				: focusCandidateForPoint(input.focalPoint, input.viewState)) ?? null;
-		if (!candidate) {
-			if (focusRuntime.isFocused) scheduleFocusIdleUnmount();
-			return;
-		}
-		const progress = Math.min(1, Math.max(0, input.boundaryProgress ?? 0));
-		if (progress <= 0) {
-			if (focusRuntime.focusedNodeId === candidate.node.id) {
-				focusRuntime.setProgress(0, 'entering');
-				scheduleFocusIdleUnmount();
-			}
-			return;
-		}
-		if (progress >= 1 || input.committed === true) {
-			commitFocus(candidate.node, APP_CONFIG.multigraph.focus.entryGestureIdleMs);
-			return;
-		}
-		beginOrUpdateEntryScrub(candidate.node, progress);
-	}
-
-	/**
-	 * Entry scrub: mount (or update) the single morph surface at the scrubbed
-	 * progress. The surface is `pointer-events: none` below progress 1, so the
-	 * stage keeps receiving the wheel/pinch that drives the scrub.
-	 */
-	function beginOrUpdateEntryScrub(node: NodeData, progress: number) {
-		clearFocusIdleUnmount();
-		cancelFocusTween();
-		if (focusRuntime.focusedNodeId === node.id) {
-			focusRuntime.setProgress(progress, 'entering');
-			return;
-		}
-		closeOverlays();
-		focusEntryGestureIdleMs = 0;
-		const fill = focusFillRect();
-		focusRuntime.open(node, fill, fill, { morphProgress: progress, phase: 'entering' });
-	}
-
-	/** Exit scrub from the focused world's zoom-out boundary (via DeepZoomStack). */
-	function handleFocusExit(_level: FocusLevel, delta: number) {
-		// Guard also blocks reversals while the terminal close tween is running.
-		if (!focusRuntime.isFocused || focusExiting) return;
-		cancelFocusTween();
-		if (delta <= 0) {
-			// Revert to committed state (user zoomed back in past the exit boundary).
-			focusRuntime.setProgress(1, 'active');
-			return;
-		}
-		if (delta >= 1) {
-			// Wheel-out crossed the full exit threshold — use the unified close path.
-			closeFocus();
-			return;
-		}
-		// Partial exit scrub: morph the frame down while staying committed so the
-		// world keeps driving and the graph stays marked focus-active.
-		focusRuntime.setProgress(Math.max(0, 1 - delta), 'exiting');
-	}
-
-	function handleFocusWorldState(_level: FocusLevel, state: ZoomWorldState) {
-		focusRuntime.setWorldState(state);
-	}
-
-	/**
-	 * A partial exit scrub is in flight: the frame is shrinking, so wheel input
-	 * can land outside it (past the rounded corners, or on the exposed stage).
-	 * While this is true the focus root captures those wheels and keeps driving
-	 * the exit, instead of letting them zoom the stage or scroll the page.
-	 */
-	// 'exiting' now exclusively means partial exit scrub (still committed), so
-	// checking the phase is sufficient — the committed && !closing guards are redundant.
-	const focusExitScrubActive = $derived(
-		Boolean(
-			activeFocusLevel && activeFocusLevel.phase === 'exiting' && activeFocusLevel.morphProgress < 1
-		)
-	);
-
-	/** Continue/reverse the exit scrub for wheels the shrinking frame missed. */
-	function handleFocusRootWheel(event: WheelEvent) {
-		const level = activeFocusLevel;
-		if (!focusExitScrubActive || !level) return;
-		event.preventDefault();
-		event.stopPropagation();
-		if (event.deltaY < 0) {
-			handleFocusExit(level, 0);
-			return;
-		}
-		const fill = focusFillRect();
-		// Same wheel-to-exit-delta math the focused ZoomWorld uses at fit scale,
-		// so the scrub feels identical wherever the cursor is.
-		const step = wheelZoomWorld(
-			{ panX: 0, panY: 0, scale: 1 },
-			event.deltaY,
-			{ x: fill.width / 2, y: fill.height / 2 },
-			{
-				width: fill.width,
-				height: fill.height,
-				subjectWidth: fill.width,
-				subjectHeight: fill.height
-			}
-		);
-		const amount = Math.min(1, Math.max(0, 1 - level.morphProgress) + step.exitBoundaryDelta);
-		handleFocusExit(level, amount);
 	}
 
 	function toggleTagColorLegend() {
@@ -1202,7 +930,7 @@
 
 <div
 	class="graph"
-	class:focus-active={focusCommitted && !focusExiting}
+	class:focus-active={focus.committed && !focus.exiting}
 	bind:this={graphRef}
 	style={`--focus-transition-duration: ${FOCUS_TRANSITION_MS}ms;`}
 	data-settling={layoutRuntime.isSettling ? 'true' : undefined}
@@ -1234,7 +962,7 @@
 	<Stage
 		{getNodeAt}
 		{fitViewRequest}
-		{focusEntryBoundaryCandidateForPoint}
+		focusEntryBoundaryCandidateForPoint={(input) => focus.entryBoundaryCandidateForPoint(input)}
 		entryGestureGateRequest={stageEntryGestureGateRequest}
 		initialScale={initialViewState?.scale}
 		initialPanX={initialViewState?.panX}
@@ -1252,7 +980,7 @@
 		onStageRectChange={(rect) => {
 			stageRect = rect;
 		}}
-		onBlockedZoom={handleBlockedStageZoom}
+		onBlockedZoom={(input) => focus.handleBlockedZoom(input)}
 		{onViewStateChange}
 	>
 		<div class="edges" aria-hidden="true">
@@ -1465,7 +1193,7 @@
 				<div
 					class="node-wrapper"
 					class:primary={primaryNodeId === node.id}
-					class:focus-owned={focusRuntime.focusedNodeId === node.id}
+					class:focus-owned={focus.focusedNodeId === node.id}
 					data-node-id={node.id}
 					data-query-role={queryNodeState?.role}
 					data-scale={nodeScale}
@@ -1555,7 +1283,7 @@
 				closeOverlays();
 			}}
 			onEdit={() => openEditSheet(actionMenuNode.id)}
-			onFocus={() => openFocus(actionMenuNode)}
+			onFocus={() => focus.openFocus(actionMenuNode)}
 			onDelete={() => deleteNode(actionMenuNode.id)}
 			onClose={() => (actionMenu = null)}
 		/>
@@ -1630,44 +1358,43 @@
 		{/if}
 	{/snippet}
 
-	{#if focusRuntime.isFocused}
+	{#if focus.isFocused}
 		<div
 			class="focus-root"
 			class:reduced-motion={reduceMotion}
-			class:exit-scrub={focusExitScrubActive}
-			role={focusDialogOpen ? 'dialog' : undefined}
-			aria-modal={focusDialogOpen ? 'true' : undefined}
-			aria-labelledby={focusDialogOpen ? DETAILS_TITLE_ID : undefined}
+			class:exit-scrub={focus.exitScrubActive}
+			role={focus.dialogOpen ? 'dialog' : undefined}
+			aria-modal={focus.dialogOpen ? 'true' : undefined}
+			aria-labelledby={focus.dialogOpen ? DETAILS_TITLE_ID : undefined}
 			tabindex="-1"
-			data-focus-depth={focusRuntime.depth}
-			data-exit-scrub={focusExitScrubActive ? 'true' : undefined}
-			onwheel={handleFocusRootWheel}
+			data-focus-depth={focus.depth}
+			data-exit-scrub={focus.exitScrubActive ? 'true' : undefined}
+			onwheel={(event) => focus.handleRootWheel(event)}
 			onkeydown={(event) => {
-				if (event.key === 'Escape') closeFocus();
+				if (event.key === 'Escape') focus.closeFocus();
 			}}
 		>
-			{#if focusDialogOpen}
+			{#if focus.dialogOpen}
 				<button
 					class="focus-close-button"
 					type="button"
 					aria-label="Close node focus"
-					onclick={closeFocus}
+					onclick={() => focus.closeFocus()}
 				>
 					Close
 				</button>
 			{/if}
 			<DeepZoomStack
-				levels={focusRuntime.levels}
+				levels={focus.levels}
 				{reduceMotion}
-				entryGestureIdleMs={focusEntryGestureIdleMs}
+				entryGestureIdleMs={focus.entryGestureIdleMs}
 				entryGestureMaxMs={APP_CONFIG.multigraph.focus.entryGestureMaxMs}
 				geometryForLevel={geometryForFocusLevel}
 				baseSizeForLevel={baseSizeForFocusLevel}
 				frame={focusFrame}
 				compact={focusCompact}
 				details={focusDetails}
-				onAscend={handleFocusExit}
-				onWorldStateChange={handleFocusWorldState}
+				onAscend={(level, delta) => focus.handleExit(level, delta)}
 			/>
 		</div>
 	{/if}

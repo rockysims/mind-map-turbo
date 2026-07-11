@@ -3,7 +3,6 @@
 	import type { FocusLevel } from './lib/focusRuntime.svelte';
 	import type { FrameGeometry } from './lib/frameGeometry';
 	import { interpolateMorph } from './lib/morphGeometry';
-	import type { ZoomWorldState } from './lib/zoomWorldController';
 
 	const fillRect = { left: 16, top: 16, width: 720, height: 460 };
 
@@ -46,7 +45,6 @@
 			sourceRect,
 			fillRect,
 			borderWidthPx: 8,
-			worldState: { panX: 0, panY: 0, scale: 1 },
 			morphProgress: 1,
 			phase: 'active'
 		};
@@ -70,12 +68,6 @@
 	function ascend(_level: FocusLevel, delta: number) {
 		if (delta < 1 || levels.length <= 1) return;
 		levels = levels.slice(0, -1);
-	}
-
-	function updateWorldState(level: FocusLevel, state: ZoomWorldState) {
-		levels = levels.map((candidate) =>
-			candidate.id === level.id ? { ...candidate, worldState: state } : candidate
-		);
 	}
 </script>
 
@@ -121,7 +113,6 @@
 		{compact}
 		{details}
 		onAscend={ascend}
-		onWorldStateChange={updateWorldState}
 	/>
 </div>
 
