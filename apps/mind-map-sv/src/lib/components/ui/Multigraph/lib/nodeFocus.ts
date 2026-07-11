@@ -47,7 +47,7 @@ export function focalNodeForPoint(
 	focalPoint: Point,
 	stageRect: StageRect,
 	view: ViewTransform,
-	options: { coverageRatio?: number } = {}
+	options: { coverageRatio?: number; preferredNodeId?: string } = {}
 ): NodeFocusCandidate | null {
 	const coverageRatio =
 		options.coverageRatio ?? APP_CONFIG.multigraph.focus.eligibilityCoverageRatio;
@@ -62,6 +62,12 @@ export function focalNodeForPoint(
 		return distance(circle.center, focalPoint) <= circle.radius * coverageRatio;
 	});
 	if (hits.length === 0) return null;
+	// Mid entry-scrub the steered subject can overlap other candidates' circles;
+	// keep driving the subject already being scrubbed instead of flapping targets.
+	if (options.preferredNodeId) {
+		const preferred = hits.find((hit) => hit.node.id === options.preferredNodeId);
+		if (preferred) return preferred;
+	}
 	return hits.toSorted((left, right) => (right.zIndex ?? 0) - (left.zIndex ?? 0))[0] ?? null;
 }
 

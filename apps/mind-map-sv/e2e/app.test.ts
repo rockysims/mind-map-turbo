@@ -597,6 +597,47 @@ test('deep zoom enters node focus and exits by wheel gestures', async ({ page })
 	await expect(dialog).not.toBeVisible();
 });
 
+test('deep zoom entry keeps driving focus after boundary steering slides the node off-cursor', async ({
+	page
+}) => {
+	const graphId = `e2e-entry-steering-${Date.now()}`;
+	await page.goto('/');
+	await page.evaluate(() => localStorage.clear());
+	await page.goto(graphUrl(graphId));
+	await expect(page.getByText('Root')).toBeVisible();
+
+	// Drag the node off-center (toward the bottom-right) so that boundary
+	// steering must translate the view to center it — which slides the node
+	// out from under the cursor mid-scrub.
+	await page.mouse.move(640, 360);
+	await page.mouse.down();
+	await page.mouse.move(940, 520, { steps: 8 });
+	await page.mouse.up();
+	await page.waitForTimeout(100);
+
+	const circle = page.locator('.node-wrapper .circle').first();
+	const box = await circle.boundingBox();
+	if (!box) throw new Error('Node .circle element not found');
+	await page.mouse.move(Math.round(box.x + box.width / 2), Math.round(box.y + box.height / 2));
+
+	// Small trackpad-like wheel steps: the entry boundary is crossed gradually
+	// over many events instead of jumping straight to commit in one step.
+	const graph = page.locator('.graph');
+	for (let i = 0; i < 25; i += 1) {
+		if (((await graph.getAttribute('class')) ?? '').includes('focus-active')) break;
+		await page.mouse.wheel(0, -150);
+		await page.waitForTimeout(25);
+	}
+	await expect(graph).toHaveClass(/focus-active/);
+	await expect(page.getByRole('dialog')).toBeVisible();
+
+	// Continued wheel-in past the entry gate must deepen the focused world.
+	await page.waitForTimeout(500);
+	const world = page.locator('.zoom-world').first();
+	await page.mouse.wheel(0, -400);
+	await expect(world).toHaveAttribute('data-zoom-world-scale', /^(?!1(?:\.0*)?$).+/);
+});
+
 async function editFirstNodeTitle(page: Page, title: string) {
 	// .stage-content has pointer-events:none; all clicks pass to the stage handler.
 	// The editor opens via long-press (>1000ms), then action menu, then Edit.

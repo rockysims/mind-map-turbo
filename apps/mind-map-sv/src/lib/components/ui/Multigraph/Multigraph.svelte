@@ -727,16 +727,18 @@
 
 	function focusCandidateForPoint(
 		focalPoint: Point,
-		view: ViewTransform
+		view: ViewTransform,
+		preferredNodeId?: string
 	): NodeFocusCandidate | null {
 		if (!stageRect) return null;
-		return focalNodeForPoint(focusCandidates(), focalPoint, stageRect, view);
+		return focalNodeForPoint(focusCandidates(), focalPoint, stageRect, view, { preferredNodeId });
 	}
 
 	function focusEntryBoundaryCandidateForPoint(input: {
 		focalPoint: Point;
 		requestedScale: number;
 		viewState: ViewTransform;
+		stickyNodeId?: string;
 	}): FocusEntryBoundaryCandidate | null {
 		if (
 			input.requestedScale <= input.viewState.scale ||
@@ -746,7 +748,13 @@
 		) {
 			return null;
 		}
-		const candidate = focusCandidateForPoint(input.focalPoint, input.viewState);
+		// Boundary steering can slide the subject out from under the cursor, so
+		// fall back to the node already being steered when the focal test misses.
+		const candidate =
+			focusCandidateForPoint(input.focalPoint, input.viewState, input.stickyNodeId) ??
+			(input.stickyNodeId
+				? (focusCandidates().find((entry) => entry.node.id === input.stickyNodeId) ?? null)
+				: null);
 		if (!candidate) return null;
 		return {
 			nodeId: candidate.node.id,

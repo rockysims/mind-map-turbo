@@ -111,12 +111,19 @@
 			requestedScale: number;
 			clampedScale: number;
 		}) => number | null;
-		/** Return the graph-space focus candidate for boundary camera steering. */
+		/**
+		 * Return the graph-space focus candidate for boundary camera steering.
+		 * `stickyNodeId` is the node already being steered toward, if any: the
+		 * steering translation can slide the subject out from under the focal
+		 * point, so the consumer should keep resolving that node rather than
+		 * re-hit-testing from scratch.
+		 */
 		focusEntryBoundaryCandidateForPoint?: (input: {
 			focalPoint: Point;
 			requestedScale: number;
 			clampedScale: number;
 			viewState: ViewStateSnapshot;
+			stickyNodeId?: string;
 		}) => FocusEntryBoundaryCandidate | null;
 		/** Fired when zoom input continues past the configured scale clamps. */
 		onBlockedZoom?: (input: BlockedZoomInput) => void;
@@ -162,6 +169,13 @@
 	let lastEntryGestureGateRequestId = $state<number | null>(null);
 	let entryGestureGate = $state<EntryGestureGateState>(EMPTY_ENTRY_GESTURE_GATE);
 	let focusEntryBoundaryProgress = $state<{ nodeId: string; progress: number } | null>(null);
+	/**
+	 * Node the entry boundary is currently steering toward. Steering translates
+	 * the view to center/fit the subject, which can move it out from under the
+	 * cursor; without this stickiness the next wheel's focal hit-test misses,
+	 * the boundary is abandoned, and zoom-in jams at max scale.
+	 */
+	let focusEntrySteeringNodeId = $state<string | null>(null);
 
 	// Pan
 	// svelte-ignore state_referenced_locally
@@ -463,6 +477,7 @@
 		panY = nextView.panY;
 		scale = nextView.scale;
 		focusEntryBoundaryProgress = null;
+		focusEntrySteeringNodeId = null;
 		if (focusBoundaryScale !== null) {
 			onBlockedZoom?.({
 				direction: 'in',
@@ -595,6 +610,7 @@
 					panY = nextView.panY;
 					scale = nextView.scale;
 					focusEntryBoundaryProgress = null;
+					focusEntrySteeringNodeId = null;
 					if (focusBoundaryScale !== null) {
 						onBlockedZoom?.({
 							direction: 'in',
@@ -655,10 +671,12 @@
 			focalPoint,
 			requestedScale,
 			clampedScale,
-			viewState: startView
+			viewState: startView,
+			stickyNodeId: focusEntrySteeringNodeId ?? undefined
 		});
 		if (!candidate) {
 			focusEntryBoundaryProgress = null;
+			focusEntrySteeringNodeId = null;
 			return false;
 		}
 		const step = solveFocusEntryBoundary({
@@ -672,6 +690,7 @@
 		panX = step.view.panX;
 		panY = step.view.panY;
 		scale = step.view.scale;
+		focusEntrySteeringNodeId = step.phase === 'free' ? null : candidate.nodeId;
 
 		if (step.phase === 'free') {
 			focusEntryBoundaryProgress = null;
