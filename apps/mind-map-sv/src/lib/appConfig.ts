@@ -33,19 +33,16 @@ export const APP_CONFIG = {
 			maxScale: 4 // maximum stage zoom scale
 		},
 		focus: {
-			overshootCommitThreshold: 0.95, // accumulated blocked zoom needed to enter/exit
-			overshootDecayHalfLifeMs: 180, // decay speed after a boundary bump pauses
-			overshootHysteresisMs: 320, // cooldown after a committed transition
 			entryGestureIdleMs: 180, // initial quiet gap before residual zoom input becomes fresh
 			entryGestureMaxMs: 420, // hard cap for swallowing residual boundary-crossing zoom input
 			boundaryNearTouchMarginPx: 8, // tolerance for treating zoom subjects as inscribed
 			detailsCornerRadiusPx: 18, // fully focused node corner radius
+			preInscribeZoneFraction: 0.22, // fraction of inscribe scale used for entry scrub
+			subFitExitZoneFraction: 0.18, // fraction below fit scale used for exit scrub
 			eligibilityCoverageRatio: 1, // focal point must be inside the projected node circle
 			entryTransitionMs: 660, // focus overlay morph duration
 			worldWheelSensitivity: 0.002, // wheel delta to scale factor inside focus/image worlds
-			exitOvershootDeltaScale: 500, // wheel delta divisor for focus/image exit gates
-			imageZoomMaxScale: 8, // deepest image inspection zoom
-			imageZoomMinScale: 1 // image fit floor
+			worldMaxScale: 8 // deepest free zoom inside a focused world
 		},
 		tagSyntax: {
 			nodeTagMarker: '#', // leading marker for node tags in title/query shortcuts

@@ -1,7 +1,14 @@
 import { APP_CONFIG } from '$lib/appConfig';
 import type { Point } from '../../types/multigraph';
 import { scaleFromWheelDelta } from './graphMath';
-import { clampRectToCoverViewport, type Rect, type ViewportSize } from './zoomBoundary';
+import {
+	centeredFitForRect,
+	clampRectToCoverViewport,
+	entryProgress,
+	exitProgress,
+	type Rect,
+	type ViewportSize
+} from './zoomBoundary';
 
 export interface ZoomWorldState {
 	panX: number;
@@ -16,11 +23,17 @@ export interface ZoomWorldBounds extends ViewportSize {
 	maxScale?: number;
 	wheelSensitivity?: number;
 	exitDeltaScale?: number;
+	entryInscribeScale?: number;
+	entryZoneFraction?: number;
+	exitZoneFraction?: number;
 }
 
 export interface ZoomWorldStep {
 	state: ZoomWorldState;
 	exitBoundaryDelta: number;
+	entryProgress: number;
+	exitProgress: number;
+	boundary: 'descend' | 'ascend' | null;
 }
 
 export function worldRectForState(state: ZoomWorldState, bounds: ZoomWorldBounds): Rect {
@@ -75,6 +88,8 @@ export function wheelZoomWorld(
 	bounds: ZoomWorldBounds
 ): ZoomWorldStep {
 	const limits = zoomWorldScaleLimits(bounds);
+	const exitZoneFraction =
+		bounds.exitZoneFraction ?? APP_CONFIG.multigraph.focus.subFitExitZoneFraction;
 	const requestedScale = scaleFromWheelDelta(
 		state.scale,
 		deltaY,
@@ -83,20 +98,78 @@ export function wheelZoomWorld(
 		Number.POSITIVE_INFINITY
 	);
 
-	if (deltaY > 0 && state.scale <= limits.minScale + 0.001 && requestedScale < limits.minScale) {
+	if (deltaY > 0 && requestedScale < limits.minScale) {
+		const fitState = clampZoomWorldState({ ...state, scale: limits.minScale }, bounds);
+		const centeredFit = centeredFitForRect(worldRectForState(fitState, bounds), bounds).centeredFit;
+		const exitScale = centeredFit
+			? clamp(requestedScale, limits.minScale * (1 - exitZoneFraction), limits.minScale)
+			: limits.minScale;
+		const progress = centeredFit ? exitProgress(exitScale, limits.minScale, exitZoneFraction) : 1;
 		return {
-			state: { panX: 0, panY: 0, scale: limits.minScale },
-			exitBoundaryDelta: Math.min(
-				1,
-				Math.abs(deltaY) /
-					(bounds.exitDeltaScale ?? APP_CONFIG.multigraph.focus.exitOvershootDeltaScale)
-			)
+			state: fitState,
+			exitBoundaryDelta: 1 - progress,
+			entryProgress: 0,
+			exitProgress: progress,
+			boundary: progress <= 0 ? 'ascend' : null
 		};
 	}
 
+	const stateAfterZoom = zoomWorldAtPoint(state, requestedScale, focalPoint, bounds);
+	const inscribeScale = bounds.entryInscribeScale;
+	const progress =
+		deltaY < 0 && inscribeScale !== undefined
+			? entryProgress(
+					stateAfterZoom.scale,
+					inscribeScale,
+					bounds.entryZoneFraction ?? APP_CONFIG.multigraph.focus.preInscribeZoneFraction
+				)
+			: 0;
+
 	return {
-		state: zoomWorldAtPoint(state, requestedScale, focalPoint, bounds),
-		exitBoundaryDelta: 0
+		state: stateAfterZoom,
+		exitBoundaryDelta: 0,
+		entryProgress: progress,
+		exitProgress: 1,
+		boundary:
+			inscribeScale !== undefined && deltaY < 0 && state.scale < inscribeScale && progress >= 1
+				? 'descend'
+				: null
+	};
+}
+
+export interface PinchZoomWorldStep {
+	state: ZoomWorldState;
+	entryProgress: number;
+	boundary: 'descend' | null;
+}
+
+export function pinchZoomWorldStep(
+	state: ZoomWorldState,
+	startScale: number,
+	distanceRatio: number,
+	focalPoint: Point,
+	bounds: ZoomWorldBounds
+): PinchZoomWorldStep {
+	const next = pinchZoomWorld(state, startScale, distanceRatio, focalPoint, bounds);
+	const inscribeScale = bounds.entryInscribeScale;
+	const progress =
+		inscribeScale === undefined
+			? 0
+			: entryProgress(
+					next.scale,
+					inscribeScale,
+					bounds.entryZoneFraction ?? APP_CONFIG.multigraph.focus.preInscribeZoneFraction
+				);
+	return {
+		state: next,
+		entryProgress: progress,
+		boundary:
+			inscribeScale !== undefined &&
+			distanceRatio > 1 &&
+			state.scale < inscribeScale &&
+			progress >= 1
+				? 'descend'
+				: null
 	};
 }
 
@@ -114,11 +187,12 @@ export function zoomWorldScaleLimits(bounds: ZoomWorldBounds): {
 	minScale: number;
 	maxScale: number;
 } {
-	const minScale = bounds.minScale ?? 1;
-	const maxScale = Math.max(
-		minScale,
-		bounds.maxScale ?? APP_CONFIG.multigraph.focus.imageZoomMaxScale
-	);
+	const fitScale =
+		bounds.subjectWidth > 0 && bounds.subjectHeight > 0
+			? Math.min(bounds.width / bounds.subjectWidth, bounds.height / bounds.subjectHeight, 1)
+			: 1;
+	const minScale = bounds.minScale ?? fitScale;
+	const maxScale = Math.max(minScale, bounds.maxScale ?? APP_CONFIG.multigraph.focus.worldMaxScale);
 	return { minScale, maxScale };
 }
 

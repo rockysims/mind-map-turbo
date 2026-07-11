@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	clampZoomWorldState,
 	pinchZoomWorld,
+	pinchZoomWorldStep,
 	wheelZoomWorld,
 	worldRectForState,
 	zoomWorldAtPoint
@@ -49,12 +50,13 @@ describe('zoom world controller', () => {
 
 		const boundary = wheelZoomWorld(
 			{ panX: 0, panY: 0, scale: 1 },
-			250,
+			125,
 			{ x: 400, y: 300 },
-			bounds
+			{ ...bounds, exitZoneFraction: 0.5 }
 		);
 		expect(boundary.state).toEqual({ panX: 0, panY: 0, scale: 1 });
 		expect(boundary.exitBoundaryDelta).toBe(0.5);
+		expect(boundary.exitProgress).toBe(0.5);
 	});
 
 	it('uses the same focal transform for pinch and wheel consumers', () => {
@@ -63,5 +65,49 @@ describe('zoom world controller', () => {
 		const pinch = pinchZoomWorld({ panX: 0, panY: 0, scale: 1 }, 1, 1.75, focalPoint, bounds);
 
 		expect(pinch).toEqual(wheel);
+	});
+
+	it('descends exactly at the entry inscribe scale with large wheel and pinch steps', () => {
+		const wheel = wheelZoomWorld(
+			{ panX: 0, panY: 0, scale: 2.5 },
+			-1000,
+			{ x: 400, y: 300 },
+			{ ...bounds, maxScale: 3, entryInscribeScale: 3, entryZoneFraction: 0.2 }
+		);
+		const pinch = pinchZoomWorldStep(
+			{ panX: 0, panY: 0, scale: 2.5 },
+			2.5,
+			2,
+			{ x: 400, y: 300 },
+			{ ...bounds, maxScale: 3, entryInscribeScale: 3, entryZoneFraction: 0.2 }
+		);
+
+		expect(wheel.state.scale).toBe(3);
+		expect(wheel.entryProgress).toBe(1);
+		expect(wheel.boundary).toBe('descend');
+		expect(pinch.state.scale).toBe(3);
+		expect(pinch.entryProgress).toBe(1);
+		expect(pinch.boundary).toBe('descend');
+	});
+
+	it('recenters to fit before the sub-fit zone reaches zero and ascends', () => {
+		const recentered = wheelZoomWorld(
+			{ panX: 120, panY: 0, scale: 1 },
+			5000,
+			{ x: 400, y: 300 },
+			bounds
+		);
+		expect(recentered.state).toEqual({ panX: 0, panY: 0, scale: 1 });
+		expect(recentered.exitProgress).toBe(0);
+		expect(recentered.boundary).toBe('ascend');
+
+		const centered = wheelZoomWorld(
+			{ panX: 0, panY: 0, scale: 1 },
+			5000,
+			{ x: 400, y: 300 },
+			bounds
+		);
+		expect(centered.boundary).toBe('ascend');
+		expect(centered.exitProgress).toBe(0);
 	});
 });

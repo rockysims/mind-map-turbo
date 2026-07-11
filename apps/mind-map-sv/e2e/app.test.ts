@@ -485,7 +485,7 @@ test('reload restores graph data and viewState from localStorage without file im
 	expect(transform).toContain(`scale(${savedViewState.scale})`);
 });
 
-test('deep zoom enters focus, image inspection, and exits by wheel gestures', async ({ page }) => {
+test('deep zoom enters node focus and exits by wheel gestures', async ({ page }) => {
 	const graphId = `e2e-deep-zoom-${Date.now()}`;
 	const assetId = 'deep-zoom-image';
 	const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 480">
@@ -505,11 +505,34 @@ test('deep zoom enters focus, image inspection, and exits by wheel gestures', as
 	await page.goto(graphUrl(graphId));
 	await expect(page.getByText('Deep Zoom Image Node')).toBeVisible();
 
-	await openFocusForFirstNode(page);
+	const circle = page.locator('.node-wrapper .circle').first();
+	const nodeBox = await circle.boundingBox();
+	if (!nodeBox) throw new Error('Node .circle element not found');
+	const nodeCenter = {
+		x: nodeBox.x + nodeBox.width / 2,
+		y: nodeBox.y + nodeBox.height / 2
+	};
+	const stage = page.locator('.stage');
+	await stage.dispatchEvent('wheel', {
+		deltaY: -1000,
+		clientX: nodeCenter.x,
+		clientY: nodeCenter.y,
+		bubbles: true,
+		cancelable: true
+	});
+
 	const dialog = page.getByRole('dialog');
 	await expect(dialog).toBeVisible();
+	await expect(page.locator('.graph')).toHaveClass(/focus-active/);
+	await expect(page.locator('.node-wrapper.focus-owned')).toHaveCount(1);
+
 	const image = page.locator('.focus-image').first();
 	await expect(image).toBeVisible();
+	await expect(page.locator('.image-frame').first()).not.toHaveAttribute(
+		'data-image-focused',
+		'true'
+	);
+	await expect(image).not.toHaveAttribute('data-image-zoom-scale', /.+/);
 
 	const imageBox = await image.boundingBox();
 	if (!imageBox) throw new Error('Focused image did not have a bounding box');
@@ -518,103 +541,52 @@ test('deep zoom enters focus, image inspection, and exits by wheel gestures', as
 		y: imageBox.y + imageBox.height / 2
 	};
 
-	await image.dispatchEvent('wheel', {
+	const world = page.locator('.zoom-world').first();
+	const surface = page.locator('.focus-surface').first();
+	const initialSurfaceWidth = await surface.evaluate((el) => el.getBoundingClientRect().width);
+
+	await page.waitForTimeout(220);
+	await world.dispatchEvent('wheel', {
 		deltaY: -700,
 		clientX: imageCenter.x,
 		clientY: imageCenter.y,
 		bubbles: true,
 		cancelable: true
 	});
-	await expect(page.locator('.zoom-world')).toHaveAttribute(
-		'data-zoom-world-scale',
-		/^(?!1(?:\.0*)?$).+/
-	);
+	await expect(world).toHaveAttribute('data-zoom-world-scale', /^(?!1(?:\.0*)?$).+/);
+	await expect
+		.poll(async () => surface.evaluate((el) => el.getBoundingClientRect().width))
+		.toBeGreaterThan(initialSurfaceWidth);
 
-	const frame = page.locator('.image-frame').first();
-	for (let attempt = 0; attempt < 5; attempt += 1) {
-		if ((await frame.getAttribute('data-image-focused')) === 'true') break;
-		await image.dispatchEvent('wheel', {
-			deltaY: -1000,
+	const stageContent = page.locator('.stage-content');
+	const stageTransformBeforeFocusExit = await stageContent.getAttribute('style');
+
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		if (!((await page.locator('.graph').getAttribute('class')) ?? '').includes('focus-active')) {
+			break;
+		}
+		await world.dispatchEvent('wheel', {
+			deltaY: 5000,
 			clientX: imageCenter.x,
 			clientY: imageCenter.y,
 			bubbles: true,
 			cancelable: true
 		});
-		await page.waitForTimeout(20);
+		await page.waitForTimeout(30);
 	}
-	await expect(frame).toHaveAttribute('data-image-focused', 'true');
+	await expect(page.locator('.graph')).not.toHaveClass(/focus-active/);
 
-	const initialImageScale = Number(await image.getAttribute('data-image-zoom-scale'));
-	await image.dispatchEvent('wheel', {
-		deltaY: -500,
+	await stage.dispatchEvent('wheel', {
+		deltaY: 5000,
 		clientX: imageCenter.x,
 		clientY: imageCenter.y,
 		bubbles: true,
 		cancelable: true
 	});
-	await expect
-		.poll(async () => Number(await image.getAttribute('data-image-zoom-scale')))
-		.toBe(initialImageScale);
-
-	await page.waitForTimeout(120);
-	await image.dispatchEvent('wheel', {
-		deltaY: -500,
-		clientX: imageCenter.x,
-		clientY: imageCenter.y,
-		bubbles: true,
-		cancelable: true
-	});
-	await expect
-		.poll(async () => Number(await image.getAttribute('data-image-zoom-scale')))
-		.toBe(initialImageScale);
+	await page.waitForTimeout(20);
+	expect(await stageContent.getAttribute('style')).toBe(stageTransformBeforeFocusExit);
 
 	await page.waitForTimeout(220);
-	await image.dispatchEvent('wheel', {
-		deltaY: -500,
-		clientX: imageCenter.x,
-		clientY: imageCenter.y,
-		bubbles: true,
-		cancelable: true
-	});
-	await expect
-		.poll(async () => Number(await image.getAttribute('data-image-zoom-scale')))
-		.toBeGreaterThan(initialImageScale);
-
-	await page.waitForTimeout(350);
-	await image.dispatchEvent('wheel', {
-		deltaY: 5000,
-		clientX: imageCenter.x,
-		clientY: imageCenter.y,
-		bubbles: true,
-		cancelable: true
-	});
-	await image.dispatchEvent('wheel', {
-		deltaY: 5000,
-		clientX: imageCenter.x,
-		clientY: imageCenter.y,
-		bubbles: true,
-		cancelable: true
-	});
-	await expect(frame).not.toHaveAttribute('data-image-focused', 'true');
-
-	await page.locator('.zoom-world').dispatchEvent('wheel', {
-		deltaY: 5000,
-		clientX: imageCenter.x,
-		clientY: imageCenter.y,
-		bubbles: true,
-		cancelable: true
-	});
-	await page.waitForTimeout(350);
-	const stage = page.locator('.stage');
-	const stageContent = page.locator('.stage-content');
-	const stageTransformBeforeFocusExit = await stageContent.getAttribute('style');
-	await page.locator('.zoom-world').dispatchEvent('wheel', {
-		deltaY: 5000,
-		clientX: imageCenter.x,
-		clientY: imageCenter.y,
-		bubbles: true,
-		cancelable: true
-	});
 	await stage.dispatchEvent('wheel', {
 		deltaY: 5000,
 		clientX: imageCenter.x,
@@ -622,20 +594,6 @@ test('deep zoom enters focus, image inspection, and exits by wheel gestures', as
 		bubbles: true,
 		cancelable: true
 	});
-	await page.waitForTimeout(20);
-	expect(await stageContent.getAttribute('style')).toBe(stageTransformBeforeFocusExit);
-
-	await page.waitForTimeout(120);
-	await stage.dispatchEvent('wheel', {
-		deltaY: 5000,
-		clientX: imageCenter.x,
-		clientY: imageCenter.y,
-		bubbles: true,
-		cancelable: true
-	});
-	await page.waitForTimeout(20);
-	expect(await stageContent.getAttribute('style')).toBe(stageTransformBeforeFocusExit);
-
 	await expect(dialog).not.toBeVisible();
 });
 
@@ -680,37 +638,6 @@ async function editFirstNodeTitle(page: Page, title: string) {
 	await page.getByLabel('Title').fill(title);
 	await page.getByRole('button', { name: 'Save' }).click();
 	await expect(page.getByText(title)).toBeVisible();
-}
-
-async function openFocusForFirstNode(page: Page) {
-	const circle = page.locator('.node-wrapper .circle').first();
-	const box = await circle.boundingBox();
-	if (!box) throw new Error('Node .circle element not found');
-	const cx = Math.round(box.x + box.width / 2);
-	const cy = Math.round(box.y + box.height / 2);
-	const stage = page.locator('.stage');
-	await stage.dispatchEvent('pointerdown', {
-		pointerId: 1,
-		isPrimary: true,
-		button: 0,
-		buttons: 1,
-		clientX: cx,
-		clientY: cy,
-		bubbles: true,
-		cancelable: true
-	});
-	await page.waitForTimeout(1300);
-	await stage.dispatchEvent('pointerup', {
-		pointerId: 1,
-		isPrimary: true,
-		button: 0,
-		buttons: 0,
-		clientX: cx,
-		clientY: cy,
-		bubbles: true,
-		cancelable: true
-	});
-	await page.getByRole('menuitem', { name: 'Focus' }).click();
 }
 
 async function seedImageGraph(

@@ -57,6 +57,7 @@ individual PR-sized tasks.
 | 05  | Filter / find / search                             | complete    | [milestone](milestones/05-filter-find-search.md), [plan](plans/2026-06-22%2005-filter-find-search.md)                                           |
 | 06  | Node focus and rich media                          | complete    | [milestone](milestones/06-node-focus-and-rich-media.md), [plan](plans/2026-07-04%2006-node-focus-and-rich-media.md)                             |
 | 06a | Continuous deep zoom                               | complete    | [milestone](milestones/06a-continuous-deep-zoom.md), [plan](plans/2026-07-04%2006a-continuous-deep-zoom.md)                                     |
+| 06b | Recursive deep zoom (single-element morph)         | complete    | [milestone](milestones/06b-recursive-deep-zoom.md), [plan](plans/2026-07-10%2006b-recursive-deep-zoom.md)                                       |
 | 07  | Multiplayer                                        | not started | [milestones/07-multiplayer.md](milestones/07-multiplayer.md)                                                                                    |
 
 Milestones 04a-04m deepen the local-first graph experience before multiplayer.
@@ -81,7 +82,12 @@ inside self-contained HTML save files. Milestone 06a reworks the deep-zoom
 gestures into one continuous nested-zoom model: the real node morphs in place
 (border radius as bold-zoom feedback), the focus dialog is the node component
 in a details mode, and dialog/image zoom are nested gated levels of the same
-interaction. Milestone 07 follows with multiplayer after rich local document
+interaction. Milestone 06b supersedes 06a's transition mechanism: instead of
+crossfading to a viewport-centered replica node, the real element genuinely
+morphs into the fullscreen surface via a single 0→1 geometry function, on a
+depth-agnostic focus stack so deep zoom nests to any number of levels; the node
+level lands first and images/other blocks follow as consumers of the same
+primitives. Milestone 07 follows with multiplayer after rich local document
 behavior is settled.
 
 ## How this directory is organized

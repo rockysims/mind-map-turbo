@@ -1,24 +1,135 @@
 import type { NodeData } from '../../types/node';
+import type { Rect } from './zoomBoundary';
+import type { ZoomWorldState } from './zoomWorldController';
+
+export type FocusSubjectKind = 'node' | 'placeholder' | (string & {});
+
+export type FocusLevelPhase = 'entering' | 'active' | 'exiting';
+
+export interface FocusLevel {
+	id: string;
+	subjectKind: FocusSubjectKind;
+	subjectId: string;
+	sourceRect: Rect;
+	fillRect: Rect;
+	worldState: ZoomWorldState;
+	morphProgress: number;
+	phase: FocusLevelPhase;
+}
+
+export interface PushFocusLevelInput {
+	subjectKind: FocusSubjectKind;
+	subjectId: string;
+	sourceRect: Rect;
+	fillRect: Rect;
+	worldState?: ZoomWorldState;
+	morphProgress?: number;
+	phase?: FocusLevelPhase;
+}
+
+const DEFAULT_RECT: Rect = { left: 0, top: 0, width: 0, height: 0 };
+const DEFAULT_WORLD_STATE: ZoomWorldState = { panX: 0, panY: 0, scale: 1 };
 
 export class FocusRuntime {
-	focusedNodeId = $state<string | null>(null);
-	entryProgress = $state(0);
+	levels = $state<FocusLevel[]>([]);
 
 	get isFocused(): boolean {
-		return this.focusedNodeId !== null;
+		return this.levels.length > 0;
 	}
 
-	open(node: NodeData): void {
-		this.focusedNodeId = node.id;
-		this.entryProgress = 1;
+	get depth(): number {
+		return this.levels.length;
+	}
+
+	get activeLevel(): FocusLevel | null {
+		return this.levels[this.levels.length - 1] ?? null;
+	}
+
+	get focusedNodeId(): string | null {
+		const active = this.activeLevel;
+		return active?.subjectKind === 'node' ? active.subjectId : null;
+	}
+
+	get entryProgress(): number {
+		return this.activeLevel?.morphProgress ?? 0;
+	}
+
+	push(input: PushFocusLevelInput): FocusLevel {
+		const level: FocusLevel = {
+			id: `${input.subjectKind}:${input.subjectId}:${this.levels.length + 1}`,
+			subjectKind: input.subjectKind,
+			subjectId: input.subjectId,
+			sourceRect: input.sourceRect,
+			fillRect: input.fillRect,
+			worldState: input.worldState ?? DEFAULT_WORLD_STATE,
+			morphProgress: clamp01(input.morphProgress ?? 1),
+			phase: input.phase ?? 'active'
+		};
+		this.levels = [...this.levels, level];
+		return level;
+	}
+
+	pop(): FocusLevel | null {
+		const active = this.activeLevel;
+		if (!active) return null;
+		this.levels = this.levels.slice(0, -1);
+		return active;
+	}
+
+	setProgress(
+		progress: number,
+		phase: FocusLevelPhase = this.activeLevel?.phase ?? 'active'
+	): void {
+		this.updateActive((level) => ({
+			...level,
+			morphProgress: clamp01(progress),
+			phase
+		}));
+	}
+
+	setWorldState(worldState: ZoomWorldState): void {
+		this.updateActive((level) => ({ ...level, worldState }));
+	}
+
+	open(node: NodeData, sourceRect: Rect = DEFAULT_RECT, fillRect: Rect = sourceRect): void {
+		this.levels = [];
+		this.push({
+			subjectKind: 'node',
+			subjectId: node.id,
+			sourceRect,
+			fillRect,
+			morphProgress: 1,
+			phase: 'active'
+		});
 	}
 
 	close(): void {
-		this.focusedNodeId = null;
-		this.entryProgress = 0;
+		this.levels = [];
 	}
 
 	preview(progress: number): void {
-		this.entryProgress = Math.max(0, Math.min(1, progress));
+		const active = this.activeLevel;
+		if (!active) {
+			this.push({
+				subjectKind: 'placeholder',
+				subjectId: 'preview',
+				sourceRect: DEFAULT_RECT,
+				fillRect: DEFAULT_RECT,
+				morphProgress: progress,
+				phase: 'entering'
+			});
+			return;
+		}
+		this.setProgress(progress, active.phase);
 	}
+
+	private updateActive(updater: (level: FocusLevel) => FocusLevel): void {
+		const active = this.activeLevel;
+		if (!active) return;
+		this.levels = [...this.levels.slice(0, -1), updater(active)];
+	}
+}
+
+function clamp01(value: number): number {
+	return Math.min(1, Math.max(0, value));
 }

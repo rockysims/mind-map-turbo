@@ -158,13 +158,16 @@
 
 	.node[data-details-mode='true'] {
 		--node-surface-background: #ffffff;
+
+		width: var(--node-details-width, min(calc(100vw - 2rem), 52rem));
+		height: var(--node-details-height, min(calc(100vh - 2rem), 46rem));
 	}
 
 	.node[data-details-mode='true'] .circle {
 		justify-content: stretch;
 		align-items: stretch;
-		width: min(calc(100vw - 2rem), 52rem);
-		height: min(calc(100vh - 2rem), 46rem);
+		width: 100%;
+		height: 100%;
 		overflow: auto;
 		box-shadow: 0 24px 80px rgb(15 23 42 / 22%);
 	}

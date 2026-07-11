@@ -20,7 +20,7 @@
 	} from './lib/zoomWorldController';
 
 	let {
-		minScale = 1,
+		minScale,
 		maxScale = 8,
 		entryGestureIdleMs = 0,
 		entryGestureMaxMs = 0,
@@ -136,7 +136,7 @@
 
 	function handlePointerDown(event: PointerEvent) {
 		activePointers.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
-		if (activePointers.size === 1 && worldState.scale > minScale + 0.001) {
+		if (activePointers.size === 1 && worldState.scale > (minScale ?? 1) + 0.001) {
 			dragStart = {
 				clientX: event.clientX,
 				clientY: event.clientY,

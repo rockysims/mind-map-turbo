@@ -643,36 +643,12 @@
 		});
 
 		const frame = image.closest('.image-frame') as HTMLElement;
-		for (let attempt = 0; attempt < 4 && frame.dataset.imageFocused !== 'true'; attempt += 1) {
-			dispatchWheel(image, -1000, imageCenter.x, imageCenter.y);
-			await sleep();
-		}
+		dispatchWheel(image, -1000, imageCenter.x, imageCenter.y);
 		await waitFor(() => {
-			expect(frame.dataset.imageFocused).toBe('true');
+			expect(Number(world.dataset.zoomWorldScale)).toBeGreaterThan(1);
 		});
-		const initialImageScale = Number(image.dataset.imageZoomScale);
-		dispatchWheel(image, -500, imageCenter.x, imageCenter.y);
-		await sleep();
-		expect(Number(image.dataset.imageZoomScale)).toBe(initialImageScale);
-
-		await sleep(Math.max(0, APP_CONFIG.multigraph.focus.entryGestureIdleMs - 30));
-		dispatchWheel(image, -500, imageCenter.x, imageCenter.y);
-		await sleep();
-		expect(Number(image.dataset.imageZoomScale)).toBe(initialImageScale);
-
-		await sleep(APP_CONFIG.multigraph.focus.entryGestureIdleMs + 20);
-		dispatchWheel(image, -500, imageCenter.x, imageCenter.y);
-		await waitFor(() => {
-			expect(Number(image.dataset.imageZoomScale)).toBeGreaterThan(initialImageScale);
-		});
-
-		await sleep(APP_CONFIG.multigraph.focus.overshootHysteresisMs + 20);
-		dispatchWheel(image, 5000, imageCenter.x, imageCenter.y);
-		await sleep();
-		dispatchWheel(image, 5000, imageCenter.x, imageCenter.y);
-		await waitFor(() => {
-			expect(frame.dataset.imageFocused).not.toBe('true');
-		});
+		expect(frame.dataset.imageFocused).toBeUndefined();
+		expect(image.dataset.imageZoomScale).toBeUndefined();
 
 		dispatchWheel(world, 2000, imageCenter.x, imageCenter.y);
 		await waitFor(() => {
@@ -724,11 +700,6 @@
 		});
 
 		const stageTransformBeforeExit = getStageTransform(canvasElement);
-		dispatchWheel(world, 5000, center.x, center.y);
-		await waitFor(() => {
-			expect(Number(world.dataset.zoomWorldScale)).toBe(1);
-		});
-
 		dispatchWheel(world, 5000, center.x, center.y);
 		await waitFor(() => {
 			expect(canvasElement.querySelector('.graph')).not.toHaveClass('focus-active');

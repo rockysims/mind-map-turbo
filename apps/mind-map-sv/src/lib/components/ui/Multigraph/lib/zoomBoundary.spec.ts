@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
 	borderRadiusForProgress,
+	centeredFitForRect,
 	clampRectForEntrySteering,
 	clampRectToCoverViewport,
+	entryProgress,
+	exitProgress,
+	exitProgressAfterCenteredFit,
 	inscribeScaleForCircle,
 	inscribeScaleForRect,
 	inscribedContactForCircle,
@@ -131,5 +135,43 @@ describe('zoom boundary radius progress', () => {
 	it('clamps progress outside the supported range', () => {
 		expect(borderRadiusForProgress(200, -1, { toRadiusPx: 20 })).toBe(100);
 		expect(borderRadiusForProgress(200, 2, { toRadiusPx: 20 })).toBe(20);
+	});
+});
+
+describe('scale-derived boundary progress', () => {
+	it('ramps entry progress from the pre-inscribe zone start to inscribe', () => {
+		expect(entryProgress(7.8, 10, 0.2)).toBe(0);
+		expect(entryProgress(9, 10, 0.2)).toBe(0.5);
+		expect(entryProgress(10, 10, 0.2)).toBe(1);
+	});
+
+	it('is reversible and supports a large single-step jump to commit', () => {
+		expect(entryProgress(10.5, 10, 0.2)).toBe(1);
+		expect(entryProgress(8.4, 10, 0.2)).toBeCloseTo(0.2);
+	});
+
+	it('ramps exit progress symmetrically below fit', () => {
+		expect(exitProgress(1, 1, 0.2)).toBe(1);
+		expect(exitProgress(0.9, 1, 0.2)).toBeCloseTo(0.5);
+		expect(exitProgress(0.8, 1, 0.2)).toBe(0);
+	});
+
+	it('distinguishes centered fit from merely fitting', () => {
+		expect(centeredFitForRect({ left: 10, top: 20, width: 300, height: 200 }, viewport, 0)).toEqual(
+			{ fits: true, centered: true, centeredFit: true }
+		);
+		expect(centeredFitForRect({ left: 0, top: 0, width: 300, height: 200 }, viewport, 0)).toEqual({
+			fits: true,
+			centered: false,
+			centeredFit: false
+		});
+		expect(
+			centeredFitForRect({ left: -20, top: -10, width: 360, height: 260 }, viewport, 0)
+		).toEqual({ fits: false, centered: true, centeredFit: false });
+	});
+
+	it('holds exit progress until cover clamp has recentered to fit', () => {
+		expect(exitProgressAfterCenteredFit(0.8, 1, false, 0.2)).toBe(1);
+		expect(exitProgressAfterCenteredFit(0.8, 1, true, 0.2)).toBe(0);
 	});
 });

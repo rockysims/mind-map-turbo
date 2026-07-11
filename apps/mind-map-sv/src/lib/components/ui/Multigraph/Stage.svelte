@@ -14,11 +14,7 @@
 	} from './lib/graphMath.js';
 	import { pointerDistance } from './lib/hitTest.js';
 	import { recognizeLongPress } from './lib/longPress.js';
-	import {
-		focusOverzoomMaxScaleForNode,
-		focusOverzoomScale,
-		persistedScaleForFocusOverzoom
-	} from './lib/nodeFocus.js';
+	import { focusOverzoomMaxScaleForNode, persistedScaleForFocusOverzoom } from './lib/nodeFocus.js';
 	import {
 		beginEntryGestureGate,
 		EMPTY_ENTRY_GESTURE_GATE,
@@ -45,6 +41,8 @@
 		direction: 'in' | 'out';
 		focalPoint: Point;
 		blockedFactor: number;
+		boundaryProgress?: number;
+		committed?: boolean;
 		viewState: ViewStateSnapshot;
 	}
 
@@ -386,14 +384,13 @@
 			},
 			rect
 		);
-		const canOverzoom = requestedScale > DEFAULT_MAX_SCALE && dynamicMaxScale !== null;
+		const focusBoundaryScale =
+			requestedScale > scale && dynamicMaxScale !== null ? dynamicMaxScale : null;
 		const nextScale =
-			requestedScale > DEFAULT_MAX_SCALE
-				? focusOverzoomScale(
-						requestedScale,
-						{ maxScale: DEFAULT_MAX_SCALE, dynamicMaxScale: dynamicMaxScale ?? undefined },
-						canOverzoom
-					)
+			focusBoundaryScale !== null
+				? focusBoundaryScale <= scale
+					? scale
+					: clampScale(requestedScale, DEFAULT_MIN_SCALE, focusBoundaryScale)
 				: clampedScale;
 		const nextView = zoomViewTransformAtPoint({ panX, panY, scale }, nextScale, focalPoint, {
 			x: rect.left + rect.width / 2,
@@ -403,7 +400,16 @@
 		panX = nextView.panX;
 		panY = nextView.panY;
 		scale = nextView.scale;
-		if (requestedScale > nextScale) {
+		if (focusBoundaryScale !== null) {
+			onBlockedZoom?.({
+				direction: 'in',
+				focalPoint,
+				blockedFactor: Math.abs(requestedScale - nextScale) / Math.max(nextScale, 0.001),
+				boundaryProgress: focusBoundaryScale <= 0 ? 0 : Math.min(1, nextScale / focusBoundaryScale),
+				committed: nextScale >= focusBoundaryScale,
+				viewState: { panX, panY, scale }
+			});
+		} else if (requestedScale > nextScale) {
 			onBlockedZoom?.({
 				direction: 'in',
 				focalPoint,
@@ -487,17 +493,13 @@
 						},
 						rect
 					);
-					const canOverzoom = requestedScale > DEFAULT_MAX_SCALE && dynamicMaxScale !== null;
+					const focusBoundaryScale =
+						requestedScale > pinchStart.scale && dynamicMaxScale !== null ? dynamicMaxScale : null;
 					const nextScale =
-						requestedScale > DEFAULT_MAX_SCALE
-							? focusOverzoomScale(
-									requestedScale,
-									{
-										maxScale: DEFAULT_MAX_SCALE,
-										dynamicMaxScale: dynamicMaxScale ?? undefined
-									},
-									canOverzoom
-								)
+						focusBoundaryScale !== null
+							? focusBoundaryScale <= pinchStart.scale
+								? pinchStart.scale
+								: clampScale(requestedScale, DEFAULT_MIN_SCALE, focusBoundaryScale)
 							: clampedScale;
 					const nextView = zoomViewTransformAtPoint(
 						{ panX: pinchStart.panX, panY: pinchStart.panY, scale: pinchStart.scale },
@@ -508,7 +510,17 @@
 					panX = nextView.panX;
 					panY = nextView.panY;
 					scale = nextView.scale;
-					if (requestedScale > nextScale) {
+					if (focusBoundaryScale !== null) {
+						onBlockedZoom?.({
+							direction: 'in',
+							focalPoint: pinchStart.centroid,
+							blockedFactor: Math.abs(requestedScale - nextScale) / Math.max(nextScale, 0.001),
+							boundaryProgress:
+								focusBoundaryScale <= 0 ? 0 : Math.min(1, nextScale / focusBoundaryScale),
+							committed: nextScale >= focusBoundaryScale,
+							viewState: { panX, panY, scale }
+						});
+					} else if (requestedScale > nextScale) {
 						onBlockedZoom?.({
 							direction: 'in',
 							focalPoint: pinchStart.centroid,
@@ -547,14 +559,13 @@
 		},
 		rect: DOMRect
 	): number | null {
-		if (input.requestedScale <= DEFAULT_MAX_SCALE) return null;
+		if (input.requestedScale <= scale) return null;
 		const fromParent = focusOverzoomMaxScaleForPoint?.(input);
 		if (fromParent !== undefined && fromParent !== null) {
-			return Math.max(DEFAULT_MAX_SCALE, fromParent);
+			return Math.max(DEFAULT_MIN_SCALE, fromParent);
 		}
 		const canOverzoom =
-			scale > DEFAULT_MAX_SCALE ||
-			(canOverzoomForFocus?.(input) ?? getNodeAt(input.focalPoint.x, input.focalPoint.y) !== null);
+			canOverzoomForFocus?.(input) ?? getNodeAt(input.focalPoint.x, input.focalPoint.y) !== null;
 		if (!canOverzoom) return null;
 		return focusOverzoomMaxScaleForNode(
 			NODE_RADIUS,

@@ -36,6 +36,12 @@ export interface ClampResult {
 	dy: number;
 }
 
+export interface CenteredFitResult {
+	fits: boolean;
+	centered: boolean;
+	centeredFit: boolean;
+}
+
 export function rectRight(rect: Rect): number {
 	return rect.left + rect.width;
 }
@@ -56,7 +62,7 @@ export function circleToRect(circle: Circle): Rect {
 export function inscribedContactForRect(
 	rect: Rect,
 	viewport: ViewportSize,
-	marginPx = APP_CONFIG.multigraph.focus.boundaryNearTouchMarginPx
+	marginPx: number = APP_CONFIG.multigraph.focus.boundaryNearTouchMarginPx
 ): InscribedContact {
 	const x = axisContact(rect.left, rectRight(rect), viewport.width, marginPx);
 	const y = axisContact(rect.top, rectBottom(rect), viewport.height, marginPx);
@@ -70,7 +76,7 @@ export function inscribedContactForRect(
 export function inscribedContactForCircle(
 	circle: Circle,
 	viewport: ViewportSize,
-	marginPx = APP_CONFIG.multigraph.focus.boundaryNearTouchMarginPx
+	marginPx: number = APP_CONFIG.multigraph.focus.boundaryNearTouchMarginPx
 ): InscribedContact {
 	return inscribedContactForRect(circleToRect(circle), viewport, marginPx);
 }
@@ -113,6 +119,56 @@ export function clampRectToCoverViewport(
 		dx,
 		dy
 	};
+}
+
+export function entryProgress(
+	scale: number,
+	inscribeScale: number,
+	zoneFraction: number = APP_CONFIG.multigraph.focus.preInscribeZoneFraction
+): number {
+	if (inscribeScale <= 0) return 0;
+	const zoneStart = inscribeScale * (1 - clamp01(zoneFraction));
+	if (inscribeScale <= zoneStart) return scale >= inscribeScale ? 1 : 0;
+	return clamp01((scale - zoneStart) / (inscribeScale - zoneStart));
+}
+
+export function exitProgress(
+	scale: number,
+	fitScale: number,
+	zoneFraction: number = APP_CONFIG.multigraph.focus.subFitExitZoneFraction
+): number {
+	if (fitScale <= 0) return 0;
+	const zoneEnd = fitScale * (1 - clamp01(zoneFraction));
+	if (fitScale <= zoneEnd) return scale >= fitScale ? 1 : 0;
+	return clamp01((scale - zoneEnd) / (fitScale - zoneEnd));
+}
+
+export function centeredFitForRect(
+	rect: Rect,
+	viewport: ViewportSize,
+	marginPx: number = APP_CONFIG.multigraph.focus.boundaryNearTouchMarginPx
+): CenteredFitResult {
+	const fits =
+		rect.width <= viewport.width + marginPx * 2 && rect.height <= viewport.height + marginPx * 2;
+	const centerX = rect.left + rect.width / 2;
+	const centerY = rect.top + rect.height / 2;
+	const centered =
+		Math.abs(centerX - viewport.width / 2) <= marginPx &&
+		Math.abs(centerY - viewport.height / 2) <= marginPx;
+	return {
+		fits,
+		centered,
+		centeredFit: fits && centered
+	};
+}
+
+export function exitProgressAfterCenteredFit(
+	scale: number,
+	fitScale: number,
+	isCenteredFit: boolean,
+	zoneFraction: number = APP_CONFIG.multigraph.focus.subFitExitZoneFraction
+): number {
+	return isCenteredFit ? exitProgress(scale, fitScale, zoneFraction) : 1;
 }
 
 export function borderRadiusForProgress(
