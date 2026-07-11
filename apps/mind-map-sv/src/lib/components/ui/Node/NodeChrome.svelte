@@ -10,9 +10,6 @@
 		hasTagBorder = false,
 		tagBorderBackground = 'transparent',
 		detailsMode = false,
-		detailsPreview = false,
-		previewWidthPx,
-		previewHeightPx,
 		spotlight = false,
 		spotlightColor = 'transparent',
 		surfaceBackground,
@@ -26,9 +23,6 @@
 		hasTagBorder?: boolean;
 		tagBorderBackground?: string;
 		detailsMode?: boolean;
-		detailsPreview?: boolean;
-		previewWidthPx?: number;
-		previewHeightPx?: number;
 		spotlight?: boolean;
 		spotlightColor?: string;
 		surfaceBackground?: string;
@@ -41,11 +35,8 @@
 	data-pinned={pinned ? 'true' : undefined}
 	data-tag-border={hasTagBorder ? 'true' : undefined}
 	data-details-mode={detailsMode ? 'true' : undefined}
-	data-details-preview={detailsPreview ? 'true' : undefined}
 	data-spotlight={spotlight ? 'true' : undefined}
-	style="--node-diameter: {diameterPx}px; --node-border-radius: {borderRadiusPx}px; --node-border-width: {borderWidthPx}px; --pinned-node-border-width: {pinnedBorderWidthPx}px; --node-preview-width: {previewWidthPx ??
-		diameterPx}px; --node-preview-height: {previewHeightPx ??
-		diameterPx}px; --node-tag-border: {tagBorderBackground}; --node-spotlight-color: {spotlightColor};{surfaceBackground
+	style="--node-diameter: {diameterPx}px; --node-border-radius: {borderRadiusPx}px; --node-border-width: {borderWidthPx}px; --pinned-node-border-width: {pinnedBorderWidthPx}px; --node-tag-border: {tagBorderBackground}; --node-spotlight-color: {spotlightColor};{surfaceBackground
 		? ` --node-surface-background: ${surfaceBackground};`
 		: ''}"
 >
@@ -69,11 +60,6 @@
 		border-width: var(--pinned-node-border-width);
 		border-color: #555555;
 		box-shadow: 0 0 0 2px #ffffff;
-	}
-
-	.circle[data-details-preview='true'] {
-		width: var(--node-preview-width);
-		height: var(--node-preview-height);
 	}
 
 	.circle[data-tag-border='true'] {

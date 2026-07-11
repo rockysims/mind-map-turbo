@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-	borderRadiusForProgress,
 	centeredFitForRect,
 	clampRectForEntrySteering,
 	clampRectToCoverViewport,
@@ -122,19 +121,6 @@ describe('zoom boundary pan clamps', () => {
 		expect(large.rect.left).toBe(0);
 		expect(fit.rect.left).toBe(20);
 		expect(fit.rect.top).toBe(20);
-	});
-});
-
-describe('zoom boundary radius progress', () => {
-	it('maps progress from circle to details radius', () => {
-		expect(borderRadiusForProgress(200, 0, { toRadiusPx: 20 })).toBe(100);
-		expect(borderRadiusForProgress(200, 0.5, { toRadiusPx: 20 })).toBe(60);
-		expect(borderRadiusForProgress(200, 1, { toRadiusPx: 20 })).toBe(20);
-	});
-
-	it('clamps progress outside the supported range', () => {
-		expect(borderRadiusForProgress(200, -1, { toRadiusPx: 20 })).toBe(100);
-		expect(borderRadiusForProgress(200, 2, { toRadiusPx: 20 })).toBe(20);
 	});
 });
 

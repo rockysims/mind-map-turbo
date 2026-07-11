@@ -23,15 +23,6 @@ export interface ScreenCircle {
 	radius: number;
 }
 
-export interface NodeFocusMorphSource {
-	nodeId: string;
-	left: number;
-	top: number;
-	width: number;
-	height: number;
-	borderWidthPx?: number;
-}
-
 export function nodeScreenCircle(
 	nodeId: string,
 	position: Point,

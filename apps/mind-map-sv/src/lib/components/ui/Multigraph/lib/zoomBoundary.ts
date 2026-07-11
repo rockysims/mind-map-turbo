@@ -171,19 +171,6 @@ export function exitProgressAfterCenteredFit(
 	return isCenteredFit ? exitProgress(scale, fitScale, zoneFraction) : 1;
 }
 
-export function borderRadiusForProgress(
-	sizePx: number,
-	progress: number,
-	options: {
-		fromRadiusPx?: number;
-		toRadiusPx?: number;
-	} = {}
-): number {
-	const fromRadiusPx = options.fromRadiusPx ?? sizePx / 2;
-	const toRadiusPx = options.toRadiusPx ?? APP_CONFIG.multigraph.focus.detailsCornerRadiusPx;
-	return lerp(fromRadiusPx, toRadiusPx, clamp01(progress));
-}
-
 function axisContact(
 	start: number,
 	end: number,
@@ -241,10 +228,6 @@ function translateRect(rect: Rect, dx: number, dy: number): Rect {
 		left: rect.left + dx,
 		top: rect.top + dy
 	};
-}
-
-function lerp(from: number, to: number, progress: number): number {
-	return from + (to - from) * progress;
 }
 
 function clamp(value: number, min: number, max: number): number {
