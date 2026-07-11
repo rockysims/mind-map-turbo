@@ -614,6 +614,18 @@
 		focusExitTimeoutId = setTimeout(finishCloseFocus, FOCUS_TRANSITION_MS);
 	}
 
+	function commitFocusExitFromBoundary() {
+		if (!focusRuntime.isFocused || focusExiting) return;
+		ensureFocusExitTarget();
+		focusRuntime.setProgress(0, 'exiting');
+		focusExiting = true;
+		if (typeof requestAnimationFrame === 'function') {
+			requestAnimationFrame(finishCloseFocus);
+		} else {
+			finishCloseFocus();
+		}
+	}
+
 	function clearFocusExitTimeout() {
 		if (focusExitTimeoutId === null) return;
 		clearTimeout(focusExitTimeoutId);
@@ -895,12 +907,13 @@
 			focusRuntime.setProgress(1, 'active');
 			return;
 		}
-		ensureFocusExitTarget();
-		focusRuntime.setProgress(Math.max(0, 1 - delta), 'exiting');
 		if (delta >= 1) {
 			armStageEntryGestureGate('out');
-			closeFocus();
+			commitFocusExitFromBoundary();
+			return;
 		}
+		ensureFocusExitTarget();
+		focusRuntime.setProgress(Math.max(0, 1 - delta), 'exiting');
 	}
 
 	function toggleTagColorLegend() {

@@ -832,6 +832,8 @@
 			expect(canvasElement.querySelector('.graph')).not.toHaveClass('focus-active');
 			expect(surface).toHaveClass('exiting');
 		});
+		await waitForFrames(2);
+		expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
 	}}
 />
 
