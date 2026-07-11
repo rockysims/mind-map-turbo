@@ -3,7 +3,7 @@
 **Created:** 2026-07-10
 **Author:** Cursor agent
 **Milestone:** [milestones/06c-single-surface-morph.md](../milestones/06c-single-surface-morph.md)
-**Status:** draft
+**Status:** executing
 **Total estimated effort:** L (5 tasks across 4 waves; pure frame geometry,
 shared chrome extraction, morph surface component, production rewiring,
 cleanup/closeout)
@@ -70,7 +70,7 @@ handoff seams, the dual geometry math, and all DOM-measurement compensation.
 
 ## Tasks
 
-### T01 — Pure frame geometry: derived source rect + border-width channel
+### T01 — Pure frame geometry: derived source rect + border-width channel — ✓ done (96b9803)
 
 |                |                                                                                                        |
 | -------------- | ------------------------------------------------------------------------------------------------------ |
@@ -101,7 +101,7 @@ Do not remove `borderRadiusForProgress` or measurement callers yet (T04/T05).
 - No Svelte/DOM imports; every tunable is a parameter with an `appConfig`
   default; existing `interpolateMorph` callers still compile and pass.
 
-### T02 — Extract shared chrome and content-layer components from Node
+### T02 — Extract shared chrome and content-layer components from Node — ✓ done (85ad1cd)
 
 |                |                                                                                                                                            |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
