@@ -687,6 +687,216 @@
 />
 
 <Story
+	name="UserBoldZoomsIntoNodeImageToDepthTwo"
+	args={{
+		multigraphData: {
+			...makeGraph({
+				nodes: [
+					{
+						id: 'image-node',
+						title: 'Image node',
+						description: 'Bold-zoom into the image to nest a deeper level.',
+						tags: ['visual'],
+						content: [
+							{
+								type: 'image',
+								assetId: FOCUS_IMAGE_ASSET_ID,
+								alt: 'Color blocks',
+								caption: 'A small test image'
+							}
+						]
+					}
+				],
+				pinned: ['image-node']
+			}),
+			assets: {
+				[FOCUS_IMAGE_ASSET_ID]: {
+					id: FOCUS_IMAGE_ASSET_ID,
+					kind: 'image',
+					mimeType: 'image/svg+xml',
+					name: 'focus-image.svg',
+					size: FOCUS_IMAGE_SVG.length,
+					createdAt: 0
+				}
+			}
+		},
+		defaultPrimaryNodeId: 'image-node',
+		assetStore: focusImageAssetStore,
+		assetScope: FOCUS_IMAGE_SCOPE,
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const circle = getCircle(canvasElement, 'image-node');
+		const center = getCenter(circle);
+		const canvas = within(canvasElement);
+
+		// Commit focus on the node via the long-press menu (no residual gate).
+		dispatchPointer(circle, 'pointerdown', center.x, center.y);
+		await sleep(LONG_PRESS_MS + 20);
+		dispatchPointer(circle, 'pointerup', center.x, center.y);
+		canvas.getByRole('menuitem', { name: 'Focus' }).click();
+
+		const dialog = await canvas.findByRole('dialog');
+		await waitFor(() => {
+			expect(dialog.querySelector('.focus-image')).toBeInTheDocument();
+		});
+
+		const stack = canvasElement.querySelector('.deep-zoom-stack') as HTMLElement;
+		expect(stack.dataset.depth).toBe('1');
+
+		const image = dialog.querySelector('.focus-image') as HTMLElement;
+		const imageCenter = getCenter(image);
+		const nodeWorld = dialog.querySelector('.zoom-world') as HTMLElement;
+
+		// Zoom the node world in toward max scale over the image.
+		dispatchWheel(image, -3000, imageCenter.x, imageCenter.y);
+		await waitFor(() => {
+			expect(Number(nodeWorld.dataset.zoomWorldScale)).toBeGreaterThan(1);
+		});
+
+		// A bold zoom-in past max, cursor over the image, descends to depth 2.
+		dispatchWheel(image, -6000, imageCenter.x, imageCenter.y);
+		await waitFor(() => {
+			expect(stack.dataset.depth).toBe('2');
+		});
+		expect(dialog.dataset.focusDepth).toBe('2');
+
+		// The nested details layer mounts lazily once the entry morph advances
+		// past progress 0, so wait for it rather than asserting synchronously.
+		await waitFor(() => {
+			const imageDetails = canvasElement.querySelector(
+				'[data-subject-kind="image"]'
+			) as HTMLElement | null;
+			expect(imageDetails).toBeInTheDocument();
+			expect(imageDetails?.dataset.focusSubjectId).toBe(FOCUS_IMAGE_ASSET_ID);
+			expect(canvasElement.querySelector('.focus-image-full')).toBeInTheDocument();
+		});
+
+		// Wait for the entry morph to finish so the image world mounts and pans.
+		await waitFor(
+			() => {
+				const layers = canvasElement.querySelectorAll('.deep-zoom-layer');
+				const active = layers[layers.length - 1] as HTMLElement;
+				expect(Number(active.dataset.morphProgress)).toBe(1);
+			},
+			{ timeout: 2000 }
+		);
+
+		// Zoom out past fit in the image world pops back to the node (depth 1),
+		// continuously (focus stays open — it does not close).
+		const imageWorld = dialog.querySelector('.zoom-world') as HTMLElement;
+		dispatchWheel(imageWorld, 6000, imageCenter.x, imageCenter.y);
+		await waitFor(
+			() => {
+				expect(stack.dataset.depth).toBe('1');
+			},
+			{ timeout: 2000 }
+		);
+		expect(dialog).toBeInTheDocument();
+		expect(dialog.dataset.focusDepth).toBe('1');
+	}}
+/>
+
+<Story
+	name="UserBoldZoomsIntoNodeImageWithReducedMotion"
+	args={{
+		multigraphData: {
+			...makeGraph({
+				nodes: [
+					{
+						id: 'image-node',
+						title: 'Image node',
+						description: 'Reduced motion still reaches the nested image level.',
+						tags: ['visual'],
+						content: [
+							{
+								type: 'image',
+								assetId: FOCUS_IMAGE_ASSET_ID,
+								alt: 'Color blocks',
+								caption: 'A small test image'
+							}
+						]
+					}
+				],
+				pinned: ['image-node']
+			}),
+			assets: {
+				[FOCUS_IMAGE_ASSET_ID]: {
+					id: FOCUS_IMAGE_ASSET_ID,
+					kind: 'image',
+					mimeType: 'image/svg+xml',
+					name: 'focus-image.svg',
+					size: FOCUS_IMAGE_SVG.length,
+					createdAt: 0
+				}
+			}
+		},
+		defaultPrimaryNodeId: 'image-node',
+		assetStore: focusImageAssetStore,
+		assetScope: FOCUS_IMAGE_SCOPE,
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		// Force reduced motion BEFORE focus first reads it (the derived is lazy
+		// and only read once focus mounts), so the morph skips intermediate frames.
+		const originalMatchMedia = window.matchMedia;
+		window.matchMedia = ((query: string) => ({
+			matches: query.includes('prefers-reduced-motion'),
+			media: query,
+			onchange: null,
+			addListener() {},
+			removeListener() {},
+			addEventListener() {},
+			removeEventListener() {},
+			dispatchEvent() {
+				return false;
+			}
+		})) as typeof window.matchMedia;
+		try {
+			await waitForLayout();
+			const circle = getCircle(canvasElement, 'image-node');
+			const center = getCenter(circle);
+			const canvas = within(canvasElement);
+
+			dispatchPointer(circle, 'pointerdown', center.x, center.y);
+			await sleep(LONG_PRESS_MS + 20);
+			dispatchPointer(circle, 'pointerup', center.x, center.y);
+			canvas.getByRole('menuitem', { name: 'Focus' }).click();
+
+			const dialog = await canvas.findByRole('dialog');
+			await waitFor(() => {
+				expect(dialog.querySelector('.focus-image')).toBeInTheDocument();
+			});
+
+			const stack = canvasElement.querySelector('.deep-zoom-stack') as HTMLElement;
+			const image = dialog.querySelector('.focus-image') as HTMLElement;
+			const imageCenter = getCenter(image);
+			const nodeWorld = dialog.querySelector('.zoom-world') as HTMLElement;
+
+			dispatchWheel(image, -3000, imageCenter.x, imageCenter.y);
+			await waitFor(() => {
+				expect(Number(nodeWorld.dataset.zoomWorldScale)).toBeGreaterThan(1);
+			});
+
+			dispatchWheel(image, -6000, imageCenter.x, imageCenter.y);
+			await waitFor(() => {
+				expect(stack.dataset.depth).toBe('2');
+			});
+
+			// Reduced motion jumps straight to the committed image level: the
+			// nested layer is already at full morph progress (no intermediate frame).
+			const layers = canvasElement.querySelectorAll('.deep-zoom-layer');
+			const active = layers[layers.length - 1] as HTMLElement;
+			expect(Number(active.dataset.morphProgress)).toBe(1);
+			expect(canvasElement.querySelector('[data-subject-kind="image"]')).toBeInTheDocument();
+		} finally {
+			window.matchMedia = originalMatchMedia;
+		}
+	}}
+/>
+
+<Story
 	name="UserOverzoomsNodeIntoFocus"
 	args={{
 		multigraphData: makeGraph({

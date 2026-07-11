@@ -98,6 +98,53 @@ describe('FocusController lifecycle', () => {
 		expect(focus.isFocused).toBe(false);
 	});
 
+	it('descends into an image (depth 2) then pops back to the node (depth 1)', () => {
+		const { deps } = makeDeps();
+		const focus = new FocusController(deps);
+		focus.openFocus(node);
+		expect(focus.depth).toBe(1);
+
+		const imageRect = { left: 100, top: 80, width: 200, height: 150 };
+		focus.descendToImage({
+			assetId: 'asset-1',
+			sourceRect: imageRect,
+			src: 'blob:image',
+			alt: 'A picture'
+		});
+
+		expect(focus.depth).toBe(2);
+		const image = focus.activeLevel!;
+		expect(image.subjectKind).toBe('image');
+		expect(image.subjectId).toBe('asset-1');
+		expect(image.subjectSrc).toBe('blob:image');
+		expect(image.subjectAlt).toBe('A picture');
+		expect(image.sourceRect).toEqual(imageRect);
+		expect(image.fillRect).toEqual(fillRect);
+		// Reduced motion (makeDeps default) jumps straight to committed.
+		expect(image.morphProgress).toBe(1);
+		expect(image.phase).toBe('active');
+		expect(focus.committed).toBe(true);
+
+		// Partial exit at depth 2 scrubs the image frame, staying at depth 2.
+		focus.handleExit(focus.activeLevel!, 0.4);
+		expect(focus.depth).toBe(2);
+		expect(focus.activeLevel?.subjectKind).toBe('image');
+		expect(focus.activeLevel?.phase).toBe('exiting');
+		expect(focus.activeLevel?.morphProgress).toBeCloseTo(0.6);
+
+		// A full exit at depth 2 POPS to the node instead of closing focus.
+		focus.handleExit(focus.activeLevel!, 1);
+		expect(focus.isFocused).toBe(true);
+		expect(focus.depth).toBe(1);
+		expect(focus.focusedNodeId).toBe('n0');
+		expect(focus.activeLevel?.phase).toBe('active');
+		expect(focus.activeLevel?.morphProgress).toBe(1);
+
+		// A full exit at depth 1 still closes focus entirely.
+		focus.handleExit(focus.activeLevel!, 1);
+		expect(focus.isFocused).toBe(false);
+	});
+
 	it('handleBlockedZoom scrubs at partial progress and commits at full', () => {
 		const { deps } = makeDeps();
 		const focus = new FocusController(deps);

@@ -21,7 +21,7 @@
 
 <script lang="ts">
 	import DeepZoomLayer, { type FrameSnippetArgs } from './DeepZoomLayer.svelte';
-	import ZoomWorld from './ZoomWorld.svelte';
+	import ZoomWorld, { type DescendInput } from './ZoomWorld.svelte';
 
 	let {
 		levels = [],
@@ -33,7 +33,8 @@
 		frame,
 		compact,
 		details,
-		onAscend
+		onAscend,
+		onDescend
 	}: {
 		levels?: FocusLevel[];
 		reduceMotion?: boolean;
@@ -45,6 +46,8 @@
 		compact?: Snippet<[FocusLevel]>;
 		details?: Snippet<[FocusLevel]>;
 		onAscend?: (level: FocusLevel, delta: number) => void;
+		/** Bold zoom-in over an image in the active world descends into it. */
+		onDescend?: (input: DescendInput) => void;
 	} = $props();
 
 	// Single focus input surface: the active (top) level owns wheel input once it
@@ -89,6 +92,7 @@
 					{entryGestureIdleMs}
 					{entryGestureMaxMs}
 					onExitBoundary={(delta) => onAscend?.(level, delta)}
+					{onDescend}
 				>
 					{@render details?.(level)}
 				</ZoomWorld>

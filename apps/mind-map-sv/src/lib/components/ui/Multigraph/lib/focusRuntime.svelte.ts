@@ -12,6 +12,10 @@ export interface FocusLevel {
 	sourceRect: Rect;
 	fillRect: Rect;
 	borderWidthPx?: number;
+	/** Image source, present only for `subjectKind: 'image'` levels. */
+	subjectSrc?: string;
+	/** Image alt text, present only for `subjectKind: 'image'` levels. */
+	subjectAlt?: string;
 	morphProgress: number;
 	phase: FocusLevelPhase;
 }
@@ -22,6 +26,8 @@ export interface PushFocusLevelInput {
 	sourceRect: Rect;
 	fillRect: Rect;
 	borderWidthPx?: number;
+	subjectSrc?: string;
+	subjectAlt?: string;
 	morphProgress?: number;
 	phase?: FocusLevelPhase;
 }
@@ -62,6 +68,8 @@ export class FocusRuntime {
 			sourceRect: input.sourceRect,
 			fillRect: input.fillRect,
 			borderWidthPx: input.borderWidthPx,
+			subjectSrc: input.subjectSrc,
+			subjectAlt: input.subjectAlt,
 			morphProgress: clamp01(input.morphProgress ?? 1),
 			phase: input.phase ?? 'active'
 		};

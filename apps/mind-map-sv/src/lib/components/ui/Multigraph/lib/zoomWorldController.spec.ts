@@ -59,6 +59,48 @@ describe('zoom world controller', () => {
 		expect(boundary.exitProgress).toBe(0.5);
 	});
 
+	it('reports entryBoundaryDelta only for a zoom-in blocked at max scale', () => {
+		// Not blocked: a gentle zoom-in that stays below maxScale reports 0.
+		const belowMax = wheelZoomWorld(
+			{ panX: 0, panY: 0, scale: 2 },
+			-100,
+			{ x: 400, y: 300 },
+			{ ...bounds, maxScale: 6, entryBoundaryZoneFraction: 0.5 }
+		);
+		expect(belowMax.state.scale).toBeLessThan(6);
+		expect(belowMax.entryBoundaryDelta).toBe(0);
+
+		// Blocked at max: a bold zoom-in overshoots maxScale and reports pressure.
+		const blocked = wheelZoomWorld(
+			{ panX: 0, panY: 0, scale: 6 },
+			-1000,
+			{ x: 400, y: 300 },
+			{ ...bounds, maxScale: 6, entryBoundaryZoneFraction: 0.5 }
+		);
+		expect(blocked.state.scale).toBe(6);
+		expect(blocked.entryBoundaryDelta).toBe(1);
+
+		// A gentle press just inside the zone reports a partial fraction.
+		const partial = wheelZoomWorld(
+			{ panX: 0, panY: 0, scale: 6 },
+			-50,
+			{ x: 400, y: 300 },
+			{ ...bounds, maxScale: 6, entryBoundaryZoneFraction: 0.5 }
+		);
+		expect(partial.state.scale).toBe(6);
+		expect(partial.entryBoundaryDelta).toBeGreaterThan(0);
+		expect(partial.entryBoundaryDelta).toBeLessThan(1);
+
+		// Zoom-out never reports descend pressure.
+		const zoomOut = wheelZoomWorld(
+			{ panX: 0, panY: 0, scale: 6 },
+			1000,
+			{ x: 400, y: 300 },
+			{ ...bounds, maxScale: 6, entryBoundaryZoneFraction: 0.5 }
+		);
+		expect(zoomOut.entryBoundaryDelta).toBe(0);
+	});
+
 	it('uses the same focal transform for pinch and wheel consumers', () => {
 		const focalPoint = { x: 300, y: 260 };
 		const wheel = zoomWorldAtPoint({ panX: 0, panY: 0, scale: 1 }, 1.75, focalPoint, bounds);

@@ -26,11 +26,25 @@ export interface ZoomWorldBounds extends ViewportSize {
 	entryInscribeScale?: number;
 	entryZoneFraction?: number;
 	exitZoneFraction?: number;
+	/**
+	 * Zone above `maxScale` used to report descend pressure, symmetric to
+	 * `exitZoneFraction` below `minScale`. A single bold wheel-in that requests a
+	 * scale at/above `maxScale * (1 + entryBoundaryZoneFraction)` yields a full
+	 * `entryBoundaryDelta` of 1; a gentle press reports a proportional fraction.
+	 */
+	entryBoundaryZoneFraction?: number;
 }
 
 export interface ZoomWorldStep {
 	state: ZoomWorldState;
 	exitBoundaryDelta: number;
+	/**
+	 * Fraction of zoom-in pressure applied while already clamped at `maxScale`
+	 * (0 when not blocked at max, > 0 when a zoom-in is blocked at max, 0 for any
+	 * zoom-out). Symmetric to `exitBoundaryDelta`; the world accumulates it to
+	 * trigger a descend into a nested subject.
+	 */
+	entryBoundaryDelta: number;
 	entryProgress: number;
 	exitProgress: number;
 	boundary: 'descend' | 'ascend' | null;
@@ -108,6 +122,7 @@ export function wheelZoomWorld(
 		return {
 			state: fitState,
 			exitBoundaryDelta: 1 - progress,
+			entryBoundaryDelta: 0,
 			entryProgress: 0,
 			exitProgress: progress,
 			boundary: progress <= 0 ? 'ascend' : null
@@ -125,9 +140,15 @@ export function wheelZoomWorld(
 				)
 			: 0;
 
+	// Descend pressure: a zoom-in whose requested scale overshoots `maxScale`
+	// reports the fraction of that overshoot within the entry-boundary zone,
+	// mirroring how the exit branch reports zoom-out pressure past `minScale`.
+	const entryBoundaryDelta = descendBoundaryDelta(deltaY, requestedScale, limits.maxScale, bounds);
+
 	return {
 		state: stateAfterZoom,
 		exitBoundaryDelta: 0,
+		entryBoundaryDelta,
 		entryProgress: progress,
 		exitProgress: 1,
 		boundary:
@@ -135,6 +156,23 @@ export function wheelZoomWorld(
 				? 'descend'
 				: null
 	};
+}
+
+function descendBoundaryDelta(
+	deltaY: number,
+	requestedScale: number,
+	maxScale: number,
+	bounds: ZoomWorldBounds
+): number {
+	if (deltaY >= 0 || requestedScale <= maxScale) return 0;
+	const zoneFraction = Math.max(
+		0,
+		bounds.entryBoundaryZoneFraction ?? APP_CONFIG.multigraph.focus.preInscribeZoneFraction
+	);
+	const zoneEnd = maxScale * (1 + zoneFraction);
+	if (zoneEnd <= maxScale) return 1;
+	const pressed = clamp(requestedScale, maxScale, zoneEnd);
+	return clamp((pressed - maxScale) / (zoneEnd - maxScale), 0, 1);
 }
 
 export interface PinchZoomWorldStep {

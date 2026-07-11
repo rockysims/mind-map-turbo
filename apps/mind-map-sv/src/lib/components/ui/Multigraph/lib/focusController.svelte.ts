@@ -53,6 +53,14 @@ export interface EntryBoundaryCandidateInput {
 	stickyNodeId?: string;
 }
 
+/** Payload from a bold zoom-in over an image inside a focused world. */
+export interface DescendImageInput {
+	assetId: string;
+	sourceRect: Rect;
+	src: string;
+	alt: string;
+}
+
 /**
  * Owns the focus state machine: the recursive `FocusRuntime` stack, the morph
  * phase, entry scrub → commit → exit scrub → close lifecycle, and the idle
@@ -201,9 +209,48 @@ export class FocusController {
 		this.beginOrUpdateEntryScrub(candidate.node, progress);
 	}
 
-	/** Exit scrub from the focused world's zoom-out boundary (via DeepZoomStack). */
+	/**
+	 * Descend into an image inside the focused world: push a self-contained image
+	 * level (source = the image's on-screen rect, fill = the viewport) and tween
+	 * it through the SAME morph surface used at depth 1. Reduced motion (or a
+	 * non-positive transition) jumps straight to the committed state.
+	 */
+	descendToImage(input: DescendImageInput): void {
+		if (!this.isFocused || this.exiting) return;
+		this.clearIdleUnmount();
+		this.cancelTween();
+		const fill = this.#deps.getFillRect();
+		this.#runtime.push({
+			subjectKind: 'image',
+			subjectId: input.assetId,
+			sourceRect: input.sourceRect,
+			fillRect: fill,
+			subjectSrc: input.src,
+			subjectAlt: input.alt,
+			morphProgress: 0,
+			phase: 'entering'
+		});
+		const transitionMs = this.#deps.config.transitionMs;
+		if (
+			this.#deps.getReduceMotion() ||
+			transitionMs <= 0 ||
+			typeof requestAnimationFrame !== 'function'
+		) {
+			this.#runtime.setProgress(1, 'active');
+			return;
+		}
+		this.#tweenProgress(0, 1, transitionMs, 'entering', () => {
+			this.#runtime.setProgress(1, 'active');
+		});
+	}
+
+	/**
+	 * Exit scrub from the focused world's zoom-out boundary (via DeepZoomStack).
+	 * Depth-aware: at the deepest level (`depth === 1`) a completed exit closes
+	 * focus; at a nested level (`depth > 1`) it POPS back to the parent instead.
+	 */
 	handleExit(_level: FocusLevel, delta: number): void {
-		// Guard also blocks reversals while the terminal close tween is running.
+		// Guard also blocks reversals while a terminal close/pop tween is running.
 		if (!this.isFocused || this.exiting) return;
 		this.cancelTween();
 		if (delta <= 0) {
@@ -212,13 +259,55 @@ export class FocusController {
 			return;
 		}
 		if (delta >= 1) {
-			// Wheel-out crossed the full exit threshold — use the unified close path.
-			this.closeFocus();
+			// Full exit threshold crossed: pop a nested level, or close the last.
+			if (this.depth > 1) {
+				this.#popLevel();
+			} else {
+				this.closeFocus();
+			}
 			return;
 		}
 		// Partial exit scrub: morph the frame down while staying committed so the
 		// world keeps driving and the graph stays marked focus-active.
 		this.#runtime.setProgress(Math.max(0, 1 - delta), 'exiting');
+	}
+
+	/**
+	 * Pop a nested level: tween the active (child) frame 1 → 0, then drop it and
+	 * restore the now-active parent to its committed state.
+	 *
+	 * Camera-on-pop (open question #1): the parent world is NOT stored — its
+	 * `ZoomWorld` remounts at centered-fit (identity: scale 1, no pan) because a
+	 * level only commits at centered-and-fit and the exit gate guarantees a child
+	 * is centered-and-fit before it pops. Restoring the parent to
+	 * `morphProgress: 1, phase: 'active'` is the only preserved value. If a real
+	 * panned-image case proves this discontinuous, the smallest fix is to carry
+	 * the parent's world scale/pan onto the child level and rehydrate the parent
+	 * `ZoomWorld` from it — NOT to reinstate a general worldState store.
+	 */
+	#popLevel(): void {
+		this.clearIdleUnmount();
+		this.cancelTween();
+		const from = this.activeLevel?.morphProgress ?? 1;
+		const transitionMs = this.#deps.config.transitionMs;
+		const finish = () => {
+			this.#runtime.pop();
+			this.#runtime.setProgress(1, 'active');
+		};
+		if (
+			this.#deps.getReduceMotion() ||
+			transitionMs <= 0 ||
+			typeof requestAnimationFrame !== 'function'
+		) {
+			this.#runtime.setProgress(0, 'closing');
+			finish();
+			return;
+		}
+		// 'closing' phase reuses the exiting-guard so stray wheels can't cancel
+		// the pop mid-flight; the child frame freezes while it shrinks away.
+		this.#tweenProgress(from, 0, transitionMs, 'closing', () => {
+			requestAnimationFrame(() => finish());
+		});
 	}
 
 	/**

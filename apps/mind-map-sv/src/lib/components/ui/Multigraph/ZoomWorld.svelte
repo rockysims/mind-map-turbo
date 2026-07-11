@@ -18,6 +18,10 @@
 		type ZoomWorldBounds,
 		type ZoomWorldState
 	} from './lib/zoomWorldController';
+	import type { Rect } from './lib/zoomBoundary';
+
+	/** Payload for a committed descend into a nested image subject. */
+	export type DescendInput = { assetId: string; sourceRect: Rect; src: string; alt: string };
 
 	let {
 		minScale,
@@ -25,6 +29,7 @@
 		entryGestureIdleMs = 0,
 		entryGestureMaxMs = 0,
 		onExitBoundary,
+		onDescend,
 		children
 	}: {
 		minScale?: number;
@@ -32,6 +37,7 @@
 		entryGestureIdleMs?: number;
 		entryGestureMaxMs?: number;
 		onExitBoundary?: (delta: number) => void;
+		onDescend?: (input: DescendInput) => void;
 		children?: Snippet;
 	} = $props();
 
@@ -51,6 +57,7 @@
 	} | null>(null);
 	let entryGestureGate = $state<EntryGestureGateState>(EMPTY_ENTRY_GESTURE_GATE);
 	let exitBoundaryAmount = $state(0);
+	let descendBoundaryAmount = $state(0);
 
 	const activePointers = new SvelteMap<number, { clientX: number; clientY: number }>();
 	const transformStyle = $derived(
@@ -112,6 +119,22 @@
 		return step.swallow;
 	}
 
+	/**
+	 * Resolve the descendable image directly under the cursor. Only an
+	 * `<img class="focus-image">` carrying a `data-asset-id` qualifies, so
+	 * bold zoom-in over empty space or non-image content never descends (and a
+	 * nested image world, whose image is `focus-image-full`, cannot re-descend).
+	 */
+	function descendImageAt(clientX: number, clientY: number): HTMLImageElement | null {
+		if (typeof document === 'undefined') return null;
+		const hit = document.elementFromPoint(clientX, clientY);
+		const asset = hit?.closest('[data-asset-id]');
+		if (asset instanceof HTMLImageElement && asset.classList.contains('focus-image')) {
+			return asset;
+		}
+		return null;
+	}
+
 	function handleWheel(event: WheelEvent) {
 		const bounds = currentBounds();
 		const point = localPoint(event.clientX, event.clientY);
@@ -124,6 +147,9 @@
 			onExitBoundary?.(0);
 			return;
 		}
+		// A reversal (zoom-out) cancels any in-flight descend accumulation,
+		// mirroring how a zoom-in cancels an exit scrub.
+		if (descendBoundaryAmount > 0 && event.deltaY > 0) descendBoundaryAmount = 0;
 		const step = wheelZoomWorld(worldState, event.deltaY, point, bounds);
 		commitState(step.state);
 		if (step.exitBoundaryDelta > 0) {
@@ -133,6 +159,31 @@
 			exitBoundaryAmount = 0;
 			onExitBoundary?.(0);
 		}
+		accumulateDescend(step.entryBoundaryDelta, event.clientX, event.clientY);
+	}
+
+	function accumulateDescend(entryBoundaryDelta: number, clientX: number, clientY: number) {
+		if (!onDescend) return;
+		if (entryBoundaryDelta <= 0) {
+			descendBoundaryAmount = 0;
+			return;
+		}
+		const image = descendImageAt(clientX, clientY);
+		if (!image) {
+			// Blocked at max but not over a descendable image: no descend.
+			descendBoundaryAmount = 0;
+			return;
+		}
+		descendBoundaryAmount = Math.min(1, descendBoundaryAmount + entryBoundaryDelta);
+		if (descendBoundaryAmount < 1) return;
+		descendBoundaryAmount = 0;
+		const rect = image.getBoundingClientRect();
+		onDescend({
+			assetId: image.dataset.assetId ?? '',
+			sourceRect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+			src: image.getAttribute('src') ?? '',
+			alt: image.getAttribute('alt') ?? ''
+		});
 	}
 
 	function getTwoPointerDistance(): number | null {

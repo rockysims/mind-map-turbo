@@ -597,6 +597,137 @@ test('deep zoom enters node focus and exits by wheel gestures', async ({ page })
 	await expect(dialog).not.toBeVisible();
 });
 
+test('deep zoom nests a node image as a second level and pops back to the node', async ({
+	page
+}) => {
+	const graphId = `e2e-nested-image-${Date.now()}`;
+	const assetId = 'nested-zoom-image';
+	const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 480">
+		<rect width="640" height="480" fill="#e0f2fe"/>
+		<circle cx="220" cy="230" r="120" fill="#fb7185"/>
+		<rect x="330" y="145" width="190" height="190" rx="26" fill="#22c55e"/>
+	</svg>`;
+
+	await page.goto('/');
+	await page.evaluate(() => localStorage.clear());
+	await seedImageGraph(page, { graphId, assetId, svg, title: 'Nested Image Node' });
+	await page.goto(graphUrl(graphId));
+	await expect(page.getByText('Nested Image Node')).toBeVisible();
+
+	const circle = page.locator('.node-wrapper .circle').first();
+	const nodeBox = await circle.boundingBox();
+	if (!nodeBox) throw new Error('Node .circle element not found');
+	const nodeCenter = { x: nodeBox.x + nodeBox.width / 2, y: nodeBox.y + nodeBox.height / 2 };
+	const stage = page.locator('.stage');
+	await stage.dispatchEvent('wheel', {
+		deltaY: -1000,
+		clientX: nodeCenter.x,
+		clientY: nodeCenter.y,
+		bubbles: true,
+		cancelable: true
+	});
+
+	const dialog = page.getByRole('dialog');
+	await expect(dialog).toBeVisible();
+
+	const image = page.locator('.focus-image').first();
+	await expect(image).toBeVisible();
+	const imageBox = await image.boundingBox();
+	if (!imageBox) throw new Error('Focused image did not have a bounding box');
+	const imageCenter = { x: imageBox.x + imageBox.width / 2, y: imageBox.y + imageBox.height / 2 };
+
+	const stack = page.locator('.deep-zoom-stack');
+	await expect(stack).toHaveAttribute('data-depth', '1');
+
+	// Wait out the entry gesture gate, then zoom the node world in over the image.
+	await page.waitForTimeout(220);
+	const nodeWorld = page.locator('.zoom-world').first();
+	await nodeWorld.dispatchEvent('wheel', {
+		deltaY: -3000,
+		clientX: imageCenter.x,
+		clientY: imageCenter.y,
+		bubbles: true,
+		cancelable: true
+	});
+	await expect(nodeWorld).toHaveAttribute('data-zoom-world-scale', /^(?!1(?:\.0*)?$).+/);
+
+	// A bold zoom-in past max, cursor over the image, descends to depth 2.
+	await nodeWorld.dispatchEvent('wheel', {
+		deltaY: -8000,
+		clientX: imageCenter.x,
+		clientY: imageCenter.y,
+		bubbles: true,
+		cancelable: true
+	});
+	await expect(stack).toHaveAttribute('data-depth', '2');
+	await expect(page.locator('[data-subject-kind="image"]')).toBeVisible();
+	await expect(page.locator('.focus-image-full')).toBeVisible();
+	await expect(page.getByRole('dialog')).toHaveAttribute('data-focus-depth', '2');
+
+	// Let the entry morph settle so the nested image world mounts, then zoom in
+	// and pan it to prove it is its own interactive zoom level.
+	await page.waitForTimeout(700);
+	const imageWorld = page.locator('.zoom-world').first();
+	await imageWorld.dispatchEvent('wheel', {
+		deltaY: -2000,
+		clientX: imageCenter.x,
+		clientY: imageCenter.y,
+		bubbles: true,
+		cancelable: true
+	});
+	await expect(imageWorld).toHaveAttribute('data-zoom-world-scale', /^(?!1(?:\.0*)?$).+/);
+	const panBefore = await imageWorld.getAttribute('data-zoom-world-pan-x');
+	await imageWorld.dispatchEvent('pointerdown', {
+		pointerId: 1,
+		isPrimary: true,
+		button: 0,
+		buttons: 1,
+		clientX: imageCenter.x,
+		clientY: imageCenter.y,
+		bubbles: true,
+		cancelable: true
+	});
+	await imageWorld.dispatchEvent('pointermove', {
+		pointerId: 1,
+		isPrimary: true,
+		buttons: 1,
+		clientX: imageCenter.x - 80,
+		clientY: imageCenter.y,
+		bubbles: true,
+		cancelable: true
+	});
+	await imageWorld.dispatchEvent('pointerup', {
+		pointerId: 1,
+		isPrimary: true,
+		button: 0,
+		buttons: 0,
+		clientX: imageCenter.x - 80,
+		clientY: imageCenter.y,
+		bubbles: true,
+		cancelable: true
+	});
+	await expect
+		.poll(async () => imageWorld.getAttribute('data-zoom-world-pan-x'))
+		.not.toBe(panBefore);
+
+	// Zoom out past fit in the image world POPS back to the node (depth 1) — it
+	// does not close focus.
+	for (let attempt = 0; attempt < 8; attempt += 1) {
+		if ((await stack.getAttribute('data-depth')) === '1') break;
+		await imageWorld.dispatchEvent('wheel', {
+			deltaY: 8000,
+			clientX: imageCenter.x,
+			clientY: imageCenter.y,
+			bubbles: true,
+			cancelable: true
+		});
+		await page.waitForTimeout(120);
+	}
+	await expect(stack).toHaveAttribute('data-depth', '1');
+	await expect(dialog).toBeVisible();
+	await expect(page.getByRole('dialog')).toHaveAttribute('data-focus-depth', '1');
+});
+
 test('deep zoom entry keeps driving focus after boundary steering slides the node off-cursor', async ({
 	page
 }) => {

@@ -120,6 +120,7 @@
 		type FrameViewState,
 		type NodeFrameLayout
 	} from './lib/frameGeometry.js';
+	import { interpolateMorph } from './lib/morphGeometry.js';
 	import type { Rect } from './lib/zoomBoundary.js';
 	import type { StageRect } from './lib/stageCoordinates.js';
 	import { NODE_RADIUS, NODE_TEXT_FONT_SIZE } from '$lib/constants.js';
@@ -128,6 +129,10 @@
 	const FOCUS_TRANSITION_MS = APP_CONFIG.multigraph.focus.entryTransitionMs;
 	const DETAILS_TITLE_ID = 'node-focus-title';
 	const NODE_DIAMETER_PX = NODE_RADIUS * 2;
+	/** Modest starting corner radius for an image frame's descend morph. */
+	const IMAGE_SOURCE_RADIUS_PX = 8;
+	/** Fixed logical size of the image level's compact (thumbnail) layer. */
+	const IMAGE_COMPACT_PX = 96;
 
 	let {
 		multigraphData = {
@@ -664,6 +669,24 @@
 	 * position; there is nothing to snapshot.
 	 */
 	function geometryForFocusLevel(level: FocusLevel): FrameGeometry {
+		if (level.subjectKind === 'image') {
+			// The image frame morphs from the captured on-screen image rect out to
+			// the viewport through the SAME interpolation used for node frames.
+			const morph = interpolateMorph(level.sourceRect, level.fillRect, level.morphProgress, {
+				sourceRadiusPx: IMAGE_SOURCE_RADIUS_PX,
+				targetRadiusPx: APP_CONFIG.multigraph.focus.detailsCornerRadiusPx,
+				sourceBorderWidthPx: 0,
+				targetBorderWidthPx: APP_CONFIG.multigraph.focus.detailsBorderWidthPx
+			});
+			return {
+				x: morph.x,
+				y: morph.y,
+				width: morph.width,
+				height: morph.height,
+				borderRadiusPx: morph.borderRadiusPx,
+				borderWidthPx: morph.borderWidthPx ?? 0
+			};
+		}
 		const layout = focusNodeLayout(level.subjectId);
 		const view = focusViewState();
 		const fill = focusFillRect();
@@ -680,7 +703,17 @@
 		return frameGeometry(layout, view, fill, level.morphProgress);
 	}
 
-	function baseSizeForFocusLevel(): LayerBaseSize {
+	function baseSizeForFocusLevel(level: FocusLevel): LayerBaseSize {
+		if (level.subjectKind === 'image') {
+			// Details layer laid out at the captured fill size so its scale is
+			// exactly 1 at fit — the image is scaled only by the layer + world
+			// transforms, never twice, so it stays crisp.
+			return {
+				compactPx: IMAGE_COMPACT_PX,
+				detailsWidthPx: level.fillRect.width,
+				detailsHeightPx: level.fillRect.height
+			};
+		}
 		const fill = focusFillRect();
 		return {
 			compactPx: NODE_DIAMETER_PX,
@@ -1309,52 +1342,77 @@
 	{/if}
 
 	{#snippet focusFrame({ level, borderRadiusPx, borderWidthPx, content }: StackFrameArgs)}
-		{@const frameNode = nodeById[level.subjectId]}
-		{#if frameNode}
-			{@const segments = nodeBorderSegments(frameNode, graph.tagColorConfig.nodeTags)}
-			<NodeChrome
-				diameterPx={NODE_DIAMETER_PX}
-				{borderRadiusPx}
-				{borderWidthPx}
-				pinnedBorderWidthPx={borderWidthPx}
-				pinned={frameNode.pinned ?? false}
-				hasTagBorder={segments.length > 0}
-				tagBorderBackground={tagBorderBackground(segments)}
-				detailsMode
-				surfaceBackground="#ffffff"
+		{#if level.subjectKind === 'image'}
+			<div
+				class="focus-image-frame"
+				style={`border-radius: ${borderRadiusPx}px; border-width: ${borderWidthPx}px;`}
 			>
 				{@render content()}
-			</NodeChrome>
+			</div>
+		{:else}
+			{@const frameNode = nodeById[level.subjectId]}
+			{#if frameNode}
+				{@const segments = nodeBorderSegments(frameNode, graph.tagColorConfig.nodeTags)}
+				<NodeChrome
+					diameterPx={NODE_DIAMETER_PX}
+					{borderRadiusPx}
+					{borderWidthPx}
+					pinnedBorderWidthPx={borderWidthPx}
+					pinned={frameNode.pinned ?? false}
+					hasTagBorder={segments.length > 0}
+					tagBorderBackground={tagBorderBackground(segments)}
+					detailsMode
+					surfaceBackground="#ffffff"
+				>
+					{@render content()}
+				</NodeChrome>
+			{/if}
 		{/if}
 	{/snippet}
 
 	{#snippet focusCompact(level: FocusLevel)}
-		{@const compactNode = nodeById[level.subjectId]}
-		{#if compactNode}
+		{#if level.subjectKind === 'image'}
 			<div class="focus-compact-fill">
-				<NodeCompactContent
-					title={compactNode.title}
-					diameterPx={NODE_DIAMETER_PX}
-					fontSizePx={NODE_TEXT_FONT_SIZE}
-					detailsMode
-				/>
+				<img class="focus-image-thumb" src={level.subjectSrc} alt={level.subjectAlt ?? ''} />
 			</div>
+		{:else}
+			{@const compactNode = nodeById[level.subjectId]}
+			{#if compactNode}
+				<div class="focus-compact-fill">
+					<NodeCompactContent
+						title={compactNode.title}
+						diameterPx={NODE_DIAMETER_PX}
+						fontSizePx={NODE_TEXT_FONT_SIZE}
+						detailsMode
+					/>
+				</div>
+			{/if}
 		{/if}
 	{/snippet}
 
 	{#snippet focusDetails(level: FocusLevel)}
-		{@const detailsNode = nodeById[level.subjectId]}
-		{#if detailsNode}
-			<div class="focus-surface" data-focus-subject-id={level.subjectId}>
-				<NodeDetailsLayer title={detailsNode.title} detailsTitleId={DETAILS_TITLE_ID} detailsMode>
-					<NodeDetailsContent
-						node={detailsNode}
-						assets={graph.assets ?? {}}
-						{assetStore}
-						{assetScope}
-					/>
-				</NodeDetailsLayer>
+		{#if level.subjectKind === 'image'}
+			<div
+				class="focus-image-details"
+				data-focus-subject-id={level.subjectId}
+				data-subject-kind="image"
+			>
+				<img class="focus-image-full" src={level.subjectSrc} alt={level.subjectAlt ?? ''} />
 			</div>
+		{:else}
+			{@const detailsNode = nodeById[level.subjectId]}
+			{#if detailsNode}
+				<div class="focus-surface" data-focus-subject-id={level.subjectId}>
+					<NodeDetailsLayer title={detailsNode.title} detailsTitleId={DETAILS_TITLE_ID} detailsMode>
+						<NodeDetailsContent
+							node={detailsNode}
+							assets={graph.assets ?? {}}
+							{assetStore}
+							{assetScope}
+						/>
+					</NodeDetailsLayer>
+				</div>
+			{/if}
 		{/if}
 	{/snippet}
 
@@ -1393,6 +1451,7 @@
 				compact={focusCompact}
 				details={focusDetails}
 				onAscend={(level, delta) => focus.handleExit(level, delta)}
+				onDescend={(input) => focus.descendToImage(input)}
 			/>
 		</div>
 	{/if}
@@ -1505,6 +1564,40 @@
 	.focus-surface {
 		width: 100%;
 		height: 100%;
+	}
+
+	/* The single bordered box for an image level (mirrors the node frame's
+	   NodeChrome, but neutral: images bring their own subject). */
+	.focus-image-frame {
+		position: absolute;
+		inset: 0;
+		box-sizing: border-box;
+		border-style: solid;
+		border-color: #334155;
+		background: #ffffff;
+		overflow: hidden;
+	}
+
+	.focus-image-thumb {
+		width: 100%;
+		height: 100%;
+		object-fit: contain;
+	}
+
+	.focus-image-details {
+		width: 100%;
+		height: 100%;
+	}
+
+	/* Rendered at contain size in the details layer; scaled ONLY by the layer's
+	   content transform and the ZoomWorld transform — never a manual second
+	   scale — so the image is crisp at fit. */
+	.focus-image-full {
+		width: 100%;
+		height: 100%;
+		object-fit: contain;
+		user-select: none;
+		-webkit-user-drag: none;
 	}
 
 	.focus-close-button {
