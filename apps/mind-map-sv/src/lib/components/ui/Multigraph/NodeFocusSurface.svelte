@@ -1,10 +1,11 @@
 <script lang="ts">
 	import Node from '$lib/components/ui/Node/Node.svelte';
 	import DeepZoomLayer from './DeepZoomLayer.svelte';
+	import NodeDetailsContent from './NodeDetailsContent.svelte';
 	import ZoomWorld from './ZoomWorld.svelte';
 	import type { GraphAssetStore } from '$lib/assets/assetStore';
 	import type { GraphAssetMetadata } from '../types/multigraph';
-	import type { NodeData, NodeImageContent } from '../types/node';
+	import type { NodeData } from '../types/node';
 	import type { TagColorSegment } from './lib/tagColors';
 	import type { Rect } from './lib/zoomBoundary';
 
@@ -42,38 +43,12 @@
 		onZoomOutBoundary?: (delta: number) => void;
 	} = $props();
 
-	let imageUrls = $state<Record<string, string>>({});
 	let surfaceRef = $state<HTMLElement | null>(null);
 
-	const imageBlocks = $derived(
-		(node.content ?? []).filter((block): block is NodeImageContent => block.type === 'image')
-	);
 	const clampedDetailsProgress = $derived(Math.min(1, Math.max(0, detailsProgress)));
 	const effectiveSourceRect = $derived(
 		clampedDetailsProgress < 1 && exitSourceRect ? exitSourceRect : sourceRect
 	);
-
-	$effect(() => {
-		let cancelled = false;
-		const urlsToRevoke: string[] = [];
-		async function loadImages() {
-			if (!assetStore || !assetScope) return;
-			const loaded: Record<string, string> = {};
-			for (const image of imageBlocks) {
-				const asset = await assetStore.get(assetScope, image.assetId);
-				if (!asset.ok) continue;
-				const url = URL.createObjectURL(asset.value.blob);
-				urlsToRevoke.push(url);
-				loaded[image.assetId] = url;
-			}
-			if (!cancelled) imageUrls = loaded;
-		}
-		void loadImages();
-		return () => {
-			cancelled = true;
-			for (const url of urlsToRevoke) URL.revokeObjectURL(url);
-		};
-	});
 
 	function handleKeydown(event: KeyboardEvent) {
 		if (event.key === 'Escape') onClose();
@@ -117,42 +92,7 @@
 					{borderWidthPx}
 					detailsTitleId="node-focus-title"
 				>
-					<div class="focus-content" data-focus-zoom-scale="1">
-						{#if node.description.trim()}
-							<p class="description">{node.description}</p>
-						{/if}
-
-						{#if imageBlocks.length > 0}
-							<div class="image-grid" aria-label="Node images">
-								{#each imageBlocks as image (image.assetId)}
-									{@const asset = assets[image.assetId]}
-									<figure>
-										{#if imageUrls[image.assetId]}
-											<div class="image-frame" role="presentation">
-												<img
-													class="focus-image"
-													data-asset-id={image.assetId}
-													src={imageUrls[image.assetId]}
-													alt={image.alt}
-												/>
-											</div>
-										{:else}
-											<div
-												class="missing-image"
-												role="img"
-												aria-label={image.alt || 'Missing image'}
-											>
-												{asset?.name ?? 'Image unavailable'}
-											</div>
-										{/if}
-										{#if image.caption}
-											<figcaption>{image.caption}</figcaption>
-										{/if}
-									</figure>
-								{/each}
-							</div>
-						{/if}
-					</div>
+					<NodeDetailsContent {node} {assets} {assetStore} {assetScope} />
 				</Node>
 			</div>
 		</ZoomWorld>
@@ -185,18 +125,6 @@
 		border-radius: var(--deep-zoom-border-radius);
 	}
 
-	p,
-	figure {
-		margin: 0;
-	}
-
-	.description {
-		color: #334155;
-		font-size: 1.125rem;
-		line-height: 1.65;
-		white-space: pre-wrap;
-	}
-
 	.close-button {
 		position: fixed;
 		top: calc(1rem + env(safe-area-inset-top));
@@ -210,44 +138,6 @@
 		color: white;
 		font: inherit;
 		cursor: pointer;
-	}
-
-	.image-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
-		gap: 1rem;
-	}
-
-	figure {
-		display: grid;
-		gap: 0.5rem;
-	}
-
-	.image-frame,
-	.missing-image {
-		aspect-ratio: 4 / 3;
-		width: 100%;
-		border: 1px solid #cbd5e1;
-		border-radius: 0.5rem;
-		background: #f8fafc;
-		overflow: hidden;
-	}
-
-	img {
-		width: 100%;
-		height: 100%;
-		object-fit: contain;
-	}
-
-	.missing-image {
-		display: grid;
-		place-items: center;
-		color: #64748b;
-	}
-
-	figcaption {
-		color: #475569;
-		font-size: 0.925rem;
 	}
 
 	.focus-layer.reduced-motion :global(.deep-zoom-layer) {

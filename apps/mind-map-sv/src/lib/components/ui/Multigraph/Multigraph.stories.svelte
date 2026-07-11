@@ -771,6 +771,15 @@
 			expect(node).toHaveAttribute('data-details-preview', 'true');
 			expect(Number(node.dataset.detailsProgress)).toBeGreaterThan(0);
 		});
+		const previewNode = getCircle(canvasElement, 'n0').closest('.node') as HTMLElement;
+		const previewCompact = previewNode.querySelector('.compact-layer') as HTMLElement;
+		const previewDetails = previewNode.querySelector('.details') as HTMLElement;
+		expect(previewDetails.querySelector('.details-title')?.textContent).toBe('Node 0');
+		expect(previewDetails.querySelector('.description')?.textContent).toBe(
+			'Description for node 0'
+		);
+		expect(parseFloat(window.getComputedStyle(previewCompact).opacity)).toBeLessThan(1);
+		expect(parseFloat(window.getComputedStyle(previewDetails).opacity)).toBeGreaterThan(0);
 
 		dispatchWheel(stage, 160, center.x, center.y);
 		await waitFor(() => {
@@ -821,6 +830,10 @@
 		const exitingLayerArea = exitingLayerRect.width * exitingLayerRect.height;
 		expect(sourceArea).toBeLessThan(fillArea);
 		expect(exitingLayerArea).toBeLessThan(initialLayerArea);
+		const compactLayer = surface.querySelector('.compact-layer') as HTMLElement;
+		const detailsLayer = surface.querySelector('.details') as HTMLElement;
+		expect(parseFloat(window.getComputedStyle(compactLayer).opacity)).toBeGreaterThan(0);
+		expect(parseFloat(window.getComputedStyle(detailsLayer).opacity)).toBeLessThan(1);
 		expect(parseFloat(window.getComputedStyle(focusedCircle).borderRadius)).toBeCloseTo(
 			Number(layer.dataset.morphRadius),
 			0

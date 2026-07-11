@@ -3,6 +3,7 @@
 	import Node from '$lib/components/ui/Node/Node.svelte';
 	import DuplicateEdgeDialog from './DuplicateEdgeDialog.svelte';
 	import GraphQueryPanel from './GraphQueryPanel.svelte';
+	import NodeDetailsContent from './NodeDetailsContent.svelte';
 	import NodeActionMenu from './NodeActionMenu.svelte';
 	import NodeEditSheet from './NodeEditSheet.svelte';
 	import NodeFocusSurface from './NodeFocusSurface.svelte';
@@ -1450,7 +1451,11 @@
 								: committedGraph;
 							commitUserGraph(nextGraph);
 						}}
-					/>
+					>
+						{#if focusPreviewSize}
+							<NodeDetailsContent {node} assets={graph.assets ?? {}} {assetStore} {assetScope} />
+						{/if}
+					</Node>
 				</div>
 			{/if}
 		{/each}

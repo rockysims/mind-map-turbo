@@ -63,6 +63,10 @@
 	const previewHeightPx = $derived(
 		lerp(NODE_RADIUS * 2, detailsHeightPx ?? NODE_RADIUS * 2, clampedDetailsProgress)
 	);
+	const showDetailsLayer = $derived(detailsMode || previewDetailsShape);
+	const showCompactLayer = $derived(!detailsMode || clampedDetailsProgress < 1);
+	const compactOpacity = $derived(showDetailsLayer ? 1 - clampedDetailsProgress : 1);
+	const detailsOpacity = $derived(showDetailsLayer ? clampedDetailsProgress : 0);
 	const nodeBorderWidthPx = $derived(borderWidthPx ?? NODE_BORDER_WIDTH);
 	const pinnedNodeBorderWidthPx = $derived(borderWidthPx ?? PINNED_NODE_BORDER_WIDTH);
 
@@ -94,14 +98,40 @@
 	data-details-mode={detailsMode ? 'true' : undefined}
 	data-details-preview={previewDetailsShape ? 'true' : undefined}
 	data-details-progress={clampedDetailsProgress}
+	data-content-crossfade={showDetailsLayer ? 'true' : undefined}
 	data-spotlight={spotlightColor ? 'true' : undefined}
 	style="--node-diameter: {NODE_RADIUS *
-		2}px; --node-border-radius: {borderRadiusPx}px; --node-preview-width: {previewWidthPx}px; --node-preview-height: {previewHeightPx}px; --node-tag-border: {borderBackground}; --node-text-font-size: {NODE_TEXT_FONT_SIZE}px; --node-border-width: {nodeBorderWidthPx}px; --pinned-node-border-width: {pinnedNodeBorderWidthPx}px; --node-spotlight-color: {spotlightColor ??
+		2}px; --node-border-radius: {borderRadiusPx}px; --node-preview-width: {previewWidthPx}px; --node-preview-height: {previewHeightPx}px; --node-compact-opacity: {compactOpacity}; --node-details-opacity: {detailsOpacity}; --node-tag-border: {borderBackground}; --node-text-font-size: {NODE_TEXT_FONT_SIZE}px; --node-border-width: {nodeBorderWidthPx}px; --pinned-node-border-width: {pinnedNodeBorderWidthPx}px; --node-spotlight-color: {spotlightColor ??
 		'transparent'};"
 >
 	<div class="circle">
-		{#if detailsMode}
-			<article class="details">
+		{#if showCompactLayer}
+			<div class="compact-layer" aria-hidden={detailsMode ? 'true' : undefined}>
+				<div class="square">
+					{#if isTitleEditing}
+						<input
+							bind:this={titleInputRef}
+							class="title-input"
+							type="text"
+							value={nodeData.title}
+							onblur={(e) => onTitleCommit?.(e.currentTarget.value)}
+							onkeydown={(e) => {
+								if (e.key === 'Enter') {
+									e.preventDefault();
+									onTitleCommit?.(e.currentTarget.value);
+								}
+							}}
+							onclick={(e) => e.stopPropagation()}
+							onpointerdown={(e) => e.stopPropagation()}
+						/>
+					{:else}
+						<SquareText classList={['title']} text={nodeData.title} />
+					{/if}
+				</div>
+			</div>
+		{/if}
+		{#if showDetailsLayer}
+			<article class="details" aria-hidden={!detailsMode ? 'true' : undefined}>
 				<header>
 					<h1 id={detailsTitleId} class="details-title">{nodeData.title}</h1>
 				</header>
@@ -111,37 +141,14 @@
 					</div>
 				{/if}
 			</article>
-		{:else}
-			<div class="square">
-				{#if isTitleEditing}
-					<input
-						bind:this={titleInputRef}
-						class="title-input"
-						type="text"
-						value={nodeData.title}
-						onblur={(e) => onTitleCommit?.(e.currentTarget.value)}
-						onkeydown={(e) => {
-							if (e.key === 'Enter') {
-								e.preventDefault();
-								onTitleCommit?.(e.currentTarget.value);
-							}
-						}}
-						onclick={(e) => e.stopPropagation()}
-						onpointerdown={(e) => e.stopPropagation()}
-					/>
-				{:else}
-					<SquareText classList={['title']} text={nodeData.title} />
-				{/if}
-			</div>
 		{/if}
 	</div>
 </div>
 
 <style>
 	.node .circle {
-		display: flex;
-		justify-content: center;
-		align-items: center;
+		display: grid;
+		place-items: center;
 		width: var(--node-diameter);
 		height: var(--node-diameter);
 		box-sizing: border-box;
@@ -149,6 +156,36 @@
 		border: var(--node-border-width) solid #aaaaaa;
 		background: var(--node-surface-background, #ccc);
 		overflow: hidden;
+	}
+
+	.node .compact-layer,
+	.node .details {
+		grid-area: 1 / 1;
+		will-change: opacity;
+	}
+
+	.node .compact-layer {
+		opacity: var(--node-compact-opacity);
+	}
+
+	.node[data-details-mode='true'] .compact-layer {
+		pointer-events: none;
+	}
+
+	.node .details {
+		display: grid;
+		align-content: start;
+		gap: 1rem;
+		width: 100%;
+		min-height: 100%;
+		padding: clamp(1.25rem, 4vw, 3rem);
+		box-sizing: border-box;
+		opacity: var(--node-details-opacity);
+		pointer-events: none;
+	}
+
+	.node[data-details-mode='true'] .details {
+		pointer-events: auto;
 	}
 
 	.node[data-pinned='true'] .circle {
@@ -202,24 +239,14 @@
 		box-shadow: 0 24px 80px rgb(15 23 42 / 22%);
 	}
 
-	.node[data-details-mode='true'] .details {
-		display: grid;
-		align-content: start;
-		gap: 1rem;
-		width: 100%;
-		min-height: 100%;
-		padding: clamp(1.25rem, 4vw, 3rem);
-		box-sizing: border-box;
-	}
-
-	.node[data-details-mode='true'] .details-title {
+	.node .details-title {
 		margin: 0;
 		color: #111827;
 		font-size: clamp(2rem, 8vw, 4rem);
 		line-height: 1.05;
 	}
 
-	.node[data-details-mode='true'] .details-body {
+	.node .details-body {
 		display: grid;
 		gap: 1rem;
 		color: #334155;
