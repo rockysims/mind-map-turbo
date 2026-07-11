@@ -1,6 +1,6 @@
 # Milestone 06d: Deep zoom hardening and nested image zoom
 
-**Status:** planned
+**Status:** complete
 **Depends on:** milestone 06c (single-surface morph).
 **Plan:** [2026-07-11 06d-deep-zoom-hardening-and-nested-image-zoom.md](../plans/2026-07-11%2006d-deep-zoom-hardening-and-nested-image-zoom.md)
 

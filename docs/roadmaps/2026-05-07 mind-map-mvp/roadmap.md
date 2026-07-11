@@ -59,7 +59,7 @@ individual PR-sized tasks.
 | 06a | Continuous deep zoom                               | complete    | [milestone](milestones/06a-continuous-deep-zoom.md), [plan](plans/2026-07-04%2006a-continuous-deep-zoom.md)                                           |
 | 06b | Recursive deep zoom (single-element morph)         | complete    | [milestone](milestones/06b-recursive-deep-zoom.md), [plan](plans/2026-07-10%2006b-recursive-deep-zoom.md)                                             |
 | 06c | Single-surface morph (one frame element)           | complete    | [milestone](milestones/06c-single-surface-morph.md), [plan](plans/2026-07-10%2006c-single-surface-morph.md)                                           |
-| 06d | Deep zoom hardening and nested image zoom          | planned     | [milestone](milestones/06d-deep-zoom-hardening-and-nested-image-zoom.md), [plan](plans/2026-07-11%2006d-deep-zoom-hardening-and-nested-image-zoom.md) |
+| 06d | Deep zoom hardening and nested image zoom          | complete    | [milestone](milestones/06d-deep-zoom-hardening-and-nested-image-zoom.md), [plan](plans/2026-07-11%2006d-deep-zoom-hardening-and-nested-image-zoom.md) |
 | 07  | Multiplayer                                        | not started | [milestones/07-multiplayer.md](milestones/07-multiplayer.md)                                                                                          |
 
 Milestones 04a-04m deepen the local-first graph experience before multiplayer.

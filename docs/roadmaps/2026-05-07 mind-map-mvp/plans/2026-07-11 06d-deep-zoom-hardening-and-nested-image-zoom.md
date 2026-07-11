@@ -3,7 +3,7 @@
 **Created:** 2026-07-11
 **Author:** Cursor agent
 **Milestone:** [milestones/06d-deep-zoom-hardening-and-nested-image-zoom.md](../milestones/06d-deep-zoom-hardening-and-nested-image-zoom.md)
-**Status:** executing
+**Status:** done
 **Total estimated effort:** L (≈ 2–3 days across the waves)
 
 ## Summary
@@ -328,3 +328,20 @@ feature branch.
 - 2026-07-11: Open question on camera-on-pop resolved toward _recompute from
   invariants_; T08 must validate before we consider the general `worldState`
   store gone for good.
+- 2026-07-11 (execution close-out): all nine tasks landed on `feature/deep-zoom-2`,
+  each verified with the full browser suite (631 tests) plus the deep-zoom e2e
+  (4 tests, including the new nesting test). Follow-ups discovered during
+  execution, none blocking:
+  - **Descend is wheel-only.** T08's bold-zoom-into-image gesture reports the
+    symmetric `entryBoundaryDelta` for wheel; pinch-to-descend was scoped out
+    (its non-Step pinch handler would need reworking). Add pinch descend when
+    touch nesting matters.
+  - **Pop-continuity is centered-fit.** Returning from a nested image remounts
+    the parent world at identity (centered-fit) since no `worldState` is stored.
+    This validated fine for the depth-2 proof; if a panned/zoomed parent ever
+    feels discontinuous on pop, carry only the parent morph/camera onto the
+    child level rather than reinstating the general `worldState` store.
+  - **Dead world-state plumbing removed.** `DeepZoomStack.onWorldStateChange`
+    and `ZoomWorld.onStateChange` were dropped in T07 (already unused post-T06).
+  - **`offline-app-shell.html` regenerated** once at close-out (its inlined
+    bundle changes with any app source change).
