@@ -1,5 +1,5 @@
 <script lang="ts">
-	import DeepZoomStack from './DeepZoomStack.svelte';
+	import DeepZoomStack, { type StackFrameArgs } from './DeepZoomStack.svelte';
 	import type { FocusLevel } from './lib/focusRuntime.svelte';
 	import type { ZoomWorldState } from './lib/zoomWorldController';
 
@@ -20,6 +20,7 @@
 			subjectId,
 			sourceRect,
 			fillRect,
+			borderWidthPx: 8,
 			worldState: { panX: 0, panY: 0, scale: 1 },
 			morphProgress: 1,
 			phase: 'active'
@@ -54,7 +55,23 @@
 </script>
 
 <div class="deep-zoom-stack-harness" data-depth={levels.length}>
-	{#snippet renderLevel(level: FocusLevel)}
+	{#snippet frame({ level, borderRadiusPx, borderWidthPx, content }: StackFrameArgs)}
+		<div
+			class="placeholder-frame"
+			data-subject-id={level.subjectId}
+			style={`border-radius: ${borderRadiusPx}px; border-width: ${borderWidthPx}px;`}
+		>
+			{@render content()}
+		</div>
+	{/snippet}
+
+	{#snippet compact(level: FocusLevel)}
+		<div class="placeholder-compact" data-subject-id={level.subjectId}>
+			<span>{level.subjectId}</span>
+		</div>
+	{/snippet}
+
+	{#snippet details(level: FocusLevel)}
 		<section class="placeholder-level" data-subject-id={level.subjectId}>
 			<h1>{level.subjectId}</h1>
 			<div
@@ -73,7 +90,9 @@
 		{levels}
 		entryGestureIdleMs={0}
 		entryGestureMaxMs={0}
-		{renderLevel}
+		{frame}
+		{compact}
+		{details}
 		onAscend={ascend}
 		onWorldStateChange={updateWorldState}
 	/>
@@ -88,6 +107,26 @@
 		background: #eef2ff;
 	}
 
+	.placeholder-frame {
+		position: absolute;
+		inset: 0;
+		box-sizing: border-box;
+		border-style: solid;
+		border-color: #334155;
+		background: #fff;
+		overflow: hidden;
+	}
+
+	.placeholder-compact {
+		display: grid;
+		place-items: center;
+		width: 100%;
+		height: 100%;
+		font-size: 1.5rem;
+		font-weight: 700;
+		color: #0f172a;
+	}
+
 	.placeholder-level {
 		display: grid;
 		align-content: center;
@@ -96,9 +135,6 @@
 		width: 100%;
 		height: 100%;
 		box-sizing: border-box;
-		border: 8px solid #334155;
-		border-radius: var(--deep-zoom-border-radius);
-		background: #fff;
 		color: #0f172a;
 	}
 
