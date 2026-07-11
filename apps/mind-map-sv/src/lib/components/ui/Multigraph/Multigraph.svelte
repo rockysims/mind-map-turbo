@@ -199,7 +199,8 @@
 	let pendingFocusCommitNodeId = $state<string | null>(null);
 	let reduceMotion = $derived(prefersReducedMotion());
 	let focusExiting = $state(false);
-	let focusExitProgress = $state(1);
+	let focusExitSourceRect = $state<Rect | null>(null);
+	let focusExitBorderWidthPx = $state<number | undefined>(undefined);
 	let focusEntryGestureIdleMs = $state(0);
 	let stageEntryGestureGateRequest = $state<{
 		id: number;
@@ -588,7 +589,7 @@
 		closeOverlays();
 		clearFocusExitTimeout();
 		focusExiting = false;
-		focusExitProgress = 1;
+		clearFocusExitTarget();
 		clearFocusPreview();
 		pendingFocusCommitNodeId = null;
 		focusEntryGestureIdleMs = entryGestureIdleMs;
@@ -603,8 +604,8 @@
 
 	function closeFocus() {
 		if (!focusRuntime.isFocused || focusExiting) return;
+		ensureFocusExitTarget();
 		focusRuntime.setProgress(0, 'exiting');
-		focusExitProgress = 0;
 		if (reduceMotion || FOCUS_TRANSITION_MS <= 0 || typeof window === 'undefined') {
 			finishCloseFocus();
 			return;
@@ -624,7 +625,7 @@
 		focusRuntime.close();
 		focusEntryGestureIdleMs = 0;
 		focusExiting = false;
-		focusExitProgress = 1;
+		clearFocusExitTarget();
 	}
 
 	function armStageEntryGestureGate(direction: EntryGestureDirection) {
@@ -802,6 +803,19 @@
 		return Math.max(1, Math.round(borderWidthPx));
 	}
 
+	function clearFocusExitTarget() {
+		focusExitSourceRect = null;
+		focusExitBorderWidthPx = undefined;
+	}
+
+	function ensureFocusExitTarget() {
+		if (focusExitSourceRect || !focusRuntime.focusedNodeId) return;
+		const metrics = nodeRenderMetricsForNodeId(focusRuntime.focusedNodeId);
+		if (!metrics) return;
+		focusExitSourceRect = metrics.rect;
+		focusExitBorderWidthPx = metrics.borderWidthPx;
+	}
+
 	function focusFillRect(): Rect {
 		const rect = graphRef?.getBoundingClientRect();
 		const width = rect?.width ?? (typeof window === 'undefined' ? 800 : window.innerWidth);
@@ -876,8 +890,13 @@
 	}
 
 	function handleFocusZoomOutBoundary(delta: number) {
-		focusExitProgress = Math.max(0, 1 - delta);
-		focusRuntime.setProgress(focusExitProgress, 'exiting');
+		if (delta <= 0) {
+			clearFocusExitTarget();
+			focusRuntime.setProgress(1, 'active');
+			return;
+		}
+		ensureFocusExitTarget();
+		focusRuntime.setProgress(Math.max(0, 1 - delta), 'exiting');
 		if (delta >= 1) {
 			armStageEntryGestureGate('out');
 			closeFocus();
@@ -1509,13 +1528,14 @@
 			node={focusedNode}
 			assets={graph.assets ?? {}}
 			borderSegments={nodeBorderSegments(focusedNode, graph.tagColorConfig.nodeTags)}
-			detailsProgress={activeFocusLevel.morphProgress * focusExitProgress}
+			detailsProgress={activeFocusLevel.morphProgress}
 			{assetStore}
 			{assetScope}
 			{reduceMotion}
 			sourceRect={activeFocusLevel.sourceRect}
+			exitSourceRect={focusExitSourceRect}
 			fillRect={activeFocusLevel.fillRect}
-			borderWidthPx={activeFocusLevel.borderWidthPx}
+			borderWidthPx={focusExitBorderWidthPx ?? activeFocusLevel.borderWidthPx}
 			entryGestureIdleMs={focusEntryGestureIdleMs}
 			entryGestureMaxMs={APP_CONFIG.multigraph.focus.entryGestureMaxMs}
 			onClose={closeFocus}

@@ -804,6 +804,9 @@
 		const dialog = await within(canvasElement).findByRole('dialog');
 		const world = dialog.querySelector('.zoom-world') as HTMLElement;
 		const surface = dialog.querySelector('.focus-surface') as HTMLElement;
+		const layer = dialog.querySelector('.deep-zoom-layer') as HTMLElement;
+		const focusedCircle = surface.querySelector('.circle') as HTMLElement;
+		const initialLayerRect = layer.getBoundingClientRect();
 
 		dispatchWheel(world, 70, center.x, center.y);
 		await waitFor(() => {
@@ -811,6 +814,17 @@
 			expect(progress).toBeGreaterThan(0);
 			expect(progress).toBeLessThan(1);
 		});
+		const exitingLayerRect = layer.getBoundingClientRect();
+		const sourceArea = Number(layer.dataset.sourceWidth) * Number(layer.dataset.sourceHeight);
+		const fillArea = Number(layer.dataset.fillWidth) * Number(layer.dataset.fillHeight);
+		const initialLayerArea = initialLayerRect.width * initialLayerRect.height;
+		const exitingLayerArea = exitingLayerRect.width * exitingLayerRect.height;
+		expect(sourceArea).toBeLessThan(fillArea);
+		expect(exitingLayerArea).toBeLessThan(initialLayerArea);
+		expect(parseFloat(window.getComputedStyle(focusedCircle).borderRadius)).toBeCloseTo(
+			Number(layer.dataset.morphRadius),
+			0
+		);
 		expect(canvasElement.querySelector('.graph')).toHaveClass('focus-active');
 
 		dispatchWheel(world, 70, center.x, center.y);

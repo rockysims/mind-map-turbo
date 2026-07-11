@@ -16,6 +16,7 @@
 		assetScope = '',
 		reduceMotion = false,
 		sourceRect,
+		exitSourceRect,
 		fillRect,
 		borderWidthPx,
 		detailsProgress = 1,
@@ -31,6 +32,7 @@
 		assetScope?: string;
 		reduceMotion?: boolean;
 		sourceRect: Rect;
+		exitSourceRect?: Rect | null;
 		fillRect: Rect;
 		borderWidthPx?: number;
 		detailsProgress?: number;
@@ -47,6 +49,9 @@
 		(node.content ?? []).filter((block): block is NodeImageContent => block.type === 'image')
 	);
 	const clampedDetailsProgress = $derived(Math.min(1, Math.max(0, detailsProgress)));
+	const effectiveSourceRect = $derived(
+		clampedDetailsProgress < 1 && exitSourceRect ? exitSourceRect : sourceRect
+	);
 
 	$effect(() => {
 		let cancelled = false;
@@ -89,7 +94,12 @@
 		Close
 	</button>
 
-	<DeepZoomLayer {sourceRect} {fillRect} progress={clampedDetailsProgress} {reduceMotion}>
+	<DeepZoomLayer
+		sourceRect={effectiveSourceRect}
+		{fillRect}
+		progress={clampedDetailsProgress}
+		{reduceMotion}
+	>
 		<ZoomWorld {entryGestureIdleMs} {entryGestureMaxMs} onExitBoundary={onZoomOutBoundary}>
 			<div
 				bind:this={surfaceRef}
@@ -172,6 +182,7 @@
 	.focus-surface :global(.node[data-details-mode='true'] .circle) {
 		width: 100%;
 		height: 100%;
+		border-radius: var(--deep-zoom-border-radius);
 	}
 
 	p,
