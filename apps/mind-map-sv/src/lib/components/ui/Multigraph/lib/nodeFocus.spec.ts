@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { NodeData } from '../../types/node';
-import {
-	focalNodeForPoint,
-	focusOverzoomMaxScaleForNode,
-	nodeScreenCircle,
-	persistedScaleForFocusOverzoom
-} from './nodeFocus';
+import { focalNodeForPoint, nodeScreenCircle, persistedScaleForFocusOverzoom } from './nodeFocus';
+import { solveFocusEntryBoundary } from './focusEntryBoundary';
 
 const node = (id: string): NodeData => ({ id, title: id, description: '', tags: [], content: [] });
 const rect = { left: 10, top: 20, width: 300, height: 200 };
@@ -54,9 +50,37 @@ describe('focus overzoom scale', () => {
 		expect(persistedScaleForFocusOverzoom(5.5, 4)).toBe(4);
 		expect(persistedScaleForFocusOverzoom(3.5, 4)).toBe(3.5);
 	});
+});
 
-	it('derives the boundary cap from node radius and viewport size', () => {
-		expect(focusOverzoomMaxScaleForNode(20, { width: 300, height: 200 }, 4)).toBe(5);
-		expect(focusOverzoomMaxScaleForNode(80, { width: 300, height: 200 }, 4)).toBe(1.25);
+describe('single boundary path parity', () => {
+	it('focal point over a node resolves a candidate and commits focus via solveFocusEntryBoundary', () => {
+		// The fallback used to catch nodes via getNodeAt when focalNodeForPoint returned null.
+		// This spec proves the boundary resolver alone handles the canonical "zoom over a node" case.
+		const candidate = focalNodeForPoint(
+			[{ node: node('n0'), position: { x: 0, y: 0 }, radius: 40 }],
+			{ x: 160, y: 120 }, // client-space center of node (rect center = 10+150, 20+100)
+			rect,
+			{ panX: 0, panY: 0, scale: 1 }
+		);
+
+		expect(candidate).not.toBeNull();
+		expect(candidate!.node.id).toBe('n0');
+
+		// A large single wheel step while at inscription scale commits the boundary (progress = 1).
+		const step = solveFocusEntryBoundary({
+			currentView: { panX: 0, panY: 0, scale: 4 },
+			requestedScale: 4.75,
+			focalPoint: { x: 150, y: 100 }, // viewport-relative (= client − rect.left/top)
+			viewport: { width: rect.width, height: rect.height },
+			candidate: {
+				nodeId: candidate!.node.id,
+				position: candidate!.position,
+				radius: candidate!.radius
+			},
+			zoneFraction: 0.25
+		});
+
+		expect(step.phase).toBe('boundary');
+		expect(step.progressDelta).toBe(1);
 	});
 });

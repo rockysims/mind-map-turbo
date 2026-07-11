@@ -2,8 +2,6 @@ import { APP_CONFIG } from '$lib/appConfig';
 import type { Point } from '../../types/multigraph';
 import type { NodeData } from '../../types/node';
 import { graphPointToClientPoint, type StageRect } from './stageCoordinates';
-import { inscribeScaleForCircle, type ViewportSize } from './zoomBoundary';
-
 export interface ViewTransform {
 	panX: number;
 	panY: number;
@@ -67,15 +65,6 @@ export function focalNodeForPoint(
 
 export function persistedScaleForFocusOverzoom(visualScale: number, maxScale: number): number {
 	return Math.min(visualScale, maxScale);
-}
-
-export function focusOverzoomMaxScaleForNode(
-	radius: number,
-	viewport: ViewportSize,
-	maxScale: number
-): number {
-	const inscribeScale = inscribeScaleForCircle(radius, viewport);
-	return Number.isFinite(inscribeScale) && inscribeScale > 0 ? inscribeScale : maxScale;
 }
 
 function distance(left: Point, right: Point): number {
