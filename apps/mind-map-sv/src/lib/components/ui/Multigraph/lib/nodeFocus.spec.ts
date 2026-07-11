@@ -37,36 +37,6 @@ describe('node focus geometry', () => {
 		expect(selected?.node.id).toBe('front');
 	});
 
-	it('prefers the already-scrubbed node when it is among the hits', () => {
-		const selected = focalNodeForPoint(
-			[
-				{ node: node('subject'), position: { x: 0, y: 0 }, radius: 30, zIndex: 1 },
-				{ node: node('front'), position: { x: 0, y: 0 }, radius: 30, zIndex: 2 }
-			],
-			{ x: 160, y: 120 },
-			rect,
-			{ panX: 0, panY: 0, scale: 1 },
-			{ preferredNodeId: 'subject' }
-		);
-
-		expect(selected?.node.id).toBe('subject');
-	});
-
-	it('ignores the preferred node when the focal point is outside its circle', () => {
-		const selected = focalNodeForPoint(
-			[
-				{ node: node('subject'), position: { x: -100, y: 0 }, radius: 20, zIndex: 1 },
-				{ node: node('other'), position: { x: 0, y: 0 }, radius: 30, zIndex: 2 }
-			],
-			{ x: 160, y: 120 },
-			rect,
-			{ panX: 0, panY: 0, scale: 1 },
-			{ preferredNodeId: 'subject' }
-		);
-
-		expect(selected?.node.id).toBe('other');
-	});
-
 	it('rejects focal points outside the projected circle', () => {
 		const selected = focalNodeForPoint(
 			[{ node: node('n0'), position: { x: 0, y: 0 }, radius: 20 }],

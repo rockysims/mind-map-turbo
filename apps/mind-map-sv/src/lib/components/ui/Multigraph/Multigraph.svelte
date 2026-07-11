@@ -123,7 +123,7 @@
 	import type { FocusEntryBoundaryCandidate } from './lib/focusEntryBoundary.js';
 	import type { Rect } from './lib/zoomBoundary.js';
 	import type { StageRect } from './lib/stageCoordinates.js';
-	import type { ZoomWorldState } from './lib/zoomWorldController.js';
+	import { wheelZoomWorld, type ZoomWorldState } from './lib/zoomWorldController.js';
 	import { NODE_RADIUS, NODE_TEXT_FONT_SIZE } from '$lib/constants.js';
 
 	const CENTERED_POSITION: Point = { x: 0, y: 0 };
@@ -727,11 +727,10 @@
 
 	function focusCandidateForPoint(
 		focalPoint: Point,
-		view: ViewTransform,
-		preferredNodeId?: string
+		view: ViewTransform
 	): NodeFocusCandidate | null {
 		if (!stageRect) return null;
-		return focalNodeForPoint(focusCandidates(), focalPoint, stageRect, view, { preferredNodeId });
+		return focalNodeForPoint(focusCandidates(), focalPoint, stageRect, view);
 	}
 
 	function focusEntryBoundaryCandidateForPoint(input: {
@@ -748,13 +747,15 @@
 		) {
 			return null;
 		}
-		// Boundary steering can slide the subject out from under the cursor, so
-		// fall back to the node already being steered when the focal test misses.
-		const candidate =
-			focusCandidateForPoint(input.focalPoint, input.viewState, input.stickyNodeId) ??
-			(input.stickyNodeId
-				? (focusCandidates().find((entry) => entry.node.id === input.stickyNodeId) ?? null)
-				: null);
+		// Once the boundary is steering toward a subject, that gesture owns it:
+		// steering slides the node around the screen (often out from under the
+		// cursor, sometimes over other nodes' circles), so re-hit-testing every
+		// wheel event would drop or flip the subject mid-scrub. The sticky
+		// subject wins until the gesture releases (zoom-out) or it disappears.
+		const sticky = input.stickyNodeId
+			? (focusCandidates().find((entry) => entry.node.id === input.stickyNodeId) ?? null)
+			: null;
+		const candidate = sticky ?? focusCandidateForPoint(input.focalPoint, input.viewState);
 		if (!candidate) return null;
 		return {
 			nodeId: candidate.node.id,
@@ -923,6 +924,50 @@
 
 	function handleFocusWorldState(_level: FocusLevel, state: ZoomWorldState) {
 		focusRuntime.setWorldState(state);
+	}
+
+	/**
+	 * A partial exit scrub is in flight: the frame is shrinking, so wheel input
+	 * can land outside it (past the rounded corners, or on the exposed stage).
+	 * While this is true the focus root captures those wheels and keeps driving
+	 * the exit, instead of letting them zoom the stage or scroll the page.
+	 */
+	const focusExitScrubActive = $derived(
+		Boolean(
+			focusCommitted &&
+			!focusExiting &&
+			activeFocusLevel &&
+			activeFocusLevel.phase === 'exiting' &&
+			activeFocusLevel.morphProgress < 1
+		)
+	);
+
+	/** Continue/reverse the exit scrub for wheels the shrinking frame missed. */
+	function handleFocusRootWheel(event: WheelEvent) {
+		const level = activeFocusLevel;
+		if (!focusExitScrubActive || !level) return;
+		event.preventDefault();
+		event.stopPropagation();
+		if (event.deltaY < 0) {
+			handleFocusExit(level, 0);
+			return;
+		}
+		const fill = focusFillRect();
+		// Same wheel-to-exit-delta math the focused ZoomWorld uses at fit scale,
+		// so the scrub feels identical wherever the cursor is.
+		const step = wheelZoomWorld(
+			{ panX: 0, panY: 0, scale: 1 },
+			event.deltaY,
+			{ x: fill.width / 2, y: fill.height / 2 },
+			{
+				width: fill.width,
+				height: fill.height,
+				subjectWidth: fill.width,
+				subjectHeight: fill.height
+			}
+		);
+		const amount = Math.min(1, Math.max(0, 1 - level.morphProgress) + step.exitBoundaryDelta);
+		handleFocusExit(level, amount);
 	}
 
 	function toggleTagColorLegend() {
@@ -1603,11 +1648,14 @@
 		<div
 			class="focus-root"
 			class:reduced-motion={reduceMotion}
+			class:exit-scrub={focusExitScrubActive}
 			role={focusDialogOpen ? 'dialog' : undefined}
 			aria-modal={focusDialogOpen ? 'true' : undefined}
 			aria-labelledby={focusDialogOpen ? DETAILS_TITLE_ID : undefined}
 			tabindex="-1"
 			data-focus-depth={focusRuntime.depth}
+			data-exit-scrub={focusExitScrubActive ? 'true' : undefined}
+			onwheel={handleFocusRootWheel}
 			onkeydown={(event) => {
 				if (event.key === 'Escape') closeFocus();
 			}}
@@ -1723,6 +1771,13 @@
 		z-index: 60;
 		pointer-events: none;
 		touch-action: none;
+	}
+
+	/* During a partial exit scrub the shrinking frame no longer covers the
+	   viewport; catch wheel input everywhere so the exit keeps scrubbing
+	   instead of zooming the stage underneath. */
+	.focus-root.exit-scrub {
+		pointer-events: auto;
 	}
 
 	.focus-root.reduced-motion :global(.deep-zoom-layer) {

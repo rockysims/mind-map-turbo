@@ -24,6 +24,7 @@
 		maxScale = 8,
 		entryGestureIdleMs = 0,
 		entryGestureMaxMs = 0,
+		exitBoundarySync = undefined,
 		onExitBoundary,
 		onStateChange,
 		children
@@ -32,6 +33,13 @@
 		maxScale?: number;
 		entryGestureIdleMs?: number;
 		entryGestureMaxMs?: number;
+		/**
+		 * Authoritative exit-boundary amount from the consumer. The exit scrub
+		 * can also be driven from outside this world (e.g. wheel events landing
+		 * off the shrinking frame); syncing keeps the internal accumulator from
+		 * going stale and jumping on the next wheel handled here.
+		 */
+		exitBoundarySync?: number;
 		onExitBoundary?: (delta: number) => void;
 		onStateChange?: (state: ZoomWorldState) => void;
 		children?: Snippet;
@@ -66,6 +74,13 @@
 			entryGestureIdleMs,
 			entryGestureMaxMs
 		);
+	});
+
+	$effect(() => {
+		if (exitBoundarySync === undefined) return;
+		if (Math.abs(exitBoundarySync - exitBoundaryAmount) > 1e-6) {
+			exitBoundaryAmount = exitBoundarySync;
+		}
 	});
 
 	function currentBounds(): ZoomWorldBounds | null {

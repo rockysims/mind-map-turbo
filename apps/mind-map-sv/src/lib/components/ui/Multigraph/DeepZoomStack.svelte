@@ -104,6 +104,9 @@
 				<ZoomWorld
 					{entryGestureIdleMs}
 					{entryGestureMaxMs}
+					exitBoundarySync={level.phase === 'exiting'
+						? Math.min(1, Math.max(0, 1 - level.morphProgress))
+						: 0}
 					onExitBoundary={(delta) => onAscend?.(level, delta)}
 					onStateChange={(state) => onWorldStateChange?.(level, state)}
 				>

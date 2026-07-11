@@ -44,11 +44,11 @@
 		padding: clamp(1.25rem, 4vw, 3rem);
 		box-sizing: border-box;
 		opacity: var(--node-details-opacity);
-		pointer-events: none;
-	}
-
-	.details[data-details-mode='true'] {
-		pointer-events: auto;
+		/* No pointer-events override: the morph surface (DeepZoomLayer) owns
+		   interactivity. An explicit `auto` here would punch through the
+		   layer's pointer-events:none during the entry scrub and swallow the
+		   wheel input that drives the morph. Interactivity is inherited once
+		   the layer is interactive. */
 	}
 
 	.details-title {

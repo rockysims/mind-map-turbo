@@ -620,13 +620,15 @@ test('deep zoom entry keeps driving focus after boundary steering slides the nod
 	if (!box) throw new Error('Node .circle element not found');
 	await page.mouse.move(Math.round(box.x + box.width / 2), Math.round(box.y + box.height / 2));
 
-	// Small trackpad-like wheel steps: the entry boundary is crossed gradually
-	// over many events instead of jumping straight to commit in one step.
+	// Fine trackpad-like wheel steps: the entry boundary is crossed gradually,
+	// so the morph surface is mounted mid-scrub UNDER THE CURSOR for several
+	// events. Those wheels must keep falling through to the stage (the surface
+	// content must not swallow them) for the scrub to reach commit.
 	const graph = page.locator('.graph');
-	for (let i = 0; i < 25; i += 1) {
+	for (let i = 0; i < 40; i += 1) {
 		if (((await graph.getAttribute('class')) ?? '').includes('focus-active')) break;
-		await page.mouse.wheel(0, -150);
-		await page.waitForTimeout(25);
+		await page.mouse.wheel(0, -40);
+		await page.waitForTimeout(20);
 	}
 	await expect(graph).toHaveClass(/focus-active/);
 	await expect(page.getByRole('dialog')).toBeVisible();
@@ -636,6 +638,39 @@ test('deep zoom entry keeps driving focus after boundary steering slides the nod
 	const world = page.locator('.zoom-world').first();
 	await page.mouse.wheel(0, -400);
 	await expect(world).toHaveAttribute('data-zoom-world-scale', /^(?!1(?:\.0*)?$).+/);
+});
+
+test('deep zoom exit keeps scrubbing when the cursor leaves the shrinking frame', async ({
+	page
+}) => {
+	const graphId = `e2e-exit-scrub-${Date.now()}`;
+	await page.goto('/');
+	await page.evaluate(() => localStorage.clear());
+	await page.goto(graphUrl(graphId));
+	await expect(page.getByText('Root')).toBeVisible();
+
+	// Enter focus with one large wheel over the centered node.
+	await page.mouse.move(640, 360);
+	await page.mouse.wheel(0, -800);
+	const graph = page.locator('.graph');
+	await expect(graph).toHaveClass(/focus-active/);
+
+	// Begin a partial exit over the frame, past the entry gesture gate.
+	await page.waitForTimeout(500);
+	await page.mouse.wheel(0, 30);
+	await expect(page.locator('.focus-root')).toHaveAttribute('data-exit-scrub', 'true');
+
+	// The frame is shrinking; move the cursor to a corner it no longer covers.
+	// Continued wheel-out must keep driving the exit rather than being lost to
+	// the stage or the page.
+	await page.mouse.move(5, 5);
+	for (let i = 0; i < 15; i += 1) {
+		if (!((await graph.getAttribute('class')) ?? '').includes('focus-active')) break;
+		await page.mouse.wheel(0, 30);
+		await page.waitForTimeout(30);
+	}
+	await expect(graph).not.toHaveClass(/focus-active/);
+	await expect(page.getByRole('dialog')).not.toBeVisible();
 });
 
 async function editFirstNodeTitle(page: Page, title: string) {
