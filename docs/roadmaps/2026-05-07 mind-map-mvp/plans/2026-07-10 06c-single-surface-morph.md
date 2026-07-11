@@ -165,7 +165,7 @@ progress 1.
 - The component keeps zero content-type knowledge (snippets only); reduced
   motion path reaches end states without intermediate frames.
 
-### T04 — Rewire Multigraph: DeepZoomStack in production, one progress channel
+### T04 — Rewire Multigraph: DeepZoomStack in production, one progress channel — ✓ done (8b1aa23)
 
 |                |                                                                                                                                     |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
