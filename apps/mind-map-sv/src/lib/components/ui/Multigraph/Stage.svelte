@@ -416,7 +416,7 @@
 		);
 		const clampedScale = clampScale(requestedScale, DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE);
 		if (
-			applyFocusEntryBoundary({
+			!applyZoomGesture({
 				focalPoint,
 				requestedScale,
 				clampedScale,
@@ -424,36 +424,13 @@
 				startView: { panX, panY, scale }
 			})
 		) {
+			// Plain zoom: wheel persists view state immediately on each event.
 			onViewStateChange?.({
 				panX,
 				panY,
 				scale: persistedScaleForFocusOverzoom(scale, DEFAULT_MAX_SCALE)
 			});
-			return;
 		}
-		const nextScale = clampedScale;
-		const nextView = zoomViewTransformAtPoint({ panX, panY, scale }, nextScale, focalPoint, {
-			x: rect.left + rect.width / 2,
-			y: rect.top + rect.height / 2
-		});
-
-		panX = nextView.panX;
-		panY = nextView.panY;
-		scale = nextView.scale;
-		focusEntryBoundaryProgress = null;
-		focusEntrySteeringNodeId = null;
-		if (requestedScale > nextScale) {
-			onBlockedZoom?.({
-				direction: 'in',
-				focalPoint,
-				viewState: { panX, panY, scale }
-			});
-		}
-		onViewStateChange?.({
-			panX,
-			panY,
-			scale: persistedScaleForFocusOverzoom(scale, DEFAULT_MAX_SCALE)
-		});
 	}
 
 	function shouldSwallowEntryGesture(direction: EntryGestureDirection): boolean {
@@ -523,40 +500,19 @@
 						pinchStart = { distance: dist, scale, centroid: pinchStart.centroid, panX, panY };
 						return;
 					}
-					if (
-						applyFocusEntryBoundary({
-							focalPoint: pinchStart.centroid,
-							requestedScale,
-							clampedScale,
-							rect,
-							startView: {
-								panX: pinchStart.panX,
-								panY: pinchStart.panY,
-								scale: pinchStart.scale
-							}
-						})
-					) {
-						return;
-					}
-					const nextScale = clampedScale;
-					const nextView = zoomViewTransformAtPoint(
-						{ panX: pinchStart.panX, panY: pinchStart.panY, scale: pinchStart.scale },
-						nextScale,
-						pinchStart.centroid,
-						{ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
-					);
-					panX = nextView.panX;
-					panY = nextView.panY;
-					scale = nextView.scale;
-					focusEntryBoundaryProgress = null;
-					focusEntrySteeringNodeId = null;
-					if (requestedScale > nextScale) {
-						onBlockedZoom?.({
-							direction: 'in',
-							focalPoint: pinchStart.centroid,
-							viewState: { panX, panY, scale }
-						});
-					}
+					applyZoomGesture({
+						focalPoint: pinchStart.centroid,
+						requestedScale,
+						clampedScale,
+						rect,
+						startView: {
+							panX: pinchStart.panX,
+							panY: pinchStart.panY,
+							scale: pinchStart.scale
+						}
+					});
+					// Plain pinch zoom is persisted on pointer-up; boundary steering is
+					// persisted inside applyZoomGesture (fixing the prior asymmetry).
 				}
 			}
 		} else {
@@ -579,6 +535,59 @@
 	}
 
 	const transformStyle = $derived(`translate(${panX}px, ${panY}px) scale(${scale})`);
+
+	/**
+	 * Shared focus-entry zoom sequence for wheel and pinch.
+	 *
+	 * Tries boundary steering via `applyFocusEntryBoundary`. If the gesture is
+	 * handled (steering or commit), persists view state via `onViewStateChange`
+	 * and returns `true` — callers must not persist again.
+	 *
+	 * Otherwise applies the plain clamp-zoom, resets boundary progress, emits
+	 * `onBlockedZoom` if the scale was clamped, and returns `false` — the caller
+	 * decides when to persist (wheel: immediately; pinch: on pointer-up).
+	 */
+	function applyZoomGesture({
+		focalPoint,
+		requestedScale,
+		clampedScale,
+		rect,
+		startView
+	}: {
+		focalPoint: Point;
+		requestedScale: number;
+		clampedScale: number;
+		rect: DOMRect;
+		startView: ViewStateSnapshot;
+	}): boolean {
+		if (applyFocusEntryBoundary({ focalPoint, requestedScale, clampedScale, rect, startView })) {
+			// Fix wheel/pinch asymmetry: both now persist view state after steering.
+			onViewStateChange?.({
+				panX,
+				panY,
+				scale: persistedScaleForFocusOverzoom(scale, DEFAULT_MAX_SCALE)
+			});
+			return true;
+		}
+		const nextScale = clampedScale;
+		const nextView = zoomViewTransformAtPoint(startView, nextScale, focalPoint, {
+			x: rect.left + rect.width / 2,
+			y: rect.top + rect.height / 2
+		});
+		panX = nextView.panX;
+		panY = nextView.panY;
+		scale = nextView.scale;
+		focusEntryBoundaryProgress = null;
+		focusEntrySteeringNodeId = null;
+		if (requestedScale > nextScale) {
+			onBlockedZoom?.({
+				direction: 'in',
+				focalPoint,
+				viewState: { panX, panY, scale }
+			});
+		}
+		return false;
+	}
 
 	function applyFocusEntryBoundary({
 		focalPoint,
