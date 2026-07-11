@@ -3,7 +3,7 @@
 **Created:** 2026-07-11
 **Author:** Cursor agent
 **Milestone:** [milestones/06d-deep-zoom-hardening-and-nested-image-zoom.md](../milestones/06d-deep-zoom-hardening-and-nested-image-zoom.md)
-**Status:** draft
+**Status:** executing
 **Total estimated effort:** L (≈ 2–3 days across the waves)
 
 ## Summary
