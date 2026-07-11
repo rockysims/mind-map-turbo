@@ -47,8 +47,7 @@ export function solveFocusEntryBoundary({
 	marginPx = APP_CONFIG.multigraph.focus.boundaryNearTouchMarginPx
 }: FocusEntryBoundaryInput): FocusEntryBoundaryStep {
 	const boundaryScale = inscribeScaleForCircle(candidate.radius, viewport);
-	const lockedScale = Math.max(currentView.scale, boundaryScale);
-	const nextScale = requestedScale >= boundaryScale ? lockedScale : requestedScale;
+	const nextScale = requestedScale >= boundaryScale ? boundaryScale : requestedScale;
 	const viewportCenter = { x: viewport.width / 2, y: viewport.height / 2 };
 	const rawView = zoomViewTransformAtPoint(currentView, nextScale, focalPoint, viewportCenter);
 	const rawRect = projectedCandidateRect(candidate, rawView, viewport);
@@ -60,7 +59,7 @@ export function solveFocusEntryBoundary({
 			projectedRect: centered.rect,
 			boundaryScale,
 			phase: 'boundary',
-			progressDelta: boundaryProgressDelta(requestedScale, lockedScale, zoneFraction)
+			progressDelta: boundaryProgressDelta(requestedScale, boundaryScale, zoneFraction)
 		};
 	}
 

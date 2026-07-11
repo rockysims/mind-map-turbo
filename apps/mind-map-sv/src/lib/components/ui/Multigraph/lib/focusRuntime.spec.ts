@@ -78,4 +78,17 @@ describe('focus runtime stack', () => {
 		expect(runtime.isFocused).toBe(false);
 		expect(runtime.focusedNodeId).toBeNull();
 	});
+
+	it('can open a focused node at an entry morph progress', () => {
+		const runtime = new FocusRuntime();
+		runtime.open(
+			{ id: 'n0', title: 'Node', description: '', tags: [] },
+			{ left: 10, top: 20, width: 100, height: 100 },
+			fillRect,
+			{ morphProgress: 0, phase: 'entering' }
+		);
+
+		expect(runtime.activeLevel?.morphProgress).toBe(0);
+		expect(runtime.activeLevel?.phase).toBe('entering');
+	});
 });

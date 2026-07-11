@@ -675,7 +675,9 @@
 		const stage = getStage(canvasElement);
 		const circle = getCircle(canvasElement, 'n0');
 		const center = getCenter(circle);
-		const sourceRect = circle.getBoundingClientRect();
+		const oversizedRect = circle.getBoundingClientRect();
+		const stageRect = stage.getBoundingClientRect();
+		const expectedInscribedSize = Math.min(stageRect.width, stageRect.height);
 
 		dispatchWheel(stage, -800, center.x, center.y);
 
@@ -684,17 +686,27 @@
 		const layer = dialog.querySelector('.deep-zoom-layer') as HTMLElement;
 		const world = dialog.querySelector('.zoom-world') as HTMLElement;
 		expect(surface.dataset.morphSourceNodeId).toBe('n0');
-		expect(Number(layer.dataset.sourceX)).toBeCloseTo(sourceRect.left, 0);
-		expect(Number(layer.dataset.sourceY)).toBeCloseTo(sourceRect.top, 0);
-		expect(Number(layer.dataset.sourceWidth)).toBeCloseTo(sourceRect.width, 0);
-		expect(Number(layer.dataset.sourceHeight)).toBeCloseTo(sourceRect.height, 0);
+		const sourceWidth = Number(layer.dataset.sourceWidth);
+		const sourceHeight = Number(layer.dataset.sourceHeight);
+		expect(sourceWidth).toBeCloseTo(expectedInscribedSize, 0);
+		expect(sourceHeight).toBeCloseTo(expectedInscribedSize, 0);
+		expect(sourceWidth).toBeLessThan(oversizedRect.width);
+		expect(Math.abs(Number(layer.dataset.morphWidth) - sourceWidth)).toBeLessThan(
+			expectedInscribedSize * 0.25
+		);
+		expect(Math.abs(Number(layer.dataset.morphHeight) - sourceHeight)).toBeLessThan(
+			expectedInscribedSize * 0.25
+		);
+		const layerRect = layer.getBoundingClientRect();
+		const surfaceRect = surface.getBoundingClientRect();
+		const focusedNode = surface.querySelector('.node') as HTMLElement;
+		const focusedNodeRect = focusedNode.getBoundingClientRect();
+		expect(surfaceRect.width).toBeCloseTo(layerRect.width, 0);
+		expect(surfaceRect.height).toBeCloseTo(layerRect.height, 0);
+		expect(focusedNodeRect.width).toBeCloseTo(layerRect.width, 0);
+		expect(focusedNodeRect.height).toBeCloseTo(layerRect.height, 0);
 		expect(canvasElement.querySelector('.graph')).toHaveClass('focus-active');
 
-		dispatchWheel(world, -800, center.x, center.y);
-		await sleep();
-		expect(Number(world.dataset.zoomWorldScale)).toBe(1);
-
-		await sleep(Math.max(0, APP_CONFIG.multigraph.focus.entryGestureIdleMs - 30));
 		dispatchWheel(world, -800, center.x, center.y);
 		await sleep();
 		expect(Number(world.dataset.zoomWorldScale)).toBe(1);
@@ -740,7 +752,7 @@
 			posByNodeId: { n0: { x: 0, y: 0 } }
 		}),
 		defaultPrimaryNodeId: 'n0',
-		initialViewState: { panX: 0, panY: 0, scale: APP_CONFIG.multigraph.zoom.maxScale },
+		initialViewState: { panX: 0, panY: 0, scale: 0.95 },
 		layoutSettings: { relaxIterations: 0 }
 	}}
 	play={async ({ canvasElement }: PlayContext) => {

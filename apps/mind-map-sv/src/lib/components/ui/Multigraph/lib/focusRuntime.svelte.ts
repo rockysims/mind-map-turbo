@@ -27,6 +27,11 @@ export interface PushFocusLevelInput {
 	phase?: FocusLevelPhase;
 }
 
+export interface OpenFocusInput {
+	morphProgress?: number;
+	phase?: FocusLevelPhase;
+}
+
 const DEFAULT_RECT: Rect = { left: 0, top: 0, width: 0, height: 0 };
 const DEFAULT_WORLD_STATE: ZoomWorldState = { panX: 0, panY: 0, scale: 1 };
 
@@ -91,15 +96,20 @@ export class FocusRuntime {
 		this.updateActive((level) => ({ ...level, worldState }));
 	}
 
-	open(node: NodeData, sourceRect: Rect = DEFAULT_RECT, fillRect: Rect = sourceRect): void {
+	open(
+		node: NodeData,
+		sourceRect: Rect = DEFAULT_RECT,
+		fillRect: Rect = sourceRect,
+		options: OpenFocusInput = {}
+	): void {
 		this.levels = [];
 		this.push({
 			subjectKind: 'node',
 			subjectId: node.id,
 			sourceRect,
 			fillRect,
-			morphProgress: 1,
-			phase: 'active'
+			morphProgress: options.morphProgress ?? 1,
+			phase: options.phase ?? 'active'
 		});
 	}
 

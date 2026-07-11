@@ -204,6 +204,7 @@
 	let stageEntryGestureGateRequestId = $state(0);
 	const focusRuntime = new FocusRuntime();
 	let focusExitTimeoutId: ReturnType<typeof setTimeout> | null = null;
+	let focusEntryAnimationFrameId: number | null = null;
 	const activeFocusLevel = $derived(focusRuntime.activeLevel);
 
 	/** Internal enter animations for nodes added by the user (scale 0 → target). */
@@ -426,6 +427,7 @@
 
 	$effect(() => {
 		return () => {
+			cancelFocusEntryAnimation();
 			clearFocusExitTimeout();
 			layoutRuntime.stop();
 		};
@@ -580,6 +582,7 @@
 		entryGestureIdleMs = 0
 	) {
 		closeOverlays();
+		cancelFocusEntryAnimation();
 		clearFocusExitTimeout();
 		focusExiting = false;
 		focusExitProgress = 1;
@@ -589,11 +592,17 @@
 		focusEntryGestureIdleMs = entryGestureIdleMs;
 		const sourceRect = source ? rectFromMorphSource(source) : nodeRectForNodeId(node.id);
 		const fillRect = focusFillRect();
-		focusRuntime.open(node, sourceRect ?? fillRect, fillRect);
+		const animateEntry = entryGestureIdleMs > 0 && !reduceMotion && FOCUS_TRANSITION_MS > 0;
+		focusRuntime.open(node, sourceRect ?? fillRect, fillRect, {
+			morphProgress: animateEntry ? 0 : 1,
+			phase: animateEntry ? 'entering' : 'active'
+		});
+		if (animateEntry) startFocusEntryAnimation();
 	}
 
 	function closeFocus() {
 		if (!focusRuntime.isFocused || focusExiting) return;
+		cancelFocusEntryAnimation();
 		focusRuntime.setProgress(0, 'exiting');
 		focusExitProgress = 0;
 		if (reduceMotion || FOCUS_TRANSITION_MS <= 0 || typeof window === 'undefined') {
@@ -610,7 +619,38 @@
 		focusExitTimeoutId = null;
 	}
 
+	function startFocusEntryAnimation() {
+		if (typeof requestAnimationFrame !== 'function') {
+			focusRuntime.setProgress(1, 'active');
+			return;
+		}
+		const startedAt =
+			typeof performance !== 'undefined' && typeof performance.now === 'function'
+				? performance.now()
+				: Date.now();
+		const step = (now: number) => {
+			const elapsed = Math.max(0, now - startedAt);
+			const rawProgress = Math.min(1, elapsed / FOCUS_TRANSITION_MS);
+			focusRuntime.setProgress(easeOutCubic(rawProgress), rawProgress >= 1 ? 'active' : 'entering');
+			if (rawProgress >= 1) {
+				focusEntryAnimationFrameId = null;
+				return;
+			}
+			focusEntryAnimationFrameId = requestAnimationFrame(step);
+		};
+		focusEntryAnimationFrameId = requestAnimationFrame(step);
+	}
+
+	function cancelFocusEntryAnimation() {
+		if (focusEntryAnimationFrameId === null) return;
+		if (typeof cancelAnimationFrame === 'function') {
+			cancelAnimationFrame(focusEntryAnimationFrameId);
+		}
+		focusEntryAnimationFrameId = null;
+	}
+
 	function finishCloseFocus() {
+		cancelFocusEntryAnimation();
 		clearFocusExitTimeout();
 		focusRuntime.close();
 		focusEntryGestureIdleMs = 0;
@@ -804,6 +844,7 @@
 	}
 
 	function handleFocusZoomOutBoundary(delta: number) {
+		cancelFocusEntryAnimation();
 		focusExitProgress = Math.max(0, 1 - delta);
 		focusRuntime.setProgress(focusExitProgress, 'exiting');
 		if (delta >= 1) {
@@ -1048,6 +1089,10 @@
 	function commitUserGraph(nextGraph: MultigraphData) {
 		graph = nextGraph;
 		onMultigraphChange?.(nextGraph);
+	}
+
+	function easeOutCubic(progress: number): number {
+		return 1 - (1 - progress) ** 3;
 	}
 </script>
 

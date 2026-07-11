@@ -257,6 +257,8 @@
 	}
 
 	.zoom-world-subject {
+		width: 100%;
+		height: 100%;
 		transform-origin: 50% 50%;
 		will-change: transform;
 	}

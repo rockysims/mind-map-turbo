@@ -68,6 +68,23 @@ describe('focus entry boundary solver', () => {
 		expect(step.progressDelta).toBeCloseTo(0.4);
 	});
 
+	it('shrinks an already oversized current view back to the inscription scale', () => {
+		const step = solveFocusEntryBoundary({
+			currentView: { panX: 0, panY: 0, scale: 4 },
+			requestedScale: 4.4,
+			focalPoint: { x: 160, y: 120 },
+			viewport,
+			candidate: centeredCandidate,
+			zoneFraction: 0.25
+		});
+
+		expect(step.phase).toBe('boundary');
+		expect(step.boundaryScale).toBe(3);
+		expect(step.view.scale).toBe(3);
+		expect(step.projectedRect.height).toBeCloseTo(viewport.height);
+		expect(step.progressDelta).toBe(1);
+	});
+
 	it('does not produce boundary progress when zoom reverses below inscription', () => {
 		expect(boundaryProgressDelta(2.9, 3, 0.25)).toBe(0);
 		expect(boundaryReleaseDelta(2.625, 3, 0.25)).toBeCloseTo(0.5);
