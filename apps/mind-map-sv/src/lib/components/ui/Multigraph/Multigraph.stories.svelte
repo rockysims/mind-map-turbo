@@ -840,11 +840,16 @@
 		);
 		expect(canvasElement.querySelector('.graph')).toHaveClass('focus-active');
 
-		dispatchWheel(world, 70, center.x, center.y);
-		await waitFor(() => {
-			expect(canvasElement.querySelector('.graph')).not.toHaveClass('focus-active');
-			expect(surface).toHaveClass('exiting');
-		});
+		dispatchWheel(world, 5000, center.x, center.y);
+		await waitForFrames(1);
+		expect(dialog).toBeInTheDocument();
+		expect(canvasElement.querySelector('.graph')).not.toHaveClass('focus-active');
+		expect(surface).toHaveClass('exiting');
+		expect(Number(layer.dataset.morphProgress)).toBe(0);
+		expect(Number(layer.dataset.morphRadius)).toBeCloseTo(
+			Math.min(Number(layer.dataset.sourceWidth), Number(layer.dataset.sourceHeight)) / 2,
+			0
+		);
 		await waitForFrames(2);
 		expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
 	}}

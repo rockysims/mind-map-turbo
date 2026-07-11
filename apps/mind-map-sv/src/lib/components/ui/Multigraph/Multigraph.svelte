@@ -621,7 +621,7 @@
 		focusRuntime.setProgress(0, 'exiting');
 		focusExiting = true;
 		if (typeof requestAnimationFrame === 'function') {
-			requestAnimationFrame(finishCloseFocus);
+			requestAnimationFrame(() => requestAnimationFrame(finishCloseFocus));
 		} else {
 			finishCloseFocus();
 		}
