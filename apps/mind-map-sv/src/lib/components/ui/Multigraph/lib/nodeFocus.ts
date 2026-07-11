@@ -29,6 +29,7 @@ export interface NodeFocusMorphSource {
 	top: number;
 	width: number;
 	height: number;
+	borderWidthPx?: number;
 }
 
 export function nodeScreenCircle(

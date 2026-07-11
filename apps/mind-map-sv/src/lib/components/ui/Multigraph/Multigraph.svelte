@@ -116,6 +116,11 @@
 	const CENTERED_POSITION: Point = { x: 0, y: 0 };
 	const FOCUS_TRANSITION_MS = APP_CONFIG.multigraph.focus.entryTransitionMs;
 
+	interface NodeRenderMetrics {
+		rect: Rect;
+		borderWidthPx?: number;
+	}
+
 	let {
 		multigraphData = {
 			nodes: [],
@@ -190,6 +195,7 @@
 	const stageScale = $derived(stageViewState.scale);
 	let focusPreviewNodeId = $state<string | null>(null);
 	let focusPreviewProgress = $state(0);
+	let focusPreviewEffectiveScale = $state(1);
 	let pendingFocusCommitNodeId = $state<string | null>(null);
 	let reduceMotion = $derived(prefersReducedMotion());
 	let focusExiting = $state(false);
@@ -204,7 +210,6 @@
 	let stageEntryGestureGateRequestId = $state(0);
 	const focusRuntime = new FocusRuntime();
 	let focusExitTimeoutId: ReturnType<typeof setTimeout> | null = null;
-	let focusEntryAnimationFrameId: number | null = null;
 	const activeFocusLevel = $derived(focusRuntime.activeLevel);
 
 	/** Internal enter animations for nodes added by the user (scale 0 → target). */
@@ -427,7 +432,6 @@
 
 	$effect(() => {
 		return () => {
-			cancelFocusEntryAnimation();
 			clearFocusExitTimeout();
 			layoutRuntime.stop();
 		};
@@ -582,27 +586,23 @@
 		entryGestureIdleMs = 0
 	) {
 		closeOverlays();
-		cancelFocusEntryAnimation();
 		clearFocusExitTimeout();
 		focusExiting = false;
 		focusExitProgress = 1;
-		focusPreviewNodeId = null;
-		focusPreviewProgress = 0;
+		clearFocusPreview();
 		pendingFocusCommitNodeId = null;
 		focusEntryGestureIdleMs = entryGestureIdleMs;
-		const sourceRect = source ? rectFromMorphSource(source) : nodeRectForNodeId(node.id);
+		const sourceMetrics = source ? null : nodeRenderMetricsForNodeId(node.id);
+		const sourceRect = source ? rectFromMorphSource(source) : sourceMetrics?.rect;
+		const borderWidthPx = source?.borderWidthPx ?? sourceMetrics?.borderWidthPx;
 		const fillRect = focusFillRect();
-		const animateEntry = entryGestureIdleMs > 0 && !reduceMotion && FOCUS_TRANSITION_MS > 0;
 		focusRuntime.open(node, sourceRect ?? fillRect, fillRect, {
-			morphProgress: animateEntry ? 0 : 1,
-			phase: animateEntry ? 'entering' : 'active'
+			borderWidthPx
 		});
-		if (animateEntry) startFocusEntryAnimation();
 	}
 
 	function closeFocus() {
 		if (!focusRuntime.isFocused || focusExiting) return;
-		cancelFocusEntryAnimation();
 		focusRuntime.setProgress(0, 'exiting');
 		focusExitProgress = 0;
 		if (reduceMotion || FOCUS_TRANSITION_MS <= 0 || typeof window === 'undefined') {
@@ -619,38 +619,7 @@
 		focusExitTimeoutId = null;
 	}
 
-	function startFocusEntryAnimation() {
-		if (typeof requestAnimationFrame !== 'function') {
-			focusRuntime.setProgress(1, 'active');
-			return;
-		}
-		const startedAt =
-			typeof performance !== 'undefined' && typeof performance.now === 'function'
-				? performance.now()
-				: Date.now();
-		const step = (now: number) => {
-			const elapsed = Math.max(0, now - startedAt);
-			const rawProgress = Math.min(1, elapsed / FOCUS_TRANSITION_MS);
-			focusRuntime.setProgress(easeOutCubic(rawProgress), rawProgress >= 1 ? 'active' : 'entering');
-			if (rawProgress >= 1) {
-				focusEntryAnimationFrameId = null;
-				return;
-			}
-			focusEntryAnimationFrameId = requestAnimationFrame(step);
-		};
-		focusEntryAnimationFrameId = requestAnimationFrame(step);
-	}
-
-	function cancelFocusEntryAnimation() {
-		if (focusEntryAnimationFrameId === null) return;
-		if (typeof cancelAnimationFrame === 'function') {
-			cancelAnimationFrame(focusEntryAnimationFrameId);
-		}
-		focusEntryAnimationFrameId = null;
-	}
-
 	function finishCloseFocus() {
-		cancelFocusEntryAnimation();
 		clearFocusExitTimeout();
 		focusRuntime.close();
 		focusEntryGestureIdleMs = 0;
@@ -730,8 +699,47 @@
 			left: circle.center.x - circle.radius,
 			top: circle.center.y - circle.radius,
 			width: circle.radius * 2,
-			height: circle.radius * 2
+			height: circle.radius * 2,
+			borderWidthPx: estimatedBorderWidthPx(candidate, view)
 		};
+	}
+
+	function clearFocusPreview() {
+		focusPreviewNodeId = null;
+		focusPreviewProgress = 0;
+		focusPreviewEffectiveScale = 1;
+	}
+
+	function setFocusPreview(candidate: NodeFocusCandidate, progress: number, view: ViewTransform) {
+		focusPreviewNodeId = candidate.node.id;
+		focusPreviewProgress = progress;
+		focusPreviewEffectiveScale = focusPreviewScaleForCandidate(candidate, view);
+	}
+
+	function focusPreviewSizeForNode(nodeId: string): { widthPx: number; heightPx: number } | null {
+		if (focusPreviewNodeId !== nodeId || focusPreviewProgress <= 0) return null;
+		const fillRect = focusFillRect();
+		const effectiveScale = Math.max(0.001, focusPreviewEffectiveScale);
+		return {
+			widthPx: Math.max(1, fillRect.width / effectiveScale),
+			heightPx: Math.max(1, fillRect.height / effectiveScale)
+		};
+	}
+
+	function focusPreviewScaleForCandidate(
+		candidate: NodeFocusCandidate,
+		view: ViewTransform
+	): number {
+		const baseRadius = Math.max(0.001, resolvedLayoutSettings.baseRadius);
+		const nodeScale = candidate.radius / baseRadius;
+		return Math.max(0.001, view.scale * nodeScale);
+	}
+
+	function estimatedBorderWidthPx(candidate: NodeFocusCandidate, view: ViewTransform): number {
+		const baseBorderWidth = candidate.node.pinned
+			? APP_CONFIG.multigraph.pinnedNodeBorderWidthPx
+			: APP_CONFIG.multigraph.nodeBorderWidthPx;
+		return roundedBorderWidthPx(baseBorderWidth * focusPreviewScaleForCandidate(candidate, view));
 	}
 
 	function rectFromMorphSource(source: NodeFocusMorphSource): Rect {
@@ -743,28 +751,55 @@
 		};
 	}
 
-	function morphSourceFromRect(nodeId: string, rect: Rect): NodeFocusMorphSource {
+	function morphSourceFromMetrics(
+		nodeId: string,
+		metrics: NodeRenderMetrics
+	): NodeFocusMorphSource {
+		return morphSourceFromRect(nodeId, metrics.rect, metrics.borderWidthPx);
+	}
+
+	function morphSourceFromRect(
+		nodeId: string,
+		rect: Rect,
+		borderWidthPx?: number
+	): NodeFocusMorphSource {
 		return {
 			nodeId,
 			left: rect.left,
 			top: rect.top,
 			width: rect.width,
-			height: rect.height
+			height: rect.height,
+			borderWidthPx
 		};
 	}
 
-	function nodeRectForNodeId(nodeId: string): Rect | null {
+	function nodeRenderMetricsForNodeId(nodeId: string): NodeRenderMetrics | null {
 		const wrappers = Array.from(graphRef?.querySelectorAll('.node-wrapper') ?? []) as HTMLElement[];
 		const wrapper = wrappers.find((element) => element.dataset.nodeId === nodeId) ?? null;
 		const circle = wrapper?.querySelector('.circle');
 		if (!(circle instanceof HTMLElement)) return null;
 		const rect = circle.getBoundingClientRect();
 		return {
-			left: rect.left,
-			top: rect.top,
-			width: rect.width,
-			height: rect.height
+			rect: {
+				left: rect.left,
+				top: rect.top,
+				width: rect.width,
+				height: rect.height
+			},
+			borderWidthPx: measuredBorderWidthPx(circle, rect)
 		};
+	}
+
+	function measuredBorderWidthPx(circle: HTMLElement, rect: DOMRect): number | undefined {
+		const cssBorderWidth = Number.parseFloat(getComputedStyle(circle).borderTopWidth);
+		if (!Number.isFinite(cssBorderWidth) || cssBorderWidth <= 0) return undefined;
+		const untransformedWidth = circle.offsetWidth;
+		const visualScale = untransformedWidth > 0 ? rect.width / untransformedWidth : 1;
+		return roundedBorderWidthPx(cssBorderWidth * visualScale);
+	}
+
+	function roundedBorderWidthPx(borderWidthPx: number): number {
+		return Math.max(1, Math.round(borderWidthPx));
 	}
 
 	function focusFillRect(): Rect {
@@ -773,12 +808,11 @@
 		const height = rect?.height ?? (typeof window === 'undefined' ? 600 : window.innerHeight);
 		const left = rect?.left ?? 0;
 		const top = rect?.top ?? 0;
-		const margin = 16;
 		return {
-			left: left + margin,
-			top: top + margin,
-			width: Math.max(1, width - margin * 2),
-			height: Math.max(1, height - margin * 2)
+			left,
+			top,
+			width: Math.max(1, width),
+			height: Math.max(1, height)
 		};
 	}
 
@@ -797,26 +831,22 @@
 				? focusCandidates().find((entry) => entry.node.id === input.nodeId)
 				: focusCandidateForPoint(input.focalPoint, input.viewState)) ?? null;
 		if (!candidate) {
-			focusPreviewNodeId = null;
-			focusPreviewProgress = 0;
+			clearFocusPreview();
 			return;
 		}
 		const progress = Math.min(1, Math.max(0, input.boundaryProgress ?? 0));
 		if (progress <= 0) {
 			if (!input.nodeId || input.nodeId === focusPreviewNodeId) {
-				focusPreviewNodeId = null;
-				focusPreviewProgress = 0;
+				clearFocusPreview();
 			}
 			return;
 		}
 		if (progress >= 1 || input.committed === true) {
+			setFocusPreview(candidate, 1, input.viewState);
 			commitFocusFromCandidate(candidate, input.viewState);
-			focusPreviewNodeId = null;
-			focusPreviewProgress = 0;
 			return;
 		}
-		focusPreviewNodeId = candidate.node.id;
-		focusPreviewProgress = progress;
+		setFocusPreview(candidate, progress, input.viewState);
 	}
 
 	function commitFocusFromCandidate(candidate: NodeFocusCandidate, fallbackView: ViewTransform) {
@@ -828,10 +858,12 @@
 				pendingFocusCommitNodeId = null;
 				return;
 			}
-			const measuredRect = nodeRectForNodeId(candidate.node.id);
+			const measuredMetrics = nodeRenderMetricsForNodeId(candidate.node.id);
 			openFocus(
 				candidate.node,
-				measuredRect ? morphSourceFromRect(candidate.node.id, measuredRect) : fallbackSource,
+				measuredMetrics
+					? morphSourceFromMetrics(candidate.node.id, measuredMetrics)
+					: fallbackSource,
 				APP_CONFIG.multigraph.focus.entryGestureIdleMs
 			);
 			pendingFocusCommitNodeId = null;
@@ -844,7 +876,6 @@
 	}
 
 	function handleFocusZoomOutBoundary(delta: number) {
-		cancelFocusEntryAnimation();
 		focusExitProgress = Math.max(0, 1 - delta);
 		focusRuntime.setProgress(focusExitProgress, 'exiting');
 		if (delta >= 1) {
@@ -1089,10 +1120,6 @@
 	function commitUserGraph(nextGraph: MultigraphData) {
 		graph = nextGraph;
 		onMultigraphChange?.(nextGraph);
-	}
-
-	function easeOutCubic(progress: number): number {
-		return 1 - (1 - progress) ** 3;
 	}
 </script>
 
@@ -1355,6 +1382,7 @@
 					baseNodeOpacity *
 					(revealWaveNodeOpacityByNodeId[node.id] ?? 1) *
 					queryOpacity(queryNodeState)}
+				{@const focusPreviewSize = focusPreviewSizeForNode(node.id)}
 				<div
 					class="node-wrapper"
 					class:primary={primaryNodeId === node.id}
@@ -1371,6 +1399,8 @@
 						nodeData={node}
 						isTitleEditing={titleEditContext?.nodeId === node.id}
 						detailsProgress={focusPreviewNodeId === node.id ? focusPreviewProgress : 0}
+						detailsWidthPx={focusPreviewSize?.widthPx}
+						detailsHeightPx={focusPreviewSize?.heightPx}
 						borderSegments={nodeBorderSegments(node, graph.tagColorConfig.nodeTags)}
 						spotlightColor={queryNodeState?.role === 'spotlight'
 							? queryNodeState.spotlightColor
@@ -1485,6 +1515,7 @@
 			{reduceMotion}
 			sourceRect={activeFocusLevel.sourceRect}
 			fillRect={activeFocusLevel.fillRect}
+			borderWidthPx={activeFocusLevel.borderWidthPx}
 			entryGestureIdleMs={focusEntryGestureIdleMs}
 			entryGestureMaxMs={APP_CONFIG.multigraph.focus.entryGestureMaxMs}
 			onClose={closeFocus}

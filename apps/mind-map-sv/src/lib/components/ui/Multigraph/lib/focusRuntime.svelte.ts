@@ -12,6 +12,7 @@ export interface FocusLevel {
 	subjectId: string;
 	sourceRect: Rect;
 	fillRect: Rect;
+	borderWidthPx?: number;
 	worldState: ZoomWorldState;
 	morphProgress: number;
 	phase: FocusLevelPhase;
@@ -22,12 +23,14 @@ export interface PushFocusLevelInput {
 	subjectId: string;
 	sourceRect: Rect;
 	fillRect: Rect;
+	borderWidthPx?: number;
 	worldState?: ZoomWorldState;
 	morphProgress?: number;
 	phase?: FocusLevelPhase;
 }
 
 export interface OpenFocusInput {
+	borderWidthPx?: number;
 	morphProgress?: number;
 	phase?: FocusLevelPhase;
 }
@@ -66,6 +69,7 @@ export class FocusRuntime {
 			subjectId: input.subjectId,
 			sourceRect: input.sourceRect,
 			fillRect: input.fillRect,
+			borderWidthPx: input.borderWidthPx,
 			worldState: input.worldState ?? DEFAULT_WORLD_STATE,
 			morphProgress: clamp01(input.morphProgress ?? 1),
 			phase: input.phase ?? 'active'
@@ -108,6 +112,7 @@ export class FocusRuntime {
 			subjectId: node.id,
 			sourceRect,
 			fillRect,
+			borderWidthPx: options.borderWidthPx,
 			morphProgress: options.morphProgress ?? 1,
 			phase: options.phase ?? 'active'
 		});

@@ -17,6 +17,7 @@
 		reduceMotion = false,
 		sourceRect,
 		fillRect,
+		borderWidthPx,
 		detailsProgress = 1,
 		entryGestureIdleMs = 0,
 		entryGestureMaxMs = 0,
@@ -31,6 +32,7 @@
 		reduceMotion?: boolean;
 		sourceRect: Rect;
 		fillRect: Rect;
+		borderWidthPx?: number;
 		detailsProgress?: number;
 		entryGestureIdleMs?: number;
 		entryGestureMaxMs?: number;
@@ -95,12 +97,14 @@
 				class:exiting={clampedDetailsProgress < 1}
 				data-morph-source-node-id={node.id}
 				data-details-progress={clampedDetailsProgress}
+				data-focus-border-width={borderWidthPx}
 			>
 				<Node
 					nodeData={node}
 					{borderSegments}
 					detailsMode
 					detailsProgress={clampedDetailsProgress}
+					{borderWidthPx}
 					detailsTitleId="node-focus-title"
 				>
 					<div class="focus-content" data-focus-zoom-scale="1">

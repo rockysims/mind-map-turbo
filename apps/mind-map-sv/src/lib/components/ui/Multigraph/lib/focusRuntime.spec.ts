@@ -14,6 +14,7 @@ describe('focus runtime stack', () => {
 			subjectId: 'n0',
 			sourceRect: { left: 100, top: 80, width: 120, height: 120 },
 			fillRect,
+			borderWidthPx: 12,
 			worldState: parentWorld
 		});
 		runtime.push({
@@ -44,6 +45,7 @@ describe('focus runtime stack', () => {
 			height: 120
 		});
 		expect(runtime.activeLevel?.fillRect).toEqual(fillRect);
+		expect(runtime.activeLevel?.borderWidthPx).toBe(12);
 		expect(runtime.activeLevel?.worldState).toEqual(parentWorld);
 	});
 
@@ -85,9 +87,10 @@ describe('focus runtime stack', () => {
 			{ id: 'n0', title: 'Node', description: '', tags: [] },
 			{ left: 10, top: 20, width: 100, height: 100 },
 			fillRect,
-			{ morphProgress: 0, phase: 'entering' }
+			{ borderWidthPx: 14, morphProgress: 0, phase: 'entering' }
 		);
 
+		expect(runtime.activeLevel?.borderWidthPx).toBe(14);
 		expect(runtime.activeLevel?.morphProgress).toBe(0);
 		expect(runtime.activeLevel?.phase).toBe('entering');
 	});

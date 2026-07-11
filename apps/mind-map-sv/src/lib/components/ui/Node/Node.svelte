@@ -24,6 +24,9 @@
 		borderSegments = [],
 		detailsMode = false,
 		detailsProgress = 0,
+		detailsWidthPx,
+		detailsHeightPx,
+		borderWidthPx,
 		detailsTitleId,
 		spotlightColor,
 		onTitleCommit,
@@ -34,6 +37,9 @@
 		borderSegments?: TagColorSegment[];
 		detailsMode?: boolean;
 		detailsProgress?: number;
+		detailsWidthPx?: number;
+		detailsHeightPx?: number;
+		borderWidthPx?: number;
 		detailsTitleId?: string;
 		spotlightColor?: string;
 		onTitleCommit?: (title: string) => void;
@@ -45,11 +51,29 @@
 	);
 	const clampedDetailsProgress = $derived(Math.min(1, Math.max(0, detailsProgress)));
 	const borderRadiusPx = $derived(borderRadiusForProgress(NODE_RADIUS * 2, clampedDetailsProgress));
+	const previewDetailsShape = $derived(
+		!detailsMode &&
+			clampedDetailsProgress > 0 &&
+			detailsWidthPx !== undefined &&
+			detailsHeightPx !== undefined
+	);
+	const previewWidthPx = $derived(
+		lerp(NODE_RADIUS * 2, detailsWidthPx ?? NODE_RADIUS * 2, clampedDetailsProgress)
+	);
+	const previewHeightPx = $derived(
+		lerp(NODE_RADIUS * 2, detailsHeightPx ?? NODE_RADIUS * 2, clampedDetailsProgress)
+	);
+	const nodeBorderWidthPx = $derived(borderWidthPx ?? NODE_BORDER_WIDTH);
+	const pinnedNodeBorderWidthPx = $derived(borderWidthPx ?? PINNED_NODE_BORDER_WIDTH);
 
 	function borderGradient(segments: TagColorSegment[]): string {
 		return `conic-gradient(${segments
 			.map((segment) => `${segment.color} ${segment.startTurn}turn ${segment.endTurn}turn`)
 			.join(', ')})`;
+	}
+
+	function lerp(from: number, to: number, progress: number): number {
+		return from + (to - from) * progress;
 	}
 
 	$effect(() => {
@@ -68,10 +92,11 @@
 	data-pinned={nodeData.pinned ? 'true' : undefined}
 	data-tag-border={borderSegments.length > 0 ? 'true' : undefined}
 	data-details-mode={detailsMode ? 'true' : undefined}
+	data-details-preview={previewDetailsShape ? 'true' : undefined}
 	data-details-progress={clampedDetailsProgress}
 	data-spotlight={spotlightColor ? 'true' : undefined}
 	style="--node-diameter: {NODE_RADIUS *
-		2}px; --node-border-radius: {borderRadiusPx}px; --node-tag-border: {borderBackground}; --node-text-font-size: {NODE_TEXT_FONT_SIZE}px; --node-border-width: {NODE_BORDER_WIDTH}px; --pinned-node-border-width: {PINNED_NODE_BORDER_WIDTH}px; --node-spotlight-color: {spotlightColor ??
+		2}px; --node-border-radius: {borderRadiusPx}px; --node-preview-width: {previewWidthPx}px; --node-preview-height: {previewHeightPx}px; --node-tag-border: {borderBackground}; --node-text-font-size: {NODE_TEXT_FONT_SIZE}px; --node-border-width: {nodeBorderWidthPx}px; --pinned-node-border-width: {pinnedNodeBorderWidthPx}px; --node-spotlight-color: {spotlightColor ??
 		'transparent'};"
 >
 	<div class="circle">
@@ -130,6 +155,11 @@
 		border-width: var(--pinned-node-border-width);
 		border-color: #555555;
 		box-shadow: 0 0 0 2px #ffffff;
+	}
+
+	.node[data-details-preview='true'] .circle {
+		width: var(--node-preview-width);
+		height: var(--node-preview-height);
 	}
 
 	.node[data-tag-border='true'] .circle {

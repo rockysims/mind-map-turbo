@@ -677,7 +677,6 @@
 		const center = getCenter(circle);
 		const oversizedRect = circle.getBoundingClientRect();
 		const stageRect = stage.getBoundingClientRect();
-		const expectedInscribedSize = Math.min(stageRect.width, stageRect.height);
 
 		dispatchWheel(stage, -800, center.x, center.y);
 
@@ -688,23 +687,28 @@
 		expect(surface.dataset.morphSourceNodeId).toBe('n0');
 		const sourceWidth = Number(layer.dataset.sourceWidth);
 		const sourceHeight = Number(layer.dataset.sourceHeight);
-		expect(sourceWidth).toBeCloseTo(expectedInscribedSize, 0);
-		expect(sourceHeight).toBeCloseTo(expectedInscribedSize, 0);
+		expect(sourceWidth).toBeCloseTo(stageRect.width, 0);
+		expect(sourceHeight).toBeCloseTo(stageRect.height, 0);
+		expect(Number(layer.dataset.fillX)).toBeCloseTo(stageRect.left, 0);
+		expect(Number(layer.dataset.fillY)).toBeCloseTo(stageRect.top, 0);
+		expect(Number(layer.dataset.fillWidth)).toBeCloseTo(stageRect.width, 0);
+		expect(Number(layer.dataset.fillHeight)).toBeCloseTo(stageRect.height, 0);
 		expect(sourceWidth).toBeLessThan(oversizedRect.width);
-		expect(Math.abs(Number(layer.dataset.morphWidth) - sourceWidth)).toBeLessThan(
-			expectedInscribedSize * 0.25
-		);
-		expect(Math.abs(Number(layer.dataset.morphHeight) - sourceHeight)).toBeLessThan(
-			expectedInscribedSize * 0.25
-		);
+		expect(Number(layer.dataset.morphWidth)).toBeCloseTo(stageRect.width, 0);
+		expect(Number(layer.dataset.morphHeight)).toBeCloseTo(stageRect.height, 0);
 		const layerRect = layer.getBoundingClientRect();
 		const surfaceRect = surface.getBoundingClientRect();
 		const focusedNode = surface.querySelector('.node') as HTMLElement;
+		const focusedCircle = surface.querySelector('.circle') as HTMLElement;
 		const focusedNodeRect = focusedNode.getBoundingClientRect();
 		expect(surfaceRect.width).toBeCloseTo(layerRect.width, 0);
 		expect(surfaceRect.height).toBeCloseTo(layerRect.height, 0);
 		expect(focusedNodeRect.width).toBeCloseTo(layerRect.width, 0);
 		expect(focusedNodeRect.height).toBeCloseTo(layerRect.height, 0);
+		expect(parseFloat(window.getComputedStyle(focusedCircle).borderWidth)).toBeCloseTo(
+			Number(surface.dataset.focusBorderWidth),
+			0
+		);
 		expect(canvasElement.querySelector('.graph')).toHaveClass('focus-active');
 
 		dispatchWheel(world, -800, center.x, center.y);
@@ -764,12 +768,14 @@
 		dispatchWheel(stage, -80, center.x, center.y);
 		await waitFor(() => {
 			const node = getCircle(canvasElement, 'n0').closest('.node') as HTMLElement;
+			expect(node).toHaveAttribute('data-details-preview', 'true');
 			expect(Number(node.dataset.detailsProgress)).toBeGreaterThan(0);
 		});
 
 		dispatchWheel(stage, 160, center.x, center.y);
 		await waitFor(() => {
 			const node = getCircle(canvasElement, 'n0').closest('.node') as HTMLElement;
+			expect(node).not.toHaveAttribute('data-details-preview');
 			expect(Number(node.dataset.detailsProgress)).toBe(0);
 		});
 		expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
