@@ -843,7 +843,6 @@
 	function handleBlockedStageZoom(input: {
 		direction: 'in' | 'out';
 		focalPoint: Point;
-		blockedFactor: number;
 		boundaryProgress?: number;
 		committed?: boolean;
 		nodeId?: string;
@@ -1627,12 +1626,7 @@
 		{@const detailsNode = nodeById[level.subjectId]}
 		{#if detailsNode}
 			<div class="focus-surface" data-focus-subject-id={level.subjectId}>
-				<NodeDetailsLayer
-					title={detailsNode.title}
-					detailsTitleId={DETAILS_TITLE_ID}
-					detailsMode
-					opacity={1}
-				>
+				<NodeDetailsLayer title={detailsNode.title} detailsTitleId={DETAILS_TITLE_ID} detailsMode>
 					<NodeDetailsContent
 						node={detailsNode}
 						assets={graph.assets ?? {}}

@@ -1,9 +1,34 @@
 <script lang="ts">
-	import DeepZoomStack, { type StackFrameArgs } from './DeepZoomStack.svelte';
+	import DeepZoomStack, { type LayerBaseSize, type StackFrameArgs } from './DeepZoomStack.svelte';
 	import type { FocusLevel } from './lib/focusRuntime.svelte';
+	import type { FrameGeometry } from './lib/frameGeometry';
+	import { interpolateMorph } from './lib/morphGeometry';
 	import type { ZoomWorldState } from './lib/zoomWorldController';
 
 	const fillRect = { left: 16, top: 16, width: 720, height: 460 };
+
+	function geometryForLevel(level: FocusLevel): FrameGeometry {
+		const morph = interpolateMorph(level.sourceRect, level.fillRect, level.morphProgress, {
+			sourceBorderWidthPx: level.borderWidthPx,
+			targetBorderWidthPx: level.borderWidthPx
+		});
+		return {
+			x: morph.x,
+			y: morph.y,
+			width: morph.width,
+			height: morph.height,
+			borderRadiusPx: morph.borderRadiusPx,
+			borderWidthPx: morph.borderWidthPx ?? level.borderWidthPx ?? 0
+		};
+	}
+
+	function baseSizeForLevel(level: FocusLevel): LayerBaseSize {
+		return {
+			compactPx: Math.min(level.sourceRect.width, level.sourceRect.height) || level.fillRect.width,
+			detailsWidthPx: level.fillRect.width,
+			detailsHeightPx: level.fillRect.height
+		};
+	}
 
 	let levels = $state<FocusLevel[]>([
 		createLevel('root', { left: 260, top: 180, width: 180, height: 180 }, 1)
@@ -90,6 +115,8 @@
 		{levels}
 		entryGestureIdleMs={0}
 		entryGestureMaxMs={0}
+		{geometryForLevel}
+		{baseSizeForLevel}
 		{frame}
 		{compact}
 		{details}

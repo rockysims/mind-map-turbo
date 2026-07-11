@@ -22,42 +22,15 @@
 <script lang="ts">
 	import DeepZoomLayer, { type FrameSnippetArgs } from './DeepZoomLayer.svelte';
 	import ZoomWorld from './ZoomWorld.svelte';
-	import { interpolateMorph } from './lib/morphGeometry';
 	import type { ZoomWorldState } from './lib/zoomWorldController';
-
-	// Generic default: interpolate the level's stored source→fill rects. The
-	// node consumer (T04) overrides this with a live frameGeometry derivation.
-	const defaultGeometryForLevel = (level: FocusLevel): FrameGeometry => {
-		const morph = interpolateMorph(level.sourceRect, level.fillRect, level.morphProgress, {
-			sourceBorderWidthPx: level.borderWidthPx,
-			targetBorderWidthPx: level.borderWidthPx
-		});
-		return {
-			x: morph.x,
-			y: morph.y,
-			width: morph.width,
-			height: morph.height,
-			borderRadiusPx: morph.borderRadiusPx,
-			borderWidthPx: morph.borderWidthPx ?? level.borderWidthPx ?? 0
-		};
-	};
-
-	// The compact layer's base is the level's logical source diameter; the
-	// details layer is laid out at the fill size so it sits at scale 1 at
-	// progress 1 (where ZoomWorld — not the frame — owns the scale).
-	const defaultBaseSizeForLevel = (level: FocusLevel): LayerBaseSize => ({
-		compactPx: Math.min(level.sourceRect.width, level.sourceRect.height) || level.fillRect.width,
-		detailsWidthPx: level.fillRect.width,
-		detailsHeightPx: level.fillRect.height
-	});
 
 	let {
 		levels = [],
 		reduceMotion = false,
 		entryGestureIdleMs = 0,
 		entryGestureMaxMs = 0,
-		geometryForLevel = defaultGeometryForLevel,
-		baseSizeForLevel = defaultBaseSizeForLevel,
+		geometryForLevel,
+		baseSizeForLevel,
 		frame,
 		compact,
 		details,
@@ -68,8 +41,8 @@
 		reduceMotion?: boolean;
 		entryGestureIdleMs?: number;
 		entryGestureMaxMs?: number;
-		geometryForLevel?: (level: FocusLevel) => FrameGeometry;
-		baseSizeForLevel?: (level: FocusLevel) => LayerBaseSize;
+		geometryForLevel: (level: FocusLevel) => FrameGeometry;
+		baseSizeForLevel: (level: FocusLevel) => LayerBaseSize;
 		frame?: Snippet<[StackFrameArgs]>;
 		compact?: Snippet<[FocusLevel]>;
 		details?: Snippet<[FocusLevel]>;

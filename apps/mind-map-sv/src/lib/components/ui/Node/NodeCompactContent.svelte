@@ -8,7 +8,6 @@
 		isTitleEditing = false,
 		diameterPx,
 		fontSizePx,
-		opacity = 1,
 		detailsMode = false,
 		onTitleCommit
 	} = $props<{
@@ -16,7 +15,6 @@
 		isTitleEditing?: boolean;
 		diameterPx: number;
 		fontSizePx: number;
-		opacity?: number;
 		detailsMode?: boolean;
 		onTitleCommit?: (title: string) => void;
 	}>();
@@ -35,7 +33,7 @@
 	class="compact-layer"
 	data-details-mode={detailsMode ? 'true' : undefined}
 	aria-hidden={detailsMode ? 'true' : undefined}
-	style="--node-diameter: {diameterPx}px; --node-text-font-size: {fontSizePx}px; --node-compact-opacity: {opacity};"
+	style="--node-diameter: {diameterPx}px; --node-text-font-size: {fontSizePx}px;"
 >
 	<div class="square">
 		{#if isTitleEditing}
@@ -64,7 +62,6 @@
 	.compact-layer {
 		grid-area: 1 / 1;
 		will-change: opacity;
-		opacity: var(--node-compact-opacity);
 	}
 
 	.compact-layer[data-details-mode='true'] {

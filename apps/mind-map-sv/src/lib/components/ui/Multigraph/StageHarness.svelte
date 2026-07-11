@@ -131,7 +131,7 @@
 			lastLiveViewState = state;
 		}}
 		onBlockedZoom={(input) => {
-			lastBlockedZoom = `${input.direction},${input.focalPoint.x},${input.focalPoint.y},${input.blockedFactor}`;
+			lastBlockedZoom = `${input.direction},${input.focalPoint.x},${input.focalPoint.y}`;
 		}}
 	>
 		{#each nodes as node (node.id)}

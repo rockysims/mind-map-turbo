@@ -68,13 +68,12 @@ describe('focus runtime stack', () => {
 		expect(runtime.activeLevel?.worldState).toEqual({ panX: 1, panY: 2, scale: 3 });
 	});
 
-	it('keeps legacy focused node getters backed by the active level', () => {
+	it('keeps focused node getters backed by the active level', () => {
 		const runtime = new FocusRuntime();
 		runtime.open({ id: 'n0', title: 'Node', description: '', tags: [] });
 
 		expect(runtime.isFocused).toBe(true);
 		expect(runtime.focusedNodeId).toBe('n0');
-		expect(runtime.entryProgress).toBe(1);
 
 		runtime.close();
 		expect(runtime.isFocused).toBe(false);

@@ -45,7 +45,6 @@
 	interface BlockedZoomInput {
 		direction: 'in' | 'out';
 		focalPoint: Point;
-		blockedFactor: number;
 		boundaryProgress?: number;
 		committed?: boolean;
 		nodeId?: string;
@@ -482,7 +481,6 @@
 			onBlockedZoom?.({
 				direction: 'in',
 				focalPoint,
-				blockedFactor: Math.abs(requestedScale - nextScale) / Math.max(nextScale, 0.001),
 				boundaryProgress: focusBoundaryScale <= 0 ? 0 : Math.min(1, nextScale / focusBoundaryScale),
 				committed: nextScale >= focusBoundaryScale,
 				viewState: { panX, panY, scale }
@@ -491,7 +489,6 @@
 			onBlockedZoom?.({
 				direction: 'in',
 				focalPoint,
-				blockedFactor: Math.abs(requestedScale - nextScale) / Math.max(nextScale, 0.001),
 				viewState: { panX, panY, scale }
 			});
 		}
@@ -615,7 +612,6 @@
 						onBlockedZoom?.({
 							direction: 'in',
 							focalPoint: pinchStart.centroid,
-							blockedFactor: Math.abs(requestedScale - nextScale) / Math.max(nextScale, 0.001),
 							boundaryProgress:
 								focusBoundaryScale <= 0 ? 0 : Math.min(1, nextScale / focusBoundaryScale),
 							committed: nextScale >= focusBoundaryScale,
@@ -625,7 +621,6 @@
 						onBlockedZoom?.({
 							direction: 'in',
 							focalPoint: pinchStart.centroid,
-							blockedFactor: Math.abs(requestedScale - nextScale) / Math.max(nextScale, 0.001),
 							viewState: { panX, panY, scale }
 						});
 					}
@@ -711,7 +706,6 @@
 		onBlockedZoom?.({
 			direction: 'in',
 			focalPoint,
-			blockedFactor: step.progressDelta,
 			boundaryProgress,
 			committed: boundaryProgress >= 1,
 			nodeId: candidate.nodeId,
@@ -736,7 +730,6 @@
 		onBlockedZoom?.({
 			direction: 'out',
 			focalPoint,
-			blockedFactor: releaseDelta,
 			boundaryProgress: nextProgress,
 			committed: false,
 			nodeId,

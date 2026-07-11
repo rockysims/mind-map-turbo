@@ -17,14 +17,10 @@
 
 <script lang="ts">
 	import { contentLayerScale, crossfadeOpacity } from './lib/morphSurface';
-	import { interpolateMorph } from './lib/morphGeometry';
 	import type { FrameGeometry } from './lib/frameGeometry';
-	import type { Rect } from './lib/zoomBoundary';
 
 	let {
 		geometry,
-		sourceRect,
-		fillRect,
 		progress = 1,
 		reduceMotion = false,
 		interactive: interactiveProp = undefined,
@@ -33,18 +29,14 @@
 		detailsBaseHeightPx = 0,
 		frame,
 		compact,
-		details,
-		children
+		details
 	}: {
 		/**
 		 * The fully-computed morphed frame, produced by the CONSUMER (via
 		 * `frameGeometry` / `interpolateMorph`). The layer does NOT interpolate
 		 * again — passing this avoids the double-interpolation bug.
 		 */
-		geometry?: FrameGeometry;
-		/** Legacy inputs (single-`children` consumers): the layer interpolates. */
-		sourceRect?: Rect;
-		fillRect?: Rect;
+		geometry: FrameGeometry;
 		progress?: number;
 		reduceMotion?: boolean;
 		/**
@@ -64,30 +56,17 @@
 		/** Content-layer snippets, rendered once at their base size and scaled. */
 		compact?: Snippet;
 		details?: Snippet;
-		/** Legacy single content slot (no crossfade); rendered borderless. */
-		children?: Snippet;
 	} = $props();
 
 	const effectiveProgress = $derived(reduceMotion ? Math.round(progress) : progress);
-	const useContentLayers = $derived(Boolean(compact || details));
 
-	// Geometry is authored by the consumer; only fall back to interpolating here
-	// for legacy single-`children` consumers that still pass source/fill rects.
-	const geo = $derived<FrameGeometry>(
-		geometry ??
-			(sourceRect && fillRect
-				? {
-						...interpolateMorph(sourceRect, fillRect, effectiveProgress),
-						borderWidthPx: 0
-					}
-				: { x: 0, y: 0, width: 0, height: 0, borderRadiusPx: 0, borderWidthPx: 0 })
-	);
+	const geo = $derived<FrameGeometry>(geometry);
 	const borderWidthPx = $derived(geo.borderWidthPx ?? 0);
 
 	// pointer-events: none while morphing so the underlying stage keeps getting
 	// wheel/pinch input driving the scrub; interactive only once committed —
 	// unless the consumer overrides (exit scrub feeds the wrapped ZoomWorld).
-	const interactive = $derived(interactiveProp ?? (!useContentLayers || effectiveProgress >= 1));
+	const interactive = $derived(interactiveProp ?? effectiveProgress >= 1);
 
 	const compactScale = $derived(contentLayerScale(geo.width, compactBasePx));
 	const detailsScale = $derived(contentLayerScale(geo.width, detailsBaseWidthPx));
@@ -143,7 +122,6 @@
 
 <div
 	class="deep-zoom-layer"
-	class:content-mode={useContentLayers}
 	style={layerStyle}
 	data-morph-surface="true"
 	data-morph-progress={effectiveProgress}
@@ -154,31 +132,15 @@
 	data-morph-radius={geo.borderRadiusPx}
 	data-morph-border-width={borderWidthPx}
 	data-morph-interactive={interactive ? 'true' : 'false'}
-	data-source-x={sourceRect?.left}
-	data-source-y={sourceRect?.top}
-	data-source-width={sourceRect?.width}
-	data-source-height={sourceRect?.height}
-	data-fill-x={fillRect?.left}
-	data-fill-y={fillRect?.top}
-	data-fill-width={fillRect?.width}
-	data-fill-height={fillRect?.height}
 >
-	{#if useContentLayers}
-		{#if frame}
-			{@render frame({ borderRadiusPx: geo.borderRadiusPx, borderWidthPx, content: contentLayers })}
-		{:else}
-			{@render defaultFrame({
-				borderRadiusPx: geo.borderRadiusPx,
-				borderWidthPx,
-				content: contentLayers
-			})}
-		{/if}
+	{#if frame}
+		{@render frame({ borderRadiusPx: geo.borderRadiusPx, borderWidthPx, content: contentLayers })}
 	{:else}
-		<div class="deep-zoom-layer-subject">
-			{#if children}
-				{@render children()}
-			{/if}
-		</div>
+		{@render defaultFrame({
+			borderRadiusPx: geo.borderRadiusPx,
+			borderWidthPx,
+			content: contentLayers
+		})}
 	{/if}
 </div>
 
@@ -192,14 +154,8 @@
 	}
 
 	/* While morphing, let wheel/pinch fall through to the stage beneath. */
-	.deep-zoom-layer.content-mode[data-morph-interactive='false'] {
+	.deep-zoom-layer[data-morph-interactive='false'] {
 		pointer-events: none;
-	}
-
-	.deep-zoom-layer-subject {
-		position: absolute;
-		inset: 0;
-		overflow: visible;
 	}
 
 	.deep-zoom-default-frame {

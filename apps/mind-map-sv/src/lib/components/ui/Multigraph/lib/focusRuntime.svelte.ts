@@ -58,10 +58,6 @@ export class FocusRuntime {
 		return active?.subjectKind === 'node' ? active.subjectId : null;
 	}
 
-	get entryProgress(): number {
-		return this.activeLevel?.morphProgress ?? 0;
-	}
-
 	push(input: PushFocusLevelInput): FocusLevel {
 		const level: FocusLevel = {
 			id: `${input.subjectKind}:${input.subjectId}:${this.levels.length + 1}`,
@@ -120,22 +116,6 @@ export class FocusRuntime {
 
 	close(): void {
 		this.levels = [];
-	}
-
-	preview(progress: number): void {
-		const active = this.activeLevel;
-		if (!active) {
-			this.push({
-				subjectKind: 'placeholder',
-				subjectId: 'preview',
-				sourceRect: DEFAULT_RECT,
-				fillRect: DEFAULT_RECT,
-				morphProgress: progress,
-				phase: 'entering'
-			});
-			return;
-		}
-		this.setProgress(progress, active.phase);
 	}
 
 	private updateActive(updater: (level: FocusLevel) => FocusLevel): void {

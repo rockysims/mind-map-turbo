@@ -5,13 +5,11 @@
 		title,
 		detailsTitleId,
 		detailsMode = false,
-		opacity = 0,
 		children
 	} = $props<{
 		title: string;
 		detailsTitleId?: string;
 		detailsMode?: boolean;
-		opacity?: number;
 		children?: Snippet;
 	}>();
 </script>
@@ -20,7 +18,6 @@
 	class="details"
 	data-details-mode={detailsMode ? 'true' : undefined}
 	aria-hidden={!detailsMode ? 'true' : undefined}
-	style="--node-details-opacity: {opacity};"
 >
 	<header>
 		<h1 id={detailsTitleId} class="details-title">{title}</h1>
@@ -43,7 +40,6 @@
 		min-height: 100%;
 		padding: clamp(1.25rem, 4vw, 3rem);
 		box-sizing: border-box;
-		opacity: var(--node-details-opacity);
 		/* No pointer-events override: the morph surface (DeepZoomLayer) owns
 		   interactivity. An explicit `auto` here would punch through the
 		   layer's pointer-events:none during the entry scrub and swallow the
