@@ -129,7 +129,7 @@ refactor.
   out) and `Node.svelte` contains no duplicated chrome CSS.
 - Lint, check, unit/story tests pass.
 
-### T03 — MorphSurface: one frame element with dual transform-scaled layers
+### T03 — MorphSurface: one frame element with dual transform-scaled layers — ✓ done (f4445d3)
 
 |                |                                                                                                                                                           |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -303,3 +303,17 @@ waiting on any design validation from T01/T03.
   (fullscreen content laid out under the stage scale wraps and rasterizes
   wrong; stage would own dialog scroll/gestures) and literal DOM reparenting
   (fragile under Svelte's managed anchors; `moveBefore()` not cross-browser).
+- 2026-07-10: During execution, resolved a tension between the T03 wording
+  ("DeepZoomLayer renders NodeChrome") and the milestone's hard criterion
+  ("zero content-type knowledge — snippets only" + the placeholder recursion
+  story). Kept the DeepZoom\* components content-agnostic: the layer takes a
+  `frame` snippet (the single bordered box) plus `compact`/`details` content
+  snippets and owns only the generic transform-scale + crossfade + lazy-mount
+  - pointer-fallthrough mechanics. The node consumer supplies `NodeChrome` as
+    the `frame` in T04. This preserves the "one border element, content fades
+    inside" invariant without coupling the generic surface to Node. Implemented
+    in T03 (f4445d3).
+- 2026-07-10: Waves 1–2 landed (T01 96b9803, T02 85ad1cd, T03 f4445d3). Each
+  task was validated independently by the orchestrator (lint + check + full
+  618-test suite) before committing. The production focus path is still the
+  legacy `NodeFocusSurface` (untouched, still green) until T04 swaps it.
