@@ -83,7 +83,8 @@
 		{@const isActive = index === levels.length - 1}
 		{@const geometry = geometryForLevel(level)}
 		{@const base = baseSizeForLevel(level)}
-		{@const worldActive = isActive && level.morphProgress >= 1}
+		{@const committedOrExiting = level.morphProgress >= 1 || level.phase === 'exiting'}
+		{@const worldActive = isActive && committedOrExiting}
 
 		{#snippet levelFrame(args: FrameSnippetArgs)}
 			{@render frame?.({
@@ -119,6 +120,7 @@
 			{geometry}
 			progress={level.morphProgress}
 			{reduceMotion}
+			interactive={committedOrExiting}
 			compactBasePx={base.compactPx}
 			detailsBaseWidthPx={base.detailsWidthPx}
 			detailsBaseHeightPx={base.detailsHeightPx}

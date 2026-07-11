@@ -27,7 +27,7 @@
 		type EntryGestureDirection,
 		type EntryGestureGateState
 	} from './lib/entryGestureGate.js';
-	import { clientPointToGraphPoint } from './lib/stageCoordinates.js';
+	import { clientPointToGraphPoint, type StageRect } from './lib/stageCoordinates.js';
 	import {
 		DRAG_THRESHOLD,
 		DBL_CLICK_MS,
@@ -92,6 +92,13 @@
 		onNodeLongPress?: (node: NodeData, point: Point) => void;
 		/** Fired whenever the internal pan/zoom state changes, including initial mount. */
 		onViewStateLiveChange?: (state: ViewStateSnapshot) => void;
+		/**
+		 * Fired with the stage element's on-screen rect (origin + size) on mount,
+		 * on every view change, and on resize. Consumers derive on-screen node
+		 * geometry from this rect + the live view state, avoiding any DOM
+		 * measurement of the nodes themselves (see the focus morph surface).
+		 */
+		onStageRectChange?: (rect: StageRect) => void;
 		/** Return true when zoom-in past max scale should keep moving toward focus. */
 		canOverzoomForFocus?: (input: {
 			focalPoint: Point;
@@ -139,6 +146,7 @@
 		onNodeDoubleClickDropOntoBackground,
 		onNodeLongPress,
 		onViewStateLiveChange,
+		onStageRectChange,
 		canOverzoomForFocus,
 		focusOverzoomMaxScaleForPoint,
 		focusEntryBoundaryCandidateForPoint,
@@ -178,9 +186,31 @@
 		panY: number;
 	} | null>(null);
 
+	function reportStageRect() {
+		if (!stageRef) return;
+		const rect = stageRef.getBoundingClientRect();
+		onStageRectChange?.({
+			left: rect.left,
+			top: rect.top,
+			width: rect.width,
+			height: rect.height
+		});
+	}
+
 	$effect(() => {
 		const state = { panX, panY, scale };
-		untrack(() => onViewStateLiveChange?.(state));
+		untrack(() => {
+			onViewStateLiveChange?.(state);
+			reportStageRect();
+		});
+	});
+
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		reportStageRect();
+		const onResize = () => reportStageRect();
+		window.addEventListener('resize', onResize);
+		return () => window.removeEventListener('resize', onResize);
 	});
 
 	$effect(() => {

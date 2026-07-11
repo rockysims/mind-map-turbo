@@ -27,6 +27,7 @@
 		fillRect,
 		progress = 1,
 		reduceMotion = false,
+		interactive: interactiveProp = undefined,
 		compactBasePx = 0,
 		detailsBaseWidthPx = 0,
 		detailsBaseHeightPx = 0,
@@ -46,6 +47,13 @@
 		fillRect?: Rect;
 		progress?: number;
 		reduceMotion?: boolean;
+		/**
+		 * Optional override for whether the surface intercepts pointer events.
+		 * When omitted the layer is interactive only once committed (progress ≥ 1);
+		 * the node consumer sets this true during the exit scrub so the wrapped
+		 * `ZoomWorld` keeps receiving the wheel/pinch that drives the morph down.
+		 */
+		interactive?: boolean;
 		/** Fixed logical base size of the square compact layer. */
 		compactBasePx?: number;
 		/** Fixed logical base size of the details layer (laid out at fill size). */
@@ -77,8 +85,9 @@
 	const borderWidthPx = $derived(geo.borderWidthPx ?? 0);
 
 	// pointer-events: none while morphing so the underlying stage keeps getting
-	// wheel/pinch input driving the scrub; interactive only once committed.
-	const interactive = $derived(!useContentLayers || effectiveProgress >= 1);
+	// wheel/pinch input driving the scrub; interactive only once committed —
+	// unless the consumer overrides (exit scrub feeds the wrapped ZoomWorld).
+	const interactive = $derived(interactiveProp ?? (!useContentLayers || effectiveProgress >= 1));
 
 	const compactScale = $derived(contentLayerScale(geo.width, compactBasePx));
 	const detailsScale = $derived(contentLayerScale(geo.width, detailsBaseWidthPx));

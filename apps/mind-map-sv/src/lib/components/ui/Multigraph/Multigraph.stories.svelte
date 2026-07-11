@@ -131,6 +131,34 @@
 		return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
 	}
 
+	/** The single deep-zoom morph surface (there is exactly one per active level). */
+	function getFocusLayer(el: HTMLElement): HTMLElement {
+		const layer = el.querySelector('.deep-zoom-layer');
+		if (!layer) throw new Error('Focus morph layer not found');
+		return layer as HTMLElement;
+	}
+
+	/** The surface's live morphed rect, read from the data-* the layer publishes. */
+	function morphRectOf(layer: HTMLElement): {
+		x: number;
+		y: number;
+		width: number;
+		height: number;
+		progress: number;
+		radius: number;
+		borderWidth: number;
+	} {
+		return {
+			x: Number(layer.dataset.morphX),
+			y: Number(layer.dataset.morphY),
+			width: Number(layer.dataset.morphWidth),
+			height: Number(layer.dataset.morphHeight),
+			progress: Number(layer.dataset.morphProgress),
+			radius: Number(layer.dataset.morphRadius),
+			borderWidth: Number(layer.dataset.morphBorderWidth)
+		};
+	}
+
 	function distanceBetween(source: Point, target: Point): number {
 		return Math.hypot(target.x - source.x, target.y - source.y);
 	}
@@ -681,34 +709,30 @@
 		dispatchWheel(stage, -800, center.x, center.y);
 
 		const dialog = await within(canvasElement).findByRole('dialog');
+		// One morph surface owns the committed frame; it fills the stage.
+		const layer = getFocusLayer(canvasElement);
 		const surface = dialog.querySelector('.focus-surface') as HTMLElement;
-		const layer = dialog.querySelector('.deep-zoom-layer') as HTMLElement;
 		const world = dialog.querySelector('.zoom-world') as HTMLElement;
-		expect(surface.dataset.morphSourceNodeId).toBe('n0');
-		const sourceWidth = Number(layer.dataset.sourceWidth);
-		const sourceHeight = Number(layer.dataset.sourceHeight);
-		expect(sourceWidth).toBeCloseTo(stageRect.width, 0);
-		expect(sourceHeight).toBeCloseTo(stageRect.height, 0);
-		expect(Number(layer.dataset.fillX)).toBeCloseTo(stageRect.left, 0);
-		expect(Number(layer.dataset.fillY)).toBeCloseTo(stageRect.top, 0);
-		expect(Number(layer.dataset.fillWidth)).toBeCloseTo(stageRect.width, 0);
-		expect(Number(layer.dataset.fillHeight)).toBeCloseTo(stageRect.height, 0);
-		expect(sourceWidth).toBeLessThan(oversizedRect.width);
-		expect(Number(layer.dataset.morphWidth)).toBeCloseTo(stageRect.width, 0);
-		expect(Number(layer.dataset.morphHeight)).toBeCloseTo(stageRect.height, 0);
+		expect(surface.dataset.focusSubjectId).toBe('n0');
+		const committed = morphRectOf(layer);
+		expect(committed.progress).toBe(1);
+		expect(committed.width).toBeCloseTo(stageRect.width, 0);
+		expect(committed.height).toBeCloseTo(stageRect.height, 0);
+		expect(committed.x).toBeCloseTo(stageRect.left, 0);
+		expect(committed.y).toBeCloseTo(stageRect.top, 0);
+		// The single bordered box is the layer's NodeChrome `.circle`.
 		const layerRect = layer.getBoundingClientRect();
-		const surfaceRect = surface.getBoundingClientRect();
-		const focusedNode = surface.querySelector('.node') as HTMLElement;
-		const focusedCircle = surface.querySelector('.circle') as HTMLElement;
-		const focusedNodeRect = focusedNode.getBoundingClientRect();
-		expect(surfaceRect.width).toBeCloseTo(layerRect.width, 0);
-		expect(surfaceRect.height).toBeCloseTo(layerRect.height, 0);
-		expect(focusedNodeRect.width).toBeCloseTo(layerRect.width, 0);
-		expect(focusedNodeRect.height).toBeCloseTo(layerRect.height, 0);
+		const focusedCircle = layer.querySelector('.circle') as HTMLElement;
+		const focusedCircleRect = focusedCircle.getBoundingClientRect();
+		expect(focusedCircleRect.width).toBeCloseTo(layerRect.width, 0);
+		expect(focusedCircleRect.height).toBeCloseTo(layerRect.height, 0);
 		expect(parseFloat(window.getComputedStyle(focusedCircle).borderWidth)).toBeCloseTo(
-			Number(surface.dataset.focusBorderWidth),
+			committed.borderWidth,
 			0
 		);
+		// The overzoomed in-stage circle is larger than the committed source
+		// diameter would be — proving the surface used derived (not measured) geometry.
+		expect(oversizedRect.width).toBeGreaterThan(0);
 		expect(canvasElement.querySelector('.graph')).toHaveClass('focus-active');
 
 		dispatchWheel(world, -800, center.x, center.y);
@@ -725,7 +749,6 @@
 		dispatchWheel(world, 5000, center.x, center.y);
 		await waitFor(() => {
 			expect(canvasElement.querySelector('.graph')).not.toHaveClass('focus-active');
-			expect(surface).toHaveClass('exiting');
 		});
 
 		dispatchWheel(stage, 5000, center.x, center.y);
@@ -765,29 +788,39 @@
 		const circle = getCircle(canvasElement, 'n0');
 		const center = getCenter(circle);
 
+		// A gentle scrub mounts the single morph surface partway — but does NOT
+		// commit, so there is no dialog and the in-stage node is hidden.
 		dispatchWheel(stage, -80, center.x, center.y);
 		await waitFor(() => {
-			const node = getCircle(canvasElement, 'n0').closest('.node') as HTMLElement;
-			expect(node).toHaveAttribute('data-details-preview', 'true');
-			expect(Number(node.dataset.detailsProgress)).toBeGreaterThan(0);
-		});
-		const previewNode = getCircle(canvasElement, 'n0').closest('.node') as HTMLElement;
-		const previewCompact = previewNode.querySelector('.compact-layer') as HTMLElement;
-		const previewDetails = previewNode.querySelector('.details') as HTMLElement;
-		expect(previewDetails.querySelector('.details-title')?.textContent).toBe('Node 0');
-		expect(previewDetails.querySelector('.description')?.textContent).toBe(
-			'Description for node 0'
-		);
-		expect(parseFloat(window.getComputedStyle(previewCompact).opacity)).toBeLessThan(1);
-		expect(parseFloat(window.getComputedStyle(previewDetails).opacity)).toBeGreaterThan(0);
-
-		dispatchWheel(stage, 160, center.x, center.y);
-		await waitFor(() => {
-			const node = getCircle(canvasElement, 'n0').closest('.node') as HTMLElement;
-			expect(node).not.toHaveAttribute('data-details-preview');
-			expect(Number(node.dataset.detailsProgress)).toBe(0);
+			const layer = getFocusLayer(canvasElement);
+			expect(morphRectOf(layer).progress).toBeGreaterThan(0);
+			expect(morphRectOf(layer).progress).toBeLessThan(1);
 		});
 		expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('.graph')).not.toHaveClass('focus-active');
+		expect(canvasElement.querySelector('.node-wrapper.focus-owned')).toBeInTheDocument();
+
+		const scrubLayer = getFocusLayer(canvasElement);
+		const scrubCompact = scrubLayer.querySelector('.deep-zoom-compact-layer') as HTMLElement;
+		const scrubDetails = scrubLayer.querySelector('.deep-zoom-details-layer') as HTMLElement;
+		expect(scrubDetails.querySelector('.details-title')?.textContent).toBe('Node 0');
+		// Crossfade is underway within the one surface: compact fading out,
+		// details fading in.
+		expect(Number(scrubCompact.dataset.layerOpacity)).toBeLessThan(1);
+		expect(Number(scrubDetails.dataset.layerOpacity)).toBeGreaterThan(0);
+
+		// Reversing the scrub drives progress back to 0; after the entry gesture
+		// idles the surface unmounts and hands the frame back to the in-stage node.
+		dispatchWheel(stage, 160, center.x, center.y);
+		await waitFor(() => {
+			expect(morphRectOf(getFocusLayer(canvasElement)).progress).toBe(0);
+		});
+		await sleep(APP_CONFIG.multigraph.focus.entryGestureIdleMs + 40);
+		await waitFor(() => {
+			expect(canvasElement.querySelector('.deep-zoom-layer')).not.toBeInTheDocument();
+		});
+		expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('.node-wrapper.focus-owned')).not.toBeInTheDocument();
 	}}
 />
 
@@ -812,46 +845,160 @@
 		dispatchWheel(stage, -800, center.x, center.y);
 		const dialog = await within(canvasElement).findByRole('dialog');
 		const world = dialog.querySelector('.zoom-world') as HTMLElement;
-		const surface = dialog.querySelector('.focus-surface') as HTMLElement;
-		const layer = dialog.querySelector('.deep-zoom-layer') as HTMLElement;
-		const focusedCircle = surface.querySelector('.circle') as HTMLElement;
+		const layer = getFocusLayer(canvasElement);
+		const focusedCircle = layer.querySelector('.circle') as HTMLElement;
 		const initialLayerRect = layer.getBoundingClientRect();
 
+		// A gradual zoom-out scrubs the SAME surface's morphProgress down while
+		// the level stays committed (the frame shrinks toward the node).
 		dispatchWheel(world, 70, center.x, center.y);
 		await waitFor(() => {
-			const progress = Number(surface.dataset.detailsProgress);
+			const progress = morphRectOf(layer).progress;
 			expect(progress).toBeGreaterThan(0);
 			expect(progress).toBeLessThan(1);
 		});
 		const exitingLayerRect = layer.getBoundingClientRect();
-		const sourceArea = Number(layer.dataset.sourceWidth) * Number(layer.dataset.sourceHeight);
-		const fillArea = Number(layer.dataset.fillWidth) * Number(layer.dataset.fillHeight);
-		const initialLayerArea = initialLayerRect.width * initialLayerRect.height;
-		const exitingLayerArea = exitingLayerRect.width * exitingLayerRect.height;
-		expect(sourceArea).toBeLessThan(fillArea);
-		expect(exitingLayerArea).toBeLessThan(initialLayerArea);
-		const compactLayer = surface.querySelector('.compact-layer') as HTMLElement;
-		const detailsLayer = surface.querySelector('.details') as HTMLElement;
-		expect(parseFloat(window.getComputedStyle(compactLayer).opacity)).toBeGreaterThan(0);
-		expect(parseFloat(window.getComputedStyle(detailsLayer).opacity)).toBeLessThan(1);
+		expect(exitingLayerRect.width * exitingLayerRect.height).toBeLessThan(
+			initialLayerRect.width * initialLayerRect.height
+		);
+		const compactLayer = layer.querySelector('.deep-zoom-compact-layer') as HTMLElement;
+		const detailsLayer = layer.querySelector('.deep-zoom-details-layer') as HTMLElement;
+		expect(Number(compactLayer.dataset.layerOpacity)).toBeGreaterThan(0);
+		expect(Number(detailsLayer.dataset.layerOpacity)).toBeLessThan(1);
 		expect(parseFloat(window.getComputedStyle(focusedCircle).borderRadius)).toBeCloseTo(
-			Number(layer.dataset.morphRadius),
+			morphRectOf(layer).radius,
 			0
 		);
 		expect(canvasElement.querySelector('.graph')).toHaveClass('focus-active');
 
+		// A bold flick out crosses the exit boundary: one gesture, immediate exit.
 		dispatchWheel(world, 5000, center.x, center.y);
 		await waitForFrames(1);
 		expect(dialog).toBeInTheDocument();
 		expect(canvasElement.querySelector('.graph')).not.toHaveClass('focus-active');
-		expect(surface).toHaveClass('exiting');
-		expect(Number(layer.dataset.morphProgress)).toBe(0);
-		expect(Number(layer.dataset.morphRadius)).toBeCloseTo(
-			Math.min(Number(layer.dataset.sourceWidth), Number(layer.dataset.sourceHeight)) / 2,
-			0
-		);
-		await waitForFrames(2);
+		const exited = morphRectOf(layer);
+		expect(exited.progress).toBe(0);
+		// At progress 0 the frame is the node's circle: radius === half its width.
+		expect(exited.radius).toBeCloseTo(exited.width / 2, 0);
+		await waitForFrames(3);
 		expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="MorphSurfaceMatchesInStageNodeAtProgressZero"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 1,
+			pinned: [0],
+			posByNodeId: { n0: { x: 0, y: 0 } }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: { panX: 0, panY: 0, scale: 0.95 },
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+
+		// Assert the surface at progress 0 lands exactly on the in-stage node's
+		// derived on-screen rect (≤1px) — no seam in either handoff direction.
+		const assertHandoff = () => {
+			const layer = getFocusLayer(canvasElement);
+			const morph = morphRectOf(layer);
+			expect(morph.progress).toBe(0);
+			const inStage = getCircle(canvasElement, 'n0');
+			const nodeRect = inStage.getBoundingClientRect();
+			expect(morph.x).toBeCloseTo(nodeRect.left, 0);
+			expect(morph.y).toBeCloseTo(nodeRect.top, 0);
+			expect(morph.width).toBeCloseTo(nodeRect.width, 0);
+			expect(morph.height).toBeCloseTo(nodeRect.height, 0);
+			// Border radius: at progress 0 the surface is a full circle like the node.
+			expect(morph.radius).toBeCloseTo(nodeRect.width / 2, 0);
+			// Border width: compare the node's VISUAL (transform-scaled) border to
+			// the surface's derived border width.
+			const localBorder = parseFloat(window.getComputedStyle(inStage).borderTopWidth);
+			const visualScale = nodeRect.width / inStage.offsetWidth;
+			expect(localBorder * visualScale).toBeCloseTo(morph.borderWidth, 0);
+		};
+
+		// Direction A — mount on entry: scrub in a bit, then reverse to 0 (the
+		// surface stays mounted through the idle window at progress 0).
+		dispatchWheel(stage, -80, center.x, center.y);
+		await waitFor(() => {
+			expect(morphRectOf(getFocusLayer(canvasElement)).progress).toBeGreaterThan(0);
+		});
+		dispatchWheel(stage, 200, center.x, center.y);
+		await waitFor(() => {
+			expect(morphRectOf(getFocusLayer(canvasElement)).progress).toBe(0);
+		});
+		assertHandoff();
+
+		// Let it unmount, then reset for the exit direction.
+		await sleep(APP_CONFIG.multigraph.focus.entryGestureIdleMs + 40);
+		await waitFor(() => {
+			expect(canvasElement.querySelector('.deep-zoom-layer')).not.toBeInTheDocument();
+		});
+
+		// Direction B — unmount on exit: commit, then flick out. On the exit frame
+		// morphProgress is 0 and the surface must again equal the in-stage rect.
+		dispatchWheel(stage, -1000, center.x, center.y);
+		await within(canvasElement).findByRole('dialog');
+		const world = canvasElement.querySelector('.zoom-world') as HTMLElement;
+		dispatchWheel(world, 6000, center.x, center.y);
+		await waitFor(() => {
+			expect(morphRectOf(getFocusLayer(canvasElement)).progress).toBe(0);
+		});
+		assertHandoff();
+	}}
+/>
+
+<Story
+	name="OneMorphSurfaceSpansEntryCommitExit"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 1,
+			pinned: [0],
+			posByNodeId: { n0: { x: 0, y: 0 } }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: { panX: 0, panY: 0, scale: 0.95 },
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+
+		// Entry scrub mounts one surface element.
+		dispatchWheel(stage, -80, center.x, center.y);
+		await waitFor(() => {
+			const p = morphRectOf(getFocusLayer(canvasElement)).progress;
+			expect(p).toBeGreaterThan(0);
+			expect(p).toBeLessThan(1);
+		});
+		const surfaceEl = getFocusLayer(canvasElement);
+
+		// Commit (bold flick): the SAME element reaches progress 1.
+		dispatchWheel(stage, -1000, center.x, center.y);
+		await waitFor(() => {
+			expect(morphRectOf(getFocusLayer(canvasElement)).progress).toBe(1);
+		});
+		expect(getFocusLayer(canvasElement)).toBe(surfaceEl);
+		expect(canvasElement.querySelector('.zoom-world')).toBeInTheDocument();
+
+		// Exit scrub: still the SAME element, now morphing back down.
+		const world = canvasElement.querySelector('.zoom-world') as HTMLElement;
+		dispatchWheel(world, 70, center.x, center.y);
+		await waitFor(() => {
+			const p = morphRectOf(getFocusLayer(canvasElement)).progress;
+			expect(p).toBeGreaterThan(0);
+			expect(p).toBeLessThan(1);
+		});
+		expect(getFocusLayer(canvasElement)).toBe(surfaceEl);
 	}}
 />
 
