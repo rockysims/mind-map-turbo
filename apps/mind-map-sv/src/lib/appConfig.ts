@@ -38,8 +38,8 @@ export const APP_CONFIG = {
 			boundaryNearTouchMarginPx: 8, // tolerance for treating zoom subjects as inscribed
 			detailsCornerRadiusPx: 18, // fully focused node corner radius
 			detailsBorderWidthPx: 8, // fully focused node frame border width (matches node border)
-			preInscribeZoneFraction: 0.22, // fraction of inscribe scale used for entry scrub
-			subFitExitZoneFraction: 0.18, // fraction below fit scale used for exit scrub
+			preInscribeZoneFraction: 0.88, // fraction of inscribe scale used for entry scrub
+			subFitExitZoneFraction: 0.72, // fraction below fit scale used for exit scrub
 			eligibilityCoverageRatio: 1, // focal point must be inside the projected node circle
 			entryTransitionMs: 660, // focus overlay morph duration
 			worldWheelSensitivity: 0.002, // wheel delta to scale factor inside focus/image worlds
