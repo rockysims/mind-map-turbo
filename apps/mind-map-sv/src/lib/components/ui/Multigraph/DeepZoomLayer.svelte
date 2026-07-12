@@ -27,6 +27,7 @@
 		compactBasePx = 0,
 		detailsBaseWidthPx = 0,
 		detailsBaseHeightPx = 0,
+		onFrameWheel,
 		frame,
 		compact,
 		details
@@ -51,6 +52,8 @@
 		/** Fixed logical base size of the details layer (laid out at fill size). */
 		detailsBaseWidthPx?: number;
 		detailsBaseHeightPx?: number;
+		/** Wheel fallback for frame chrome that wraps, but is not inside, ZoomWorld. */
+		onFrameWheel?: (event: WheelEvent) => void;
 		/** Draws the single bordered box; defaults to a plain bordered box. */
 		frame?: Snippet<[FrameSnippetArgs]>;
 		/** Content-layer snippets, rendered once at their base size and scaled. */
@@ -132,6 +135,7 @@
 	data-morph-radius={geo.borderRadiusPx}
 	data-morph-border-width={borderWidthPx}
 	data-morph-interactive={interactive ? 'true' : 'false'}
+	onwheel={(event) => onFrameWheel?.(event)}
 >
 	{#if frame}
 		{@render frame({ borderRadiusPx: geo.borderRadiusPx, borderWidthPx, content: contentLayers })}

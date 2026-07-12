@@ -111,6 +111,7 @@
 			compactBasePx={base.compactPx}
 			detailsBaseWidthPx={base.detailsWidthPx}
 			detailsBaseHeightPx={base.detailsHeightPx}
+			onFrameWheel={worldActive ? (event) => activeWorld?.dispatchWheel(event) : undefined}
 			frame={frame ? levelFrame : undefined}
 			compact={compact ? levelCompact : undefined}
 			details={details ? levelDetails : undefined}

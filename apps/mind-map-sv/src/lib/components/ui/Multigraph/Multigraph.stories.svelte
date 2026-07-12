@@ -960,6 +960,17 @@
 			expect(Number(world.dataset.zoomWorldScale)).toBeGreaterThan(1);
 		});
 
+		const scaleBeforeBorderWheel = Number(world.dataset.zoomWorldScale);
+		dispatchWheel(
+			focusedCircle,
+			-80,
+			focusedCircleRect.left + focusedCircleRect.width / 2,
+			focusedCircleRect.top + committed.borderWidth / 2
+		);
+		await waitFor(() => {
+			expect(Number(world.dataset.zoomWorldScale)).toBeGreaterThan(scaleBeforeBorderWheel);
+		});
+
 		const stageTransformBeforeExit = getStageTransform(canvasElement);
 		dispatchWheel(world, 5000, center.x, center.y);
 		await waitFor(() => {
