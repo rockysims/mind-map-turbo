@@ -113,7 +113,10 @@ export class FocusController {
 	 */
 	get committed(): boolean {
 		const active = this.activeLevel;
-		return active != null && (active.phase === 'active' || active.phase === 'exiting');
+		return (
+			active != null &&
+			(active.phase === 'active' || (active.phase === 'exiting' && active.morphProgress > 0))
+		);
 	}
 
 	/** True while the terminal close tween is in flight (phase 'closing'). */
@@ -136,7 +139,9 @@ export class FocusController {
 	 */
 	get exitScrubActive(): boolean {
 		const active = this.activeLevel;
-		return Boolean(active && active.phase === 'exiting' && active.morphProgress < 1);
+		return Boolean(
+			active && active.phase === 'exiting' && active.morphProgress > 0 && active.morphProgress < 1
+		);
 	}
 
 	/**
@@ -259,11 +264,12 @@ export class FocusController {
 			return;
 		}
 		if (delta >= 1) {
-			// Full exit threshold crossed: pop a nested level, or close the last.
+			// Full gesture threshold crossed: snap to the gesture-computed endpoint
+			// (progress 0), then remove/pop after that handoff frame paints.
 			if (this.depth > 1) {
-				this.#popLevel();
+				this.#completeGesturePop();
 			} else {
-				this.closeFocus();
+				this.#completeGestureClose();
 			}
 			return;
 		}
@@ -273,47 +279,9 @@ export class FocusController {
 	}
 
 	/**
-	 * Pop a nested level: tween the active (child) frame 1 → 0, then drop it and
-	 * restore the now-active parent to its committed state.
-	 *
-	 * Camera-on-pop (open question #1): the parent world is NOT stored — its
-	 * `ZoomWorld` remounts at centered-fit (identity: scale 1, no pan) because a
-	 * level only commits at centered-and-fit and the exit gate guarantees a child
-	 * is centered-and-fit before it pops. Restoring the parent to
-	 * `morphProgress: 1, phase: 'active'` is the only preserved value. If a real
-	 * panned-image case proves this discontinuous, the smallest fix is to carry
-	 * the parent's world scale/pan onto the child level and rehydrate the parent
-	 * `ZoomWorld` from it — NOT to reinstate a general worldState store.
-	 */
-	#popLevel(): void {
-		this.clearIdleUnmount();
-		this.cancelTween();
-		const from = this.activeLevel?.morphProgress ?? 1;
-		const transitionMs = this.#deps.config.transitionMs;
-		const finish = () => {
-			this.#runtime.pop();
-			this.#runtime.setProgress(1, 'active');
-		};
-		if (
-			this.#deps.getReduceMotion() ||
-			transitionMs <= 0 ||
-			typeof requestAnimationFrame !== 'function'
-		) {
-			this.#runtime.setProgress(0, 'closing');
-			finish();
-			return;
-		}
-		// 'closing' phase reuses the exiting-guard so stray wheels can't cancel
-		// the pop mid-flight; the child frame freezes while it shrinks away.
-		this.#tweenProgress(from, 0, transitionMs, 'closing', () => {
-			requestAnimationFrame(() => finish());
-		});
-	}
-
-	/**
-	 * Unified close: used by Escape, the close button, and wheel-out completion
-	 * (handleExit delta >= 1). Tweens progress to 0 then unmounts. Arms the
-	 * residual-gesture gate on every close for consistent wheel swallowing.
+	 * Unified close: used by Escape and the close button. Tweens progress to 0
+	 * then unmounts. Wheel-out gesture completion uses #completeGestureClose
+	 * instead so visual progress stays synchronized with the wheel input.
 	 */
 	closeFocus(): void {
 		if (!this.isFocused || this.exiting) return;
@@ -416,6 +384,35 @@ export class FocusController {
 		this.clearIdleUnmount();
 		this.#runtime.close();
 		this.#entryGestureIdleMs = 0;
+	}
+
+	#completeGestureClose(): void {
+		this.clearIdleUnmount();
+		this.cancelTween();
+		this.#deps.armEntryGate('out');
+		this.#runtime.setProgress(0, 'exiting');
+		this.#afterHandoffFrame(() => this.#finishClose());
+	}
+
+	#completeGesturePop(): void {
+		this.clearIdleUnmount();
+		this.cancelTween();
+		this.#runtime.setProgress(0, 'exiting');
+		this.#afterHandoffFrame(() => {
+			this.#runtime.pop();
+			this.#runtime.setProgress(1, 'active');
+		});
+	}
+
+	#afterHandoffFrame(finish: () => void): void {
+		if (typeof requestAnimationFrame !== 'function') {
+			finish();
+			return;
+		}
+		this.#tweenRaf = requestAnimationFrame(() => {
+			this.#tweenRaf = null;
+			finish();
+		});
 	}
 
 	#tweenProgress(

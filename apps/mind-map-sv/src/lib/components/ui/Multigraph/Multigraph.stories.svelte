@@ -2,6 +2,7 @@
 	import { defineMeta } from '@storybook/addon-svelte-csf';
 	import Multigraph from '$lib/components/ui/Multigraph/Multigraph.svelte';
 	import { expect, fn, waitFor, within } from 'storybook/test';
+	import { tick } from 'svelte';
 	import { APP_CONFIG } from '$lib/appConfig';
 	import {
 		DBL_CLICK_MS,
@@ -1105,20 +1106,18 @@
 			expect(progress).toBeLessThan(1);
 		});
 
-		// A bold flick out crosses the exit boundary: the unified close tween runs
-		// progress to 0 then unmounts the surface one frame later.
+		// A bold flick out crosses the exit boundary: the gesture drives progress
+		// directly to 0, then unmounts the surface one frame later.
 		dispatchWheel(world, 5000, center.x, center.y);
-		await waitForFrames(1);
+		await tick();
 		expect(dialog).toBeInTheDocument();
 		expect(canvasElement.querySelector('.graph')).not.toHaveClass('focus-active');
-		// Tween completes: progress reaches 0 (frame is the node's circle).
-		await waitFor(() => {
-			expect(morphRectOf(layer).progress).toBe(0);
-		});
+		expect(morphRectOf(layer).progress).toBe(0);
 		const exited = morphRectOf(layer);
 		// At progress 0 the frame is the node's circle: radius === half its width.
 		expect(exited.radius).toBeCloseTo(exited.width / 2, 0);
 		// One rAF later the surface unmounts.
+		await waitForFrames(1);
 		await waitFor(() => {
 			expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
 		});

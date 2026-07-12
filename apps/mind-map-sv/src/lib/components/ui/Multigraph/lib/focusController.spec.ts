@@ -271,4 +271,42 @@ describe('FocusController lifecycle', () => {
 			vi.unstubAllGlobals();
 		}
 	});
+
+	it('completes wheel exit at progress zero without running the close tween', () => {
+		vi.useFakeTimers();
+		const rafQueue: FrameRequestCallback[] = [];
+		vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+			rafQueue.push(cb);
+			return rafQueue.length;
+		});
+		vi.stubGlobal('cancelAnimationFrame', () => {});
+		const flushFrame = () => rafQueue.shift()?.(0);
+		try {
+			const { deps, armEntryGate } = makeDeps({
+				getReduceMotion: () => false,
+				config: { transitionMs: 660, entryGestureIdleMs: 180, entryGestureMaxMs: 420 }
+			});
+			const focus = new FocusController(deps);
+			focus.openFocus(node);
+
+			focus.handleExit(focus.activeLevel!, 0.4);
+			expect(focus.activeLevel?.morphProgress).toBeCloseTo(0.6);
+
+			focus.handleExit(focus.activeLevel!, 1);
+			expect(armEntryGate).toHaveBeenCalledWith('out');
+			expect(focus.activeLevel?.phase).toBe('exiting');
+			expect(focus.activeLevel?.morphProgress).toBe(0);
+			expect(focus.committed).toBe(false);
+			expect(focus.isFocused).toBe(true);
+
+			vi.advanceTimersByTime(660);
+			expect(focus.isFocused).toBe(true);
+
+			flushFrame();
+			expect(focus.isFocused).toBe(false);
+		} finally {
+			vi.useRealTimers();
+			vi.unstubAllGlobals();
+		}
+	});
 });
