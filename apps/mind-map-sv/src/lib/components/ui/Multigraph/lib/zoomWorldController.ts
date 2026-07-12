@@ -158,6 +158,32 @@ export function wheelZoomWorld(
 	};
 }
 
+export function wheelExitBoundaryAmount(
+	currentAmount: number,
+	deltaY: number,
+	bounds: ZoomWorldBounds
+): number {
+	const limits = zoomWorldScaleLimits(bounds);
+	const exitZoneFraction =
+		bounds.exitZoneFraction ?? APP_CONFIG.multigraph.focus.subFitExitZoneFraction;
+	const minScale = limits.minScale;
+	const zoneEnd = minScale * (1 - clamp(exitZoneFraction, 0, 1));
+	const amount = clamp(currentAmount, 0, 1);
+	if (amount <= 0) return 0;
+	if (zoneEnd >= minScale || minScale <= 0) return deltaY < 0 ? 0 : 1;
+
+	const virtualScale = minScale - amount * (minScale - zoneEnd);
+	const requestedScale = scaleFromWheelDelta(
+		virtualScale,
+		deltaY,
+		bounds.wheelSensitivity ?? APP_CONFIG.multigraph.focus.worldWheelSensitivity,
+		Number.NEGATIVE_INFINITY,
+		Number.POSITIVE_INFINITY
+	);
+	const nextScale = clamp(requestedScale, zoneEnd, minScale);
+	return clamp((minScale - nextScale) / (minScale - zoneEnd), 0, 1);
+}
+
 function descendBoundaryDelta(
 	deltaY: number,
 	requestedScale: number,

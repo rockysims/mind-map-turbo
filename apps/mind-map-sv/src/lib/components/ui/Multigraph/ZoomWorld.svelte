@@ -14,6 +14,7 @@
 	import {
 		clampZoomWorldState,
 		pinchZoomWorld,
+		wheelExitBoundaryAmount,
 		wheelZoomWorld,
 		type ZoomWorldBounds,
 		type ZoomWorldState
@@ -142,9 +143,9 @@
 		event.preventDefault();
 		event.stopPropagation();
 		if (shouldSwallowEntryZoom(event.deltaY < 0 ? 'in' : 'out')) return;
-		if (exitBoundaryAmount > 0 && event.deltaY < 0) {
-			exitBoundaryAmount = 0;
-			onExitBoundary?.(0);
+		if (exitBoundaryAmount > 0) {
+			exitBoundaryAmount = wheelExitBoundaryAmount(exitBoundaryAmount, event.deltaY, bounds);
+			onExitBoundary?.(exitBoundaryAmount);
 			return;
 		}
 		// A reversal (zoom-out) cancels any in-flight descend accumulation,

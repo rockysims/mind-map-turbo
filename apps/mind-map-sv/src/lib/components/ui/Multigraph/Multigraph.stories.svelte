@@ -1086,6 +1086,14 @@
 		);
 		expect(canvasElement.querySelector('.graph')).toHaveClass('focus-active');
 
+		const partialExitProgress = morphRectOf(layer).progress;
+		dispatchWheel(world, -10, center.x, center.y);
+		await waitFor(() => {
+			const progress = morphRectOf(layer).progress;
+			expect(progress).toBeGreaterThan(partialExitProgress);
+			expect(progress).toBeLessThan(1);
+		});
+
 		// A bold flick out crosses the exit boundary: the unified close tween runs
 		// progress to 0 then unmounts the surface one frame later.
 		dispatchWheel(world, 5000, center.x, center.y);

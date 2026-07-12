@@ -3,6 +3,7 @@ import {
 	clampZoomWorldState,
 	pinchZoomWorld,
 	pinchZoomWorldStep,
+	wheelExitBoundaryAmount,
 	wheelZoomWorld,
 	worldRectForState,
 	zoomWorldAtPoint
@@ -57,6 +58,25 @@ describe('zoom world controller', () => {
 		expect(boundary.state).toEqual({ panX: 0, panY: 0, scale: 1 });
 		expect(boundary.exitBoundaryDelta).toBe(0.5);
 		expect(boundary.exitProgress).toBe(0.5);
+	});
+
+	it('reverses exit boundary pressure proportionally', () => {
+		const exiting = wheelExitBoundaryAmount(0.75, -10, {
+			...bounds,
+			exitZoneFraction: 0.5
+		});
+		expect(exiting).toBeGreaterThan(0);
+		expect(exiting).toBeLessThan(0.75);
+
+		const continuing = wheelExitBoundaryAmount(exiting, 10, {
+			...bounds,
+			exitZoneFraction: 0.5
+		});
+		expect(continuing).toBeGreaterThan(exiting);
+		expect(continuing).toBeLessThan(1);
+
+		expect(wheelExitBoundaryAmount(0.1, -5000, { ...bounds, exitZoneFraction: 0.5 })).toBe(0);
+		expect(wheelExitBoundaryAmount(0.9, 5000, { ...bounds, exitZoneFraction: 0.5 })).toBe(1);
 	});
 
 	it('reports entryBoundaryDelta only for a zoom-in blocked at max scale', () => {
