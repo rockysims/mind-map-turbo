@@ -13,6 +13,7 @@ import {
 
 export type FocusEntryBoundaryPhase = 'free' | 'steering' | 'boundary';
 export type FocusEntrySteeringAxis = 'horizontal' | 'vertical';
+export type FocusEntrySteeringSide = 'start' | 'end';
 
 export interface FocusEntryBoundaryCandidate {
 	nodeId: string;
@@ -23,6 +24,7 @@ export interface FocusEntryBoundaryCandidate {
 export interface FocusEntrySteeringState {
 	nodeId: string;
 	axis: FocusEntrySteeringAxis;
+	side: FocusEntrySteeringSide;
 	startScale: number;
 }
 
@@ -152,45 +154,99 @@ function steerViewForOneSidedEntry(
 	changed: boolean;
 	steeringState: FocusEntrySteeringState | null;
 } {
-	const clamped = clampRectForEntrySteering(rect, viewport);
-	let dx = clamped.dx;
-	let dy = clamped.dy;
-	let nextRect = clamped.rect;
 	const horizontalContact = rect.left <= marginPx || rectRight(rect) >= viewport.width - marginPx;
 	const verticalContact = rect.top <= marginPx || rectBottom(rect) >= viewport.height - marginPx;
-	const contactAxis: FocusEntrySteeringAxis | null =
-		horizontalContact && !verticalContact
-			? 'horizontal'
-			: verticalContact && !horizontalContact
-				? 'vertical'
-				: null;
-	const nextSteeringState = contactAxis
-		? steeringState?.nodeId === candidate.nodeId && steeringState.axis === contactAxis
+	const contact = oneSidedContact(rect, viewport, horizontalContact, verticalContact, marginPx);
+	const activeContact =
+		steeringState?.nodeId === candidate.nodeId
+			? { axis: steeringState.axis, side: steeringState.side }
+			: contact;
+	const nextSteeringState = activeContact
+		? steeringState?.nodeId === candidate.nodeId && steeringState.axis === activeContact.axis
 			? steeringState
-			: { nodeId: candidate.nodeId, axis: contactAxis, startScale: view.scale }
+			: {
+					nodeId: candidate.nodeId,
+					axis: activeContact.axis,
+					side: activeContact.side,
+					startScale: view.scale
+				}
 		: null;
 	const centerProgress = nextSteeringState
 		? entrySteeringProgress(view.scale, nextSteeringState.startScale, boundaryScale)
 		: 1;
 
-	if (horizontalContact && !verticalContact) {
-		const centerDy = axisCenterDelta(nextRect.top, rectBottom(nextRect), viewport.height);
-		const progressiveDy = centerDy * centerProgress;
-		dy += progressiveDy;
-		nextRect = translateRect(nextRect, 0, progressiveDy);
+	if (!nextSteeringState) {
+		const clamped = clampRectForEntrySteering(rect, viewport);
+		return {
+			view: translateView(view, clamped.dx, clamped.dy),
+			rect: clamped.rect,
+			changed: Math.abs(clamped.dx) > 0.001 || Math.abs(clamped.dy) > 0.001,
+			steeringState: null
+		};
 	}
-	if (verticalContact && !horizontalContact) {
-		const centerDx = axisCenterDelta(nextRect.left, rectRight(nextRect), viewport.width);
-		const progressiveDx = centerDx * centerProgress;
-		dx += progressiveDx;
-		nextRect = translateRect(nextRect, progressiveDx, 0);
-	}
+
+	const contactDelta = firstContactSideDelta(rect, viewport, nextSteeringState);
+	const contactRect = translateRect(rect, contactDelta.dx, contactDelta.dy);
+	const centerDx = axisCenterDelta(contactRect.left, rectRight(contactRect), viewport.width);
+	const centerDy = axisCenterDelta(contactRect.top, rectBottom(contactRect), viewport.height);
+	const progressiveDx = centerDx * centerProgress;
+	const progressiveDy = centerDy * centerProgress;
+	const dx = contactDelta.dx + progressiveDx;
+	const dy = contactDelta.dy + progressiveDy;
+	const nextRect = translateRect(contactRect, progressiveDx, progressiveDy);
 
 	return {
 		view: translateView(view, dx, dy),
 		rect: nextRect,
 		changed: Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001,
 		steeringState: nextSteeringState
+	};
+}
+
+function oneSidedContact(
+	rect: Rect,
+	viewport: ViewportSize,
+	horizontalContact: boolean,
+	verticalContact: boolean,
+	marginPx: number
+): Pick<FocusEntrySteeringState, 'axis' | 'side'> | null {
+	if (horizontalContact && !verticalContact) {
+		const side = contactSide(rect.left, rectRight(rect), viewport.width, marginPx);
+		return side ? { axis: 'horizontal', side } : null;
+	}
+	if (verticalContact && !horizontalContact) {
+		const side = contactSide(rect.top, rectBottom(rect), viewport.height, marginPx);
+		return side ? { axis: 'vertical', side } : null;
+	}
+	return null;
+}
+
+function contactSide(
+	start: number,
+	end: number,
+	viewportSize: number,
+	marginPx: number
+): FocusEntrySteeringSide | null {
+	const touchesStart = start <= marginPx;
+	const touchesEnd = end >= viewportSize - marginPx;
+	if (touchesStart === touchesEnd) return null;
+	return touchesStart ? 'start' : 'end';
+}
+
+function firstContactSideDelta(
+	rect: Rect,
+	viewport: ViewportSize,
+	steeringState: Pick<FocusEntrySteeringState, 'axis' | 'side'>
+): { dx: number; dy: number } {
+	if (steeringState.axis === 'horizontal') {
+		return {
+			dx: steeringState.side === 'start' ? -rect.left : viewport.width - rectRight(rect),
+			dy: 0
+		};
+	}
+	return {
+		dx: 0,
+		dy: steeringState.side === 'start' ? -rect.top : viewport.height - rectBottom(rect)
 	};
 }
 

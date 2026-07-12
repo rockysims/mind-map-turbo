@@ -54,6 +54,7 @@ describe('focus entry boundary solver', () => {
 		expect(firstStep.steeringState).toEqual({
 			nodeId: 'n0',
 			axis: 'horizontal',
+			side: 'end',
 			startScale: 1.6
 		});
 		expect(firstStep.progressDelta).toBe(0);
@@ -68,11 +69,15 @@ describe('focus entry boundary solver', () => {
 		});
 		const firstCenterY = firstStep.projectedRect.top + firstStep.projectedRect.height / 2;
 		const secondCenterY = secondStep.projectedRect.top + secondStep.projectedRect.height / 2;
+		const firstCenterX = firstStep.projectedRect.left + firstStep.projectedRect.width / 2;
+		const secondCenterX = secondStep.projectedRect.left + secondStep.projectedRect.width / 2;
 
 		expect(secondStep.phase).toBe('steering');
-		expect(secondStep.projectedRect.left + secondStep.projectedRect.width).toBeCloseTo(
+		expect(secondStep.projectedRect.left + secondStep.projectedRect.width).toBeLessThan(
 			viewport.width
 		);
+		expect(secondCenterX).toBeLessThan(firstCenterX);
+		expect(secondCenterX).toBeGreaterThan(viewport.width / 2);
 		expect(secondCenterY).toBeLessThan(firstCenterY);
 		expect(secondCenterY).toBeGreaterThan(viewport.height / 2);
 	});
@@ -89,10 +94,11 @@ describe('focus entry boundary solver', () => {
 			focalPoint: { x: 160, y: 120 },
 			viewport,
 			candidate: offCenterCandidate,
-			steeringState: { nodeId: 'n0', axis: 'horizontal', startScale: 1.6 }
+			steeringState: { nodeId: 'n0', axis: 'horizontal', side: 'end', startScale: 1.6 }
 		});
 
 		expect(step.phase).toBe('boundary');
+		expect(step.projectedRect.left + step.projectedRect.width / 2).toBeCloseTo(viewport.width / 2);
 		expect(step.projectedRect.top + step.projectedRect.height / 2).toBeCloseTo(viewport.height / 2);
 		expect(step.steeringState).toBeNull();
 	});
