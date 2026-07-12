@@ -170,8 +170,15 @@
 
 	.deep-zoom-content-layer {
 		position: absolute;
-		top: 0;
-		left: 0;
+		/* Content layers are laid out at the frame's OUTER (border-box) size —
+		   compactBasePx/detailsBaseWidthPx mirror the in-stage node's full
+		   diameter, border included — but they mount inside the bordered frame
+		   element, whose (0, 0) is the INNER padding-box corner, inset by the
+		   live border width. Without this offset the scaled layer's visual
+		   center drifts border-width px down-right of the frame's true center
+		   (and the node's on-screen title), growing as the border scales up. */
+		top: calc(-1 * var(--deep-zoom-border-width, 0px));
+		left: calc(-1 * var(--deep-zoom-border-width, 0px));
 		transform-origin: top left;
 		will-change: transform, opacity;
 	}

@@ -1143,6 +1143,22 @@
 			const localBorder = parseFloat(window.getComputedStyle(inStage).borderTopWidth);
 			const visualScale = nodeRect.width / inStage.offsetWidth;
 			expect(localBorder * visualScale).toBeCloseTo(morph.borderWidth, 0);
+			// Title text must land close to where the in-stage node drew it — a
+			// border-box vs. padding-box mismatch in the content layer's anchor
+			// would otherwise shift it by ~borderWidth px (many px) down-right of
+			// the node. A couple sub-pixel px of drift is expected: the in-stage
+			// node composites via a `translate + scale` transform on `.node-wrapper`
+			// while the surface composites via `left/top` + a separate `scale` on
+			// the content layer — different transform chains round differently.
+			const inStageTitle = inStage.querySelector('.title') as HTMLElement;
+			const morphTitle = layer.querySelector('.title') as HTMLElement;
+			const inStageTitleRect = inStageTitle.getBoundingClientRect();
+			const morphTitleRect = morphTitle.getBoundingClientRect();
+			const titleDriftPx = Math.hypot(
+				morphTitleRect.left - inStageTitleRect.left,
+				morphTitleRect.top - inStageTitleRect.top
+			);
+			expect(titleDriftPx).toBeLessThan(2);
 		};
 
 		// Direction A — mount on entry: scrub in a bit, then reverse to 0 (the
