@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	boundaryProgressDelta,
 	boundaryReleaseDelta,
+	entrySteeringProgress,
 	projectedCandidateRect,
 	solveFocusEntryBoundary,
 	type FocusEntryBoundaryCandidate
@@ -29,13 +30,13 @@ describe('focus entry boundary solver', () => {
 		expect(step.progressDelta).toBe(0);
 	});
 
-	it('holds a one-sided edge contact and recenters the other axis without rounding', () => {
+	it('holds a one-sided edge contact while gradually recentering the other axis', () => {
 		const offCenterCandidate: FocusEntryBoundaryCandidate = {
 			nodeId: 'n0',
-			position: { x: 90, y: 0 },
+			position: { x: 90, y: 5 },
 			radius: 40
 		};
-		const step = solveFocusEntryBoundary({
+		const firstStep = solveFocusEntryBoundary({
 			currentView: { panX: 0, panY: 0, scale: 1 },
 			requestedScale: 1.6,
 			focalPoint: { x: 160, y: 120 },
@@ -43,10 +44,57 @@ describe('focus entry boundary solver', () => {
 			candidate: offCenterCandidate
 		});
 
-		expect(step.phase).toBe('steering');
-		expect(step.projectedRect.left + step.projectedRect.width).toBeCloseTo(viewport.width);
+		expect(firstStep.phase).toBe('steering');
+		expect(firstStep.projectedRect.left + firstStep.projectedRect.width).toBeCloseTo(
+			viewport.width
+		);
+		expect(firstStep.projectedRect.top + firstStep.projectedRect.height / 2).toBeGreaterThan(
+			viewport.height / 2
+		);
+		expect(firstStep.steeringState).toEqual({
+			nodeId: 'n0',
+			axis: 'horizontal',
+			startScale: 1.6
+		});
+		expect(firstStep.progressDelta).toBe(0);
+
+		const secondStep = solveFocusEntryBoundary({
+			currentView: firstStep.view,
+			requestedScale: 2.3,
+			focalPoint: { x: 160, y: 120 },
+			viewport,
+			candidate: offCenterCandidate,
+			steeringState: firstStep.steeringState
+		});
+		const firstCenterY = firstStep.projectedRect.top + firstStep.projectedRect.height / 2;
+		const secondCenterY = secondStep.projectedRect.top + secondStep.projectedRect.height / 2;
+
+		expect(secondStep.phase).toBe('steering');
+		expect(secondStep.projectedRect.left + secondStep.projectedRect.width).toBeCloseTo(
+			viewport.width
+		);
+		expect(secondCenterY).toBeLessThan(firstCenterY);
+		expect(secondCenterY).toBeGreaterThan(viewport.height / 2);
+	});
+
+	it('finishes one-sided steering centered at inscription', () => {
+		const offCenterCandidate: FocusEntryBoundaryCandidate = {
+			nodeId: 'n0',
+			position: { x: 90, y: 5 },
+			radius: 40
+		};
+		const step = solveFocusEntryBoundary({
+			currentView: { panX: 0, panY: 0, scale: 2.3 },
+			requestedScale: 3,
+			focalPoint: { x: 160, y: 120 },
+			viewport,
+			candidate: offCenterCandidate,
+			steeringState: { nodeId: 'n0', axis: 'horizontal', startScale: 1.6 }
+		});
+
+		expect(step.phase).toBe('boundary');
 		expect(step.projectedRect.top + step.projectedRect.height / 2).toBeCloseTo(viewport.height / 2);
-		expect(step.progressDelta).toBe(0);
+		expect(step.steeringState).toBeNull();
 	});
 
 	it('locks the rendered scale at inscription before accumulating boundary progress', () => {
@@ -92,5 +140,11 @@ describe('focus entry boundary solver', () => {
 
 	it('allows a large single wheel step to commit from the boundary', () => {
 		expect(boundaryProgressDelta(3.75, 3, 0.25)).toBe(1);
+	});
+
+	it('maps steering scale progress from first contact to inscription', () => {
+		expect(entrySteeringProgress(1.6, 1.6, 3)).toBe(0);
+		expect(entrySteeringProgress(2.3, 1.6, 3)).toBeCloseTo(0.5);
+		expect(entrySteeringProgress(3, 1.6, 3)).toBe(1);
 	});
 });

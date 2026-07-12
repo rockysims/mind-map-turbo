@@ -18,7 +18,8 @@
 	import {
 		boundaryReleaseDelta,
 		solveFocusEntryBoundary,
-		type FocusEntryBoundaryCandidate
+		type FocusEntryBoundaryCandidate,
+		type FocusEntrySteeringState
 	} from './lib/focusEntryBoundary.js';
 	import {
 		beginEntryGestureGate,
@@ -148,6 +149,7 @@
 	let lastEntryGestureGateRequestId = $state<number | null>(null);
 	let entryGestureGate = $state<EntryGestureGateState>(EMPTY_ENTRY_GESTURE_GATE);
 	let focusEntryBoundaryProgress = $state<{ nodeId: string; progress: number } | null>(null);
+	let focusEntrySteeringState = $state<FocusEntrySteeringState | null>(null);
 	/**
 	 * Node the entry boundary is currently steering toward. Steering translates
 	 * the view to center/fit the subject, which can move it out from under the
@@ -579,6 +581,7 @@
 		scale = nextView.scale;
 		focusEntryBoundaryProgress = null;
 		focusEntrySteeringNodeId = null;
+		focusEntrySteeringState = null;
 		if (requestedScale > nextScale) {
 			onBlockedZoom?.({
 				direction: 'in',
@@ -614,6 +617,7 @@
 		if (!candidate) {
 			focusEntryBoundaryProgress = null;
 			focusEntrySteeringNodeId = null;
+			focusEntrySteeringState = null;
 			return false;
 		}
 		const step = solveFocusEntryBoundary({
@@ -621,16 +625,19 @@
 			requestedScale,
 			focalPoint: { x: focalPoint.x - rect.left, y: focalPoint.y - rect.top },
 			viewport: { width: rect.width, height: rect.height },
-			candidate
+			candidate,
+			steeringState: focusEntrySteeringState
 		});
 
 		panX = step.view.panX;
 		panY = step.view.panY;
 		scale = step.view.scale;
 		focusEntrySteeringNodeId = step.phase === 'free' ? null : candidate.nodeId;
+		focusEntrySteeringState = step.steeringState;
 
 		if (step.phase === 'free') {
 			focusEntryBoundaryProgress = null;
+			focusEntrySteeringState = null;
 			return true;
 		}
 

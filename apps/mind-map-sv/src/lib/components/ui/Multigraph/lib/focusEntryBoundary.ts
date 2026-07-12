@@ -12,11 +12,18 @@ import {
 } from './zoomBoundary';
 
 export type FocusEntryBoundaryPhase = 'free' | 'steering' | 'boundary';
+export type FocusEntrySteeringAxis = 'horizontal' | 'vertical';
 
 export interface FocusEntryBoundaryCandidate {
 	nodeId: string;
 	position: Point;
 	radius: number;
+}
+
+export interface FocusEntrySteeringState {
+	nodeId: string;
+	axis: FocusEntrySteeringAxis;
+	startScale: number;
 }
 
 export interface FocusEntryBoundaryStep {
@@ -25,6 +32,7 @@ export interface FocusEntryBoundaryStep {
 	boundaryScale: number;
 	phase: FocusEntryBoundaryPhase;
 	progressDelta: number;
+	steeringState: FocusEntrySteeringState | null;
 }
 
 export interface FocusEntryBoundaryInput {
@@ -33,6 +41,7 @@ export interface FocusEntryBoundaryInput {
 	focalPoint: Point;
 	viewport: ViewportSize;
 	candidate: FocusEntryBoundaryCandidate;
+	steeringState?: FocusEntrySteeringState | null;
 	zoneFraction?: number;
 	marginPx?: number;
 }
@@ -43,6 +52,7 @@ export function solveFocusEntryBoundary({
 	focalPoint,
 	viewport,
 	candidate,
+	steeringState = null,
 	zoneFraction = APP_CONFIG.multigraph.focus.preInscribeZoneFraction,
 	marginPx = APP_CONFIG.multigraph.focus.boundaryNearTouchMarginPx
 }: FocusEntryBoundaryInput): FocusEntryBoundaryStep {
@@ -59,17 +69,27 @@ export function solveFocusEntryBoundary({
 			projectedRect: centered.rect,
 			boundaryScale,
 			phase: 'boundary',
-			progressDelta: boundaryProgressDelta(requestedScale, boundaryScale, zoneFraction)
+			progressDelta: boundaryProgressDelta(requestedScale, boundaryScale, zoneFraction),
+			steeringState: null
 		};
 	}
 
-	const steered = steerViewForOneSidedEntry(rawView, rawRect, viewport, marginPx);
+	const steered = steerViewForOneSidedEntry(
+		rawView,
+		rawRect,
+		viewport,
+		candidate,
+		boundaryScale,
+		steeringState,
+		marginPx
+	);
 	return {
 		view: steered.view,
 		projectedRect: steered.rect,
 		boundaryScale,
 		phase: steered.changed ? 'steering' : 'free',
-		progressDelta: 0
+		progressDelta: 0,
+		steeringState: steered.steeringState
 	};
 }
 
@@ -109,34 +129,68 @@ export function boundaryReleaseDelta(
 	return clamp01((lockedScale - requestedScale) / zoneScale);
 }
 
+export function entrySteeringProgress(
+	scale: number,
+	startScale: number,
+	boundaryScale: number
+): number {
+	if (boundaryScale <= startScale) return scale >= boundaryScale ? 1 : 0;
+	return clamp01((scale - startScale) / (boundaryScale - startScale));
+}
+
 function steerViewForOneSidedEntry(
 	view: ViewTransform,
 	rect: Rect,
 	viewport: ViewportSize,
+	candidate: FocusEntryBoundaryCandidate,
+	boundaryScale: number,
+	steeringState: FocusEntrySteeringState | null,
 	marginPx: number
-): { view: ViewTransform; rect: Rect; changed: boolean } {
+): {
+	view: ViewTransform;
+	rect: Rect;
+	changed: boolean;
+	steeringState: FocusEntrySteeringState | null;
+} {
 	const clamped = clampRectForEntrySteering(rect, viewport);
 	let dx = clamped.dx;
 	let dy = clamped.dy;
 	let nextRect = clamped.rect;
 	const horizontalContact = rect.left <= marginPx || rectRight(rect) >= viewport.width - marginPx;
 	const verticalContact = rect.top <= marginPx || rectBottom(rect) >= viewport.height - marginPx;
+	const contactAxis: FocusEntrySteeringAxis | null =
+		horizontalContact && !verticalContact
+			? 'horizontal'
+			: verticalContact && !horizontalContact
+				? 'vertical'
+				: null;
+	const nextSteeringState = contactAxis
+		? steeringState?.nodeId === candidate.nodeId && steeringState.axis === contactAxis
+			? steeringState
+			: { nodeId: candidate.nodeId, axis: contactAxis, startScale: view.scale }
+		: null;
+	const centerProgress = nextSteeringState
+		? entrySteeringProgress(view.scale, nextSteeringState.startScale, boundaryScale)
+		: 1;
 
 	if (horizontalContact && !verticalContact) {
 		const centerDy = axisCenterDelta(nextRect.top, rectBottom(nextRect), viewport.height);
-		dy += centerDy;
-		nextRect = translateRect(nextRect, 0, centerDy);
+		const progressiveDy = centerDy * centerProgress;
+		dy += progressiveDy;
+		nextRect = translateRect(nextRect, 0, progressiveDy);
 	}
 	if (verticalContact && !horizontalContact) {
 		const centerDx = axisCenterDelta(nextRect.left, rectRight(nextRect), viewport.width);
-		dx += centerDx;
-		nextRect = translateRect(nextRect, centerDx, 0);
+		const progressiveDx = centerDx * centerProgress;
+		dx += progressiveDx;
+		nextRect = translateRect(nextRect, progressiveDx, 0);
 	}
 
 	return {
 		view: translateView(view, dx, dy),
 		rect: nextRect,
-		changed: Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001
+		changed: Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001,
+		steeringState: nextSteeringState
 	};
 }
 
