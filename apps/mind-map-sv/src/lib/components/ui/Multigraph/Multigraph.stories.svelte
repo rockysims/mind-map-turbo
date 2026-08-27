@@ -1638,6 +1638,7 @@
 	args={{
 		multigraphData: makeGraph({
 			nodeCount: 3,
+			pinned: [0],
 			edges: [
 				[0, 1],
 				[1, 2]
