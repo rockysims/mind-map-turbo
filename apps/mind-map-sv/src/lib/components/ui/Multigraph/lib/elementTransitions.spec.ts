@@ -68,6 +68,16 @@ describe('createNodeEnterAnimation', () => {
 		const anim = createNodeEnterAnimation(1, 0, -50);
 		expect(anim.durationMs).toBe(0);
 	});
+
+	it('accepts an explicit fromScale for preview handoff', () => {
+		const anim = createNodeEnterAnimation(1, 0, 200, 0.4);
+		expect(anim.fromScale).toBe(0.4);
+		expect(nodeEnterScaleAt(anim, 0)).toBeCloseTo(0.4);
+		expect(nodeEnterScaleAt(anim, 200)).toBeCloseTo(1);
+		const mid = nodeEnterScaleAt(anim, 100);
+		expect(mid).toBeGreaterThan(0.4);
+		expect(mid).toBeLessThan(1);
+	});
 });
 
 describe('nodeEnterScaleAt — interpolation', () => {

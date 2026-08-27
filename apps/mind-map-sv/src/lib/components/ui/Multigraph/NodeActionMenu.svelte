@@ -5,6 +5,7 @@
 	let {
 		node,
 		position,
+		onAddNodeEdge,
 		onTogglePinned,
 		onFocus,
 		onEdit,
@@ -13,6 +14,7 @@
 	}: {
 		node: NodeData;
 		position: Point;
+		onAddNodeEdge: () => void;
 		onTogglePinned: () => void;
 		onFocus: () => void;
 		onEdit: () => void;
@@ -36,6 +38,7 @@
 		tabindex="-1"
 		onkeydown={handleKeydown}
 	>
+		<button type="button" role="menuitem" onclick={onAddNodeEdge}>Add node/edge</button>
 		<button type="button" role="menuitem" onclick={onTogglePinned}>
 			{node.pinned ? 'Unpin' : 'Pin'}
 		</button>

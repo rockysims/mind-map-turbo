@@ -65,6 +65,13 @@
 	let lastDoubleClickDropBg = $state<{ nodeId: string; point: Point } | null>(null);
 	let lastDoubleClickDropNodeIds = $state<string | null>(null);
 	let lastNodeLongPress = $state<{ nodeId: string; point: Point } | null>(null);
+	let lastNodeContextMenu = $state<{ nodeId: string; point: Point } | null>(null);
+	let lastCreationUpdate = $state<{ nodeId: string; point: Point; hoverId: string | null } | null>(
+		null
+	);
+	let lastCreationCancelId = $state<string | null>(null);
+	let creationArmRequest = $state<{ id: number; sourceNode: NodeData } | null>(null);
+	let creationArmRequestId = 0;
 	let lastViewState = $state<{ panX: number; panY: number; scale: number } | null>(null);
 	let lastLiveViewState = $state<{ panX: number; panY: number; scale: number } | null>(null);
 	let lastBlockedZoom = $state<string>('');
@@ -88,6 +95,13 @@
 	data-last-node-long-press={lastNodeLongPress
 		? `${lastNodeLongPress.nodeId},${lastNodeLongPress.point.x},${lastNodeLongPress.point.y}`
 		: ''}
+	data-last-node-context-menu={lastNodeContextMenu
+		? `${lastNodeContextMenu.nodeId},${lastNodeContextMenu.point.x},${lastNodeContextMenu.point.y}`
+		: ''}
+	data-last-creation-update={lastCreationUpdate
+		? `${lastCreationUpdate.nodeId},${lastCreationUpdate.point.x},${lastCreationUpdate.point.y},${lastCreationUpdate.hoverId ?? ''}`
+		: ''}
+	data-last-creation-cancel={lastCreationCancelId ?? ''}
 	data-last-view-state={lastViewState
 		? `${lastViewState.panX},${lastViewState.panY},${lastViewState.scale}`
 		: ''}
@@ -124,6 +138,16 @@
 		onNodeLongPress={(n, point) => {
 			lastNodeLongPress = { nodeId: n.id, point };
 		}}
+		onNodeContextMenu={(n, point) => {
+			lastNodeContextMenu = { nodeId: n.id, point };
+		}}
+		onCreationDragUpdate={(n, point, hoverNode) => {
+			lastCreationUpdate = { nodeId: n.id, point, hoverId: hoverNode?.id ?? null };
+		}}
+		onCreationCancel={(n) => {
+			lastCreationCancelId = n.id;
+		}}
+		{creationArmRequest}
 		onViewStateChange={(state) => {
 			lastViewState = state;
 		}}
@@ -145,6 +169,20 @@
 			</div>
 		{/each}
 	</Stage>
+	<div class="arm-creation-row">
+		{#each nodes as node (node.id)}
+			<button
+				type="button"
+				data-testid={`arm-creation-${node.id}`}
+				onclick={() => {
+					creationArmRequestId += 1;
+					creationArmRequest = { id: creationArmRequestId, sourceNode: node };
+				}}
+			>
+				Arm {node.id}
+			</button>
+		{/each}
+	</div>
 </div>
 
 <style>
@@ -154,5 +192,17 @@
 		height: var(--stage-harness-height);
 		overflow: hidden;
 		touch-action: none;
+	}
+
+	/* Test affordance mimicking the action menu's "Add node/edge" click; kept
+	   out of the stage's hit-test area. */
+	.arm-creation-row {
+		position: absolute;
+		right: 0;
+		bottom: 0;
+		z-index: 10;
+		display: flex;
+		gap: 0.25rem;
+		font-size: 0.625rem;
 	}
 </style>

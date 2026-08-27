@@ -825,38 +825,16 @@ test('deep zoom exit keeps scrubbing when the cursor leaves the shrinking frame'
 
 async function editFirstNodeTitle(page: Page, title: string) {
 	// .stage-content has pointer-events:none; all clicks pass to the stage handler.
-	// The editor opens via long-press (>1000ms), then action menu, then Edit.
-	// Dispatch synthetic pointer events directly on the stage at the first node's
-	// screen coordinates so the stage's hit-test finds the node.
+	// The editor opens via right-click (contextmenu), then action menu, then Edit.
+	// A real right-click at the first node's screen coordinates fires the native
+	// contextmenu event on the stage, whose hit-test finds the node.
 	const circle = page.locator('.node-wrapper .circle').first();
 	const box = await circle.boundingBox();
 	if (!box) throw new Error('Node .circle element not found');
 	const cx = Math.round(box.x + box.width / 2);
 	const cy = Math.round(box.y + box.height / 2);
 
-	const stage = page.locator('.stage');
-	await stage.dispatchEvent('pointerdown', {
-		pointerId: 1,
-		isPrimary: true,
-		button: 0,
-		buttons: 1,
-		clientX: cx,
-		clientY: cy,
-		bubbles: true,
-		cancelable: true
-	});
-	// LONG_PRESS_MS = 1000 ms; wait longer to ensure the long-press timer fires.
-	await page.waitForTimeout(1300);
-	await stage.dispatchEvent('pointerup', {
-		pointerId: 1,
-		isPrimary: true,
-		button: 0,
-		buttons: 0,
-		clientX: cx,
-		clientY: cy,
-		bubbles: true,
-		cancelable: true
-	});
+	await page.mouse.click(cx, cy, { button: 'right' });
 
 	// NodeActionMenu buttons have role="menuitem" (not "button").
 	await page.getByRole('menuitem', { name: 'Edit' }).click();

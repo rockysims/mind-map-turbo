@@ -13,6 +13,7 @@
 		zoomViewTransformAtPoint
 	} from './lib/graphMath.js';
 	import { pointerDistance } from './lib/hitTest.js';
+	import { resolveCreationDrop } from './lib/creationGesture.js';
 	import { recognizeLongPress } from './lib/longPress.js';
 	import { persistedScaleForFocusOverzoom } from './lib/nodeFocus.js';
 	import {
@@ -59,6 +60,11 @@
 		maxMs: number;
 	}
 
+	interface CreationArmRequest {
+		id: number;
+		sourceNode: NodeData;
+	}
+
 	interface Props {
 		/** Resolve node at (clientX, clientY); return null if none. Injected for testability. */
 		getNodeAt: (clientX: number, clientY: number) => NodeData | null;
@@ -82,8 +88,16 @@
 		onNodeDoubleClickDropOntoNode?: (sourceNode: NodeData, targetNode: NodeData) => void;
 		/** Callback when user double-click-drags and drops onto background with a graph-local point. */
 		onNodeDoubleClickDropOntoBackground?: (node: NodeData, point: Point) => void;
-		/** Callback when user holds a node without dragging. */
+		/** Callback when user holds a node without dragging (touch pointers only). */
 		onNodeLongPress?: (node: NodeData, point: Point) => void;
+		/** Callback when user right-clicks (or pen-barrel-clicks) a node; client coords like onNodeLongPress. */
+		onNodeContextMenu?: (node: NodeData, point: Point) => void;
+		/** Fired on every pointer move during an active creation gesture (double-click drag or menu-armed). */
+		onCreationDragUpdate?: (sourceNode: NodeData, point: Point, hoverNode: NodeData | null) => void;
+		/** Fired when a creation gesture is cancelled (Escape, release on source, pinch, pointercancel). */
+		onCreationCancel?: (sourceNode: NodeData) => void;
+		/** One-shot request to arm a creation gesture from a node (menu-initiated, no button pressed). */
+		creationArmRequest?: CreationArmRequest | null;
 		/** Fired whenever the internal pan/zoom state changes, including initial mount. */
 		onViewStateLiveChange?: (state: ViewStateSnapshot) => void;
 		/**
@@ -134,6 +148,10 @@
 		onNodeDoubleClickDropOntoNode,
 		onNodeDoubleClickDropOntoBackground,
 		onNodeLongPress,
+		onNodeContextMenu,
+		onCreationDragUpdate,
+		onCreationCancel,
+		creationArmRequest,
 		onViewStateLiveChange,
 		onStageRectChange,
 		focusEntryBoundaryCandidateForPoint,
@@ -254,6 +272,57 @@
 	let longPressStartTime = 0;
 	let longPressFired = false;
 
+	// Creation gesture (new node/edge): either a double-click drag or a
+	// menu-armed hover session where no button is pressed until the final click.
+	let creationSession = $state<{ sourceNode: NodeData; via: 'menu' | 'doubleclick' } | null>(null);
+	let lastCreationArmRequestId = $state<number | null>(null);
+
+	$effect(() => {
+		const request = creationArmRequest;
+		if (!request || request.id === lastCreationArmRequestId) return;
+		lastCreationArmRequestId = request.id;
+		cancelActiveNodeGesture();
+		panStart = null;
+		creationSession = { sourceNode: request.sourceNode, via: 'menu' };
+	});
+
+	$effect(() => {
+		if (typeof window === 'undefined' || creationSession === null) return;
+		const onKeyDown = (e: KeyboardEvent) => {
+			if (e.key === 'Escape') cancelCreationSession();
+		};
+		window.addEventListener('keydown', onKeyDown);
+		return () => window.removeEventListener('keydown', onKeyDown);
+	});
+
+	function cancelCreationSession() {
+		const session = creationSession;
+		if (!session) return;
+		creationSession = null;
+		onCreationCancel?.(session.sourceNode);
+		// Neutralize any in-flight double-click drag so the upcoming pointerup no-ops.
+		cancelLongPressTimer();
+		dragNode = null;
+		dragStartPos = null;
+		dragCurrentPos = null;
+		isNodeDragActive = false;
+		isDoubleClickSession = false;
+		longPressFired = false;
+	}
+
+	function completeCreationSession(sourceNode: NodeData, e: PointerEvent) {
+		creationSession = null;
+		const dropTarget = getNodeAt(e.clientX, e.clientY);
+		const action = resolveCreationDrop(sourceNode.id, dropTarget?.id ?? null);
+		if (action.kind === 'connect-to-node') {
+			onNodeDoubleClickDropOntoNode?.(sourceNode, dropTarget!);
+		} else if (action.kind === 'create-node-and-edge') {
+			onNodeDoubleClickDropOntoBackground?.(sourceNode, graphPointForEvent(e));
+		} else {
+			onCreationCancel?.(sourceNode);
+		}
+	}
+
 	function onPointerDown(e: PointerEvent) {
 		const node = getNodeAt(e.clientX, e.clientY);
 		if (node) {
@@ -263,7 +332,7 @@
 			longPressFired = false;
 			isDoubleClickSession =
 				lastClickNodeId === node.id && Date.now() - lastClickTime < DBL_CLICK_MS;
-			startLongPressTimer(node);
+			if (e.pointerType === 'touch') startLongPressTimer(node);
 		} else {
 			panStart = { clientX: e.clientX, clientY: e.clientY, panX, panY };
 			isDoubleClickSession = false;
@@ -306,6 +375,11 @@
 
 	function cancelActiveNodeGesture() {
 		cancelLongPressTimer();
+		if (creationSession) {
+			const session = creationSession;
+			creationSession = null;
+			onCreationCancel?.(session.sourceNode);
+		}
 		if (dragNode && isNodeDragActive) {
 			onNodeDragEnd?.(dragNode);
 		}
@@ -332,6 +406,18 @@
 		if (panStart) {
 			panX = panStart.panX + (e.clientX - panStart.clientX);
 			panY = panStart.panY + (e.clientY - panStart.clientY);
+		} else if (dragNode && dragStartPos && isDoubleClickSession) {
+			dragCurrentPos = { x: e.clientX, y: e.clientY };
+			const dist = pointerDistance(dragStartPos.x, dragStartPos.y, e.clientX, e.clientY);
+			if (dist >= dragThreshold || creationSession) {
+				cancelLongPressTimer();
+				if (!creationSession) creationSession = { sourceNode: dragNode, via: 'doubleclick' };
+				onCreationDragUpdate?.(
+					creationSession.sourceNode,
+					graphPointForEvent(e),
+					getNodeAt(e.clientX, e.clientY)
+				);
+			}
 		} else if (dragNode && dragStartPos && !isDoubleClickSession) {
 			const dist = pointerDistance(dragStartPos.x, dragStartPos.y, e.clientX, e.clientY);
 			dragCurrentPos = { x: e.clientX, y: e.clientY };
@@ -356,8 +442,12 @@
 		if (dragNode && dragStartPos) {
 			// Only fire drop/click callbacks on actual pointerup; cancel means the gesture was aborted (e.g. drag started)
 			cancelLongPressTimer();
+			if (isCancel && creationSession) {
+				const session = creationSession;
+				creationSession = null;
+				onCreationCancel?.(session.sourceNode);
+			}
 			if (!isCancel && !longPressFired) {
-				const dropTarget = getNodeAt(e.clientX, e.clientY);
 				const dist = pointerDistance(dragStartPos.x, dragStartPos.y, e.clientX, e.clientY);
 				const didDrag = dist >= dragThreshold;
 
@@ -366,13 +456,9 @@
 					lastClickTime = 0;
 				}
 
-				if (didDrag) {
+				if (didDrag || creationSession?.via === 'doubleclick') {
 					if (isDoubleClickSession) {
-						if (dropTarget && dropTarget.id !== dragNode.id) {
-							onNodeDoubleClickDropOntoNode?.(dragNode, dropTarget);
-						} else if (!dropTarget || dropTarget.id === dragNode.id) {
-							onNodeDoubleClickDropOntoBackground?.(dragNode, graphPointForEvent(e));
-						}
+						completeCreationSession(dragNode, e);
 					} else {
 						onNodeMoved?.(dragNode, graphPointForEvent(e));
 					}
@@ -465,10 +551,26 @@
 		};
 	}
 
+	function onContextMenu(e: MouseEvent) {
+		// Always suppress the native menu on the stage (also swallows the
+		// contextmenu Android synthesizes from a touch long-press).
+		e.preventDefault();
+		if ((e as PointerEvent).pointerType === 'touch') return;
+		const node = getNodeAt(e.clientX, e.clientY);
+		if (!node) return;
+		// macOS ctrl+click fires a button-0 pointerdown before contextmenu.
+		cancelActiveNodeGesture();
+		onNodeContextMenu?.(node, { x: e.clientX, y: e.clientY });
+	}
+
 	function onPointerDownStage(e: PointerEvent) {
+		if (e.button !== 0) return;
 		activePointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
 		if (activePointers.size === 1) {
-			onPointerDown(e);
+			// A menu-armed creation session swallows the press: the pointer is
+			// tracked (for pinch detection and pointerup) but must not start a
+			// pan/drag/long-press.
+			if (creationSession?.via !== 'menu') onPointerDown(e);
 		} else if (activePointers.size === 2) {
 			panStart = null;
 			cancelActiveNodeGesture();
@@ -517,6 +619,13 @@
 					// persisted inside applyZoomGesture (fixing the prior asymmetry).
 				}
 			}
+		} else if (creationSession?.via === 'menu') {
+			// Menu-armed sessions track the cursor even with no button pressed.
+			onCreationDragUpdate?.(
+				creationSession.sourceNode,
+				graphPointForEvent(e),
+				getNodeAt(e.clientX, e.clientY)
+			);
 		} else {
 			onPointerMove(e);
 		}
@@ -526,6 +635,16 @@
 		activePointers.delete(e.pointerId);
 		const pinchWasActive = pinchStart !== null;
 		if (activePointers.size < 2) pinchStart = null;
+		if (creationSession?.via === 'menu' && !pinchWasActive) {
+			if (e.type === 'pointercancel') {
+				cancelCreationSession();
+			} else {
+				completeCreationSession(creationSession.sourceNode, e);
+			}
+			const stage = e.currentTarget as HTMLElement;
+			if (stage.hasPointerCapture?.(e.pointerId)) stage.releasePointerCapture(e.pointerId);
+			return;
+		}
 		onPointerUp(e);
 		if (pinchWasActive && activePointers.size < 2) {
 			onViewStateChange?.({
@@ -696,6 +815,7 @@
 	onpointermove={onPointerMoveStage}
 	onpointerup={onPointerUpStage}
 	onpointercancel={onPointerUpStage}
+	oncontextmenu={onContextMenu}
 	onwheel={onWheel}
 	role="presentation"
 >
