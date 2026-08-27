@@ -1452,31 +1452,49 @@
 			edgeIdentifier={duplicateEdgeIdentifier(graph, confirmEdgeId)}
 			onCancel={() => (duplicateEdgeConfirm = null)}
 			onConfirm={() => {
-				const durationMs = resolvedLayoutSettings.enterExitDurationMs;
-				if (durationMs > 0) {
-					const edgeToRemove = graph.edges.find((e) => e.id === confirmEdgeId) ?? null;
-					if (edgeToRemove) {
-						const nowMs = layoutRuntime.now();
-						const enterAnim = edgeEnterAnimations[confirmEdgeId];
-						const fromOpacity = enterAnim ? edgeOpacityAt(enterAnim, nowMs) : 1;
-						edgeEnterAnimations = Object.fromEntries(
-							Object.entries(edgeEnterAnimations).filter(([k]) => k !== confirmEdgeId)
-						);
-						internalExitingBuffer = cancelExitingEdge(internalExitingBuffer, confirmEdgeId);
-						internalExitingBuffer = addExitingEdge(internalExitingBuffer, confirmEdgeId, {
-							edgeData: edgeToRemove,
-							fromOpacity,
-							startedAtMs: nowMs,
-							durationMs
-						});
-						layoutRuntime.start();
-					}
-				}
-				const removedEdge = graph.edges.find((e) => e.id === confirmEdgeId);
+				const removedEdge = graph.edges.find((e) => e.id === confirmEdgeId) ?? null;
 				if (removedEdge) {
 					severedBeaconPreference = [removedEdge.sourceNodeId, removedEdge.targetNodeId];
 				}
-				commitUserGraph(layoutRuntime.relaxAfterMutation(removeEdge(graph, confirmEdgeId)));
+				const nextGraph = removeEdge(graph, confirmEdgeId);
+				const nextHops = hopsFromPinned(nextGraph);
+				const endpointIds = removedEdge ? [removedEdge.sourceNodeId, removedEdge.targetNodeId] : [];
+				const survivorId = endpointIds.find((id) => Number.isFinite(nextHops[id]));
+				const seversComponent =
+					survivorId !== undefined && endpointIds.some((id) => !Number.isFinite(nextHops[id]));
+
+				if (seversComponent && survivorId !== undefined) {
+					// The removal cut a component off from every pinned node. Play the
+					// reveal wave (as unpinning does) so the severed side fades down to
+					// its beacon; the wave also renders the removed edge fading out, so
+					// the exiting-buffer fade below must be skipped to avoid drawing the
+					// edge twice.
+					edgeEnterAnimations = Object.fromEntries(
+						Object.entries(edgeEnterAnimations).filter(([k]) => k !== confirmEdgeId)
+					);
+					commitUserGraph(layoutRuntime.beginScaleChange(nextGraph, survivorId));
+					duplicateEdgeConfirm = null;
+					return;
+				}
+
+				const durationMs = resolvedLayoutSettings.enterExitDurationMs;
+				if (durationMs > 0 && removedEdge) {
+					const nowMs = layoutRuntime.now();
+					const enterAnim = edgeEnterAnimations[confirmEdgeId];
+					const fromOpacity = enterAnim ? edgeOpacityAt(enterAnim, nowMs) : 1;
+					edgeEnterAnimations = Object.fromEntries(
+						Object.entries(edgeEnterAnimations).filter(([k]) => k !== confirmEdgeId)
+					);
+					internalExitingBuffer = cancelExitingEdge(internalExitingBuffer, confirmEdgeId);
+					internalExitingBuffer = addExitingEdge(internalExitingBuffer, confirmEdgeId, {
+						edgeData: removedEdge,
+						fromOpacity,
+						startedAtMs: nowMs,
+						durationMs
+					});
+					layoutRuntime.start();
+				}
+				commitUserGraph(layoutRuntime.relaxAfterMutation(nextGraph));
 				duplicateEdgeConfirm = null;
 			}}
 		/>

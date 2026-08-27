@@ -2463,7 +2463,13 @@
 			}
 		}),
 		defaultPrimaryNodeId: 'n0',
-		layoutSettings: { relaxIterations: 1, edgeSpringStrength: 1, enterExitDurationMs: 0 },
+		layoutSettings: {
+			relaxIterations: 1,
+			edgeSpringStrength: 1,
+			enterExitDurationMs: 0,
+			scaleAnimationDurationMs: 120,
+			postScaleChangeSettleMaxFrames: 0
+		},
 		onMultigraphChange: fn()
 	}}
 	play={async ({ canvasElement, args }: PlayContext) => {
@@ -2507,8 +2513,25 @@
 		await sleep();
 
 		expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
-		expect(canvasElement.querySelector('[data-edge-id="e0"]')).not.toBeInTheDocument();
 		expect(lastChangedGraph(args).edges).toEqual([]);
+
+		// The removal severed n1 from the pinned side, so the reveal wave plays:
+		// the removed edge keeps rendering while it fades out with the wave.
+		const wavingEdge = canvasElement.querySelector('[data-edge-id="e0"]') as HTMLElement | null;
+		expect(wavingEdge).toBeInTheDocument();
+		expect(wavingEdge!.dataset.edgeRevealBuffer).toBe('true');
+
+		// After the wave, the edge is gone but n1 survives as its component's
+		// beacon: unpinned-neighbor size, no pinned styling.
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-edge-id="e0"]')).not.toBeInTheDocument();
+		});
+		const beacon = getNodeWrapper(canvasElement, 'n1');
+		expect(Number(beacon.dataset.scale)).toBeCloseTo(0.7);
+		expect(canvasElement.querySelector('[data-node-id="n1"] .node')).not.toHaveAttribute(
+			'data-pinned'
+		);
+		expect(Number(getNodeWrapper(canvasElement, 'n0').dataset.scale)).toBe(1);
 	}}
 />
 
@@ -3600,7 +3623,12 @@
 		multigraphData: makeGraph({
 			nodeCount: 2,
 			pinned: [0],
-			edges: [[0, 1]],
+			// Parallel edges keep the graph connected after removal, so the
+			// exiting-buffer fade path runs (severing removals use the reveal wave).
+			edges: [
+				[0, 1],
+				[0, 1]
+			],
 			posByNodeId: {
 				n0: { x: -200, y: 0 },
 				n1: { x: 200, y: 0 }
@@ -3650,6 +3678,7 @@
 		await waitForLayout();
 
 		expect(canvasElement.querySelector('[data-edge-id="e0"]')).not.toBeInTheDocument();
-		expect(lastChangedGraph(args).edges).toEqual([]);
+		expect(canvasElement.querySelector('[data-edge-id="e1"]')).toBeInTheDocument();
+		expect(lastChangedGraph(args).edges.map((edge) => edge.id)).toEqual(['e1']);
 	}}
 />
