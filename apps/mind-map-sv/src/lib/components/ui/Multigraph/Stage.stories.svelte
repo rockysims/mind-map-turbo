@@ -54,17 +54,30 @@
 		type: 'pointerdown' | 'pointermove' | 'pointerup' | 'pointercancel',
 		clientX: number,
 		clientY: number,
-		pointerId = 1
+		pointerId = 1,
+		pointerType = ''
 	) {
 		target.dispatchEvent(
 			new PointerEvent(type, {
 				clientX,
 				clientY,
 				pointerId,
+				pointerType,
 				bubbles: true,
 				cancelable: true
 			})
 		);
+	}
+
+	function dispatchContextMenu(target: HTMLElement, clientX: number, clientY: number): MouseEvent {
+		const event = new MouseEvent('contextmenu', {
+			clientX,
+			clientY,
+			bubbles: true,
+			cancelable: true
+		});
+		target.dispatchEvent(event);
+		return event;
 	}
 
 	function dispatchWheel(target: HTMLElement, deltaY: number, clientX?: number, clientY?: number) {
@@ -329,7 +342,8 @@
 		expect(backgroundDrop.x).toBeCloseTo(expectedBackgroundPoint.x);
 		expect(backgroundDrop.y).toBeCloseTo(expectedBackgroundPoint.y);
 
-		// Self-drops intentionally follow the background-drop path.
+		// Self-drops cancel the creation gesture instead of creating a node.
+		const dropBgBeforeSelfDrop = wrapper.dataset.lastDoubleClickDropBg;
 		await dispatchDoubleClickDrag(
 			circle,
 			nodeCenter.x,
@@ -339,22 +353,15 @@
 			nodeCenter.y + DRAG_THRESHOLD * 2
 		);
 		await sleep();
-		const selfDrop = parsePointCallback(wrapper.dataset.lastDoubleClickDropBg ?? '');
-		const expectedSelfDropPoint = getGraphPoint(
-			stage,
-			nodeCenter.x + DRAG_THRESHOLD * 2,
-			nodeCenter.y + DRAG_THRESHOLD * 2
-		);
-		expect(selfDrop.nodeId).toBe(NODES[0].id);
-		expect(selfDrop.x).toBeCloseTo(expectedSelfDropPoint.x);
-		expect(selfDrop.y).toBeCloseTo(expectedSelfDropPoint.y);
+		expect(wrapper.dataset.lastDoubleClickDropBg).toBe(dropBgBeforeSelfDrop);
 		expect(wrapper.dataset.lastDoubleClickDropNode).toBe('');
+		expect(wrapper.dataset.lastCreationCancel).toBe(NODES[0].id);
 
-		// Long-press fires once without interfering with later gestures.
-		dispatchPointer(circle, 'pointerdown', nodeCenter.x, nodeCenter.y);
+		// Long-press (touch pointers only) fires once without interfering with later gestures.
+		dispatchPointer(circle, 'pointerdown', nodeCenter.x, nodeCenter.y, 1, 'touch');
 		await sleep(LONG_PRESS_MS + 20);
 		expect(wrapper.dataset.lastNodeLongPress?.startsWith(NODES[0].id)).toBe(true);
-		dispatchPointer(circle, 'pointerup', nodeCenter.x, nodeCenter.y);
+		dispatchPointer(circle, 'pointerup', nodeCenter.x, nodeCenter.y, 1, 'touch');
 
 		// Single-click drag to move node
 		const moveToX = nodeCenter.x + (NODE_RADIUS + 10);
@@ -490,5 +497,230 @@
 
 		const afterPan = getStageTransform(canvasElement);
 		expect(afterPan).toContain('translate(30px, 20px)');
+	}}
+/>
+
+<Story
+	name="RightClickOpensNodeContextMenuCallback"
+	args={{ nodes: [NODES[0]] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = canvasElement.querySelector('[data-testid="stage-callbacks"]') as HTMLElement;
+		const stage = getStage(canvasElement);
+		const circle = canvasElement.querySelector('.circle') as HTMLElement;
+
+		await waitForLayout();
+
+		const nodeCenter = getCenter(circle);
+		const nodeEvent = dispatchContextMenu(stage, nodeCenter.x, nodeCenter.y);
+		await sleep();
+		expect(nodeEvent.defaultPrevented).toBe(true);
+		const contextMenu = parsePointCallback(wrapper.dataset.lastNodeContextMenu ?? '');
+		expect(contextMenu.nodeId).toBe(NODES[0].id);
+		expect(contextMenu.x).toBeCloseTo(nodeCenter.x);
+		expect(contextMenu.y).toBeCloseTo(nodeCenter.y);
+
+		// Background right-click: native menu still suppressed, but no callback.
+		const priorValue = wrapper.dataset.lastNodeContextMenu;
+		const backgroundEvent = dispatchContextMenu(
+			stage,
+			nodeCenter.x + NODE_RADIUS * 3,
+			nodeCenter.y + NODE_RADIUS * 3
+		);
+		await sleep();
+		expect(backgroundEvent.defaultPrevented).toBe(true);
+		expect(wrapper.dataset.lastNodeContextMenu).toBe(priorValue);
+	}}
+/>
+
+<Story
+	name="MouseLongPressDoesNotFire"
+	args={{ nodes: [NODES[0]] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = canvasElement.querySelector('[data-testid="stage-callbacks"]') as HTMLElement;
+		const circle = canvasElement.querySelector('.circle') as HTMLElement;
+
+		await waitForLayout();
+
+		const nodeCenter = getCenter(circle);
+		dispatchPointer(circle, 'pointerdown', nodeCenter.x, nodeCenter.y, 1, 'mouse');
+		await sleep(LONG_PRESS_MS + 20);
+		expect(wrapper.dataset.lastNodeLongPress).toBe('');
+		dispatchPointer(circle, 'pointerup', nodeCenter.x, nodeCenter.y, 1, 'mouse');
+	}}
+/>
+
+<Story
+	name="ArmedCreationHoverGesture"
+	args={{ nodes: [NODES[0]] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = canvasElement.querySelector('[data-testid="stage-callbacks"]') as HTMLElement;
+		const stage = getStage(canvasElement);
+		const circle = canvasElement.querySelector('.circle') as HTMLElement;
+
+		await waitForLayout();
+
+		const nodeCenter = getCenter(circle);
+		const bgX = nodeCenter.x + NODE_RADIUS * 3;
+		const bgY = nodeCenter.y;
+
+		const armButton = canvasElement.querySelector(
+			`[data-testid="arm-creation-${NODES[0].id}"]`
+		) as HTMLElement;
+		armButton.click();
+		await sleep();
+
+		// Hover moves (no button pressed) drive the creation gesture.
+		dispatchPointer(stage, 'pointermove', bgX, bgY);
+		await sleep();
+		const update = (wrapper.dataset.lastCreationUpdate ?? '').split(',');
+		const expectedPoint = getGraphPoint(stage, bgX, bgY);
+		expect(update[0]).toBe(NODES[0].id);
+		expect(Number(update[1])).toBeCloseTo(expectedPoint.x);
+		expect(Number(update[2])).toBeCloseTo(expectedPoint.y);
+		expect(update[3]).toBe('');
+
+		// The next click completes the gesture on the background.
+		dispatchPointer(stage, 'pointerdown', bgX, bgY);
+		dispatchPointer(stage, 'pointerup', bgX, bgY);
+		await sleep();
+		const backgroundDrop = parsePointCallback(wrapper.dataset.lastDoubleClickDropBg ?? '');
+		expect(backgroundDrop.nodeId).toBe(NODES[0].id);
+		expect(backgroundDrop.x).toBeCloseTo(expectedPoint.x);
+		expect(backgroundDrop.y).toBeCloseTo(expectedPoint.y);
+		expect(wrapper.dataset.lastCreationCancel).toBe('');
+	}}
+/>
+
+<Story
+	name="ArmedCreationReleaseOnNode"
+	args={{
+		nodes: [NODES[0], NODES[1]],
+		positions: {
+			[NODES[0].id]: { left: '5%', top: '50%' },
+			[NODES[1].id]: { left: '95%', top: '50%' }
+		}
+	}}
+	play={async ({ canvasElement }) => {
+		const wrapper = canvasElement.querySelector('[data-testid="stage-callbacks"]') as HTMLElement;
+		const stage = getStage(canvasElement);
+		const circles = canvasElement.querySelectorAll('.circle');
+		const targetCircle = circles[1] as HTMLElement;
+
+		await waitForLayout();
+
+		const targetCenter = getCenter(targetCircle);
+		const armButton = canvasElement.querySelector(
+			`[data-testid="arm-creation-${NODES[0].id}"]`
+		) as HTMLElement;
+		armButton.click();
+		await sleep();
+
+		dispatchPointer(stage, 'pointermove', targetCenter.x, targetCenter.y);
+		await sleep();
+		const update = (wrapper.dataset.lastCreationUpdate ?? '').split(',');
+		expect(update[0]).toBe(NODES[0].id);
+		expect(update[3]).toBe(NODES[1].id);
+
+		dispatchPointer(stage, 'pointerdown', targetCenter.x, targetCenter.y);
+		dispatchPointer(stage, 'pointerup', targetCenter.x, targetCenter.y);
+		await sleep();
+		expect(wrapper.dataset.lastDoubleClickDropNode).toBe(`${NODES[0].id},${NODES[1].id}`);
+		expect(wrapper.dataset.lastCreationCancel).toBe('');
+	}}
+/>
+
+<Story
+	name="ArmedCreationReleaseOnSourceCancels"
+	args={{ nodes: [NODES[0]] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = canvasElement.querySelector('[data-testid="stage-callbacks"]') as HTMLElement;
+		const stage = getStage(canvasElement);
+		const circle = canvasElement.querySelector('.circle') as HTMLElement;
+
+		await waitForLayout();
+
+		const nodeCenter = getCenter(circle);
+		const armButton = canvasElement.querySelector(
+			`[data-testid="arm-creation-${NODES[0].id}"]`
+		) as HTMLElement;
+		armButton.click();
+		await sleep();
+
+		dispatchPointer(stage, 'pointermove', nodeCenter.x + NODE_RADIUS * 3, nodeCenter.y);
+		dispatchPointer(stage, 'pointermove', nodeCenter.x, nodeCenter.y);
+		dispatchPointer(stage, 'pointerdown', nodeCenter.x, nodeCenter.y);
+		dispatchPointer(stage, 'pointerup', nodeCenter.x, nodeCenter.y);
+		await sleep();
+		expect(wrapper.dataset.lastCreationCancel).toBe(NODES[0].id);
+		expect(wrapper.dataset.lastDoubleClickDropBg).toBe('');
+		expect(wrapper.dataset.lastDoubleClickDropNode).toBe('');
+	}}
+/>
+
+<Story
+	name="ArmedCreationEscapeCancels"
+	args={{ nodes: [NODES[0]] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = canvasElement.querySelector('[data-testid="stage-callbacks"]') as HTMLElement;
+		const stage = getStage(canvasElement);
+		const circle = canvasElement.querySelector('.circle') as HTMLElement;
+
+		await waitForLayout();
+
+		const nodeCenter = getCenter(circle);
+		const bgX = nodeCenter.x + NODE_RADIUS * 3;
+		const armButton = canvasElement.querySelector(
+			`[data-testid="arm-creation-${NODES[0].id}"]`
+		) as HTMLElement;
+		armButton.click();
+		await sleep();
+
+		dispatchPointer(stage, 'pointermove', bgX, nodeCenter.y);
+		await sleep();
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+		await sleep();
+		expect(wrapper.dataset.lastCreationCancel).toBe(NODES[0].id);
+
+		// The gesture is over: a later click no longer creates anything.
+		dispatchPointer(stage, 'pointerdown', bgX, nodeCenter.y);
+		dispatchPointer(stage, 'pointerup', bgX, nodeCenter.y);
+		await sleep();
+		expect(wrapper.dataset.lastDoubleClickDropBg).toBe('');
+		expect(wrapper.dataset.lastDoubleClickDropNode).toBe('');
+	}}
+/>
+
+<Story
+	name="DoubleClickDragEmitsCreationUpdates"
+	args={{ nodes: [NODES[0]] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = canvasElement.querySelector('[data-testid="stage-callbacks"]') as HTMLElement;
+		const stage = getStage(canvasElement);
+		const circle = canvasElement.querySelector('.circle') as HTMLElement;
+
+		await waitForLayout();
+
+		const nodeCenter = getCenter(circle);
+		const bgX = nodeCenter.x + NODE_RADIUS * 3;
+		const bgY = nodeCenter.y;
+
+		dispatchPointer(circle, 'pointerdown', nodeCenter.x, nodeCenter.y);
+		dispatchPointer(circle, 'pointerup', nodeCenter.x, nodeCenter.y);
+		await sleep(50);
+		dispatchPointer(circle, 'pointerdown', nodeCenter.x, nodeCenter.y);
+		dispatchPointer(stage, 'pointermove', bgX, bgY);
+		await sleep();
+
+		const update = (wrapper.dataset.lastCreationUpdate ?? '').split(',');
+		const expectedPoint = getGraphPoint(stage, bgX, bgY);
+		expect(update[0]).toBe(NODES[0].id);
+		expect(Number(update[1])).toBeCloseTo(expectedPoint.x);
+		expect(Number(update[2])).toBeCloseTo(expectedPoint.y);
+		expect(update[3]).toBe('');
+
+		dispatchPointer(stage, 'pointerup', bgX, bgY);
+		await sleep();
+		const backgroundDrop = parsePointCallback(wrapper.dataset.lastDoubleClickDropBg ?? '');
+		expect(backgroundDrop.nodeId).toBe(NODES[0].id);
 	}}
 />

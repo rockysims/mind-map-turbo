@@ -38,6 +38,7 @@
 		type EdgeOcclusionNode
 	} from './lib/edgeOcclusion.js';
 	import {
+		NEW_NODE_TITLE,
 		addEdge,
 		addNodeImageContent,
 		addNode,
@@ -108,6 +109,14 @@
 		type ExitingBuffer,
 		type NodeEnterAnimation
 	} from './lib/elementTransitions.js';
+	import {
+		beginCreationPreview,
+		creationPreviewScaleAt,
+		endCreationPreview,
+		isCreationPreviewSettled,
+		updateCreationPreview,
+		type CreationPreviewState
+	} from './lib/creationPreview.js';
 	import { computeParallelEdgeOffsets } from './lib/parallelEdges.js';
 	import type { FocusLevel } from './lib/focusRuntime.svelte.js';
 	import { FocusController } from './lib/focusController.svelte.js';
@@ -128,6 +137,25 @@
 	import { NODE_RADIUS, NODE_TEXT_FONT_SIZE } from '$lib/constants.js';
 
 	const CENTERED_POSITION: Point = { x: 0, y: 0 };
+
+	/**
+	 * Stand-ins for the node/edge a finishing creation gesture would commit
+	 * (see addNode/addEdge in lib/graph.ts) so the preview looks identical to
+	 * the real elements it hands off to.
+	 */
+	const CREATION_PREVIEW_NODE: NodeData = {
+		id: 'creation-preview',
+		title: NEW_NODE_TITLE,
+		description: '',
+		tags: [],
+		pinned: true
+	};
+	const CREATION_PREVIEW_EDGE: EdgeData = {
+		id: 'creation-preview-edge',
+		sourceNodeId: 'creation-preview-source',
+		targetNodeId: 'creation-preview',
+		tags: []
+	};
 	const FOCUS_TRANSITION_MS = APP_CONFIG.multigraph.focus.entryTransitionMs;
 	const DETAILS_TITLE_ID = 'node-focus-title';
 	const NODE_DIAMETER_PX = NODE_RADIUS * 2;
@@ -186,6 +214,9 @@
 	let activeDragNodeId = $state<string | null>(null);
 	let editNodeId = $state<string | null>(null);
 	let actionMenu = $state<{ nodeId: string; position: Point } | null>(null);
+	let creationPreview = $state<CreationPreviewState | null>(null);
+	let creationArmRequest = $state<{ id: number; sourceNode: NodeData } | null>(null);
+	let creationArmRequestId = $state(0);
 	let duplicateEdgeConfirm = $state<{ edgeId: string } | null>(null);
 	let titleEditContext = $state<{
 		nodeId: string;
@@ -263,13 +294,17 @@
 			return (
 				hasActiveExiting(internalExitingBuffer, now) ||
 				hasActiveNodeEnterAnimations(nodeEnterAnimations, now) ||
-				hasActiveEdgeEnterAnimations(edgeEnterAnimations, now)
+				hasActiveEdgeEnterAnimations(edgeEnterAnimations, now) ||
+				(creationPreview !== null && !isCreationPreviewSettled(creationPreview, now))
 			);
 		},
 		onFrame: (nowMs) => {
 			internalExitingBuffer = pruneFinishedExiting(internalExitingBuffer, nowMs);
 			nodeEnterAnimations = pruneFinishedNodeEnterAnimations(nodeEnterAnimations, nowMs);
 			edgeEnterAnimations = pruneFinishedEdgeEnterAnimations(edgeEnterAnimations, nowMs);
+			if (creationPreview?.ending && isCreationPreviewSettled(creationPreview, nowMs)) {
+				creationPreview = null;
+			}
 		}
 	});
 
@@ -520,6 +555,8 @@
 
 	function handleNodeDoubleClickDropOntoNode(sourceNode: NodeData, targetNode: NodeData) {
 		closeOverlays();
+		const hadPreviewEdge = creationPreview !== null && !creationPreview.ending;
+		creationPreview = null;
 		const existing = findExistingEdge(graph, sourceNode.id, targetNode.id);
 		if (existing) {
 			duplicateEdgeConfirm = { edgeId: existing.id };
@@ -529,7 +566,9 @@
 			commitUserGraph(layoutRuntime.relaxAfterMutation(graphWithEdge));
 
 			const durationMs = resolvedLayoutSettings.enterExitDurationMs;
-			if (newEdge && durationMs > 0) {
+			// The preview edge was already drawn at full opacity; fading the real
+			// edge in would make it blink on handoff.
+			if (newEdge && durationMs > 0 && !hadPreviewEdge) {
 				const nowMs = layoutRuntime.now();
 				internalExitingBuffer = cancelExitingEdge(internalExitingBuffer, newEdge.id);
 				edgeEnterAnimations = {
@@ -543,6 +582,11 @@
 
 	function handleNodeDoubleClickDropOntoBackground(sourceNode: NodeData, point: Point) {
 		closeOverlays();
+		const handoffScale = creationPreview
+			? creationPreviewScaleAt(creationPreview, layoutRuntime.now())
+			: 0;
+		const hadPreviewEdge = creationPreview !== null && !creationPreview.ending;
+		creationPreview = null;
 		const graphWithNode = addNode(graph, { pinned: true, position: point });
 		const newNode = graphWithNode.nodes[graphWithNode.nodes.length - 1] ?? null;
 		const graphWithEdge = newNode
@@ -558,12 +602,17 @@
 			if (newNode) {
 				internalExitingBuffer = cancelExitingNode(internalExitingBuffer, newNode.id);
 				const targetScale = graphLayout.scaleByNodeId[newNode.id] ?? 1;
-				nodeEnterAnimations = {
-					...nodeEnterAnimations,
-					[newNode.id]: createNodeEnterAnimation(targetScale, nowMs, durationMs)
-				};
+				// Continue from the preview node's current scale so the handoff from
+				// preview to real node is seamless (a fully-shown preview skips the
+				// enter animation entirely).
+				if (handoffScale < targetScale) {
+					nodeEnterAnimations = {
+						...nodeEnterAnimations,
+						[newNode.id]: createNodeEnterAnimation(targetScale, nowMs, durationMs, handoffScale)
+					};
+				}
 			}
-			if (newEdge) {
+			if (newEdge && !hadPreviewEdge) {
 				internalExitingBuffer = cancelExitingEdge(internalExitingBuffer, newEdge.id);
 				edgeEnterAnimations = {
 					...edgeEnterAnimations,
@@ -580,9 +629,49 @@
 		}
 	}
 
-	function handleNodeLongPress(node: NodeData, point: Point) {
+	function openNodeActionMenu(node: NodeData, point: Point) {
 		editNodeId = null;
 		actionMenu = { nodeId: node.id, position: point };
+	}
+
+	const previewDurationMs = $derived(reduceMotion ? 0 : resolvedLayoutSettings.enterExitDurationMs);
+
+	function handleCreationDragUpdate(
+		sourceNode: NodeData,
+		point: Point,
+		hoverNode: NodeData | null
+	) {
+		const nowMs = layoutRuntime.now();
+		const base =
+			creationPreview && !creationPreview.ending && creationPreview.sourceNodeId === sourceNode.id
+				? creationPreview
+				: beginCreationPreview(sourceNode.id, point, nowMs);
+		creationPreview = updateCreationPreview(
+			base,
+			{ point, hoverNodeId: hoverNode?.id ?? null },
+			nowMs,
+			previewDurationMs
+		);
+		layoutRuntime.start();
+	}
+
+	function handleCreationCancel() {
+		if (!creationPreview) return;
+		const nowMs = layoutRuntime.now();
+		const ended = endCreationPreview(creationPreview, nowMs, previewDurationMs);
+		creationPreview = ended && !isCreationPreviewSettled(ended, nowMs) ? ended : null;
+		if (creationPreview) layoutRuntime.start();
+	}
+
+	function armCreationGesture(node: NodeData) {
+		actionMenu = null;
+		creationArmRequestId += 1;
+		creationArmRequest = { id: creationArmRequestId, sourceNode: node };
+		creationPreview = beginCreationPreview(
+			node.id,
+			graphLayout.posByNodeId[node.id] ?? CENTERED_POSITION,
+			layoutRuntime.now()
+		);
 	}
 
 	function openEditSheet(nodeId: string) {
@@ -996,7 +1085,11 @@
 		onNodeMakePrimary={handleNodeMakePrimary}
 		onNodeDoubleClickDropOntoNode={handleNodeDoubleClickDropOntoNode}
 		onNodeDoubleClickDropOntoBackground={handleNodeDoubleClickDropOntoBackground}
-		onNodeLongPress={handleNodeLongPress}
+		onNodeLongPress={openNodeActionMenu}
+		onNodeContextMenu={openNodeActionMenu}
+		{creationArmRequest}
+		onCreationDragUpdate={handleCreationDragUpdate}
+		onCreationCancel={handleCreationCancel}
 		onViewStateLiveChange={(state) => {
 			stageViewState = state;
 		}}
@@ -1197,6 +1290,20 @@
 					></div>
 				{/if}
 			{/each}
+			{#if creationPreview && !creationPreview.ending}
+				{@const previewSourcePos = graphLayout.posByNodeId[creationPreview.sourceNodeId]}
+				{#if previewSourcePos}
+					{@const previewEdgeColor = edgeStrokeColor(
+						CREATION_PREVIEW_EDGE,
+						graph.tagColorConfig.edgeTags
+					)}
+					<div
+						class="edge"
+						data-creation-preview-edge="true"
+						style={`${edgeStyle(previewSourcePos, creationPreview.point)} --edge-background: ${previewEdgeColor}; color: ${previewEdgeColor}; --edge-stroke-width: ${EDGE_STROKE_WIDTH}px; pointer-events: none;`}
+					></div>
+				{/if}
+			{/if}
 		</div>
 
 		{#each visibleGraph.nodes as node (node.id)}
@@ -1295,12 +1402,35 @@
 				/>
 			</div>
 		{/each}
+		{#if creationPreview}
+			{@const previewScale = creationPreviewScaleAt(creationPreview, layoutRuntime.animationNowMs)}
+			{#if previewScale > 0}
+				<div
+					class="node-wrapper"
+					data-creation-preview-node="true"
+					data-scale={previewScale}
+					data-x={creationPreview.point.x}
+					data-y={creationPreview.point.y}
+					style={`left: calc(50% + ${creationPreview.point.x}px); top: calc(50% + ${creationPreview.point.y}px); transform: translate(-50%, -50%) scale(${previewScale}); pointer-events: none;`}
+				>
+					<Node
+						nodeData={CREATION_PREVIEW_NODE}
+						isTitleEditing={false}
+						borderSegments={nodeBorderSegments(
+							CREATION_PREVIEW_NODE,
+							graph.tagColorConfig.nodeTags
+						)}
+					/>
+				</div>
+			{/if}
+		{/if}
 	</Stage>
 
 	{#if actionMenu && actionMenuNode}
 		<NodeActionMenu
 			node={actionMenuNode}
 			position={actionMenu.position}
+			onAddNodeEdge={() => armCreationGesture(actionMenuNode)}
 			onTogglePinned={() => {
 				toggleNodePinned(actionMenuNode.id);
 				closeOverlays();

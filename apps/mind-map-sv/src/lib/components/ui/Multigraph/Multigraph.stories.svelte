@@ -6,6 +6,7 @@
 	import { APP_CONFIG } from '$lib/appConfig';
 	import {
 		DBL_CLICK_MS,
+		DRAG_THRESHOLD,
 		EDGE_ARROW_HALF_HEIGHT,
 		LONG_PRESS_MS,
 		MIN_NODE_HIT_RADIUS,
@@ -192,17 +193,36 @@
 		type: 'pointerdown' | 'pointermove' | 'pointerup',
 		clientX: number,
 		clientY: number,
-		pointerId = 1
+		pointerId = 1,
+		pointerType = ''
 	) {
 		target.dispatchEvent(
 			new PointerEvent(type, {
 				clientX,
 				clientY,
 				pointerId,
+				pointerType,
 				bubbles: true,
 				cancelable: true
 			})
 		);
+	}
+
+	/** Touch long-press: the only pointer type that still opens the menu by holding. */
+	async function dispatchLongPress(target: HTMLElement, clientX: number, clientY: number) {
+		dispatchPointer(target, 'pointerdown', clientX, clientY, 1, 'touch');
+		await sleep(LONG_PRESS_MS + 20);
+	}
+
+	function dispatchContextMenu(target: HTMLElement, clientX: number, clientY: number): MouseEvent {
+		const event = new MouseEvent('contextmenu', {
+			clientX,
+			clientY,
+			bubbles: true,
+			cancelable: true
+		});
+		target.dispatchEvent(event);
+		return event;
 	}
 
 	function dispatchWheel(target: HTMLElement, deltaY: number, clientX?: number, clientY?: number) {
@@ -654,8 +674,7 @@
 		const center = getCenter(circle);
 		const canvas = within(canvasElement);
 
-		dispatchPointer(circle, 'pointerdown', center.x, center.y);
-		await sleep(LONG_PRESS_MS + 20);
+		await dispatchLongPress(circle, center.x, center.y);
 		dispatchPointer(circle, 'pointerup', center.x, center.y);
 		canvas.getByRole('menuitem', { name: 'Focus' }).click();
 
@@ -738,8 +757,7 @@
 		const canvas = within(canvasElement);
 
 		// Commit focus on the node via the long-press menu (no residual gate).
-		dispatchPointer(circle, 'pointerdown', center.x, center.y);
-		await sleep(LONG_PRESS_MS + 20);
+		await dispatchLongPress(circle, center.x, center.y);
 		dispatchPointer(circle, 'pointerup', center.x, center.y);
 		canvas.getByRole('menuitem', { name: 'Focus' }).click();
 
@@ -865,8 +883,7 @@
 			const center = getCenter(circle);
 			const canvas = within(canvasElement);
 
-			dispatchPointer(circle, 'pointerdown', center.x, center.y);
-			await sleep(LONG_PRESS_MS + 20);
+			await dispatchLongPress(circle, center.x, center.y);
 			dispatchPointer(circle, 'pointerup', center.x, center.y);
 			canvas.getByRole('menuitem', { name: 'Focus' }).click();
 
@@ -1327,8 +1344,7 @@
 		const circle = getCircle(canvasElement, 'n0');
 		const center = getCenter(circle);
 
-		dispatchPointer(circle, 'pointerdown', center.x, center.y);
-		await sleep(LONG_PRESS_MS + 20);
+		await dispatchLongPress(circle, center.x, center.y);
 
 		const canvas = within(canvasElement);
 		canvas.getByRole('menuitem', { name: 'Edit' }).click();
@@ -1380,8 +1396,7 @@
 
 		const circle = getCircle(canvasElement, 'n0');
 		const center = getCenter(circle);
-		dispatchPointer(circle, 'pointerdown', center.x, center.y);
-		await sleep(LONG_PRESS_MS + 20);
+		await dispatchLongPress(circle, center.x, center.y);
 
 		const canvas = within(canvasElement);
 		canvas.getByRole('menuitem', { name: 'Edit' }).click();
@@ -1428,8 +1443,7 @@
 
 		const targetCircle = getCircle(canvasElement, 'n1');
 		const targetCenter = getCenter(targetCircle);
-		dispatchPointer(targetCircle, 'pointerdown', targetCenter.x, targetCenter.y);
-		await sleep(LONG_PRESS_MS + 20);
+		await dispatchLongPress(targetCircle, targetCenter.x, targetCenter.y);
 		canvas.getByRole('menuitem', { name: 'Edit' }).click();
 		await sleep();
 		canvas.getByRole('tab', { name: 'Edges' }).click();
@@ -1464,10 +1478,10 @@
 		const circle = getCircle(canvasElement, 'n0');
 		const center = getCenter(circle);
 
-		dispatchPointer(circle, 'pointerdown', center.x, center.y);
-		await sleep(LONG_PRESS_MS + 20);
+		await dispatchLongPress(circle, center.x, center.y);
 
 		const canvas = within(canvasElement);
+		expect(canvas.getByRole('menuitem', { name: 'Add node/edge' })).toBeInTheDocument();
 		expect(canvas.getByRole('menuitem', { name: 'Pin' })).toBeInTheDocument();
 		expect(canvas.getByRole('menuitem', { name: 'Edit' })).toBeInTheDocument();
 		expect(canvas.getByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
@@ -1488,8 +1502,7 @@
 		const circle = getCircle(canvasElement, 'n0');
 		const center = getCenter(circle);
 
-		dispatchPointer(circle, 'pointerdown', center.x, center.y);
-		await sleep(LONG_PRESS_MS + 20);
+		await dispatchLongPress(circle, center.x, center.y);
 		within(canvasElement).getByRole('menuitem', { name: 'Delete' }).click();
 		await sleep();
 
@@ -1523,11 +1536,254 @@
 			) / 2;
 		expect(tinyRadius).toBeLessThan(MIN_NODE_HIT_RADIUS);
 
-		dispatchPointer(stage, 'pointerdown', tinyCenter.x + tinyRadius + 4, tinyCenter.y);
-		await sleep(LONG_PRESS_MS + 20);
+		await dispatchLongPress(stage, tinyCenter.x + tinyRadius + 4, tinyCenter.y);
 
 		expect(within(canvasElement).getByRole('menuitem', { name: 'Pin' })).toBeInTheDocument();
 		dispatchPointer(stage, 'pointerup', tinyCenter.x + tinyRadius + 4, tinyCenter.y);
+	}}
+/>
+
+<Story
+	name="UserRightClicksNodeForActions"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1 }),
+		defaultPrimaryNodeId: 'n0'
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+
+		const event = dispatchContextMenu(circle, center.x, center.y);
+		await sleep();
+
+		expect(event.defaultPrevented).toBe(true);
+		const canvas = within(canvasElement);
+		expect(canvas.getByRole('menuitem', { name: 'Add node/edge' })).toBeInTheDocument();
+		expect(canvas.getByRole('menuitem', { name: 'Pin' })).toBeInTheDocument();
+		expect(canvas.getByRole('menuitem', { name: 'Focus' })).toBeInTheDocument();
+		expect(canvas.getByRole('menuitem', { name: 'Edit' })).toBeInTheDocument();
+		expect(canvas.getByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="UserMouseLongPressDoesNotOpenMenu"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1 }),
+		defaultPrimaryNodeId: 'n0'
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+
+		dispatchPointer(circle, 'pointerdown', center.x, center.y, 1, 'mouse');
+		await sleep(LONG_PRESS_MS + 20);
+
+		expect(within(canvasElement).queryByRole('menuitem')).not.toBeInTheDocument();
+		dispatchPointer(circle, 'pointerup', center.x, center.y, 1, 'mouse');
+	}}
+/>
+
+<Story
+	name="UserAddsNodeViaMenuGesture"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1, pinned: [0] }),
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: { panX: 0, panY: 0, scale: 0.5 },
+		layoutSettings: { enterExitDurationMs: 0, relaxIterations: 1 },
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const stageRect = stage.getBoundingClientRect();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+		const bgX = stageRect.right - 20;
+		const bgY = stageRect.top + stageRect.height / 2;
+
+		dispatchContextMenu(circle, center.x, center.y);
+		await sleep();
+		within(canvasElement).getByRole('menuitem', { name: 'Add node/edge' }).click();
+		await sleep();
+		expect(within(canvasElement).queryByRole('menuitem')).not.toBeInTheDocument();
+
+		// Hovering the background shows the preview node and edge (durations are 0).
+		dispatchPointer(stage, 'pointermove', bgX, bgY);
+		await sleep();
+		expect(canvasElement.querySelector('[data-creation-preview-node]')).toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-creation-preview-edge]')).toBeInTheDocument();
+
+		// The next click commits the new node + edge and opens the inline title editor.
+		dispatchPointer(stage, 'pointerdown', bgX, bgY);
+		dispatchPointer(stage, 'pointerup', bgX, bgY);
+		await sleep();
+		await waitForLayout();
+
+		expect(canvasElement.querySelector('[data-creation-preview-node]')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-creation-preview-edge]')).not.toBeInTheDocument();
+		const changedGraph = lastChangedGraph(args);
+		expect(changedGraph.nodes.map((node) => node.id)).toEqual(['n0', 'n1']);
+		expect(changedGraph.nodes[1].title).toBe('New Node');
+		expect(changedGraph.edges).toHaveLength(1);
+		expect(changedGraph.edges[0]).toMatchObject({ sourceNodeId: 'n0', targetNodeId: 'n1' });
+		expect(canvasElement.querySelector('.title-input')).toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="UserAddsEdgeViaMenuGesture"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 3,
+			edges: [
+				[0, 1],
+				[1, 2]
+			],
+			posByNodeId: {
+				n0: { x: -160, y: 0 },
+				n1: { x: 0, y: 0 },
+				n2: { x: 160, y: 0 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { enterExitDurationMs: 0, relaxIterations: 1 },
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const sourceCircle = getCircle(canvasElement, 'n0');
+		const sourceCenter = getCenter(sourceCircle);
+		const targetCircle = getCircle(canvasElement, 'n2');
+		const targetCenter = getCenter(targetCircle);
+
+		dispatchContextMenu(sourceCircle, sourceCenter.x, sourceCenter.y);
+		await sleep();
+		within(canvasElement).getByRole('menuitem', { name: 'Add node/edge' }).click();
+		await sleep();
+
+		// Hovering an existing node hides the preview node but keeps the preview edge.
+		dispatchPointer(stage, 'pointermove', targetCenter.x, targetCenter.y);
+		await sleep();
+		expect(canvasElement.querySelector('[data-creation-preview-node]')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-creation-preview-edge]')).toBeInTheDocument();
+
+		dispatchPointer(stage, 'pointerdown', targetCenter.x, targetCenter.y);
+		dispatchPointer(stage, 'pointerup', targetCenter.x, targetCenter.y);
+		await sleep();
+
+		expect(canvasElement.querySelector('[data-creation-preview-edge]')).not.toBeInTheDocument();
+		const changedGraph = lastChangedGraph(args);
+		expect(changedGraph.nodes).toHaveLength(3);
+		expect(changedGraph.edges).toHaveLength(3);
+		expect(changedGraph.edges[2]).toMatchObject({ sourceNodeId: 'n0', targetNodeId: 'n2' });
+	}}
+/>
+
+<Story
+	name="UserCancelsMenuGestureWithEscape"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1, pinned: [0] }),
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: { panX: 0, panY: 0, scale: 0.5 },
+		layoutSettings: { enterExitDurationMs: 0, relaxIterations: 1 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const stageRect = stage.getBoundingClientRect();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+		const bgX = stageRect.right - 20;
+		const bgY = stageRect.top + stageRect.height / 2;
+
+		dispatchContextMenu(circle, center.x, center.y);
+		await sleep();
+		within(canvasElement).getByRole('menuitem', { name: 'Add node/edge' }).click();
+		await sleep();
+
+		dispatchPointer(stage, 'pointermove', bgX, bgY);
+		await sleep();
+		expect(canvasElement.querySelector('[data-creation-preview-node]')).toBeInTheDocument();
+
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+		await sleep();
+
+		expect(canvasElement.querySelector('[data-creation-preview-node]')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-creation-preview-edge]')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-node-id="n1"]')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('.title-input')).not.toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="UserSeesPreviewDuringDoubleClickDrag"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1, pinned: [0] }),
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: { panX: 0, panY: 0, scale: 0.5 },
+		layoutSettings: { enterExitDurationMs: 0, relaxIterations: 1 },
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const stageRect = stage.getBoundingClientRect();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+		const bgX = stageRect.right - 20;
+		const bgY = stageRect.top + stageRect.height / 2;
+
+		dispatchPointer(circle, 'pointerdown', center.x, center.y);
+		dispatchPointer(circle, 'pointerup', center.x, center.y);
+		await sleep(DBL_CLICK_MS * 0.1);
+		dispatchPointer(circle, 'pointerdown', center.x, center.y);
+		dispatchPointer(stage, 'pointermove', bgX, bgY);
+		await sleep();
+
+		expect(canvasElement.querySelector('[data-creation-preview-node]')).toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-creation-preview-edge]')).toBeInTheDocument();
+
+		dispatchPointer(stage, 'pointerup', bgX, bgY);
+		await sleep();
+		await waitForLayout();
+
+		expect(canvasElement.querySelector('[data-creation-preview-node]')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-creation-preview-edge]')).not.toBeInTheDocument();
+		expect(lastChangedGraph(args).nodes.map((node) => node.id)).toEqual(['n0', 'n1']);
+	}}
+/>
+
+<Story
+	name="UserSelfDropCancelsCreation"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1, pinned: [0] }),
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: { panX: 0, panY: 0, scale: 0.5 },
+		layoutSettings: { enterExitDurationMs: 0, relaxIterations: 1 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+
+		await dispatchDoubleClickDrag(
+			circle,
+			center.x,
+			center.y,
+			circle,
+			center.x + DRAG_THRESHOLD * 2,
+			center.y + DRAG_THRESHOLD * 2
+		);
+		await sleep();
+
+		expect(canvasElement.querySelector('[data-node-id="n1"]')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('.title-input')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-creation-preview-node]')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-creation-preview-edge]')).not.toBeInTheDocument();
 	}}
 />
 
@@ -3140,8 +3396,7 @@
 
 		const circle = getCircle(canvasElement, 'n0');
 		const center = getCenter(circle);
-		dispatchPointer(circle, 'pointerdown', center.x, center.y);
-		await sleep(LONG_PRESS_MS + 20);
+		await dispatchLongPress(circle, center.x, center.y);
 
 		const canvas = within(canvasElement);
 		canvas.getByRole('menuitem', { name: 'Edit' }).click();
@@ -3593,8 +3848,8 @@
 			dropY
 		);
 
-		// Immediately after the drop, new node and edge enter animations start.
-		// Check mid-animation state (before animation completes).
+		// Immediately after the drop, the new node's enter animation continues
+		// from the creation preview's scale. Check mid-animation state.
 		await waitForFrames(2);
 
 		const newNodeWrapper = canvasElement.querySelector(
@@ -3606,14 +3861,13 @@
 		expect(newNodeScale).toBeGreaterThan(0);
 		expect(newNodeScale).toBeLessThan(1);
 
+		// The preview edge was already drawn at full opacity during the drag, so
+		// the real edge appears without a fade-in (seamless handoff).
 		const newEdge = canvasElement.querySelector(
 			'.edge[data-source-node-id="n0"][data-target-node-id="n1"]'
 		) as HTMLElement | null;
 		expect(newEdge).toBeInTheDocument();
-
-		const newEdgeOpacity = Number(newEdge!.dataset.edgeOpacity);
-		expect(newEdgeOpacity).toBeGreaterThan(0);
-		expect(newEdgeOpacity).toBeLessThan(1);
+		expect(newEdge!.dataset.edgeExiting).toBeUndefined();
 	}}
 />
 

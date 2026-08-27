@@ -26,9 +26,10 @@ export interface EdgeOpacityAnimation {
 export function createNodeEnterAnimation(
 	toScale: number,
 	startedAtMs: number,
-	durationMs = DEFAULT_ENTER_EXIT_DURATION_MS
+	durationMs = DEFAULT_ENTER_EXIT_DURATION_MS,
+	fromScale = 0
 ): NodeEnterAnimation {
-	return { fromScale: 0, toScale, startedAtMs, durationMs: Math.max(0, durationMs) };
+	return { fromScale, toScale, startedAtMs, durationMs: Math.max(0, durationMs) };
 }
 
 export function createEdgeEnterAnimation(
@@ -202,7 +203,7 @@ export function exitingEdgeOpacityAt(entry: ExitingEdgeEntry, nowMs: number): nu
 // Shared easing (same curve as scaleAnimation.ts)
 // ---------------------------------------------------------------------------
 
-function easeInOut(t: number): number {
+export function easeInOut(t: number): number {
 	return t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
 }
 
