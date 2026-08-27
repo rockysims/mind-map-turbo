@@ -78,12 +78,14 @@ export function addNode(data: MultigraphData, input: AddNodeInput = {}): Multigr
 			'n',
 			data.nodes.map((node) => node.id)
 		);
+	const pinSequence = input.pinned ? nextPinSequence(data) : undefined;
 	const node: NodeData = {
 		id,
 		title: input.title ?? NEW_NODE_TITLE,
 		description: input.description ?? '',
 		tags: input.tags ?? [],
-		pinned: input.pinned
+		pinned: input.pinned,
+		lastPinnedSeq: pinSequence
 	};
 
 	return {
@@ -92,7 +94,8 @@ export function addNode(data: MultigraphData, input: AddNodeInput = {}): Multigr
 		posByNodeId: {
 			...data.posByNodeId,
 			[id]: input.position ?? data.posByNodeId[id] ?? { ...DEFAULT_NODE_POSITION }
-		}
+		},
+		pinSequence: pinSequence ?? data.pinSequence
 	};
 }
 
@@ -158,12 +161,10 @@ export function updateEdge(data: MultigraphData, edgeId: string, patch: EdgePatc
 }
 
 export function togglePinned(data: MultigraphData, nodeId: string): MultigraphData {
-	if (!hasNode(data, nodeId)) return data;
+	const node = data.nodes.find((candidate) => candidate.id === nodeId);
+	if (!node) return data;
 
-	return {
-		...data,
-		nodes: data.nodes.map((node) => (node.id === nodeId ? { ...node, pinned: !node.pinned } : node))
-	};
+	return setNodePinned(data, nodeId, !node.pinned);
 }
 
 export function setNodePinned(
@@ -171,11 +172,19 @@ export function setNodePinned(
 	nodeId: string,
 	pinned: boolean
 ): MultigraphData {
-	if (!hasNode(data, nodeId)) return data;
+	const node = data.nodes.find((candidate) => candidate.id === nodeId);
+	if (!node || (node.pinned ?? false) === pinned) return data;
+
+	// Both pin and unpin stamp recency, so a component's beacon is the node
+	// whose pin state the user touched last.
+	const pinSequence = nextPinSequence(data);
 
 	return {
 		...data,
-		nodes: data.nodes.map((node) => (node.id === nodeId ? { ...node, pinned } : node))
+		nodes: data.nodes.map((candidate) =>
+			candidate.id === nodeId ? { ...candidate, pinned, lastPinnedSeq: pinSequence } : candidate
+		),
+		pinSequence
 	};
 }
 
@@ -405,6 +414,11 @@ export function neighborsOf(data: MultigraphData, nodeId: string): NodeData[] {
 
 function hasNode(data: MultigraphData, nodeId: string): boolean {
 	return data.nodes.some((node) => node.id === nodeId);
+}
+
+function nextPinSequence(data: MultigraphData): number {
+	// Max over nodes keeps the counter self-healing when pinSequence is missing or stale.
+	return Math.max(data.pinSequence ?? 0, ...data.nodes.map((node) => node.lastPinnedSeq ?? 0)) + 1;
 }
 
 function isAssetReferenced(data: MultigraphData, assetId: string): boolean {

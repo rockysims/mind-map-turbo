@@ -89,7 +89,7 @@ function hopsFromSource(
 	return hops;
 }
 
-function buildAdjacency(data: MultigraphData): Record<string, string[]> {
+export function buildAdjacency(data: MultigraphData): Record<string, string[]> {
 	const adjacency = Object.fromEntries(data.nodes.map((node) => [node.id, [] as string[]]));
 
 	for (const edge of data.edges) {

@@ -31,6 +31,8 @@ export interface GraphLayoutOptions {
 	activeDragNodeId?: string | null;
 	/** Keep these nodes fixed during relaxation while their scale animates (e.g. after unpin). */
 	scaleAnchoredNodeIds?: readonly string[];
+	/** Effective hop counts merged over the pinned-BFS hops (e.g. beacons at BEACON_HOP). */
+	hopOverridesByNodeId?: Record<string, number>;
 	relaxIterations?: number;
 	scaleByNodeId?: Record<string, number>;
 	participatingNodeIds?: ReadonlySet<string>;
@@ -47,7 +49,7 @@ export function deriveGraphLayout(
 	options: GraphLayoutOptions = {}
 ): GraphLayout {
 	const settings = withDefaultLayoutSettings(options.settings);
-	const hopsByNodeId = hopsFromPinned(data);
+	const hopsByNodeId = withHopOverrides(hopsFromPinned(data), options.hopOverridesByNodeId);
 	const targetScaleByNodeId = scaleByHops(hopsByNodeId, settings);
 	const scaleByNodeId = {
 		...targetScaleByNodeId,
@@ -171,6 +173,19 @@ function anchoredNodeIds(data: MultigraphData, options: GraphLayoutOptions): Set
 		anchoredIds.add(nodeId);
 	}
 	return anchoredIds;
+}
+
+function withHopOverrides(
+	hops: Record<string, number>,
+	overrides: Record<string, number> | undefined
+): Record<string, number> {
+	if (!overrides) return hops;
+
+	const nextHops = { ...hops };
+	for (const [nodeId, hop] of Object.entries(overrides)) {
+		if (nodeId in nextHops) nextHops[nodeId] = hop;
+	}
+	return nextHops;
 }
 
 function participatingNodeIds(

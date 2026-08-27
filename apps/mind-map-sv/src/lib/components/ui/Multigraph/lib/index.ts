@@ -1,3 +1,4 @@
+export * from './beacons.js';
 export * from './graph.js';
 export * from './titleSyntax.js';
 export * from './tagColors.js';

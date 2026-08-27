@@ -34,6 +34,8 @@ export interface MakeGraphInput {
 	edges?: MakeEdgeInput[];
 	/** Nodes to mark pinned, by generated index or explicit id. */
 	pinned?: Array<number | string>;
+	/** Pin-recency stamps (NodeData.lastPinnedSeq), keyed by generated index or explicit id. */
+	pinHistory?: Record<number | string, number>;
 	/** Optional explicit positions, keyed by node id. Defaults to (0, 0). */
 	posByNodeId?: Record<string, Point>;
 	/** Optional graph-level tag colors. Defaults to empty node/edge maps. */
@@ -52,11 +54,16 @@ export function makeGraph(input: MakeGraphInput = {}): MultigraphData {
 	const idAt = (idx: number | string): string =>
 		typeof idx === 'number' ? (baseNodes[idx]?.id ?? `n${idx}`) : idx;
 	const pinnedIds = new Set((input.pinned ?? []).map(idAt));
-	const nodes = baseNodes.map((node) =>
-		pinnedIds.has(node.id)
-			? { ...node, tags: node.tags ?? [], pinned: true }
-			: { ...node, tags: node.tags ?? [] }
+	const pinHistoryEntries = Object.entries(input.pinHistory ?? {}).map(
+		([key, seq]) => [idAt(/^\d+$/.test(key) ? Number(key) : key), seq] as const
 	);
+	const pinHistoryById = new Map(pinHistoryEntries);
+	const nodes = baseNodes.map((node) => ({
+		...node,
+		tags: node.tags ?? [],
+		...(pinnedIds.has(node.id) ? { pinned: true } : {}),
+		...(pinHistoryById.has(node.id) ? { lastPinnedSeq: pinHistoryById.get(node.id) } : {})
+	}));
 
 	const edges: EdgeData[] = (input.edges ?? []).map((edge, i) => {
 		const source = Array.isArray(edge) ? edge[0] : edge.source;

@@ -56,8 +56,6 @@ IMPROVEMENTS:
 
 PROBLEMS:
 
-- When a graph is disconnected from all pinned nodes, it is invisible (no way to interact).
-
 BUGS:
 
 - Edit dialog background (click to close) has very rounded edges and padding so it doesn't cover the full Stage.

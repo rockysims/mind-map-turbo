@@ -1,4 +1,5 @@
 import type { MultigraphData } from '../../types/multigraph';
+import { beaconHopOverrides, beaconNodeIds, withBeaconHops } from './beacons';
 import {
 	edgeVisibilityForPinnedNeighborhood,
 	graphWithVisibleNodes,
@@ -64,7 +65,8 @@ export interface LayoutRuntimeOptions {
 	getGraph: () => MultigraphData;
 	getLayoutSettings: () => Partial<LayoutSettings>;
 	getActiveDragNodeId: () => string | null;
-	getFallbackAnchorNodeId: () => string | null;
+	/** Session-transient beacon hints (e.g. endpoints of a just-removed edge). */
+	getPreferredBeaconNodeIds: () => readonly string[];
 	applyGraph: (data: MultigraphData) => void;
 	scheduler?: LayoutRuntimeScheduler;
 	/** Returns true while enter/exit animations are active; keeps the frame loop running. */
@@ -267,11 +269,17 @@ export class LayoutRuntime {
 		const nodeIds = layoutGraph.nodes.map((node) => node.id);
 		const relayoutParticipating =
 			overrides.participatingNodeIds ?? participatingNodeIds(nodeIds, this.layeredRelayoutState);
+		// layoutGraph is always a visible graph, where beacon selection is
+		// idempotent: each beacon is the sole member of its pinless component.
+		// Beacons stay unanchored: overlap resolution and (bounded) hop
+		// repulsion must be able to move them off other clusters.
+		const beaconIds = this.#beaconIdsFor(layoutGraph);
 
 		return {
 			settings: this.#options.getLayoutSettings(),
 			activeDragNodeId: overrides.activeDragNodeId ?? this.#options.getActiveDragNodeId(),
 			scaleAnchoredNodeIds: overrides.scaleAnchoredNodeIds ?? this.scaleAnchoredNodeIds,
+			hopOverridesByNodeId: beaconHopOverrides(beaconIds),
 			relaxIterations: overrides.relaxIterations,
 			scaleByNodeId: overrides.scaleByNodeId ?? this.animatedScaleByNodeId,
 			participatingNodeIds: relayoutParticipating,
@@ -361,11 +369,24 @@ export class LayoutRuntime {
 		}
 	}
 
-	#visibleGraphFor(graph: MultigraphData): MultigraphData {
-		const visibleNodeIds = visibleNodeIdsForPinnedNeighborhood(graph, hopsFromPinned(graph), {
-			displayedLayers: this.#resolvedSettings().displayedLayers,
-			fallbackAnchorNodeId: this.#options.getFallbackAnchorNodeId()
+	#beaconIdsFor(graph: MultigraphData): Set<string> {
+		return beaconNodeIds(graph, {
+			preferredNodeIds: this.#options.getPreferredBeaconNodeIds()
 		});
+	}
+
+	#effectiveHopsFor(graph: MultigraphData): Record<string, number> {
+		return withBeaconHops(hopsFromPinned(graph), this.#beaconIdsFor(graph));
+	}
+
+	#visibleGraphFor(graph: MultigraphData): MultigraphData {
+		const visibleNodeIds = visibleNodeIdsForPinnedNeighborhood(
+			graph,
+			this.#effectiveHopsFor(graph),
+			{
+				displayedLayers: this.#resolvedSettings().displayedLayers
+			}
+		);
 		return graphWithVisibleNodes(graph, visibleNodeIds);
 	}
 
@@ -509,32 +530,27 @@ export class LayoutRuntime {
 		nextGraph: MultigraphData
 	): ScaleChangeRevealState {
 		const settings = this.#resolvedSettings();
-		const fallbackAnchorNodeId = this.#options.getFallbackAnchorNodeId();
-		const previousHopsByNodeId = hopsFromPinned(currentGraph);
-		const nextHopsByNodeId = hopsFromPinned(nextGraph);
+		const previousHopsByNodeId = this.#effectiveHopsFor(currentGraph);
+		const nextHopsByNodeId = this.#effectiveHopsFor(nextGraph);
 		const previousVisibleNodeIds = Array.from(
 			visibleNodeIdsForPinnedNeighborhood(currentGraph, previousHopsByNodeId, {
-				displayedLayers: settings.displayedLayers,
-				fallbackAnchorNodeId
+				displayedLayers: settings.displayedLayers
 			})
 		);
 		const nextVisibleNodeIds = Array.from(
 			visibleNodeIdsForPinnedNeighborhood(nextGraph, nextHopsByNodeId, {
-				displayedLayers: settings.displayedLayers,
-				fallbackAnchorNodeId
+				displayedLayers: settings.displayedLayers
 			})
 		);
 		const previousRenderableEdges = edgeVisibilityForPinnedNeighborhood(
 			currentGraph,
 			previousHopsByNodeId,
 			{
-				displayedLayers: settings.displayedLayers,
-				fallbackAnchorNodeId
+				displayedLayers: settings.displayedLayers
 			}
 		).filter((visibility): visibility is RenderableEdgeVisibility => visibility.kind !== 'hidden');
 		const nextRenderableEdges = edgeVisibilityForPinnedNeighborhood(nextGraph, nextHopsByNodeId, {
-			displayedLayers: settings.displayedLayers,
-			fallbackAnchorNodeId
+			displayedLayers: settings.displayedLayers
 		}).filter((visibility): visibility is RenderableEdgeVisibility => visibility.kind !== 'hidden');
 		const nextRenderableEdgeIds = nextRenderableEdges.map((visibility) => visibility.edge.id);
 

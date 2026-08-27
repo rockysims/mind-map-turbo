@@ -28,4 +28,6 @@ export interface MultigraphData {
 	posByNodeId: Record<string, Point>;
 	tagColorConfig: TagColorConfig;
 	assets?: Record<string, GraphAssetMetadata>;
+	/** Highest pin-recency stamp issued so far (see NodeData.lastPinnedSeq). */
+	pinSequence?: number;
 }

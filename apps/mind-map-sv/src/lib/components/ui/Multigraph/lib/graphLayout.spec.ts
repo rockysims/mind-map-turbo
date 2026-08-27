@@ -70,6 +70,25 @@ describe('graphLayout', () => {
 		expect(layout.radiusByNodeId.n2).toBe(20);
 	});
 
+	it('uses hop overrides for scale instead of the pinned BFS', () => {
+		const graph = makeGraph({
+			nodeCount: 3,
+			pinned: [0],
+			edges: [[0, 1]]
+		});
+
+		const layout = deriveGraphLayout(graph, {
+			settings: { baseRadius: 100, scaleFalloff: 0.5, minScale: 0.2 },
+			hopOverridesByNodeId: { n2: 1, 'missing-node': 1 },
+			relaxIterations: 0
+		});
+
+		expect(layout.hopsByNodeId.n2).toBe(1);
+		expect(layout.scaleByNodeId.n2).toBe(0.5);
+		expect(layout.radiusByNodeId.n2).toBe(50);
+		expect('missing-node' in layout.hopsByNodeId).toBe(false);
+	});
+
 	it('uses animated scale overrides for radii and physics', () => {
 		const graph = makeGraph({
 			nodeCount: 2,

@@ -7,7 +7,7 @@ import type {
 } from './components/ui/types/multigraph';
 import type { NodeContentBlock, NodeData } from './components/ui/types/node';
 
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 const EMPTY_TAG_COLOR_CONFIG: TagColorConfig = {
 	nodeTags: {},
@@ -91,7 +91,19 @@ export function unwrapPersistedGraph(payload: unknown): MultigraphData {
 		) {
 			throw new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload');
 		}
-		return migrateGraphDataToV4(payload.data);
+		return migrateGraphDataToV5(migrateGraphDataToV4(payload.data));
+	}
+
+	if (payload.schemaVersion === 4) {
+		if (
+			!isMultigraphData(payload.data, {
+				allowMissingContent: true,
+				allowMissingAssets: true
+			})
+		) {
+			throw new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload');
+		}
+		return migrateGraphDataToV5(payload.data);
 	}
 
 	if (payload.schemaVersion !== CURRENT_SCHEMA_VERSION) {
@@ -126,15 +138,17 @@ function migrateLegacyGraphData(
 	data: MultigraphData,
 	options: { allowMissingTags?: boolean } = {}
 ): MultigraphData {
-	return migrateGraphDataToV4({
-		...data,
-		nodes: data.nodes.map((node) => ({
-			...node,
-			tags: options.allowMissingTags ? (node.tags ?? []) : node.tags
-		})),
-		edges: data.edges.map(migrateLegacyEdge),
-		tagColorConfig: { ...EMPTY_TAG_COLOR_CONFIG }
-	});
+	return migrateGraphDataToV5(
+		migrateGraphDataToV4({
+			...data,
+			nodes: data.nodes.map((node) => ({
+				...node,
+				tags: options.allowMissingTags ? (node.tags ?? []) : node.tags
+			})),
+			edges: data.edges.map(migrateLegacyEdge),
+			tagColorConfig: { ...EMPTY_TAG_COLOR_CONFIG }
+		})
+	);
 }
 
 function migrateGraphDataToV4(data: MultigraphData): MultigraphData {
@@ -147,6 +161,19 @@ function migrateGraphDataToV4(data: MultigraphData): MultigraphData {
 		tagColorConfig: data.tagColorConfig ?? { ...EMPTY_TAG_COLOR_CONFIG },
 		assets: data.assets ?? {}
 	};
+}
+
+function migrateGraphDataToV5(data: MultigraphData): MultigraphData {
+	// Seed pin history for already-pinned nodes so beacon selection has recency
+	// to work with (array order stands in for actual pin order).
+	let pinSequence = data.pinSequence ?? 0;
+	const nodes = data.nodes.map((node) => {
+		if (!node.pinned || node.lastPinnedSeq !== undefined) return node;
+		pinSequence += 1;
+		return { ...node, lastPinnedSeq: pinSequence };
+	});
+
+	return { ...data, nodes, pinSequence };
 }
 
 function isMultigraphData(
@@ -173,7 +200,9 @@ function isMultigraphData(
 			: isTagColorConfig(value.tagColorConfig)) &&
 		(options.allowMissingAssets
 			? value.assets === undefined || isAssetMetadataRecord(value.assets)
-			: isAssetMetadataRecord(value.assets))
+			: isAssetMetadataRecord(value.assets)) &&
+		(value.pinSequence === undefined ||
+			(typeof value.pinSequence === 'number' && Number.isFinite(value.pinSequence)))
 	);
 }
 
@@ -190,6 +219,8 @@ function isNodeData(
 			? value.tags === undefined || isStringArray(value.tags)
 			: isStringArray(value.tags)) &&
 		(value.pinned === undefined || typeof value.pinned === 'boolean') &&
+		(value.lastPinnedSeq === undefined ||
+			(typeof value.lastPinnedSeq === 'number' && Number.isFinite(value.lastPinnedSeq))) &&
 		(options.allowMissingContent
 			? value.content === undefined || isNodeContent(value.content)
 			: isNodeContent(value.content))

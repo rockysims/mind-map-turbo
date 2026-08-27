@@ -53,9 +53,22 @@ describe('graph mutations', () => {
 				title: 'Custom',
 				description: 'Provided by persistence',
 				tags: ['topic'],
-				pinned: true
+				pinned: true,
+				lastPinnedSeq: 1
 			});
 			expect(next.posByNodeId['custom-node']).toEqual({ x: 10, y: 20 });
+		});
+
+		it('stamps pin history on pinned nodes but not unpinned ones', () => {
+			const graph = makeGraph({ nodeCount: 0 });
+
+			const withPinned = addNode(graph, { pinned: true });
+			const withUnpinned = addNode(withPinned);
+
+			expect(withPinned.nodes[0].lastPinnedSeq).toBe(1);
+			expect(withPinned.pinSequence).toBe(1);
+			expect(withUnpinned.nodes[1].lastPinnedSeq).toBeUndefined();
+			expect(withUnpinned.pinSequence).toBe(1);
 		});
 	});
 
@@ -171,6 +184,19 @@ describe('graph mutations', () => {
 			expect(graph.nodes[0].pinned).toBeUndefined();
 		});
 
+		it('stamps pin recency on both pin and unpin', () => {
+			const graph = makeGraph({ nodeCount: 2 });
+
+			const pinned = togglePinned(graph, 'n0');
+			const unpinned = togglePinned(pinned, 'n0');
+			const otherPinned = togglePinned(unpinned, 'n1');
+
+			expect(pinned.nodes[0].lastPinnedSeq).toBe(1);
+			expect(unpinned.nodes[0].lastPinnedSeq).toBe(2);
+			expect(otherPinned.nodes[1].lastPinnedSeq).toBe(3);
+			expect(otherPinned.pinSequence).toBe(3);
+		});
+
 		it('is a no-op for missing node ids', () => {
 			const graph = makeGraph({ nodeCount: 1 });
 
@@ -190,6 +216,23 @@ describe('graph mutations', () => {
 			expect(stillUnpinned.nodes[0].pinned).toBe(false);
 			expect(pinned.nodes[0].pinned).toBe(true);
 			expect(graph.nodes[0].pinned).toBe(true);
+		});
+
+		it('does not stamp pin recency when the pin state is unchanged', () => {
+			const graph = makeGraph({ nodeCount: 1, pinned: [0] });
+
+			const unchanged = setNodePinned(graph, 'n0', true);
+
+			expect(unchanged).toBe(graph);
+		});
+
+		it('self-heals a stale graph-level pin counter from node stamps', () => {
+			const graph = makeGraph({ nodeCount: 2, pinHistory: { 1: 9 } });
+
+			const pinned = setNodePinned({ ...graph, pinSequence: 3 }, 'n0', true);
+
+			expect(pinned.nodes[0].lastPinnedSeq).toBe(10);
+			expect(pinned.pinSequence).toBe(10);
 		});
 
 		it('is a no-op for missing node ids', () => {

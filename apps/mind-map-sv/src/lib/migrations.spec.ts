@@ -30,7 +30,8 @@ describe('persisted graph migrations', () => {
 			edges: [],
 			posByNodeId: graph.posByNodeId,
 			tagColorConfig: { nodeTags: {}, edgeTags: {} },
-			assets: {}
+			assets: {},
+			pinSequence: 0
 		});
 	});
 
@@ -82,8 +83,50 @@ describe('persisted graph migrations', () => {
 			],
 			posByNodeId: graph.posByNodeId,
 			tagColorConfig: { nodeTags: {}, edgeTags: {} },
-			assets: {}
+			assets: {},
+			pinSequence: 0
 		});
+	});
+
+	it('migrates version 4 payloads by seeding pin history for pinned nodes', () => {
+		const graph = makeGraph({ nodeCount: 3, pinned: [2, 0] });
+
+		const migrated = unwrapPersistedGraph({ schemaVersion: 4, data: graph });
+
+		expect(migrated.pinSequence).toBe(2);
+		expect(migrated.nodes.map((node) => node.lastPinnedSeq)).toEqual([1, undefined, 2]);
+	});
+
+	it('returns version 5 payloads untouched', () => {
+		const graph = makeGraph({ nodeCount: 2, pinned: [0] });
+		const nodes = graph.nodes.map((node, index) =>
+			index === 0 ? { ...node, lastPinnedSeq: 7 } : node
+		);
+		const data = { ...graph, nodes, pinSequence: 7 };
+
+		expect(unwrapPersistedGraph({ schemaVersion: 5, data })).toEqual(data);
+	});
+
+	it('rejects current-version nodes with malformed lastPinnedSeq', () => {
+		const graph = makeGraph({ nodeCount: 1 });
+
+		expect(() =>
+			unwrapPersistedGraph({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data: { ...graph, nodes: [{ ...graph.nodes[0], lastPinnedSeq: 'first' }] }
+			})
+		).toThrow(new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload'));
+	});
+
+	it('rejects current-version graphs with malformed pinSequence', () => {
+		const graph = makeGraph({ nodeCount: 1 });
+
+		expect(() =>
+			unwrapPersistedGraph({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data: { ...graph, pinSequence: Infinity }
+			})
+		).toThrow(new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload'));
 	});
 
 	it('parses serialized version 1 payloads', () => {

@@ -225,15 +225,18 @@
 		initialGraphId: 'animated',
 		graphs: {
 			animated: makeGraph({
-				nodeCount: 3,
+				nodeCount: 4,
+				pinned: [0],
 				edges: [
 					[0, 1],
-					[1, 2]
+					[1, 2],
+					[2, 3]
 				],
 				posByNodeId: {
-					n0: { x: -280, y: 0 },
-					n1: { x: 0, y: 0 },
-					n2: { x: 280, y: 0 }
+					n0: { x: -420, y: 0 },
+					n1: { x: -140, y: 0 },
+					n2: { x: 140, y: 0 },
+					n3: { x: 420, y: 0 }
 				}
 			})
 		},
@@ -252,15 +255,15 @@
 		const harness = getHarness(canvasElement);
 		expect(harness.dataset.graphGeneration).toBe('1');
 		expect(harness.dataset.scaleAnimationDurationMs).toBe('120');
-		expect(Number(getNodeWrapper(canvasElement, 'n0').dataset.scale)).toBe(0.2);
+		expect(Number(getNodeWrapper(canvasElement, 'n3').dataset.scale)).toBe(0.2);
 
 		const generationBeforePin = harness.dataset.graphGeneration;
-		const circle = getCircle(canvasElement, 'n0');
+		const circle = getCircle(canvasElement, 'n3');
 		const center = getCenter(circle);
 		await dispatchDoubleClick(circle, center.x, center.y);
 		await waitForFrames(2);
 
-		const node = canvasElement.querySelector('[data-node-id="n0"] .node');
+		const node = canvasElement.querySelector('[data-node-id="n3"] .node');
 		expect(node).toHaveAttribute('data-pinned', 'true');
 		expect(harness.dataset.graphGeneration).toBe(generationBeforePin);
 		await waitFor(() => {
@@ -268,8 +271,8 @@
 				'data-scale-animation-active',
 				'true'
 			);
-			const animatedPinnedScale = Number(getNodeWrapper(canvasElement, 'n0').dataset.scale);
-			const animatedNeighborScale = Number(getNodeWrapper(canvasElement, 'n1').dataset.scale);
+			const animatedPinnedScale = Number(getNodeWrapper(canvasElement, 'n3').dataset.scale);
+			const animatedNeighborScale = Number(getNodeWrapper(canvasElement, 'n2').dataset.scale);
 			expect(animatedPinnedScale).toBeGreaterThan(0.2);
 			expect(animatedPinnedScale).toBeLessThan(1);
 			expect(animatedNeighborScale).toBeLessThan(0.5);
@@ -278,9 +281,9 @@
 		await sleep(140);
 		await waitForLayout();
 
-		expect(Number(getNodeWrapper(canvasElement, 'n0').dataset.scale)).toBe(1);
+		expect(Number(getNodeWrapper(canvasElement, 'n3').dataset.scale)).toBe(1);
+		expect(Number(getNodeWrapper(canvasElement, 'n2').dataset.scale)).toBe(0.5);
 		expect(Number(getNodeWrapper(canvasElement, 'n1').dataset.scale)).toBe(0.5);
-		expect(Number(getNodeWrapper(canvasElement, 'n2').dataset.scale)).toBe(0.25);
 	}}
 />
 

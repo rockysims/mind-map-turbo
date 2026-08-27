@@ -25,24 +25,20 @@ export type EdgeVisibility =
 
 export interface PinnedNeighborhoodVisibilityOptions {
 	displayedLayers?: number;
-	fallbackAnchorNodeId?: string | null;
 	boundaryFadeRatio?: number;
 }
 
 export function visibleNodeIdsForPinnedNeighborhood(
 	data: MultigraphData,
-	pinnedHopsByNodeId: Record<string, number>,
+	hopsByNodeId: Record<string, number>,
 	options: PinnedNeighborhoodVisibilityOptions = {}
 ): Set<string> {
 	const displayedLayers = normalizeDisplayedLayers(options.displayedLayers);
-	const sourceHops = hasPinnedNodes(data)
-		? pinnedHopsByNodeId
-		: hopsFromFallbackAnchor(data, options.fallbackAnchorNodeId);
 
 	return new Set(
 		data.nodes
 			.filter((node) => {
-				const hopCount = sourceHops[node.id];
+				const hopCount = hopsByNodeId[node.id];
 				return Number.isFinite(hopCount) && hopCount <= displayedLayers;
 			})
 			.map((node) => node.id)
@@ -51,10 +47,10 @@ export function visibleNodeIdsForPinnedNeighborhood(
 
 export function edgeVisibilityForPinnedNeighborhood(
 	data: MultigraphData,
-	pinnedHopsByNodeId: Record<string, number>,
+	hopsByNodeId: Record<string, number>,
 	options: PinnedNeighborhoodVisibilityOptions = {}
 ): EdgeVisibility[] {
-	const visibleNodeIds = visibleNodeIdsForPinnedNeighborhood(data, pinnedHopsByNodeId, options);
+	const visibleNodeIds = visibleNodeIdsForPinnedNeighborhood(data, hopsByNodeId, options);
 	const fadeRatio = normalizeBoundaryFadeRatio(options.boundaryFadeRatio);
 
 	return data.edges.map((edge) => {
@@ -91,50 +87,6 @@ export function graphWithVisibleNodes(
 
 export function pinnedNodeIds(data: MultigraphData): Set<string> {
 	return new Set(data.nodes.filter((node) => node.pinned).map((node) => node.id));
-}
-
-function hasPinnedNodes(data: MultigraphData): boolean {
-	return data.nodes.some((node) => node.pinned === true);
-}
-
-function hopsFromFallbackAnchor(
-	data: MultigraphData,
-	fallbackAnchorNodeId: string | null | undefined
-): Record<string, number> {
-	const nodeIds = data.nodes.map((node) => node.id);
-	const hops = Object.fromEntries(nodeIds.map((nodeId) => [nodeId, Infinity]));
-	if (!fallbackAnchorNodeId || !(fallbackAnchorNodeId in hops)) return hops;
-
-	const adjacency = adjacencyByNodeId(data);
-	const queue = [fallbackAnchorNodeId];
-	hops[fallbackAnchorNodeId] = 0;
-
-	for (let index = 0; index < queue.length; index += 1) {
-		const nodeId = queue[index];
-		const nextHop = hops[nodeId] + 1;
-
-		for (const neighborId of adjacency[nodeId] ?? []) {
-			if (nextHop < hops[neighborId]) {
-				hops[neighborId] = nextHop;
-				queue.push(neighborId);
-			}
-		}
-	}
-
-	return hops;
-}
-
-function adjacencyByNodeId(data: MultigraphData): Record<string, string[]> {
-	const adjacency = Object.fromEntries(data.nodes.map((node) => [node.id, [] as string[]]));
-
-	for (const edge of data.edges) {
-		if (adjacency[edge.sourceNodeId] && adjacency[edge.targetNodeId]) {
-			adjacency[edge.sourceNodeId].push(edge.targetNodeId);
-			adjacency[edge.targetNodeId].push(edge.sourceNodeId);
-		}
-	}
-
-	return adjacency;
 }
 
 function normalizeDisplayedLayers(displayedLayers = DEFAULT_DISPLAYED_LAYERS): number {

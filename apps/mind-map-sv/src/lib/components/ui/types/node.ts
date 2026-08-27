@@ -13,5 +13,7 @@ export interface NodeData {
 	description: string;
 	tags: string[];
 	pinned?: boolean;
+	/** Pin-recency stamp from the graph-level pinSequence counter; higher = more recent. */
+	lastPinnedSeq?: number;
 	content?: NodeContentBlock[];
 }

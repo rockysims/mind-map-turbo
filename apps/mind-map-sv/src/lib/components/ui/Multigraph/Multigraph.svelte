@@ -46,6 +46,7 @@
 		duplicateEdgeIdentifier,
 		findExistingEdge,
 		moveNode,
+		neighborsOf,
 		removeEdge,
 		removeNode,
 		removeNodeImageContent,
@@ -59,6 +60,7 @@
 	} from './lib/graph.js';
 	import { deriveGraphLayout, withSettledGraphPositions } from './lib/graphLayout.js';
 	import { evaluateGraphQuery, type GraphQueryElementState } from './lib/graphQuery.js';
+	import { beaconHopOverrides, beaconNodeIds, withBeaconHops } from './lib/beacons.js';
 	import { hopsFromPinned } from './lib/layout.js';
 	import type { LayoutSettings } from './lib/layoutSettings.js';
 	import { withDefaultLayoutSettings } from './lib/layoutSettings.js';
@@ -201,7 +203,13 @@
 	} | null>(null);
 	let fitViewRequestId = $state(0);
 	let graphRef = $state<HTMLElement | null>(null);
-	let lastPinnedNodeId = $state<string | null>(null);
+	/**
+	 * Endpoints of the most recent severing mutation (edge removal / node
+	 * deletion), used as a last-resort beacon hint for pinless components that
+	 * carry no pin history. Session-only; overwritten by the next severing
+	 * mutation and cleared on external graph sync.
+	 */
+	let severedBeaconPreference = $state<string[]>([]);
 	let lastSyncedGeneration = $state(-1);
 	let lastInitialTitleEditKey = $state('');
 	let stageViewState = $state<ViewState>({ panX: 0, panY: 0, scale: 1 });
@@ -246,7 +254,7 @@
 		getGraph: () => graph,
 		getLayoutSettings: () => layoutSettings,
 		getActiveDragNodeId: () => activeDragNodeId,
-		getFallbackAnchorNodeId: () => lastPinnedNodeId,
+		getPreferredBeaconNodeIds: () => severedBeaconPreference,
 		applyGraph: (nextGraph) => {
 			graph = nextGraph;
 		},
@@ -266,18 +274,17 @@
 	});
 
 	const resolvedLayoutSettings = $derived(withDefaultLayoutSettings(layoutSettings));
-	const hopsByNodeId = $derived(hopsFromPinned(graph));
+	const beaconIds = $derived(beaconNodeIds(graph, { preferredNodeIds: severedBeaconPreference }));
+	const hopsByNodeId = $derived(withBeaconHops(hopsFromPinned(graph), beaconIds));
 	const visibleNodeIds = $derived(
 		visibleNodeIdsForPinnedNeighborhood(graph, hopsByNodeId, {
-			displayedLayers: resolvedLayoutSettings.displayedLayers,
-			fallbackAnchorNodeId: lastPinnedNodeId
+			displayedLayers: resolvedLayoutSettings.displayedLayers
 		})
 	);
 	const visibleGraph = $derived(graphWithVisibleNodes(graph, visibleNodeIds));
 	const edgeVisibility = $derived(
 		edgeVisibilityForPinnedNeighborhood(graph, hopsByNodeId, {
-			displayedLayers: resolvedLayoutSettings.displayedLayers,
-			fallbackAnchorNodeId: lastPinnedNodeId
+			displayedLayers: resolvedLayoutSettings.displayedLayers
 		})
 	);
 	const renderableEdgeVisibility = $derived(
@@ -385,12 +392,12 @@
 		const primary = untrack(() => defaultPrimaryNodeId);
 		const settings = untrack(() => layoutSettings);
 		layoutRuntime.reset();
-		graph = withSettledGraphPositions(incoming, { settings });
+		graph = withSettledGraphPositions(incoming, {
+			settings,
+			hopOverridesByNodeId: beaconHopOverrides(beaconNodeIds(incoming))
+		});
 		primaryNodeId = primary;
-		lastPinnedNodeId =
-			incoming.nodes.find((node) => node.pinned)?.id ??
-			incoming.nodes.find((node) => node.id === primary)?.id ??
-			null;
+		severedBeaconPreference = [];
 		internalExitingBuffer = EMPTY_EXITING_BUFFER;
 		nodeEnterAnimations = {};
 		edgeEnterAnimations = {};
@@ -432,19 +439,6 @@
 		};
 		window.addEventListener('keydown', onKeyDown);
 		return () => window.removeEventListener('keydown', onKeyDown);
-	});
-
-	$effect(() => {
-		const nodeIds = graph.nodes.map((node) => node.id);
-		const pinnedIds = graph.nodes.filter((node) => node.pinned).map((node) => node.id);
-		if (pinnedIds.length > 0) {
-			if (!lastPinnedNodeId || !pinnedIds.includes(lastPinnedNodeId)) {
-				lastPinnedNodeId = pinnedIds[0];
-			}
-			return;
-		}
-		if (lastPinnedNodeId && nodeIds.includes(lastPinnedNodeId)) return;
-		lastPinnedNodeId = nodeIds[Math.floor(Math.random() * nodeIds.length)] ?? null;
 	});
 
 	$effect(() => {
@@ -511,7 +505,6 @@
 		closeOverlays();
 		const wasPinned = node.pinned === true;
 		commitUserGraph(layoutRuntime.beginScaleChange(togglePinned(graph, node.id), node.id));
-		lastPinnedNodeId = node.id;
 
 		if (!wasPinned) {
 			primaryNodeId = node.id;
@@ -736,7 +729,6 @@
 
 	function toggleNodePinned(nodeId: string) {
 		commitUserGraph(layoutRuntime.beginScaleChange(togglePinned(graph, nodeId), nodeId));
-		lastPinnedNodeId = nodeId;
 	}
 
 	function deleteNode(nodeId: string) {
@@ -751,6 +743,7 @@
 			.filter((v) => v.edge.sourceNodeId === nodeId || v.edge.targetNodeId === nodeId)
 			.map((v) => v.edge);
 
+		severedBeaconPreference = neighborsOf(graph, nodeId).map((neighbor) => neighbor.id);
 		commitUserGraph(layoutRuntime.relaxAfterMutation(removeNode(graph, nodeId)));
 
 		if (durationMs > 0) {
@@ -793,9 +786,6 @@
 			}
 		}
 
-		if (lastPinnedNodeId === nodeId) {
-			lastPinnedNodeId = graph.nodes.find((candidate) => candidate.id !== nodeId)?.id ?? null;
-		}
 		if (primaryNodeId === nodeId) {
 			primaryNodeId =
 				graph.nodes.find((candidate) => candidate.pinned)?.id ??
@@ -1481,6 +1471,10 @@
 						});
 						layoutRuntime.start();
 					}
+				}
+				const removedEdge = graph.edges.find((e) => e.id === confirmEdgeId);
+				if (removedEdge) {
+					severedBeaconPreference = [removedEdge.sourceNodeId, removedEdge.targetNodeId];
 				}
 				commitUserGraph(layoutRuntime.relaxAfterMutation(removeEdge(graph, confirmEdgeId)));
 				duplicateEdgeConfirm = null;

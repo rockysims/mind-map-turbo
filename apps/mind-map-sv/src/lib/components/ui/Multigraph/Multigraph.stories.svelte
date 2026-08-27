@@ -441,7 +441,9 @@
 	const SAME_DIRECTION_PARALLEL_EDGES_WITH_UNRELATED_EDGE = {
 		...SAME_DIRECTION_PARALLEL_EDGES_GRAPH,
 		nodes: [
-			...SAME_DIRECTION_PARALLEL_EDGES_GRAPH.nodes,
+			...SAME_DIRECTION_PARALLEL_EDGES_GRAPH.nodes.map((node) =>
+				node.id === 'parallel-a' ? { ...node, pinned: true } : node
+			),
 			{
 				id: 'parallel-c',
 				title: 'Parallel C',
@@ -476,6 +478,9 @@
 
 	const OPPOSITE_DIRECTION_PARALLEL_EDGES_WITH_COLORS = {
 		...OPPOSITE_DIRECTION_PARALLEL_EDGES_GRAPH,
+		nodes: OPPOSITE_DIRECTION_PARALLEL_EDGES_GRAPH.nodes.map((node) =>
+			node.id === 'parallel-a' ? { ...node, pinned: true } : node
+		),
 		tagColorConfig: {
 			nodeTags: {},
 			edgeTags: {
@@ -1536,6 +1541,7 @@
 				[1, 2],
 				[2, 3]
 			],
+			pinHistory: { 0: 1 },
 			posByNodeId: {
 				n0: { x: -360, y: 0 },
 				n1: { x: -120, y: 0 },
@@ -1565,15 +1571,18 @@
 	name="PinningNodeAnimatesNeighborScaleChanges"
 	args={{
 		multigraphData: makeGraph({
-			nodeCount: 3,
+			nodeCount: 4,
+			pinned: [0],
 			edges: [
 				[0, 1],
-				[1, 2]
+				[1, 2],
+				[2, 3]
 			],
 			posByNodeId: {
-				n0: { x: -280, y: 0 },
-				n1: { x: 0, y: 0 },
-				n2: { x: 280, y: 0 }
+				n0: { x: -420, y: 0 },
+				n1: { x: -140, y: 0 },
+				n2: { x: 140, y: 0 },
+				n3: { x: 420, y: 0 }
 			}
 		}),
 		defaultPrimaryNodeId: 'n0',
@@ -1587,25 +1596,26 @@
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
-		const circle = getCircle(canvasElement, 'n0');
+		const circle = getCircle(canvasElement, 'n3');
 		const center = getCenter(circle);
 
 		await dispatchDoubleClick(circle, center.x, center.y);
 		await waitForFrames(2);
 
-		const animatedPinnedScale = Number(getNodeWrapper(canvasElement, 'n0').dataset.scale);
-		const animatedNeighborScale = Number(getNodeWrapper(canvasElement, 'n1').dataset.scale);
+		const animatedPinnedScale = Number(getNodeWrapper(canvasElement, 'n3').dataset.scale);
+		const animatedNeighborScale = Number(getNodeWrapper(canvasElement, 'n2').dataset.scale);
 		expect(animatedPinnedScale).toBeGreaterThan(0.2);
 		expect(animatedPinnedScale).toBeLessThan(1);
-		expect(animatedNeighborScale).toBeGreaterThan(0.2);
+		expect(animatedNeighborScale).toBeGreaterThan(0.25);
 		expect(animatedNeighborScale).toBeLessThan(0.5);
 
 		await sleep(140);
 		await waitForLayout();
 
-		expect(Number(getNodeWrapper(canvasElement, 'n0').dataset.scale)).toBe(1);
+		expect(Number(getNodeWrapper(canvasElement, 'n3').dataset.scale)).toBe(1);
+		expect(Number(getNodeWrapper(canvasElement, 'n2').dataset.scale)).toBe(0.5);
 		expect(Number(getNodeWrapper(canvasElement, 'n1').dataset.scale)).toBe(0.5);
-		expect(Number(getNodeWrapper(canvasElement, 'n2').dataset.scale)).toBe(0.25);
+		expect(Number(getNodeWrapper(canvasElement, 'n0').dataset.scale)).toBe(1);
 	}}
 />
 
@@ -1632,9 +1642,7 @@
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
 		const circle = getCircle(canvasElement, 'n0');
-		const neighborCircle = getCircle(canvasElement, 'n1');
 		const pinnedCenter = getCenter(circle);
-		const neighborCenterAtStart = getCenter(neighborCircle);
 
 		await dispatchDoubleClick(circle, pinnedCenter.x, pinnedCenter.y);
 
@@ -1655,17 +1663,21 @@
 		});
 
 		await waitFor(() => {
-			expect(canvasElement.querySelector('.graph')).toHaveAttribute(
-				'data-scale-change-focal',
-				'n0'
-			);
-			const neighborWhileFocalAnchored = getCenter(getCircle(canvasElement, 'n1'));
-			expect(distanceBetween(neighborWhileFocalAnchored, neighborCenterAtStart)).toBeGreaterThan(1);
-		});
-
-		await waitFor(() => {
 			expect(canvasElement.querySelector('.graph')).not.toHaveAttribute('data-scale-change-focal');
 		});
+
+		// The component collapses to its beacon: n0 (last pin interaction) stays
+		// visible at hop-1 scale, the neighbor hides, and the edge fades out as
+		// a boundary half-edge.
+		expect(canvasElement.querySelector('[data-node-id="n1"].node-wrapper')).not.toBeInTheDocument();
+		expect(Number(getNodeWrapper(canvasElement, 'n0').dataset.scale)).toBe(0.5);
+		expect(canvasElement.querySelector('[data-edge-id="e0"]')).toHaveAttribute(
+			'data-edge-visibility',
+			'boundary'
+		);
+		const restingCenter = getCenter(getCircle(canvasElement, 'n0'));
+		expect(restingCenter.x).toBeCloseTo(pinnedCenter.x);
+		expect(restingCenter.y).toBeCloseTo(pinnedCenter.y);
 	}}
 />
 
@@ -1813,6 +1825,7 @@
 	args={{
 		multigraphData: makeGraph({
 			nodeCount: 2,
+			pinned: [0],
 			edges: [[0, 1]],
 			posByNodeId: { n0: { x: -160, y: 0 }, n1: { x: 160, y: 0 } }
 		}),
@@ -1846,6 +1859,7 @@
 	args={{
 		multigraphData: makeGraph({
 			nodeCount: 2,
+			pinned: [1],
 			edges: [[0, 1]],
 			posByNodeId: { n0: { x: -180, y: 0 }, n1: { x: 180, y: 0 } }
 		}),
@@ -1880,10 +1894,11 @@
 />
 
 <Story
-	name="UnpinnedGraphSettlesWithoutRigidDrift"
+	name="ReleasedDragSettlesWithoutRigidDrift"
 	args={{
 		multigraphData: makeGraph({
 			nodeCount: 4,
+			pinned: [2],
 			edges: [
 				[0, 1],
 				[1, 2],
@@ -1944,6 +1959,7 @@
 	args={{
 		multigraphData: makeGraph({
 			nodeCount: 2,
+			pinned: [0],
 			edges: [[0, 1]],
 			posByNodeId: { n0: { x: -100, y: 0 }, n1: { x: 40, y: 0 } }
 		}),
@@ -2168,6 +2184,114 @@
 />
 
 <Story
+	name="DisconnectedComponentShowsBeacon"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 5,
+			pinned: [0],
+			edges: [
+				[0, 1],
+				[2, 3],
+				[3, 4]
+			],
+			pinHistory: { 3: 2 },
+			posByNodeId: {
+				n0: { x: -480, y: 0 },
+				n1: { x: -160, y: 0 },
+				n2: { x: 240, y: 0 },
+				n3: { x: 480, y: 0 },
+				n4: { x: 720, y: 0 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: {
+			displayedLayers: 3,
+			scaleFalloff: 0.7,
+			minScale: 0.1,
+			relaxIterations: 1
+		}
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+
+		// The pinned component renders normally.
+		expect(canvasElement.querySelector('[data-node-id="n0"].node-wrapper')).toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-node-id="n1"].node-wrapper')).toBeInTheDocument();
+		// The pinless component collapses to its beacon: the most recently pinned node.
+		expect(canvasElement.querySelector('[data-node-id="n2"].node-wrapper')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-node-id="n4"].node-wrapper')).not.toBeInTheDocument();
+		const beacon = getNodeWrapper(canvasElement, 'n3');
+		expect(Number(beacon.dataset.scale)).toBeCloseTo(0.7);
+		expect(canvasElement.querySelector('[data-node-id="n3"] .node')).not.toHaveAttribute(
+			'data-pinned'
+		);
+		// Every beacon edge renders as a fading boundary half-edge.
+		expect(canvasElement.querySelector('[data-edge-id="e1"]')).toHaveAttribute(
+			'data-edge-visibility',
+			'boundary'
+		);
+		expect(canvasElement.querySelector('[data-edge-id="e2"]')).toHaveAttribute(
+			'data-edge-visibility',
+			'boundary'
+		);
+
+		// Pinning the beacon through the normal gesture brings its component back.
+		const beaconCircle = getCircle(canvasElement, 'n3');
+		const center = getCenter(beaconCircle);
+		await dispatchDoubleClick(beaconCircle, center.x, center.y);
+		await sleep();
+		await waitForLayout();
+
+		expect(canvasElement.querySelector('[data-node-id="n3"] .node')).toHaveAttribute(
+			'data-pinned',
+			'true'
+		);
+		expect(canvasElement.querySelector('[data-node-id="n2"].node-wrapper')).toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-node-id="n4"].node-wrapper')).toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="AllUnpinnedGraphShowsOneBeaconPerComponent"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 5,
+			edges: [
+				[0, 1],
+				[1, 2],
+				[3, 4]
+			],
+			pinHistory: { 1: 4 },
+			posByNodeId: {
+				n0: { x: -480, y: 0 },
+				n1: { x: -240, y: 0 },
+				n2: { x: 0, y: 0 },
+				n3: { x: 360, y: 0 },
+				n4: { x: 600, y: 0 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: {
+			displayedLayers: 3,
+			scaleFalloff: 0.7,
+			minScale: 0.1,
+			relaxIterations: 1
+		}
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+
+		// One beacon per pinless component: n1 by pin history, n3 by the
+		// deterministic fallback (equal degree, lowest node id).
+		expect(canvasElement.querySelectorAll('.node-wrapper')).toHaveLength(2);
+		const historyBeacon = getNodeWrapper(canvasElement, 'n1');
+		const fallbackBeacon = getNodeWrapper(canvasElement, 'n3');
+		expect(Number(historyBeacon.dataset.scale)).toBeCloseTo(0.7);
+		expect(Number(fallbackBeacon.dataset.scale)).toBeCloseTo(0.7);
+	}}
+/>
+
+<Story
 	name="RepinningMovesTheVisibleNeighborhoodTogether"
 	args={{
 		multigraphData: makeGraph({
@@ -2224,6 +2348,7 @@
 		multigraphData: makeGraph({
 			nodeCount: 6,
 			edges: chainEdges(6),
+			pinHistory: { 2: 1 },
 			posByNodeId: {
 				n0: { x: -600, y: 0 },
 				n1: { x: -360, y: 0 },
@@ -2622,6 +2747,7 @@
 				{ id: 'n1', title: 'Mixed', description: '', tags: ['topic', 'urgent'] },
 				{ id: 'n2', title: 'Plain', description: '', tags: [] }
 			],
+			pinned: ['n2'],
 			edges: [
 				{ source: 'n0', target: 'n1', tags: ['rel'] },
 				{ source: 'n1', target: 'n2', tags: [] }
@@ -2739,6 +2865,7 @@
 				{ id: 'n1', title: 'Urgent', description: '', tags: ['urgent', 'topic'] },
 				{ id: 'n2', title: 'Plain', description: '', tags: [] }
 			],
+			pinned: ['n1'],
 			edges: [
 				{ source: 'n0', target: 'n1', tags: ['rel'] },
 				{ source: 'n1', target: 'n2', tags: [] }
@@ -2807,6 +2934,7 @@
 				{ id: 'n0', title: 'Source', description: '', tags: [] },
 				{ id: 'n1', title: 'Target', description: '', tags: [] }
 			],
+			pinned: ['n0'],
 			edges: [{ source: 'n0', target: 'n1', tags: ['link', 'edgy'] }],
 			posByNodeId: { n0: { x: -180, y: 0 }, n1: { x: 180, y: 0 } },
 			tagColorConfig: { nodeTags: {}, edgeTags: { link: '#0000ff', edgy: '#ff0000' } }
@@ -2843,6 +2971,7 @@
 				{ id: 'n1', title: 'Hide', description: '', tags: ['hide'] },
 				{ id: 'n2', title: 'Other', description: '', tags: [] }
 			],
+			pinned: ['n0', 'n2'],
 			edges: [
 				{ source: 'n0', target: 'n1', tags: ['rel'] },
 				{ source: 'n1', target: 'n2', tags: ['rel'] }
@@ -2886,6 +3015,7 @@
 				{ id: 'n1', title: 'Bridge', description: '', tags: [] },
 				{ id: 'n2', title: 'Second topic', description: '', tags: ['topic'] }
 			],
+			pinned: ['n1'],
 			edges: [
 				{ source: 'n0', target: 'n1', tags: [] },
 				{ source: 'n1', target: 'n2', tags: [] }

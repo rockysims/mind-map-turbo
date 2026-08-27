@@ -60,7 +60,7 @@ function createRuntimeFixture(
 			...settings
 		}),
 		getActiveDragNodeId: () => activeDragNodeId,
-		getFallbackAnchorNodeId: () => 'n0',
+		getPreferredBeaconNodeIds: () => [],
 		applyGraph: (nextGraph) => {
 			graph = nextGraph;
 		},
@@ -219,6 +219,48 @@ describe('LayoutRuntime', () => {
 		expect(runtime.revealWavePreviousOnlyEdgeVisibility).toEqual([]);
 		expect(runtime.revealWaveNodeOpacityByNodeId).toEqual({});
 		expect(runtime.revealWaveEdgeOpacityByEdgeId).toEqual({});
+	});
+
+	it('keeps the beacon visible at BEACON_HOP when the last pin of a component is removed', () => {
+		const graph = makeGraph({
+			nodeCount: 3,
+			pinned: [0],
+			edges: [
+				[0, 1],
+				[1, 2]
+			]
+		});
+		const { runtime, scheduler, setGraph, getGraph } = createRuntimeFixture(graph, {
+			displayedLayers: 1,
+			scaleAnimationDurationMs: 100,
+			postScaleChangeSettleMaxFrames: 0,
+			relaxIterations: 0
+		});
+		scheduler.nowMs = 10;
+
+		// Unpinning n0 stamps its recency, so it becomes the component's beacon.
+		const graphAfterScaleChange = runtime.beginScaleChange(togglePinned(getGraph(), 'n0'), 'n0');
+		setGraph(graphAfterScaleChange);
+
+		const revealState = runtime.scaleChangeRevealState;
+		expect(revealState?.nextVisibleNodeIds).toEqual(['n0']);
+		expect(revealState?.nextHopsByNodeId.n0).toBe(1);
+		expect([...(revealState?.previousVisibleNodeIds ?? [])].sort()).toEqual(['n0', 'n1']);
+	});
+
+	it('does not wedge layered relayout when no nodes are pinned', () => {
+		const graph = makeGraph({ nodeCount: 2, edges: [[0, 1]] });
+		const { runtime, getGraph } = createRuntimeFixture(graph, {
+			layeredRelayoutSettleMaxFrames: 1,
+			layeredRelayoutSettleEpsilonPx: 999
+		});
+
+		runtime.startLayeredRelayout(getGraph(), 0);
+		expect(runtime.isLayeredRelayoutActive).toBe(true);
+
+		runtime.step(1);
+
+		expect(runtime.isLayeredRelayoutActive).toBe(false);
 	});
 
 	it('restarts reveal-wave state when a second pin happens mid-flight', () => {
