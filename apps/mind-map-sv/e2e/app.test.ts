@@ -15,6 +15,29 @@ function documentDraftGraphId(documentId: string): string {
 	return `document:${documentId}`;
 }
 
+// Focus entry crosses a wide scrub zone (preInscribeZoneFraction), so no
+// single wheel event can complete it; scrub with repeated events like a
+// real gesture until the graph reports focus-active.
+async function scrubFocusEntry(
+	page: Page,
+	point: { x: number; y: number },
+	{ deltaY = -600, maxEvents = 24 }: { deltaY?: number; maxEvents?: number } = {}
+): Promise<void> {
+	const stage = page.locator('.stage');
+	const graph = page.locator('.graph');
+	for (let i = 0; i < maxEvents; i += 1) {
+		if (((await graph.getAttribute('class')) ?? '').includes('focus-active')) return;
+		await stage.dispatchEvent('wheel', {
+			deltaY,
+			clientX: point.x,
+			clientY: point.y,
+			bubbles: true,
+			cancelable: true
+		});
+		await page.waitForTimeout(20);
+	}
+}
+
 test('home page renders the graph entrypoint', async ({ page }) => {
 	await page.goto('/');
 
@@ -513,13 +536,7 @@ test('deep zoom enters node focus and exits by wheel gestures', async ({ page })
 		y: nodeBox.y + nodeBox.height / 2
 	};
 	const stage = page.locator('.stage');
-	await stage.dispatchEvent('wheel', {
-		deltaY: -1000,
-		clientX: nodeCenter.x,
-		clientY: nodeCenter.y,
-		bubbles: true,
-		cancelable: true
-	});
+	await scrubFocusEntry(page, nodeCenter);
 
 	const dialog = page.getByRole('dialog');
 	await expect(dialog).toBeVisible();
@@ -561,7 +578,7 @@ test('deep zoom enters node focus and exits by wheel gestures', async ({ page })
 	const stageContent = page.locator('.stage-content');
 	const stageTransformBeforeFocusExit = await stageContent.getAttribute('style');
 
-	for (let attempt = 0; attempt < 3; attempt += 1) {
+	for (let attempt = 0; attempt < 12; attempt += 1) {
 		if (!((await page.locator('.graph').getAttribute('class')) ?? '').includes('focus-active')) {
 			break;
 		}
@@ -618,14 +635,7 @@ test('deep zoom nests a node image as a second level and pops back to the node',
 	const nodeBox = await circle.boundingBox();
 	if (!nodeBox) throw new Error('Node .circle element not found');
 	const nodeCenter = { x: nodeBox.x + nodeBox.width / 2, y: nodeBox.y + nodeBox.height / 2 };
-	const stage = page.locator('.stage');
-	await stage.dispatchEvent('wheel', {
-		deltaY: -1000,
-		clientX: nodeCenter.x,
-		clientY: nodeCenter.y,
-		bubbles: true,
-		cancelable: true
-	});
+	await scrubFocusEntry(page, nodeCenter);
 
 	const dialog = page.getByRole('dialog');
 	await expect(dialog).toBeVisible();
@@ -651,14 +661,19 @@ test('deep zoom nests a node image as a second level and pops back to the node',
 	});
 	await expect(nodeWorld).toHaveAttribute('data-zoom-world-scale', /^(?!1(?:\.0*)?$).+/);
 
-	// A bold zoom-in past max, cursor over the image, descends to depth 2.
-	await nodeWorld.dispatchEvent('wheel', {
-		deltaY: -8000,
-		clientX: imageCenter.x,
-		clientY: imageCenter.y,
-		bubbles: true,
-		cancelable: true
-	});
+	// Bold zoom-in past max, cursor over the image, scrubs the child entry
+	// zone and descends to depth 2.
+	for (let attempt = 0; attempt < 12; attempt += 1) {
+		if ((await stack.getAttribute('data-depth')) === '2') break;
+		await nodeWorld.dispatchEvent('wheel', {
+			deltaY: -4000,
+			clientX: imageCenter.x,
+			clientY: imageCenter.y,
+			bubbles: true,
+			cancelable: true
+		});
+		await page.waitForTimeout(30);
+	}
 	await expect(stack).toHaveAttribute('data-depth', '2');
 	await expect(page.locator('[data-subject-kind="image"]')).toBeVisible();
 	await expect(page.locator('.focus-image-full')).toBeVisible();
@@ -712,7 +727,7 @@ test('deep zoom nests a node image as a second level and pops back to the node',
 
 	// Zoom out past fit in the image world POPS back to the node (depth 1) — it
 	// does not close focus.
-	for (let attempt = 0; attempt < 8; attempt += 1) {
+	for (let attempt = 0; attempt < 12; attempt += 1) {
 		if ((await stack.getAttribute('data-depth')) === '1') break;
 		await imageWorld.dispatchEvent('wheel', {
 			deltaY: 8000,
@@ -780,10 +795,14 @@ test('deep zoom exit keeps scrubbing when the cursor leaves the shrinking frame'
 	await page.goto(graphUrl(graphId));
 	await expect(page.getByText('Root')).toBeVisible();
 
-	// Enter focus with one large wheel over the centered node.
+	// Enter focus by scrubbing wheel-in over the centered node.
 	await page.mouse.move(640, 360);
-	await page.mouse.wheel(0, -800);
 	const graph = page.locator('.graph');
+	for (let i = 0; i < 24; i += 1) {
+		if (((await graph.getAttribute('class')) ?? '').includes('focus-active')) break;
+		await page.mouse.wheel(0, -600);
+		await page.waitForTimeout(20);
+	}
 	await expect(graph).toHaveClass(/focus-active/);
 
 	// Begin a partial exit over the frame, past the entry gesture gate.
@@ -795,7 +814,7 @@ test('deep zoom exit keeps scrubbing when the cursor leaves the shrinking frame'
 	// Continued wheel-out must keep driving the exit rather than being lost to
 	// the stage or the page.
 	await page.mouse.move(5, 5);
-	for (let i = 0; i < 15; i += 1) {
+	for (let i = 0; i < 40; i += 1) {
 		if (!((await graph.getAttribute('class')) ?? '').includes('focus-active')) break;
 		await page.mouse.wheel(0, 30);
 		await page.waitForTimeout(30);
