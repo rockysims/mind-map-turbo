@@ -2,13 +2,17 @@
 	import { untrack } from 'svelte';
 	import type { EdgeData } from '../types/edge';
 	import type { GraphAssetMetadata } from '../types/multigraph';
-	import type { NodeData, NodeImageContent } from '../types/node';
+	import type { NodeData, NodeImageContent, QuantityDesignation } from '../types/node';
 	import { prefersReducedMotion } from '$lib/reducedMotion';
 	import MathText from '../MathText/MathText.svelte';
 	import { hasMath } from '../MathText/lib/mathSegments';
 	import { mathPlainText } from '../MathText/lib/mathPlainText';
+	import type { QuantitySymbol } from '../MathText/lib/mathSymbols';
 	import { normalizeNodeTitle, type EdgePatch } from './lib/graph';
 	import { normalizeTagList } from './lib/titleSyntax';
+	import { nodeQuantities } from './lib/nodeQuantities';
+	import { cycleDesignation, designationView } from './lib/quantityDesignations';
+	import QuantityDesignationChips from './QuantityDesignationChips.svelte';
 
 	type ActiveTab = 'node' | 'edges';
 	type DirectionChoice = 'undirected' | 'outgoing' | 'incoming';
@@ -32,7 +36,13 @@
 		nodes: NodeData[];
 		edges: EdgeData[];
 		assets?: Record<string, GraphAssetMetadata>;
-		onSave: (content: { title: string; description: string; tags: string[] }) => void;
+		onSave: (content: {
+			title: string;
+			description: string;
+			tags: string[];
+			inputs: QuantityDesignation[];
+			outputs: QuantityDesignation[];
+		}) => void;
 		onAddImage?: (
 			file: File,
 			details: { alt: string; caption?: string }
@@ -50,6 +60,8 @@
 	let title = $state('');
 	let description = $state('');
 	let nodeTags = $state('');
+	let draftInputs = $state<QuantityDesignation[]>([]);
+	let draftOutputs = $state<QuantityDesignation[]>([]);
 	let edgeTagTextById = $state<Record<string, string>>({});
 	let imageDraftByAssetId = $state<Record<string, { alt: string; caption: string }>>({});
 	let imageStatus = $state('');
@@ -59,6 +71,21 @@
 	// Only surface the preview once the draft actually contains math, so nodes
 	// without any keep the compact form the sheet has today.
 	const descriptionHasMath = $derived(hasMath(description));
+
+	/**
+	 * Suggestions come off the *draft*, not the saved node, so a quantity can be
+	 * confirmed in the same pass that introduces it. Re-parsing on every keystroke
+	 * is affordable because the math render cache absorbs the repeats — the same
+	 * reason the preview above can re-render as you type.
+	 */
+	const draftQuantities = $derived(
+		nodeQuantities({
+			title: normalizeNodeTitle(title),
+			description,
+			tags: normalizeTagList(nodeTags)
+		})
+	);
+	const designations = $derived(designationView(draftQuantities, draftInputs, draftOutputs));
 
 	const incidentEdges = $derived(
 		edges.filter((edge) => edge.sourceNodeId === node.id || edge.targetNodeId === node.id)
@@ -71,6 +98,8 @@
 		title = node.title;
 		description = node.description;
 		nodeTags = node.tags.join(' ');
+		draftInputs = node.inputs ?? [];
+		draftOutputs = node.outputs ?? [];
 		requestAnimationFrame(() => titleInput?.focus());
 	});
 
@@ -95,8 +124,20 @@
 		onSave({
 			title: normalizeNodeTitle(title),
 			description,
-			tags: normalizeTagList(nodeTags)
+			tags: normalizeTagList(nodeTags),
+			inputs: draftInputs,
+			outputs: draftOutputs
 		});
+	}
+
+	function cycle(symbol: QuantitySymbol, suggestedRole?: 'input' | 'output') {
+		const next = cycleDesignation(
+			{ inputs: draftInputs, outputs: draftOutputs },
+			symbol,
+			suggestedRole
+		);
+		draftInputs = next.inputs;
+		draftOutputs = next.outputs;
 	}
 
 	function saveEdgeTags(edge: EdgeData) {
@@ -262,6 +303,8 @@
 						<div class="math-preview-body"><MathText text={description} /></div>
 					</section>
 				{/if}
+
+				<QuantityDesignationChips mode="edit" view={designations} onCycle={cycle} />
 
 				<label>
 					Node tags

@@ -53,6 +53,19 @@
 		paddingPx?: number;
 	}
 
+	/**
+	 * An exact camera, not a fit: `fitViewRequest` derives pan/scale from bounds
+	 * and clamps them to what fits, which cannot reproduce a view the reader was
+	 * already looking at. Restoring a remembered view needs the numbers back
+	 * verbatim.
+	 */
+	interface ViewStateRequest {
+		id: number;
+		panX: number;
+		panY: number;
+		scale: number;
+	}
+
 	interface EntryGestureGateRequest {
 		id: number;
 		direction: EntryGestureDirection;
@@ -131,6 +144,8 @@
 		onViewStateChange?: (state: ViewStateSnapshot) => void;
 		/** One-shot request to fit graph-local bounds into the stage viewport. */
 		fitViewRequest?: FitViewRequest | null;
+		/** One-shot request to restore an exact pan/scale (scale still clamped). */
+		viewStateRequest?: ViewStateRequest | null;
 		/** One-shot request to swallow residual entry/exit zoom input at the stage boundary. */
 		entryGestureGateRequest?: EntryGestureGateRequest | null;
 	}
@@ -158,12 +173,14 @@
 		onBlockedZoom,
 		onViewStateChange,
 		fitViewRequest,
+		viewStateRequest,
 		entryGestureGateRequest,
 		children
 	}: Props & { children?: Snippet } = $props();
 
 	let stageRef = $state<HTMLElement | null>(null);
 	let lastFitViewRequestId = $state<number | null>(null);
+	let lastViewStateRequestId = $state<number | null>(null);
 	let lastEntryGestureGateRequestId = $state<number | null>(null);
 	let entryGestureGate = $state<EntryGestureGateState>(EMPTY_ENTRY_GESTURE_GATE);
 	let focusEntryBoundaryProgress = $state<{ nodeId: string; progress: number } | null>(null);
@@ -242,6 +259,19 @@
 		panX = next.panX;
 		panY = next.panY;
 		scale = next.scale;
+		onViewStateChange?.({ panX, panY, scale });
+	});
+
+	$effect(() => {
+		const request = viewStateRequest;
+		if (!request || request.id === lastViewStateRequestId) return;
+		lastViewStateRequestId = request.id;
+		panX = request.panX;
+		panY = request.panY;
+		// The only adjustment: the same clamp the mount seed and every gesture go
+		// through, so a restore cannot leave the stage at a scale no gesture could
+		// have produced. Pan is reproduced verbatim — that is the whole point.
+		scale = clampScale(request.scale);
 		onViewStateChange?.({ panX, panY, scale });
 	});
 

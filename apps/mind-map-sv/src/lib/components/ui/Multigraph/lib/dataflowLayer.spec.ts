@@ -2,10 +2,28 @@ import { describe, expect, it, vi } from 'vitest';
 import { composeEdgesForRender, createDataflowModel, hasDerivedEdges } from './dataflowLayer';
 import { nodeQuantities } from './nodeQuantities';
 import type { MultigraphData } from '../../types/multigraph';
-import type { NodeData } from '../../types/node';
+import type { NodeData, QuantityDesignation } from '../../types/node';
+import type { QuantitySymbol } from '../../MathText/lib/mathSymbols';
 
+function designationOf(symbol: QuantitySymbol): QuantityDesignation {
+	return { base: symbol.base, subscript: symbol.subscript };
+}
+
+/**
+ * A node whose designations say what its text says: the author confirmed every
+ * suggestion. Edges follow designations, so the fixtures here have to carry them
+ * for the model to have anything to compose.
+ */
 function node(id: string, description: string, tags: string[] = []): NodeData {
-	return { id, title: id, description, tags };
+	const parsed = nodeQuantities({ title: id, description, tags });
+	return {
+		id,
+		title: id,
+		description,
+		tags,
+		inputs: parsed.references.map(designationOf),
+		outputs: parsed.defines.map((definition) => designationOf(definition.symbol))
+	};
 }
 
 function graphOf(

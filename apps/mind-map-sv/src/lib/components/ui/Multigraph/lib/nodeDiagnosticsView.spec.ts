@@ -3,9 +3,30 @@ import { nodeDiagnosticsView } from './nodeDiagnosticsView';
 import { computeDataflowDiagnostics } from './dataflowDiagnostics';
 import { deriveDataflowEdges } from './derivedEdges';
 import { buildQuantityIndex, type IndexableNode } from './quantityIndex';
+import { nodeQuantities } from './nodeQuantities';
+import type { QuantitySymbol } from '../../MathText/lib/mathSymbols';
+import type { QuantityDesignation } from '../../types/node';
+
+function designationOf(symbol: QuantitySymbol): QuantityDesignation {
+	return { base: symbol.base, subscript: symbol.subscript };
+}
+
+/**
+ * A node whose designations say what its text says, standing in for an author who
+ * confirmed every suggestion. Nothing below is reported about a node until it has
+ * claimed the quantity, so every fixture has to claim what it writes.
+ */
+function designated(node: IndexableNode): IndexableNode {
+	const parsed = nodeQuantities(node);
+	return {
+		...node,
+		inputs: parsed.references.map(designationOf),
+		outputs: parsed.defines.map((definition) => designationOf(definition.symbol))
+	};
+}
 
 function node(id: string, description: string): IndexableNode {
-	return { id, description, tags: [] };
+	return designated({ id, description, tags: [] });
 }
 
 function viewFor(
@@ -72,7 +93,7 @@ describe('nodeDiagnosticsView', () => {
 
 	describe('a node that contradicts itself', () => {
 		const selfContradicting = [
-			{ id: 'a', title: '$x = 1$', description: 'But also $x = 2$.', tags: [] }
+			designated({ id: 'a', title: '$x = 1$', description: 'But also $x = 2$.', tags: [] })
 		];
 
 		it('reports it as its own state rather than as a conflict with someone', () => {
@@ -90,7 +111,7 @@ describe('nodeDiagnosticsView', () => {
 		it('takes precedence when another node also disagrees', () => {
 			const view = viewFor(
 				[
-					{ id: 'a', title: '$x = 1$', description: 'But also $x = 2$.', tags: [] },
+					designated({ id: 'a', title: '$x = 1$', description: 'But also $x = 2$.', tags: [] }),
 					node('b', '$$x = 3$$')
 				],
 				'a'
@@ -101,7 +122,7 @@ describe('nodeDiagnosticsView', () => {
 		it('still reads as an ordinary conflict from the other node', () => {
 			const view = viewFor(
 				[
-					{ id: 'a', title: '$x = 1$', description: 'But also $x = 2$.', tags: [] },
+					designated({ id: 'a', title: '$x = 1$', description: 'But also $x = 2$.', tags: [] }),
 					node('b', '$$x = 3$$')
 				],
 				'b'
@@ -113,7 +134,12 @@ describe('nodeDiagnosticsView', () => {
 		it('sorts before a conflict with another node', () => {
 			const view = viewFor(
 				[
-					{ id: 'a', title: '$x = 1$', description: 'Also $x = 2$, and $w = y$.', tags: [] },
+					designated({
+						id: 'a',
+						title: '$x = 1$',
+						description: 'Also $x = 2$, and $w = y$.',
+						tags: []
+					}),
 					node('b', '$$y = 1$$'),
 					node('c', '$$y = 2$$')
 				],

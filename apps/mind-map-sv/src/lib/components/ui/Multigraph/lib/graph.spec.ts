@@ -12,6 +12,7 @@ import {
 	normalizeNodeTitle,
 	removeEdge,
 	removeNode,
+	setNodeDesignations,
 	setNodePinned,
 	setTagColor,
 	togglePinned,
@@ -285,6 +286,70 @@ describe('graph mutations', () => {
 			expect(updateNodeContent(graph, 'missing', { title: 'Nope', description: 'Nope' })).toBe(
 				graph
 			);
+		});
+
+		it('carries designations when the save includes them and preserves them when it does not', () => {
+			const graph = makeGraph({ nodeCount: 1 });
+
+			const withIO = updateNodeContent(graph, 'n0', {
+				title: 'Node 0',
+				description: '$$v = at$$',
+				inputs: [{ base: 'a', subscript: null }],
+				outputs: [{ base: 'v', subscript: null }]
+			});
+			expect(withIO.nodes[0].inputs).toEqual([{ base: 'a', subscript: null }]);
+			expect(withIO.nodes[0].outputs).toEqual([{ base: 'v', subscript: null }]);
+
+			// A save that omits the fields (e.g. inline title syntax) keeps them.
+			const titleOnly = updateNodeContent(withIO, 'n0', {
+				title: 'Renamed',
+				description: '$$v = at$$'
+			});
+			expect(titleOnly.nodes[0].inputs).toEqual([{ base: 'a', subscript: null }]);
+			expect(titleOnly.nodes[0].outputs).toEqual([{ base: 'v', subscript: null }]);
+		});
+	});
+
+	describe('setNodeDesignations', () => {
+		it('replaces designations, deduping by identity and preserving order', () => {
+			const graph = makeGraph({ nodeCount: 1 });
+
+			const next = setNodeDesignations(graph, 'n0', {
+				inputs: [
+					{ base: 'v', subscript: '0' },
+					{ base: 'a', subscript: null },
+					{ base: 'v', subscript: '0' }
+				],
+				outputs: []
+			});
+
+			expect(next.nodes[0].inputs).toEqual([
+				{ base: 'v', subscript: '0' },
+				{ base: 'a', subscript: null }
+			]);
+			expect(next.nodes[0].outputs).toEqual([]);
+			expect(graph.nodes[0].inputs).toBeUndefined();
+		});
+
+		it('does not conflate a subscripted symbol with a lookalike base', () => {
+			const graph = makeGraph({ nodeCount: 1 });
+
+			// `v` subscript `0` and a base literally named `v_0` are distinct identities.
+			const next = setNodeDesignations(graph, 'n0', {
+				inputs: [
+					{ base: 'v', subscript: '0' },
+					{ base: 'v_0', subscript: null }
+				],
+				outputs: []
+			});
+
+			expect(next.nodes[0].inputs).toHaveLength(2);
+		});
+
+		it('is a no-op for missing node ids', () => {
+			const graph = makeGraph({ nodeCount: 1 });
+
+			expect(setNodeDesignations(graph, 'missing', { inputs: [], outputs: [] })).toBe(graph);
 		});
 	});
 

@@ -1,15 +1,24 @@
 /**
  * Collect every node's quantities into one graph-wide index.
  *
- * The index keeps *every* symbol it sees, including ones nobody defines. The
- * promotion rule — a symbol counts as a tracked quantity only once some node
- * defines it — is applied by callers that draw things, not here. Discarding
- * unclaimed symbols at index time would keep the canvas quiet but leave the
- * diagnostics with nothing to offer.
+ * Two different things arrive here and are kept apart on purpose. Extraction
+ * reads each node's math and yields *suggestions* — what the text appears to
+ * define and mention. Designations are what the user confirmed, and they alone
+ * decide who defines a quantity and who consumes it, which is to say they alone
+ * draw edges. A node full of equations that nobody has confirmed anything on
+ * contributes symbols to look at and no dataflow whatsoever.
+ *
+ * The index keeps *every* symbol it sees either way, including ones nobody
+ * defines. The promotion rule — a symbol counts as a tracked quantity only once
+ * some node defines it — is applied by callers that draw things, not here.
+ * Discarding unclaimed symbols at index time would keep the canvas quiet but
+ * leave the chips and the diagnostics with nothing to offer.
  */
 
-import type { QuantitySymbol } from '../../MathText/lib/mathSymbols';
+import { symbolFor, type QuantitySymbol } from '../../MathText/lib/mathSymbols';
+import type { QuantityDesignation } from '../../types/node';
 import {
+	DEFAULT_DATAFLOW_OPT_OUT_TAG,
 	nodeQuantities,
 	type NodeQuantities,
 	type NodeQuantitiesOptions,
@@ -18,34 +27,48 @@ import {
 
 export interface IndexableNode extends QuantityBearingNode {
 	id: string;
+	/** Quantities the user confirmed this node consumes. Absent means none. */
+	inputs?: readonly QuantityDesignation[];
+	/** Quantities the user confirmed this node defines. Absent means none. */
+	outputs?: readonly QuantityDesignation[];
 }
 
 export interface QuantityDefinitionRecord {
 	nodeId: string;
 	bodyKey: string;
+	/** The LaTeX the author wrote, for rendering this definition where it is needed. */
+	sourceTex: string;
+	displayMode: boolean;
 }
 
 export interface QuantityIndexEntry {
 	symbol: QuantitySymbol;
 	/**
-	 * Nodes defining this quantity, sorted and distinct. A node appears once here
-	 * however many times it states the definition, because this drives edges and
-	 * labels, where a repeat would draw a duplicate.
+	 * Nodes whose confirmed outputs include this quantity, sorted and distinct. A
+	 * node appears once however many times it states the definition, because this
+	 * drives edges and labels, where a repeat would draw a duplicate.
 	 */
 	definerNodeIds: string[];
 	/**
-	 * Every distinct statement of this quantity, sorted. Disagreement among these
-	 * is what a conflict is; use `definerNodeIds` for anything that draws.
+	 * What the definers' text says this quantity equals, sorted — one record per
+	 * distinct statement. Disagreement among these is what a conflict is; use
+	 * `definerNodeIds` for anything that draws. A definer whose text no longer
+	 * contains the equation contributes nothing here, which is a stale designation
+	 * rather than an error: the edge the user confirmed survives a reworded node.
 	 */
 	definitions: QuantityDefinitionRecord[];
-	/** Nodes referencing this quantity without defining it, sorted. */
+	/** Nodes whose confirmed inputs include this quantity, sorted. */
 	consumerNodeIds: string[];
 }
 
 export interface QuantityIndex {
-	/** Every symbol seen anywhere, keyed by canonical key. */
+	/** Every symbol seen anywhere — extracted or designated — keyed by canonical key. */
 	entries: ReadonlyMap<string, QuantityIndexEntry>;
-	/** What each node defines and references. */
+	/**
+	 * What each node's *text* defines and references. Suggestions, not dataflow:
+	 * the chip UI offers these for confirmation and the diagnostics use them for
+	 * context, but only designations reach `definerNodeIds`/`consumerNodeIds`.
+	 */
 	byNodeId: ReadonlyMap<string, NodeQuantities>;
 }
 
@@ -57,9 +80,10 @@ export interface QuantityIndexerOptions extends NodeQuantitiesOptions {
 }
 
 /**
- * A node's contribution changes only when its title, description, or tags
- * change, since the opt-out is a tag. Nothing else about a node can affect
- * extraction.
+ * A node's *extraction* changes only when its title, description, or tags change,
+ * since the opt-out is a tag. Designations are deliberately absent: they do not
+ * affect what the math says, and folding them in here would re-render every
+ * equation in a node on each chip tap.
  *
  * The title must be in here. Omitting it produces a graph that is correct after
  * a reload and wrong until then, because a title edit would leave the cached
@@ -67,6 +91,23 @@ export interface QuantityIndexerOptions extends NodeQuantitiesOptions {
  */
 function signatureOf(node: IndexableNode): string {
 	return `${node.title ?? ''}\u0000${node.description}\u0000${node.tags.join('\u0001')}`;
+}
+
+/**
+ * A node's *designations*, which decide its edges but never its extraction.
+ *
+ * Symbol keys embed a NUL of their own, so the separators here start above it;
+ * inputs and outputs are joined by a distinct one so that moving a designation
+ * from one column to the other changes the signature rather than cancelling out.
+ */
+function designationListKey(designations: readonly QuantityDesignation[] | undefined): string {
+	return (designations ?? [])
+		.map((designation) => symbolFor(designation.base, designation.subscript).key)
+		.join('\u0001');
+}
+
+function ioSignatureOf(node: IndexableNode): string {
+	return `${designationListKey(node.inputs)}\u0002${designationListKey(node.outputs)}`;
 }
 
 function entryFor(entries: Map<string, QuantityIndexEntry>, symbol: QuantitySymbol) {
@@ -108,29 +149,43 @@ export function trackedQuantities(index: QuantityIndex): QuantityIndexEntry[] {
  * a fresh-but-identical index and invalidate every piece of derived state hanging
  * off it — edges, chips, labels, diagnostics — sixty times a second for reasons
  * that have nothing to do with the math.
+ *
+ * The two signatures serve the two halves of that: extraction is reused whenever
+ * the *text* is unchanged, while the identity return additionally requires the
+ * designations to be unchanged, since those are what the edges are made of.
  */
 export function createQuantityIndexer(options: QuantityIndexerOptions = {}) {
 	const { extract, ...quantityOptions } = options;
+	const optOutTag = quantityOptions.optOutTag ?? DEFAULT_DATAFLOW_OPT_OUT_TAG;
 	const run: QuantityExtractor = extract ?? ((node) => nodeQuantities(node, quantityOptions));
-	const cache = new Map<string, { signature: string; quantities: NodeQuantities }>();
+	const cache = new Map<
+		string,
+		{ signature: string; ioSignature: string; quantities: NodeQuantities }
+	>();
 	let previous: QuantityIndex | undefined;
 
 	return function buildQuantityIndex(nodes: readonly IndexableNode[]): QuantityIndex {
 		const signatures = nodes.map((node) => signatureOf(node));
+		const ioSignatures = nodes.map((node) => ioSignatureOf(node));
 		const liveNodeIds = new Set<string>();
 		let everyNodeMatchedItsMemo = true;
 
 		for (let position = 0; position < nodes.length; position += 1) {
 			liveNodeIds.add(nodes[position].id);
-			if (cache.get(nodes[position].id)?.signature !== signatures[position]) {
+			const cached = cache.get(nodes[position].id);
+			if (
+				cached?.signature !== signatures[position] ||
+				cached.ioSignature !== ioSignatures[position]
+			) {
 				everyNodeMatchedItsMemo = false;
 			}
 		}
 
 		// The index is a pure function of every node's (id, title, description,
-		// tags). Every node matching its memo means no content changed; the cache
-		// holding exactly as many nodes as are live means none came or went, since
-		// dead ids are evicted below and a new id could not have matched a memo.
+		// tags, inputs, outputs). Every node matching both memos means nothing
+		// relevant changed; the cache holding exactly as many nodes as are live
+		// means none came or went, since dead ids are evicted below and a new id
+		// could not have matched a memo.
 		if (previous !== undefined && everyNodeMatchedItsMemo && cache.size === liveNodeIds.size) {
 			return previous;
 		}
@@ -138,6 +193,10 @@ export function createQuantityIndexer(options: QuantityIndexerOptions = {}) {
 		const entries = new Map<string, QuantityIndexEntry>();
 		const byNodeId = new Map<string, NodeQuantities>();
 
+		// Extraction first, for every node, so that a symbol appearing in anyone's
+		// text is represented by the parsed symbol object rather than one rebuilt
+		// from a designation. The two compare equal, but only the parsed one was
+		// read off the author's math.
 		for (let position = 0; position < nodes.length; position += 1) {
 			const node = nodes[position];
 			const signature = signatures[position];
@@ -147,20 +206,65 @@ export function createQuantityIndexer(options: QuantityIndexerOptions = {}) {
 				quantities = cached.quantities;
 			} else {
 				quantities = run({ ...node });
-				cache.set(node.id, { signature, quantities });
 			}
+			cache.set(node.id, { signature, ioSignature: ioSignatures[position], quantities });
 			byNodeId.set(node.id, quantities);
 
+			// Every extracted symbol earns an entry and nothing more. This is the pool
+			// the chips are offered from and what the diagnostics reason about; the
+			// edges come from the designation pass below.
 			for (const definition of quantities.defines) {
-				const entry = entryFor(entries, definition.symbol);
-				entry.definitions.push({ nodeId: node.id, bodyKey: definition.bodyKey });
-				// A node that states one definition twice over is still one definer.
-				// Pushing it twice would draw a duplicate edge and a duplicate label.
-				if (!entry.definerNodeIds.includes(node.id)) {
-					entry.definerNodeIds.push(node.id);
-				}
+				entryFor(entries, definition.symbol);
 			}
 			for (const symbol of quantities.references) {
+				entryFor(entries, symbol);
+			}
+		}
+
+		for (const node of nodes) {
+			// One tag, one meaning: an opted-out node contributes no dataflow, so its
+			// designations are suppressed exactly as its math already was.
+			if (node.tags.includes(optOutTag)) {
+				continue;
+			}
+
+			const quantities = byNodeId.get(node.id) ?? { defines: [], references: [] };
+
+			const seenOutputs = new Set<string>();
+			for (const designation of node.outputs ?? []) {
+				const symbol = symbolFor(designation.base, designation.subscript);
+				if (seenOutputs.has(symbol.key)) {
+					continue;
+				}
+				seenOutputs.add(symbol.key);
+
+				const entry = entryFor(entries, symbol);
+				entry.definerNodeIds.push(node.id);
+				// A confirmed output whose equation is not (or no longer) in the text is
+				// still a definer; it just has no body to show.
+				for (const definition of quantities.defines) {
+					if (definition.symbol.key !== symbol.key) {
+						continue;
+					}
+					entry.definitions.push({
+						nodeId: node.id,
+						bodyKey: definition.bodyKey,
+						sourceTex: definition.sourceTex,
+						displayMode: definition.displayMode
+					});
+				}
+			}
+
+			// A node that designates one quantity as both input and output keeps both
+			// roles: it said so, and silently dropping one would lose an edge the user
+			// asked for. The definer/consumer cross-product skips self-pairs anyway.
+			const seenInputs = new Set<string>();
+			for (const designation of node.inputs ?? []) {
+				const symbol = symbolFor(designation.base, designation.subscript);
+				if (seenInputs.has(symbol.key)) {
+					continue;
+				}
+				seenInputs.add(symbol.key);
 				entryFor(entries, symbol).consumerNodeIds.push(node.id);
 			}
 		}

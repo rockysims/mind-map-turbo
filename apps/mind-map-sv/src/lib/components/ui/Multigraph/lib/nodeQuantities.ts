@@ -1,5 +1,13 @@
 /**
- * Decide which quantities a single node defines and which it merely references.
+ * Read one node's math and report which quantities it defines and which it
+ * merely mentions.
+ *
+ * This is a *suggestion provider*, not the dataflow itself. Nothing here draws an
+ * edge: what a node actually consumes and produces is the designations the user
+ * confirmed on it, which the quantity index reads. This module answers two
+ * narrower questions — what should be offered as a chip to confirm, and, for a
+ * quantity already confirmed as an output, what the node's text says it equals so
+ * a reader elsewhere can be shown the definition.
  *
  * The rule is deliberately narrow so it is predictable without documentation: a
  * definition is exactly one top-level equality with a single symbol on its left.
@@ -26,7 +34,11 @@ import {
 	type SymbolExtractionOptions
 } from '../../MathText/lib/mathSymbols';
 
-/** Tag that excludes a node from the dataflow layer entirely. */
+/**
+ * Tag that excludes a node from the dataflow layer entirely: no suggestions here,
+ * and no edges from its confirmed designations either — the index applies the
+ * same tag to those. One tag, one meaning: this node does not participate.
+ */
 export const DEFAULT_DATAFLOW_OPT_OUT_TAG = 'no-dataflow';
 
 export interface QuantityDefinition {
@@ -37,6 +49,15 @@ export interface QuantityDefinition {
 	 * two different ways is a contradiction, and only the body distinguishes them.
 	 */
 	bodyKey: string;
+	/**
+	 * The LaTeX the author wrote, delimiters stripped. `bodyKey` is a canonical
+	 * identity with whitespace and invisible operators thrown away — useful for
+	 * telling two claims apart, unusable for showing one to a reader. This is what
+	 * a peek card renders.
+	 */
+	sourceTex: string;
+	/** Whether the author set this math on its own line, so it re-renders as written. */
+	displayMode: boolean;
 }
 
 export interface NodeQuantities {
@@ -92,6 +113,10 @@ function dedupe(symbols: readonly QuantitySymbol[]): QuantitySymbol[] {
  * Writing `$x = 1$` in the title and again in the description is one claim made
  * twice, so it collapses. Writing `$x = 1$` and `$x = 2$` is two claims, and both
  * survive so the conflict is visible downstream.
+ *
+ * Identity is the symbol and the canonical body, deliberately not `sourceTex`:
+ * restating one claim with different spacing is still one claim, and the first
+ * spelling is the one that gets rendered.
  */
 function dedupeDefinitions(definitions: readonly QuantityDefinition[]): QuantityDefinition[] {
 	const seen = new Set<string>();
@@ -169,9 +194,8 @@ export function nodeQuantities(
 			continue;
 		}
 
-		const rendered = renderMath(segment.content, {
-			displayMode: segment.kind === 'display-math'
-		});
+		const displayMode = segment.kind === 'display-math';
+		const rendered = renderMath(segment.content, { displayMode });
 		// Invalid math contributes nothing rather than guessing at the author's
 		// intent; the edit sheet preview is where they find out it did not parse.
 		if (!rendered.ok) {
@@ -182,7 +206,12 @@ export function nodeQuantities(
 
 		const definition = definitionOf(children, symbolOptions);
 		if (definition !== null) {
-			defines.push({ symbol: definition.defined, bodyKey: definition.bodyKey });
+			defines.push({
+				symbol: definition.defined,
+				bodyKey: definition.bodyKey,
+				sourceTex: segment.content,
+				displayMode
+			});
 			references.push(...definition.consumed);
 			continue;
 		}

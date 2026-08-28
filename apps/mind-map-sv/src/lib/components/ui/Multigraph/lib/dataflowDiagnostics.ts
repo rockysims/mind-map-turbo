@@ -1,6 +1,12 @@
 /**
  * Report what is wrong, or merely hidden, in a graph's dataflow.
  *
+ * A "reference" here is a quantity the user confirmed as one of a node's inputs,
+ * never a symbol that merely appears in its text. That is the whole point of
+ * asking for confirmation: an unresolved reference is now a claim the author made
+ * — "this node needs a value for `g`" — and reporting one is an invitation to
+ * supply it, rather than a complaint about a letter in an equation.
+ *
  * The three reference states are deliberately distinct. A quantity whose definer
  * is simply scrolled out of the visible neighborhood is not a mistake, and
  * showing it the same way as a genuinely undefined symbol would train people to
@@ -19,6 +25,7 @@ export type ReferenceState =
 	/** Defined by no node anywhere. An invitation to extend the graph. */
 	| 'unresolved';
 
+/** One node's confirmed input, and how well the graph answers it. */
 export interface ReferenceDiagnostic {
 	nodeId: string;
 	symbol: QuantitySymbol;
@@ -30,9 +37,9 @@ export interface ReferenceDiagnostic {
 export interface ConflictDiagnostic {
 	symbol: QuantitySymbol;
 	/**
-	 * The nodes defining this quantity. Usually two or more, but exactly one when
-	 * a single node defines the same quantity two different ways — it contradicts
-	 * itself, with no second node involved.
+	 * The nodes claiming this quantity as an output. Usually two or more, but
+	 * exactly one when a single node defines it two different ways — it
+	 * contradicts itself, with no second node involved.
 	 */
 	definerNodeIds: string[];
 	/**
@@ -206,20 +213,32 @@ export function computeDataflowDiagnostics(
 	edges: readonly DerivedEdge[],
 	options: DataflowDiagnosticsOptions = {}
 ): DataflowDiagnostics {
+	// Read off the index's consumers rather than each node's extracted symbols:
+	// consumers are the confirmed inputs, which is what a reference means here.
 	const references: ReferenceDiagnostic[] = [];
 
-	for (const [nodeId, quantities] of index.byNodeId) {
-		for (const symbol of quantities.references) {
-			const definerNodeIds = index.entries.get(symbol.key)?.definerNodeIds ?? [];
+	for (const entry of index.entries.values()) {
+		for (const nodeId of entry.consumerNodeIds) {
 			references.push({
 				nodeId,
-				symbol,
-				state: referenceState(definerNodeIds, options.visibleNodeIds),
-				definerNodeIds: [...definerNodeIds]
+				symbol: entry.symbol,
+				state: referenceState(entry.definerNodeIds, options.visibleNodeIds),
+				definerNodeIds: [...entry.definerNodeIds]
 			});
 		}
 	}
 
+	// Entry order follows whichever node was read first, so sort into an order
+	// that depends on nothing but the content.
+	references.sort(
+		(left, right) =>
+			left.nodeId.localeCompare(right.nodeId) || left.symbol.key.localeCompare(right.symbol.key)
+	);
+
+	// Only confirmed outputs are compared, since only they put a definition in the
+	// index: an equation nobody claimed is a draft, and two drafts disagreeing is
+	// not yet a problem with the graph.
+	//
 	// A conflict is disagreement, not duplication. Two nodes that both state
 	// `x = 1` are saying one thing in two places, which is how a graph gets
 	// written; warning about it would fire on ordinary authoring and teach people

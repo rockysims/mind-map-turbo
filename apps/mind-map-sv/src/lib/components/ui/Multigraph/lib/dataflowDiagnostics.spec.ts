@@ -7,9 +7,33 @@ import {
 } from './dataflowDiagnostics';
 import { deriveDataflowEdges } from './derivedEdges';
 import { buildQuantityIndex, type IndexableNode } from './quantityIndex';
+import { nodeQuantities } from './nodeQuantities';
+import type { QuantitySymbol } from '../../MathText/lib/mathSymbols';
+import type { QuantityDesignation } from '../../types/node';
+
+function designationOf(symbol: QuantitySymbol): QuantityDesignation {
+	return { base: symbol.base, subscript: symbol.subscript };
+}
+
+/**
+ * A node whose designations say what its text says, standing in for an author who
+ * confirmed every suggestion.
+ *
+ * Diagnostics are about confirmed inputs and outputs now, so a fixture that only
+ * wrote math would report nothing at all. Confirming everything keeps each
+ * scenario below saying what it always said.
+ */
+function designated(node: IndexableNode): IndexableNode {
+	const parsed = nodeQuantities(node);
+	return {
+		...node,
+		inputs: parsed.references.map(designationOf),
+		outputs: parsed.defines.map((definition) => designationOf(definition.symbol))
+	};
+}
 
 function node(id: string, description: string, tags: string[] = []): IndexableNode {
-	return { id, description, tags };
+	return designated({ id, description, tags });
 }
 
 function diagnose(
@@ -132,7 +156,7 @@ describe('conflicts', () => {
 
 	it('flags a node that defines the same quantity two different ways', () => {
 		const diagnostics = diagnose([
-			{ id: 'a', title: '$x = 1$', description: 'But also $x = 2$.', tags: [] }
+			designated({ id: 'a', title: '$x = 1$', description: 'But also $x = 2$.', tags: [] })
 		]);
 		expect(diagnostics.conflicts.map((conflict) => conflict.symbol.label)).toEqual(['x']);
 	});
@@ -141,7 +165,7 @@ describe('conflicts', () => {
 	// conflict whose only participant is the node reading it.
 	it('names only the one node when it contradicts itself', () => {
 		const diagnostics = diagnose([
-			{ id: 'a', title: '$x = 1$', description: 'But also $x = 2$.', tags: [] }
+			designated({ id: 'a', title: '$x = 1$', description: 'But also $x = 2$.', tags: [] })
 		]);
 		expect(diagnostics.conflicts[0].definerNodeIds).toEqual(['a']);
 	});
@@ -168,7 +192,7 @@ describe('conflicts', () => {
 	// quantity, and warning about it would make the feature feel broken.
 	it('does not flag a node that defines the same quantity in its title and description', () => {
 		const diagnostics = diagnose([
-			{ id: 'a', title: '$x = 1$', description: 'Restated: $x = 1$', tags: [] }
+			designated({ id: 'a', title: '$x = 1$', description: 'Restated: $x = 1$', tags: [] })
 		]);
 		expect(diagnostics.conflicts).toEqual([]);
 	});

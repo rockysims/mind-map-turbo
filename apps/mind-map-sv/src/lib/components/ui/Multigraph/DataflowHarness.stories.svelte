@@ -3,7 +3,7 @@
 	import { tick } from 'svelte';
 	import DataflowHarness from './DataflowHarness.svelte';
 	import { expect, waitFor } from 'storybook/test';
-	import { makeGraph } from './lib/testFixtures';
+	import { designations, makeGraph, withDesignations } from './lib/testFixtures';
 
 	const { Story } = defineMeta({
 		title: 'Components/Multigraph/Dataflow',
@@ -14,9 +14,14 @@
 	type PlayContext = { canvasElement: HTMLElement };
 
 	/**
-	 * `a` defines g, `c` will come to consume it. The authored chain a–b–c keeps
-	 * `c` two hops from the pinned node, so the equation has somewhere to move it
-	 * from: crossing it is a single hop, which is both nearer and larger.
+	 * `a` states g and `c` will come to mention it. Equations only, with nothing
+	 * confirmed: a graph in this state draws no dataflow at all, which is what
+	 * makes it the starting point for both the stories that go on to confirm the
+	 * quantities and the one that proves an unconfirmed equation moves nothing.
+	 *
+	 * The authored chain a–b–c keeps `c` two hops from the pinned node, so a
+	 * confirmed pair has somewhere to move it from: crossing it is a single hop,
+	 * which is both nearer and larger.
 	 */
 	const CHAIN = makeGraph({
 		nodes: [
@@ -37,6 +42,15 @@
 	});
 
 	const CONSUMES_G = '$$w = m g$$';
+
+	/** The definer has published g; the consumer has confirmed nothing yet. */
+	const CHAIN_DEFINER_CONFIRMED = withDesignations(CHAIN, { a: { outputs: ['g'] } });
+
+	/** Both ends confirmed, which is the only state that draws an arrow. */
+	const CHAIN_CONFIRMED = withDesignations(CHAIN, {
+		a: { outputs: ['g'] },
+		c: { inputs: ['g'] }
+	});
 
 	const derivedEdge = (canvasElement: HTMLElement) =>
 		canvasElement.querySelector('[data-edge-id="dataflow:a->c"]');
@@ -80,6 +94,12 @@
 		}
 	});
 
+	/** The same chain with the pair a–e confirmed, so the arrow is there on arrival. */
+	const CHAIN_BEYOND_LAYERS_CONFIRMED = withDesignations(CHAIN_BEYOND_LAYERS, {
+		a: { outputs: ['g'] },
+		e: { inputs: ['g'] }
+	});
+
 	const TWO_LAYERS = { displayedLayers: 2, relaxIterations: 0 };
 
 	const nodeOnCanvas = (canvasElement: HTMLElement, nodeId: string) =>
@@ -92,8 +112,13 @@
 	 */
 	const BEHIND_A_CONSUMER = makeGraph({
 		nodes: [
-			{ id: 'root', title: 'Gravity', description: '$$g = 9.8$$' },
-			{ id: 'a', title: 'Weight', description: '' },
+			{
+				id: 'root',
+				title: 'Gravity',
+				description: '$$g = 9.8$$',
+				outputs: designations('g')
+			},
+			{ id: 'a', title: 'Weight', description: '', inputs: designations('g') },
 			{ id: 'b', title: 'Behind', description: '' }
 		],
 		pinned: ['root'],
@@ -113,8 +138,14 @@
 	 */
 	const BEHIND_A_CONSUMER_UNPINNED = makeGraph({
 		nodes: [
-			{ id: 'root', title: 'Gravity', description: '$$g = 9.8$$', lastPinnedSeq: 2 },
-			{ id: 'a', title: 'Weight', description: '' },
+			{
+				id: 'root',
+				title: 'Gravity',
+				description: '$$g = 9.8$$',
+				outputs: designations('g'),
+				lastPinnedSeq: 2
+			},
+			{ id: 'a', title: 'Weight', description: '', inputs: designations('g') },
 			{ id: 'b', title: 'Behind', description: '', lastPinnedSeq: 1 }
 		],
 		pinned: [],
@@ -134,10 +165,21 @@
 	 */
 	const TWO_CONSUMERS = makeGraph({
 		nodes: [
-			{ id: 'a', title: 'Constants', description: '$$g = 9.8$$ and $$m = 5$$' },
+			{
+				id: 'a',
+				title: 'Constants',
+				description: '$$g = 9.8$$ and $$m = 5$$',
+				outputs: designations('g', 'm')
+			},
 			{ id: 'b', title: 'Neighbor', description: '' },
-			{ id: 'd', title: 'Momentum', description: '$$p = m$$' },
-			{ id: 'e', title: 'Weight', description: '' }
+			{
+				id: 'd',
+				title: 'Momentum',
+				description: '$$p = m$$',
+				inputs: designations('m'),
+				outputs: designations('p')
+			},
+			{ id: 'e', title: 'Weight', description: '', inputs: designations('g', 'm') }
 		],
 		pinned: ['a'],
 		edges: [
@@ -153,8 +195,9 @@
 	});
 
 	/**
-	 * `a` defines g and `c` consumes it, with no authored edge anywhere. Any
-	 * movement between them has to come from the derived edge.
+	 * `a` states g and `c` will come to consume it, with no authored edge
+	 * anywhere. Any movement between them has to come from the derived edge, and
+	 * there is none until the quantities are confirmed.
 	 */
 	const UNCONNECTED_PAIR = makeGraph({
 		nodes: [
@@ -198,6 +241,16 @@
 		await waitFor(() => expect(canvasElement.querySelector('.node')).toBeInTheDocument());
 	};
 
+	/**
+	 * Confirm what every node's math suggests, which is the step between having
+	 * written an equation and having a dataflow graph. Stories that start from
+	 * unconfirmed text use this as their action, so the state they assert against
+	 * beforehand — equations everywhere, no arrows — is asserted in passing.
+	 */
+	const confirmIo = async (canvasElement: HTMLElement) => {
+		await click(canvasElement, '[data-confirm-io]');
+	};
+
 	const edgeOnCanvas = (canvasElement: HTMLElement, edgeId: string) =>
 		canvasElement.querySelector(`[data-edge-id="${edgeId}"]`);
 
@@ -219,12 +272,30 @@
 	 */
 	const CHAINED_EQUATIONS = makeGraph({
 		nodes: [
-			{ id: 'v', title: 'Source', description: '$$x = 3$$' },
+			{ id: 'v', title: 'Source', description: '$$x = 3$$', outputs: designations('x') },
 			{ id: 'p1', title: 'Drawn neighbor', description: '' },
 			{ id: 'p2', title: 'Past the layer', description: '' },
-			{ id: 'h1', title: 'First consumer', description: '$$y = x$$' },
-			{ id: 'h3', title: 'Second consumer', description: '' },
-			{ id: 'h4', title: 'Other consumer', description: '$$w = x + z$$' }
+			{
+				id: 'h1',
+				title: 'First consumer',
+				description: '$$y = x$$',
+				inputs: designations('x'),
+				outputs: designations('y')
+			},
+			{
+				id: 'h3',
+				title: 'Second consumer',
+				description: '',
+				inputs: designations('y'),
+				outputs: designations('z')
+			},
+			{
+				id: 'h4',
+				title: 'Other consumer',
+				description: '$$w = x + z$$',
+				inputs: designations('x', 'z'),
+				outputs: designations('w')
+			}
 		],
 		pinned: ['v'],
 		edges: [
@@ -261,10 +332,16 @@
 	 */
 	const NEAR_AND_FAR_CONSUMERS = makeGraph({
 		nodes: [
-			{ id: 'v', title: 'Source', description: '$$x = 3$$' },
-			{ id: 'near', title: 'Drawn consumer', description: '' },
+			{ id: 'v', title: 'Source', description: '$$x = 3$$', outputs: designations('x') },
+			{ id: 'near', title: 'Drawn consumer', description: '', inputs: designations('x') },
 			{ id: 'mid', title: 'Past the layer', description: '' },
-			{ id: 'far', title: 'Distant consumer', description: '$$w = x$$' }
+			{
+				id: 'far',
+				title: 'Distant consumer',
+				description: '$$w = x$$',
+				inputs: designations('x'),
+				outputs: designations('w')
+			}
 		],
 		pinned: ['v'],
 		edges: [
@@ -281,17 +358,24 @@
 	});
 
 	/**
-	 * `d` consumes g and nothing defines it yet, so with two layers on show it is
-	 * three authored hops out and off screen. Writing the definition into `a` is a
-	 * pure content edit that changes the topology — the case the re-ingest route
-	 * cannot reach, because ingest settles everything on its way in.
+	 * `d` has confirmed g as an input and nothing defines it yet, so with two
+	 * layers on show it is three authored hops out and off screen. Writing the
+	 * definition into `a` and confirming it is a pure content edit that changes
+	 * the topology — the case the re-ingest route cannot reach, because ingest
+	 * settles everything on its way in.
 	 */
 	const CONTENT_COMMIT_CHAIN = makeGraph({
 		nodes: [
 			{ id: 'a', title: 'Gravity', description: '' },
 			{ id: 'b', title: 'Middle', description: '' },
 			{ id: 'c', title: 'Third', description: '' },
-			{ id: 'd', title: 'Weight', description: '$$w = m g$$' }
+			{
+				id: 'd',
+				title: 'Weight',
+				description: '$$w = m g$$',
+				inputs: designations('g'),
+				outputs: designations('w')
+			}
 		],
 		pinned: ['a'],
 		edges: [
@@ -350,13 +434,14 @@
 </script>
 
 <Story
-	name="ArrowAppearsAndDisappearsWithTheEquation"
-	args={{ baseGraph: CHAIN, editNodeId: 'c', equation: CONSUMES_G }}
+	name="ArrowAppearsAndDisappearsWithTheConfirmedQuantities"
+	args={{ baseGraph: CHAIN_DEFINER_CONFIRMED, editNodeId: 'c', equation: CONSUMES_G }}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitFor(() => expect(canvasElement.querySelector('.edge')).toBeInTheDocument());
 		expect(derivedEdge(canvasElement)).not.toBeInTheDocument();
 
-		// Written through `c`'s own edit sheet, so the graph is committed the way a
+		// Written through `c`'s own edit sheet — the equation typed and the ghost
+		// chips it raises tapped once each — so the graph is committed the way a
 		// reader commits it and the canvas is never handed a fresh one to ingest.
 		await saveThroughSheet(canvasElement, '[data-save-equation]');
 		await waitFor(() => expect(derivedEdge(canvasElement)).toBeInTheDocument());
@@ -366,8 +451,54 @@
 		expect(derivedEdge(canvasElement)).toHaveAttribute('data-source-node-id', 'a');
 		expect(derivedEdge(canvasElement)).toHaveAttribute('data-target-node-id', 'c');
 
+		// Deleting the text alone would leave the designation standing — flagged
+		// stale, still drawing its arrow. Taking the quantities off is what ends it.
 		await saveThroughSheet(canvasElement, '[data-clear-equation]');
 		await waitFor(() => expect(derivedEdge(canvasElement)).not.toBeInTheDocument());
+	}}
+/>
+
+<Story
+	name="AnUnconfirmedEquationDrawsNothingAndOnlyOffersChips"
+	args={{
+		baseGraph: CHAIN,
+		editNodeId: 'c',
+		equation: CONSUMES_G,
+		startWithEquation: true,
+		initialViewState: { panX: 0, panY: 0, scale: 1 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitFor(() => expect(canvasElement.querySelector('.node')).toBeInTheDocument());
+
+		// `a` states g, `c` mentions it, and nobody has said either is meant. The
+		// parser is a source of suggestions, not of edges: reading a letter out of
+		// someone's prose is not the same as being told what a node takes in.
+		const derivedEdgeIds = Array.from(canvasElement.querySelectorAll('.edge'))
+			.map((edge) => (edge as HTMLElement).dataset.edgeId ?? '')
+			.filter((id) => id.startsWith('dataflow:'));
+		expect(derivedEdgeIds).toEqual([]);
+
+		// The canvas is just as quiet: chips there report confirmed outputs, and
+		// `a` has claimed none.
+		expect(
+			canvasElement.querySelector('[data-node-id="a"] [data-node-quantities]')
+		).not.toBeInTheDocument();
+
+		// The offer lives where it can be acted on. In `c`'s sheet every quantity
+		// its equation mentions is waiting as a ghost, and not one is confirmed.
+		await click(canvasElement, '[data-open-sheet]');
+		await waitFor(() =>
+			expect(canvasElement.querySelector('[data-designation-chips="edit"]')).toBeInTheDocument()
+		);
+		const chips = Array.from(canvasElement.querySelectorAll('[data-designation-key]'));
+		expect(chips.map((chip) => chip.getAttribute('data-designation-key')).sort()).toEqual([
+			'g',
+			'm',
+			'w'
+		]);
+		for (const chip of chips) {
+			expect(chip).toHaveAttribute('data-designation-role', 'suggestion');
+		}
 	}}
 />
 
@@ -405,7 +536,7 @@
 
 <Story
 	name="AuthoredEdgesSurviveTheDataflowLayer"
-	args={{ baseGraph: CHAIN, editNodeId: 'c', equation: CONSUMES_G }}
+	args={{ baseGraph: CHAIN, editNodeId: 'c', equation: CONSUMES_G, startWithEquation: true }}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitFor(() => expect(canvasElement.querySelector('.edge')).toBeInTheDocument());
 		const authoredEdgeIds = () =>
@@ -415,7 +546,7 @@
 				.sort();
 
 		const before = authoredEdgeIds();
-		await click(canvasElement, '[data-add-equation]');
+		await confirmIo(canvasElement);
 		await waitFor(() => expect(derivedEdge(canvasElement)).toBeInTheDocument());
 
 		expect(authoredEdgeIds()).toEqual(before);
@@ -424,12 +555,12 @@
 
 <Story
 	name="ANodeTheDataflowDoesNotTouchIsLeftAlone"
-	args={{ baseGraph: CHAIN, editNodeId: 'c', equation: CONSUMES_G }}
+	args={{ baseGraph: CHAIN, editNodeId: 'c', equation: CONSUMES_G, startWithEquation: true }}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitFor(() => expect(canvasElement.querySelector('.edge')).toBeInTheDocument());
 		const before = nodeGeometry(canvasElement, 'b');
 
-		await click(canvasElement, '[data-add-equation]');
+		await confirmIo(canvasElement);
 		await waitFor(() => expect(derivedEdge(canvasElement)).toBeInTheDocument());
 
 		// `b` neither defines nor consumes, so the new arrow says nothing about how
@@ -444,6 +575,7 @@
 		baseGraph: UNCONNECTED_PAIR,
 		editNodeId: 'c',
 		equation: CONSUMES_G,
+		startWithEquation: true,
 		layoutSettings: SPRINGS_ONLY,
 		initialViewState: FIXED_VIEW
 	}}
@@ -451,10 +583,10 @@
 		await waitFor(() => expect(canvasElement.querySelector('.node')).toBeInTheDocument());
 		const before = distanceBetween(canvasElement, 'a', 'c');
 
-		await click(canvasElement, '[data-add-equation]');
+		await confirmIo(canvasElement);
 		await waitFor(() => expect(derivedEdge(canvasElement)).toBeInTheDocument());
 
-		// Nothing else connects these two, so the equation alone moved them.
+		// Nothing else connects these two, so the confirmed pair alone moved them.
 		await waitFor(() => expect(distanceBetween(canvasElement, 'a', 'c')).toBeLessThan(before));
 	}}
 />
@@ -465,14 +597,16 @@
 		baseGraph: CHAIN_BEYOND_LAYERS,
 		editNodeId: 'e',
 		equation: CONSUMES_G,
+		startWithEquation: true,
 		layoutSettings: TWO_LAYERS
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitFor(() => expect(nodeOnCanvas(canvasElement, 'a')).toBeInTheDocument());
-		// Four authored hops out with only two layers on show.
+		// Four authored hops out with only two layers on show — and its equation,
+		// unconfirmed, buys it nothing.
 		expect(nodeOnCanvas(canvasElement, 'e')).not.toBeInTheDocument();
 
-		await click(canvasElement, '[data-add-equation]');
+		await confirmIo(canvasElement);
 
 		// Consuming g spends the one derived layer the default budget allows, which
 		// puts `e` beside the node defining what it consumes.
@@ -544,7 +678,7 @@
 <Story
 	name="ARevealedNodeDoesNotBringItsNeighborsAlong"
 	args={{
-		baseGraph: CHAIN_BEYOND_LAYERS,
+		baseGraph: CHAIN_BEYOND_LAYERS_CONFIRMED,
 		editNodeId: 'e',
 		equation: CONSUMES_G,
 		startWithEquation: true,
@@ -565,6 +699,7 @@
 		baseGraph: UNCONNECTED_PAIR,
 		editNodeId: 'c',
 		equation: CONSUMES_G,
+		startWithEquation: true,
 		layoutSettings: { ...SPRINGS_ONLY, derivedEdgeSpringFactor: 0 },
 		initialViewState: FIXED_VIEW
 	}}
@@ -572,7 +707,7 @@
 		await waitFor(() => expect(canvasElement.querySelector('.node')).toBeInTheDocument());
 		const before = distanceBetween(canvasElement, 'a', 'c');
 
-		await click(canvasElement, '[data-add-equation]');
+		await confirmIo(canvasElement);
 		await waitFor(() => expect(derivedEdge(canvasElement)).toBeInTheDocument());
 
 		// The arrow is still drawn; turning the factor down to nothing only takes
@@ -582,11 +717,12 @@
 />
 
 <Story
-	name="AnEquationPullsTheConsumerInAndSizesItByItsNewHop"
+	name="AConfirmedQuantityPullsTheConsumerInAndSizesItByItsNewHop"
 	args={{
 		baseGraph: CHAIN,
 		editNodeId: 'c',
 		equation: CONSUMES_G,
+		startWithEquation: true,
 		layoutSettings: SPRINGS_ONLY,
 		initialViewState: FIXED_VIEW
 	}}
@@ -595,13 +731,13 @@
 		const scaleBefore = scaleOf(canvasElement, 'c');
 		const distanceBefore = distanceBetween(canvasElement, 'a', 'c');
 
-		await click(canvasElement, '[data-add-equation]');
+		await confirmIo(canvasElement);
 		await waitFor(() => expect(derivedEdge(canvasElement)).toBeInTheDocument());
 		await waitFor(() =>
 			expect(distanceBetween(canvasElement, 'a', 'c')).toBeLessThan(distanceBefore)
 		);
 
-		// `c` was two authored hops out and consuming g puts it one dataflow hop
+		// `c` was two authored hops out and its confirmed g puts it one dataflow hop
 		// from the pinned node, so it grows to the size of `b` — also one hop away,
 		// by an edge the author drew rather than one an equation implied.
 		expect(scaleOf(canvasElement, 'c')).not.toBe(scaleBefore);
@@ -635,7 +771,12 @@
 
 <Story
 	name="DerivedEdgesAreDistinguishableFromAuthoredOnes"
-	args={{ baseGraph: CHAIN, editNodeId: 'c', equation: CONSUMES_G, startWithEquation: true }}
+	args={{
+		baseGraph: CHAIN_CONFIRMED,
+		editNodeId: 'c',
+		equation: CONSUMES_G,
+		startWithEquation: true
+	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitFor(() => expect(derivedEdge(canvasElement)).toBeInTheDocument());
 
@@ -655,7 +796,7 @@
 <Story
 	name="QuantityLabelRevealsWhenZoomedIn"
 	args={{
-		baseGraph: CHAIN,
+		baseGraph: CHAIN_CONFIRMED,
 		editNodeId: 'c',
 		equation: CONSUMES_G,
 		startWithEquation: true,
@@ -677,7 +818,7 @@
 <Story
 	name="QuantityLabelStaysHiddenWhenZoomedOut"
 	args={{
-		baseGraph: CHAIN,
+		baseGraph: CHAIN_CONFIRMED,
 		editNodeId: 'c',
 		equation: CONSUMES_G,
 		startWithEquation: true,
@@ -697,9 +838,14 @@
 	args={{
 		baseGraph: makeGraph({
 			nodes: [
-				{ id: 'a', title: 'Constants', description: '$$g = 9.8$$ and $$m = 5$$' },
+				{
+					id: 'a',
+					title: 'Constants',
+					description: '$$g = 9.8$$ and $$m = 5$$',
+					outputs: designations('g', 'm')
+				},
 				{ id: 'b', title: 'Middle', description: 'No math here.' },
-				{ id: 'c', title: 'Weight', description: '' }
+				{ id: 'c', title: 'Weight', description: '', inputs: designations('g', 'm') }
 			],
 			pinned: ['a'],
 			edges: [
@@ -738,9 +884,9 @@
 />
 
 <Story
-	name="DefinedQuantitiesShowOnALargeCompactNode"
+	name="ConfirmedOutputsShowOnALargeCompactNode"
 	args={{
-		baseGraph: CHAIN,
+		baseGraph: CHAIN_CONFIRMED,
 		editNodeId: 'c',
 		equation: CONSUMES_G,
 		startWithEquation: true,
@@ -756,9 +902,14 @@
 		await waitFor(() => expect(chips()).toBeInTheDocument());
 		expect(chips()).toHaveTextContent('g');
 
-		// The definer shows its chip; a node that defines nothing shows no row at all.
+		// The node that confirmed g as an output shows its chip; a node claiming
+		// nothing shows no row at all. The canvas draws confirmed reality only —
+		// `c` mentions g and m in its own equation and gets no chips for either.
 		expect(
 			canvasElement.querySelector('[data-node-id="b"] [data-node-quantities]')
+		).not.toBeInTheDocument();
+		expect(
+			canvasElement.querySelector('[data-node-id="c"] [data-node-quantities]')
 		).not.toBeInTheDocument();
 	}}
 />
@@ -766,7 +917,7 @@
 <Story
 	name="QuantityChipsStayHiddenWhenNodesAreSmall"
 	args={{
-		baseGraph: CHAIN,
+		baseGraph: CHAIN_CONFIRMED,
 		editNodeId: 'c',
 		equation: CONSUMES_G,
 		startWithEquation: true,
@@ -783,7 +934,7 @@
 <Story
 	name="ChipsDoNotSwallowPointerEventsFromTheNode"
 	args={{
-		baseGraph: CHAIN,
+		baseGraph: CHAIN_CONFIRMED,
 		editNodeId: 'c',
 		equation: CONSUMES_G,
 		startWithEquation: true,
@@ -807,7 +958,7 @@
 
 <Story
 	name="TitleLayoutIsUnchangedForANodeDefiningNothing"
-	args={{ baseGraph: CHAIN, editNodeId: 'c', equation: CONSUMES_G }}
+	args={{ baseGraph: CHAIN, editNodeId: 'c', equation: CONSUMES_G, startWithEquation: true }}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitFor(() => expect(canvasElement.querySelector('.node')).toBeInTheDocument());
 		// Size, not placement: a dataflow edge is allowed to pull `b` sideways, but
@@ -820,7 +971,7 @@
 		};
 		const before = titleSize();
 
-		await click(canvasElement, '[data-add-equation]');
+		await confirmIo(canvasElement);
 		await waitFor(() => expect(derivedEdge(canvasElement)).toBeInTheDocument());
 
 		expect(titleSize()).toEqual(before);
@@ -924,8 +1075,13 @@
 			nodes: [
 				{ id: 'a', title: 'Anchor', description: '' },
 				{ id: 'b', title: 'Middle', description: '' },
-				{ id: 'c', title: 'Gravity', description: '$$g = 9.8$$' },
-				{ id: 'd', title: 'Weight', description: '' }
+				{
+					id: 'c',
+					title: 'Gravity',
+					description: '$$g = 9.8$$',
+					outputs: designations('g')
+				},
+				{ id: 'd', title: 'Weight', description: '', inputs: designations('g') }
 			],
 			pinned: ['a', 'c'],
 			edges: [

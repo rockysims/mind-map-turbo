@@ -207,7 +207,21 @@
 		};
 	}
 
+	/**
+	 * A press that starts on a control belongs to the control. Capturing it here
+	 * would retarget its pointerup — and therefore its click — at this element,
+	 * so no button inside the world would ever fire for a real pointer. Synthetic
+	 * test events dispatch straight at the element and never showed this.
+	 */
+	function startsOnInteractiveContent(event: PointerEvent): boolean {
+		return (
+			event.target instanceof Element &&
+			event.target.closest('button, a, input, textarea, select, [contenteditable]') !== null
+		);
+	}
+
 	function handlePointerDown(event: PointerEvent) {
+		if (startsOnInteractiveContent(event)) return;
 		activePointers.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
 		if (activePointers.size === 1 && worldState.scale > (minScale ?? 1) + 0.001) {
 			dragStart = {

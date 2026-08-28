@@ -2,6 +2,10 @@
  * Narrow the graph-wide diagnostics down to what one node should say about
  * itself.
  *
+ * Every item here traces back to something the author confirmed — an input this
+ * node needs or an output it claims — so each one is worth interrupting them
+ * about. Symbols the parser merely noticed belong to the chips, not here.
+ *
  * Ordered so the actionable states come first: an unresolved quantity is an
  * invitation to extend the graph, an out-of-view one is only a navigation hop,
  * and a conflict is a judgement call the author has to make.

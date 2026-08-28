@@ -4,8 +4,14 @@
 	import type { GraphAssetMetadata } from '../types/multigraph';
 	import type { NodeData, NodeImageContent } from '../types/node';
 	import type { NodeDiagnosticsView } from './lib/nodeDiagnosticsView';
+	import type { NodeQuantities } from './lib/nodeQuantities';
+	import type { QuantityIndexEntry } from './lib/quantityIndex';
+	import { designationView } from './lib/quantityDesignations';
+	import QuantityDesignationChips from './QuantityDesignationChips.svelte';
+	import QuantityPeekCard from './QuantityPeekCard.svelte';
 
 	const EMPTY_DIAGNOSTICS: NodeDiagnosticsView = { items: [], cycleNodeIds: [] };
+	const EMPTY_QUANTITIES: NodeQuantities = { defines: [], references: [] };
 
 	const DIAGNOSTIC_TEXT = {
 		unresolved: 'is not defined anywhere',
@@ -22,9 +28,11 @@
 		assetStore = null,
 		assetScope = '',
 		diagnostics = EMPTY_DIAGNOSTICS,
+		quantities = EMPTY_QUANTITIES,
+		quantityEntryFor,
 		titleForNodeId = (nodeId: string) => nodeId,
 		onCreateDefiningNode,
-		onRevealNode
+		onJumpToNode
 	}: {
 		node: NodeData;
 		assets?: Record<string, GraphAssetMetadata>;
@@ -32,12 +40,62 @@
 		assetScope?: string;
 		/** What this node's math says about quantities it cannot resolve cleanly. */
 		diagnostics?: NodeDiagnosticsView;
+		/** What this node's text says it defines and mentions — the suggestion pool. */
+		quantities?: NodeQuantities;
+		/**
+		 * The graph-wide record for one quantity, read only when a peek opens. A
+		 * lookup rather than a map so nothing here depends on the whole index.
+		 */
+		quantityEntryFor?: (key: string) => QuantityIndexEntry | undefined;
 		titleForNodeId?: (nodeId: string) => string;
-		onCreateDefiningNode?: (quantityLabel: string) => void;
-		onRevealNode?: (nodeId: string) => void;
+		/**
+		 * The key rides along with the label so the new node can be seeded with the
+		 * designation that makes it a definer — the label alone is display text.
+		 */
+		onCreateDefiningNode?: (quantityLabel: string, quantityKey: string) => void;
+		/**
+		 * Leave for another node without pinning it. Every navigation offered here
+		 * goes through this: a surface that reads is not a surface that edits, and
+		 * pinning from a diagnostic would edit the graph behind a button that reads
+		 * like a link.
+		 */
+		onJumpToNode?: (nodeId: string) => void;
 	} = $props();
 
 	let imageUrls = $state<Record<string, string>>({});
+	let openPeekKey = $state<string | null>(null);
+	/** The chip the open card belongs to, so dismissing returns focus to it. */
+	let peekAnchor: HTMLElement | null = null;
+
+	const designations = $derived(designationView(quantities, node.inputs, node.outputs));
+	const hasDesignations = $derived(
+		designations.inputs.length > 0 ||
+			designations.outputs.length > 0 ||
+			designations.suggestions.length > 0
+	);
+	const peekEntry = $derived(openPeekKey === null ? undefined : quantityEntryFor?.(openPeekKey));
+	const peekLabel = $derived(
+		designations.inputs.find((chip) => chip.symbol.key === openPeekKey)?.symbol.label ?? ''
+	);
+
+	// A quantity that stops being an input while its card is open has nothing left
+	// to explain, and the node it was read from may have gone with it.
+	$effect(() => {
+		if (openPeekKey === null) return;
+		if (designations.inputs.some((chip) => chip.symbol.key === openPeekKey)) return;
+		openPeekKey = null;
+	});
+
+	function openPeek(key: string, anchor: HTMLElement) {
+		peekAnchor = anchor;
+		openPeekKey = key;
+	}
+
+	function closePeek() {
+		openPeekKey = null;
+		peekAnchor?.focus();
+		peekAnchor = null;
+	}
 
 	const imageBlocks = $derived(
 		(node.content ?? []).filter((block): block is NodeImageContent => block.type === 'image')
@@ -71,6 +129,36 @@
 		<p class="description"><MathText text={node.description} /></p>
 	{/if}
 
+	{#if hasDesignations}
+		<!--
+			Read-only here on purpose: this surface sits over the canvas, where a tap
+			that quietly rewrote the graph would be indistinguishable from a tap that
+			navigated. Assignment lives in the edit sheet; peeking lives here.
+		-->
+		<section class="designation-section">
+			<QuantityDesignationChips
+				mode="view"
+				view={designations}
+				onPeek={openPeek}
+				peekKey={openPeekKey}
+			/>
+			{#if openPeekKey !== null}
+				<QuantityPeekCard
+					entry={peekEntry}
+					label={peekLabel}
+					{titleForNodeId}
+					onJumpToNode={(nodeId) => {
+						openPeekKey = null;
+						onJumpToNode?.(nodeId);
+					}}
+					onCreateDefiningNode={(quantityLabel) =>
+						onCreateDefiningNode?.(quantityLabel, openPeekKey ?? '')}
+					onClose={closePeek}
+				/>
+			{/if}
+		</section>
+	{/if}
+
 	{#if diagnostics.items.length > 0 || diagnostics.cycleNodeIds.length > 0}
 		<!--
 			Kept off the canvas on purpose. An undefined letter is common while
@@ -93,7 +181,7 @@
 									<button
 										type="button"
 										data-reveal-node={relatedId}
-										onclick={() => onRevealNode?.(relatedId)}>{titleForNodeId(relatedId)}</button
+										onclick={() => onJumpToNode?.(relatedId)}>{titleForNodeId(relatedId)}</button
 									>
 								{/each}
 							</span>
@@ -103,7 +191,8 @@
 								type="button"
 								class="create"
 								data-create-defining-node={item.label}
-								onclick={() => onCreateDefiningNode(item.label)}>Define {item.label}</button
+								onclick={() => onCreateDefiningNode(item.label, item.key)}
+								>Define {item.label}</button
 							>
 						{/if}
 					</li>
@@ -116,7 +205,7 @@
 								<button
 									type="button"
 									data-reveal-node={relatedId}
-									onclick={() => onRevealNode?.(relatedId)}>{titleForNodeId(relatedId)}</button
+									onclick={() => onJumpToNode?.(relatedId)}>{titleForNodeId(relatedId)}</button
 								>
 							{/each}
 						</span>
@@ -173,6 +262,11 @@
 		font-size: 1.125rem;
 		line-height: 1.65;
 		white-space: pre-wrap;
+	}
+
+	/* Positions the peek card, which is absolute so it never reflows the section. */
+	.designation-section {
+		position: relative;
 	}
 
 	.quantity-diagnostics ul {

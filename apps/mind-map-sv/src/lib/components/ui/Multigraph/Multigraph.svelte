@@ -16,7 +16,7 @@
 	import { APP_CONFIG } from '$lib/appConfig';
 	import type { GraphAssetStore } from '$lib/assets/assetStore';
 	import { prefersReducedMotion } from '$lib/reducedMotion';
-	import type { NodeData } from '../types/node';
+	import type { NodeData, QuantityDesignation } from '../types/node';
 	import type { EdgeData } from '../types/edge';
 	import type {
 		GraphAssetMetadata,
@@ -89,6 +89,7 @@
 		shouldRevealQuantityLabel
 	} from './lib/quantityLabels.js';
 	import { LayoutRuntime } from './lib/layoutRuntime.svelte.js';
+	import { TransientRevealController } from './lib/transientReveal.svelte.js';
 	import { externalGraphSyncToken } from './lib/graphSync.js';
 	import type { EntryGestureDirection } from './lib/entryGestureGate.js';
 	import {
@@ -254,6 +255,13 @@
 		bounds: import('./lib/graphMath.js').GraphBounds;
 	} | null>(null);
 	let fitViewRequestId = $state(0);
+	let viewStateRequest = $state<{
+		id: number;
+		panX: number;
+		panY: number;
+		scale: number;
+	} | null>(null);
+	let viewStateRequestId = $state(0);
 	let graphRef = $state<HTMLElement | null>(null);
 	/**
 	 * Endpoints of the most recent severing mutation (edge removal / node
@@ -294,6 +302,12 @@
 			entryGestureMaxMs: APP_CONFIG.multigraph.focus.entryGestureMaxMs
 		}
 	});
+
+	/**
+	 * Where the reader came from, and what a jump had to surface to get them
+	 * there. Session-only: it never reaches `graph`, so no jump is a graph edit.
+	 */
+	const transientReveal = new TransientRevealController();
 
 	/** Internal enter animations for nodes added by the user (scale 0 → target). */
 	let nodeEnterAnimations = $state<Record<string, NodeEnterAnimation>>({});
@@ -361,12 +375,36 @@
 		return computeBoundedHops(
 			data,
 			dataflowModel(data, dataflowEnabled).edges,
-			beaconNodeIds(data, { preferredNodeIds: severedBeaconPreference }),
+			beaconsWithTransientReveals(data),
 			{
 				displayedLayers: resolvedLayoutSettings.displayedLayers,
 				dataflowDisplayedLayers: resolvedLayoutSettings.dataflowDisplayedLayers
 			}
 		);
+	}
+
+	/**
+	 * A jumped-to node rides in as a beacon. `withBeaconHops` overrides exactly
+	 * the ids handed to it and expands from none of them, so the target arrives
+	 * near-full-size without dragging its authored neighborhood along — which is
+	 * precisely what "passing through to read this" should look like. Every
+	 * consumer of `hopsFor` (visibility, scale, physics, edges) then agrees about
+	 * it for free, and nothing about pinning or `graph` was touched to get there.
+	 */
+	function beaconsWithTransientReveals(data: MultigraphData): ReadonlySet<string> {
+		const beacons = beaconNodeIds(data, { preferredNodeIds: severedBeaconPreference });
+		const revealed = transientReveal.revealedNodeIds;
+		// The common case: no jump in flight, so the memoized beacon set is handed
+		// straight through and this costs nothing per frame. The set is shared, so
+		// the union below must build its own rather than adding to it.
+		if (revealed.size === 0) return beacons;
+		// A node pinned since the jump is already at hop 0. Seeding it would push
+		// it back out to BEACON_HOP and draw it smaller than its own pin says.
+		const seeds = data.nodes
+			.filter((node) => node.pinned !== true && revealed.has(node.id))
+			.map((node) => node.id);
+		if (seeds.length === 0) return beacons;
+		return new Set([...beacons, ...seeds]);
 	}
 
 	const dataflow = $derived(dataflowModel(graph, dataflowEnabled));
@@ -380,16 +418,20 @@
 	 * Quantities each node defines, for the compact-node chips. Keyed by node so
 	 * the render loop does no work per node beyond a lookup.
 	 */
-	const definedQuantityLabelsByNodeId = $derived(
-		new Map(
-			[...dataflow.index.byNodeId].map(([nodeId, quantities]) => [
-				nodeId,
+	const definedQuantityLabelsByNodeId = $derived.by(() => {
+		const labelsByNodeId: Record<string, string[]> = {};
+		// Definers, not parsed definitions: the canvas draws confirmed reality, and a
+		// suggestion nobody accepted has no edge for its chip to explain.
+		for (const entry of dataflow.index.entries.values()) {
+			for (const nodeId of entry.definerNodeIds) {
+				const labels = (labelsByNodeId[nodeId] ??= []);
 				// Distinct labels: a node that states one definition two different ways
 				// still owns one quantity, and would otherwise show the chip twice.
-				[...new Set(quantities.defines.map((definition) => definition.symbol.label))]
-			])
-		)
-	);
+				if (!labels.includes(entry.symbol.label)) labels.push(entry.symbol.label);
+			}
+		}
+		return new Map(Object.entries(labelsByNodeId));
+	});
 	const quantityLabelByEdgeId = $derived(
 		new Map(
 			dataflow.edges.map((edge) => [
@@ -575,6 +617,9 @@
 		// Cleared before the settle measures anything: a preference left over from
 		// the graph being replaced must not pick a beacon in the one arriving.
 		severedBeaconPreference = [];
+		// Same reason, and stronger: a back entry names nodes and a camera from a
+		// graph that is being replaced wholesale, so none of it survives the swap.
+		transientReveal.clear();
 		// Dataflow shapes the ingest settle too. A graph arriving from storage should
 		// come to rest under the same forces it will feel from the first interaction
 		// onward, instead of shifting once the runtime takes over — so it settles
@@ -1001,18 +1046,74 @@
 	}
 
 	/**
-	 * Bring an out-of-view definer into the neighborhood by pinning it, which is
-	 * the existing mechanism for "I want to see this and what surrounds it".
+	 * Go read another node.
+	 *
+	 * This replaced a pin-to-reveal action, and the difference is the point: no
+	 * node is pinned, nothing is written to `graph`, and `onMultigraphChange`
+	 * never fires. The target is held on screen only by the nav stack, and leaves
+	 * with it. Pinning remains available where it means what it says — the node
+	 * menu's Pin — rather than as the side effect of following a reference.
 	 */
-	function revealNode(nodeId: string) {
-		// Both diagnostic actions are offered from inside the focus overlay, which
-		// covers the canvas they act on. Leaving focus open would make a successful
-		// action look like a dead button, since every visible effect is behind it.
+	function jumpToNode(originNodeId: string, targetNodeId: string) {
+		if (!nodeById[targetNodeId]) return;
+		// Read before pushing: the push changes the hop map, and what matters is
+		// whether the reader could already see the target — a node that was
+		// already on screen must not be taken away again when this entry pops.
+		const alreadyVisible = visibleNodeIds.has(targetNodeId);
+		// The jump acts on the canvas the focus overlay is covering; leaving it open
+		// would make a working jump look like a dead button.
 		leaveFocusForCanvasAction();
-		if (nodeById[nodeId]?.pinned === true) {
-			return;
-		}
-		commitUserGraph(layoutRuntime.beginScaleChange(setNodePinned(graph, nodeId, true), nodeId));
+		// `stageViewState` is Stage's live pan/zoom, reported on every change — so
+		// the snapshot is the exact camera the reader is looking at, not a
+		// reconstruction of one.
+		transientReveal.push({
+			originNodeId,
+			viewState: {
+				panX: stageViewState.panX,
+				panY: stageViewState.panY,
+				scale: stageViewState.scale
+			},
+			revealedNodeId: alreadyVisible ? null : targetNodeId
+		});
+		relaxAfterTransientRevealChange();
+		const bounds = boundsForNodeIds([targetNodeId]);
+		if (bounds) fitViewRequest = { id: (fitViewRequestId += 1), bounds };
+	}
+
+	/** Return to where the last jump started, taking its seed back out with it. */
+	function navigateBack() {
+		const entry = transientReveal.pop();
+		if (!entry) return;
+		// Popping already removed the seed from the hop map. If the reader pinned
+		// the node while they were there, it stays for that reason instead — which
+		// is the correct outcome and needs no special case.
+		relaxAfterTransientRevealChange();
+		viewStateRequest = {
+			id: (viewStateRequestId += 1),
+			panX: entry.viewState.panX,
+			panY: entry.viewState.panY,
+			scale: entry.viewState.scale
+		};
+	}
+
+	/**
+	 * A seed appearing or disappearing changes who is on screen, which is as
+	 * topology-changing for the layout as an edit — so it settles the same way a
+	 * content commit does, minus the commit. No graph data changes here: the
+	 * settle's own frames write the positions through `LayoutRuntime.applyGraph`,
+	 * exactly as a drag does.
+	 *
+	 * The seeded node pops in and settles rather than riding a reveal wave; the
+	 * wave (`beginScaleChange`) is reserved for mutations, and hooking it up here
+	 * would mean parameterizing its before/after hop maps.
+	 */
+	function relaxAfterTransientRevealChange() {
+		layoutRuntime.settleAfterDrag();
+	}
+
+	/** Node titles are math; nothing outside a MathText renders the raw source. */
+	function titleForNodeId(nodeId: string): string {
+		return mathPlainText(nodeById[nodeId]?.title ?? nodeId);
 	}
 
 	function leaveFocusForCanvasAction() {
@@ -1027,13 +1128,19 @@
 	 * node that asked for it and left with an empty right-hand side — inventing a
 	 * value would be guessing at the author's intent.
 	 */
-	function createDefiningNode(consumerNodeId: string, quantityLabel: string) {
+	function createDefiningNode(consumerNodeId: string, quantityLabel: string, quantityKey: string) {
 		leaveFocusForCanvasAction();
 		const origin = graphLayout.posByNodeId[consumerNodeId] ?? CENTERED_POSITION;
+		// Asking for this node IS the confirmation that it defines the quantity.
+		// Without the designation the repair flow would end in a node whose edge
+		// never appears, and a second trip through the edit sheet to say what the
+		// button already said.
+		const symbol = dataflow.index.entries.get(quantityKey)?.symbol;
 		const nextGraph = addNode(graph, {
 			title: quantityLabel,
 			description: `$$${quantityLabel} = $$`,
-			position: { x: origin.x, y: origin.y + NODE_RADIUS * 2.5 }
+			position: { x: origin.x, y: origin.y + NODE_RADIUS * 2.5 },
+			outputs: symbol ? [{ base: symbol.base, subscript: symbol.subscript }] : undefined
 		});
 		commitUserGraph(layoutRuntime.relaxAfterMutation(nextGraph, null, 1));
 	}
@@ -1111,6 +1218,10 @@
 			}
 		}
 
+		// A back entry naming the deleted node has nowhere to return to, and a seed
+		// for it would hold a hop open for an id the graph no longer has.
+		transientReveal.pruneMissing(new Set(nextGraph.nodes.map((node) => node.id)));
+
 		restorePrimaryNodeAfterDelete(nodeId);
 		closeOverlays();
 	}
@@ -1128,7 +1239,13 @@
 
 	function saveNodeContent(
 		nodeId: string,
-		content: { title: string; description: string; tags?: string[] }
+		content: {
+			title: string;
+			description: string;
+			tags?: string[];
+			inputs?: QuantityDesignation[];
+			outputs?: QuantityDesignation[];
+		}
 	) {
 		commitContentGraph(updateNodeContent(graph, nodeId, content));
 		closeOverlays();
@@ -1331,9 +1448,27 @@
 		Find / Filter
 	</button>
 
+	{#if transientReveal.top}
+		{@const backEntry = transientReveal.top}
+		<!--
+			Only affordance for undoing a jump, so it has to be reachable from the
+			canvas the jump left the reader on — not from inside the overlay the jump
+			closed.
+		-->
+		<button
+			type="button"
+			class="toolbar-button nav-back-button"
+			data-nav-back={backEntry.originNodeId}
+			onclick={navigateBack}
+		>
+			← Back to {titleForNodeId(backEntry.originNodeId)}
+		</button>
+	{/if}
+
 	<Stage
 		{getNodeAt}
 		{fitViewRequest}
+		{viewStateRequest}
 		focusEntryBoundaryCandidateForPoint={(input) => focus.entryBoundaryCandidateForPoint(input)}
 		entryGestureGateRequest={stageEntryGestureGateRequest}
 		initialScale={initialViewState?.scale}
@@ -1733,8 +1868,13 @@
 			nodes={graph.nodes}
 			edges={graph.edges}
 			assets={graph.assets ?? {}}
-			onSave={(content: { title: string; description: string; tags: string[] }) =>
-				saveNodeContent(editNode.id, content)}
+			onSave={(content: {
+				title: string;
+				description: string;
+				tags: string[];
+				inputs: QuantityDesignation[];
+				outputs: QuantityDesignation[];
+			}) => saveNodeContent(editNode.id, content)}
 			onAddImage={(file, details) => addImageToNode(editNode.id, file, details)}
 			onSaveImage={(assetId, details) => saveNodeImage(editNode.id, assetId, details)}
 			onMoveImage={(fromIndex, direction) => moveNodeImage(editNode.id, fromIndex, direction)}
@@ -1815,10 +1955,12 @@
 							{assetStore}
 							{assetScope}
 							diagnostics={nodeDiagnosticsView(dataflowDiagnostics, detailsNode.id)}
-							titleForNodeId={(nodeId) => mathPlainText(nodeById[nodeId]?.title ?? nodeId)}
-							onCreateDefiningNode={(quantityLabel) =>
-								createDefiningNode(detailsNode.id, quantityLabel)}
-							onRevealNode={(nodeId) => revealNode(nodeId)}
+							quantities={dataflow.index.byNodeId.get(detailsNode.id)}
+							quantityEntryFor={(key) => dataflow.index.entries.get(key)}
+							{titleForNodeId}
+							onCreateDefiningNode={(quantityLabel, quantityKey) =>
+								createDefiningNode(detailsNode.id, quantityLabel, quantityKey)}
+							onJumpToNode={(nodeId) => jumpToNode(detailsNode.id, nodeId)}
 						/>
 					</NodeDetailsLayer>
 				</div>
@@ -2069,6 +2211,18 @@
 
 	.graph-query-button {
 		left: 0.75rem;
+	}
+
+	/* Stacked above Find / Filter rather than beside it: the label carries a node
+	   title, so its width is not ours to predict. */
+	.nav-back-button {
+		left: 0.75rem;
+		bottom: 3.5rem;
+		max-width: min(20rem, calc(100% - 1.5rem));
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		cursor: pointer;
 	}
 
 	.edges {

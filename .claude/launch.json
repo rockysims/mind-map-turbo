@@ -1,0 +1,11 @@
+{
+	"version": "0.0.1",
+	"configurations": [
+		{
+			"name": "mind-map-sv",
+			"runtimeExecutable": "pnpm",
+			"runtimeArgs": ["--filter", "mind-map-sv", "dev", "--port", "5199", "--strictPort"],
+			"port": 5199
+		}
+	]
+}

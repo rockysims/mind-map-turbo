@@ -113,6 +113,37 @@ describe('persisted graph migrations', () => {
 		expect(unwrapPersistedGraph({ schemaVersion: 5, data })).toEqual(data);
 	});
 
+	it('round-trips current-version quantity designations', () => {
+		const graph = makeGraph({ nodeCount: 2, pinned: [0], edges: [[0, 1]] });
+		const nodes = graph.nodes.map((node, index) =>
+			index === 0
+				? { ...node, outputs: [{ base: 'v', subscript: '0' }] }
+				: {
+						...node,
+						inputs: [
+							{ base: 'v', subscript: '0' },
+							{ base: 'α', subscript: null }
+						]
+					}
+		);
+		const data = { ...graph, nodes, pinSequence: 1 };
+
+		expect(unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toEqual(data);
+	});
+
+	it('rejects current-version nodes with malformed designations', () => {
+		const graph = makeGraph({ nodeCount: 1, pinned: [0] });
+
+		for (const inputs of [[{ base: 'v', subscript: 3 }], [{ subscript: null }], 'v', [null]]) {
+			expect(() =>
+				unwrapPersistedGraph({
+					schemaVersion: CURRENT_SCHEMA_VERSION,
+					data: { ...graph, nodes: [{ ...graph.nodes[0], inputs }] }
+				})
+			).toThrow(new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload'));
+		}
+	});
+
 	it('rejects current-version nodes with malformed lastPinnedSeq', () => {
 		const graph = makeGraph({ nodeCount: 1 });
 
