@@ -29,16 +29,28 @@ const EMPTY_MODEL: DataflowModel = {
  *
  * Returns a closure because the underlying index memoizes per node; a fresh
  * indexer on every render would re-render every description's math each frame.
+ *
+ * The model is a pure function of node content, but callers hand it the whole
+ * graph, whose identity changes on every frame of a drag or a settle because
+ * positions moved. So the closure returns the *same model object* whenever the
+ * index came back identical: the derived edges — the objects, not just their ids
+ * — survive across unrelated frames, and every downstream derivation short-
+ * circuits instead of rebuilding for a graph whose math never moved.
  */
 export function createDataflowModel(options: QuantityIndexerOptions = {}) {
 	const buildIndex = createQuantityIndexer(options);
+	let previous: DataflowModel | undefined;
 
 	return function dataflowModel(data: MultigraphData, enabled = true): DataflowModel {
 		if (!enabled) {
 			return EMPTY_MODEL;
 		}
 		const index = buildIndex(data.nodes);
-		return { index, edges: deriveDataflowEdges(index) };
+		if (previous !== undefined && previous.index === index) {
+			return previous;
+		}
+		previous = { index, edges: deriveDataflowEdges(index) };
+		return previous;
 	};
 }
 

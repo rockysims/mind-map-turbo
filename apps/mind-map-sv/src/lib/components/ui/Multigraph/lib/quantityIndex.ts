@@ -100,23 +100,55 @@ export function trackedQuantities(index: QuantityIndex): QuantityIndexEntry[] {
  * Extraction renders every expression in a description, so re-running it for an
  * untouched node on each recompute is the cost that would make large graphs
  * unusable.
+ *
+ * The indexer also returns the *previous index object* whenever nothing
+ * content-relevant changed. Callers derive the index from the whole graph, whose
+ * identity churns on every animation frame of a drag or a settle because
+ * positions moved; without an identity return, each of those frames would build
+ * a fresh-but-identical index and invalidate every piece of derived state hanging
+ * off it — edges, chips, labels, diagnostics — sixty times a second for reasons
+ * that have nothing to do with the math.
  */
 export function createQuantityIndexer(options: QuantityIndexerOptions = {}) {
 	const { extract, ...quantityOptions } = options;
 	const run: QuantityExtractor = extract ?? ((node) => nodeQuantities(node, quantityOptions));
 	const cache = new Map<string, { signature: string; quantities: NodeQuantities }>();
+	let previous: QuantityIndex | undefined;
 
 	return function buildQuantityIndex(nodes: readonly IndexableNode[]): QuantityIndex {
+		const signatures = nodes.map((node) => signatureOf(node));
+		const liveNodeIds = new Set<string>();
+		let everyNodeMatchedItsMemo = true;
+
+		for (let position = 0; position < nodes.length; position += 1) {
+			liveNodeIds.add(nodes[position].id);
+			if (cache.get(nodes[position].id)?.signature !== signatures[position]) {
+				everyNodeMatchedItsMemo = false;
+			}
+		}
+
+		// The index is a pure function of every node's (id, title, description,
+		// tags). Every node matching its memo means no content changed; the cache
+		// holding exactly as many nodes as are live means none came or went, since
+		// dead ids are evicted below and a new id could not have matched a memo.
+		if (previous !== undefined && everyNodeMatchedItsMemo && cache.size === liveNodeIds.size) {
+			return previous;
+		}
+
 		const entries = new Map<string, QuantityIndexEntry>();
 		const byNodeId = new Map<string, NodeQuantities>();
-		const liveNodeIds = new Set<string>();
 
-		for (const node of nodes) {
-			liveNodeIds.add(node.id);
-			const signature = signatureOf(node);
+		for (let position = 0; position < nodes.length; position += 1) {
+			const node = nodes[position];
+			const signature = signatures[position];
 			const cached = cache.get(node.id);
-			const quantities = cached?.signature === signature ? cached.quantities : run({ ...node });
-			cache.set(node.id, { signature, quantities });
+			let quantities: NodeQuantities;
+			if (cached !== undefined && cached.signature === signature) {
+				quantities = cached.quantities;
+			} else {
+				quantities = run({ ...node });
+				cache.set(node.id, { signature, quantities });
+			}
 			byNodeId.set(node.id, quantities);
 
 			for (const definition of quantities.defines) {
@@ -150,7 +182,8 @@ export function createQuantityIndexer(options: QuantityIndexerOptions = {}) {
 			);
 		}
 
-		return { entries, byNodeId };
+		previous = { entries, byNodeId };
+		return previous;
 	};
 }
 
