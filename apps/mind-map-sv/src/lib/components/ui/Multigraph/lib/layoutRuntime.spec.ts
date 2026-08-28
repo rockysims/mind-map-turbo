@@ -4,6 +4,7 @@ import { togglePinned } from './graph';
 import type { LayoutRuntimeScheduler } from './layoutRuntime.svelte';
 import { LayoutRuntime } from './layoutRuntime.svelte';
 import type { LayoutSettings } from './layoutSettings';
+import type { EdgeEndpointIds } from './physics';
 import { makeGraph } from './testFixtures';
 
 class TestScheduler implements LayoutRuntimeScheduler {
@@ -296,5 +297,52 @@ describe('LayoutRuntime', () => {
 		expect(runtime.revealWaveProgress).toBe(0);
 		expect(runtime.revealWaveNodeOpacityByNodeId.n4).toBeGreaterThan(0);
 		expect(runtime.revealWaveNodeOpacityByNodeId.n5 ?? 1).toBeLessThan(1);
+	});
+
+	describe('composeSpringEdges', () => {
+		const graph = makeGraph({ nodeCount: 3, edges: [[0, 1]] });
+
+		function runtimeWith(
+			composeSpringEdges?: (visibleGraph: MultigraphData) => readonly EdgeEndpointIds[]
+		): LayoutRuntime {
+			return new LayoutRuntime({
+				getGraph: () => graph,
+				getLayoutSettings: () => ({ relaxIterations: 0 }),
+				getActiveDragNodeId: () => null,
+				getPreferredBeaconNodeIds: () => [],
+				applyGraph: () => {},
+				composeSpringEdges,
+				scheduler: new TestScheduler()
+			});
+		}
+
+		it('leaves the layout on the graph edges when no hook is given', () => {
+			expect(runtimeWith().layoutOptions(graph).springEdges).toBeUndefined();
+		});
+
+		it('leaves the layout on the graph edges when the hook adds nothing', () => {
+			// Not an empty array: the layout should keep reading data.edges directly
+			// rather than a copy of it, on every frame, for every graph.
+			expect(runtimeWith(() => []).layoutOptions(graph).springEdges).toBeUndefined();
+		});
+
+		it('appends the extra edges to the authored ones rather than replacing them', () => {
+			const runtime = runtimeWith(() => [{ sourceNodeId: 'n0', targetNodeId: 'n2' }]);
+
+			expect(runtime.layoutOptions(graph).springEdges).toEqual([
+				...graph.edges,
+				{ sourceNodeId: 'n0', targetNodeId: 'n2' }
+			]);
+		});
+
+		it('offers the layout graph so the caller can drop off-screen endpoints', () => {
+			const seen: MultigraphData[] = [];
+			runtimeWith((visibleGraph) => {
+				seen.push(visibleGraph);
+				return [];
+			}).layoutOptions(graph);
+
+			expect(seen).toEqual([graph]);
+		});
 	});
 });

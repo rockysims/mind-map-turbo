@@ -20,6 +20,15 @@ export type GraphPhysicsSettings = EdgeDistanceSettings & HopRepulsionSettings;
 export interface EdgeEndpointIds {
 	sourceNodeId: string;
 	targetNodeId: string;
+	/**
+	 * Scales this edge's share of the spring, relative to `edgeSpringStrength`.
+	 * Defaults to 1, so an edge that says nothing pulls exactly as it always has.
+	 *
+	 * Physics deliberately does not know what makes an edge weaker or stronger. It
+	 * is handed a number, which keeps the dataflow layer's existence out of the
+	 * force law.
+	 */
+	springFactor?: number;
 }
 
 export function nodeMobility(
@@ -187,6 +196,16 @@ export function neighborDegreeByNodeId(edges: EdgeEndpointIds[]): Record<string,
 	);
 }
 
+/**
+ * An edge with no stated factor pulls at full strength, which is what every edge
+ * did before factors existed. A negative factor would invert the spring into a
+ * force that pushes harder the further apart two nodes get, so it reads as zero.
+ */
+function springFactorOf(edge: EdgeEndpointIds): number {
+	const factor = edge.springFactor ?? 1;
+	return Number.isFinite(factor) && factor > 0 ? factor : 0;
+}
+
 export function relaxEdgeDistancesStep(
 	positions: Record<string, Point>,
 	radii: Record<string, number>,
@@ -201,11 +220,17 @@ export function relaxEdgeDistancesStep(
 	const springStrength = clamp(settings.edgeSpringStrength, 0, 1);
 	if (springStrength === 0) return positions;
 
-	const neighborDegree = neighborDegreeByNodeId(edges);
+	// Dropped before degree is counted, not skipped inside the loop. Degree divides
+	// each node's displacement, so an edge that exerts no force would still weaken
+	// every other edge on its endpoints — a silent way to turn a factor of 0 into a
+	// change in how the rest of the graph behaves.
+	const forcefulEdges = edges.filter((edge) => springFactorOf(edge) > 0);
+
+	const neighborDegree = neighborDegreeByNodeId(forcefulEdges);
 	const displacementByNodeId: Record<string, Point> = {};
 	let moved = false;
 
-	for (const edge of edges) {
+	for (const edge of forcefulEdges) {
 		const sourceId = edge.sourceNodeId;
 		const targetId = edge.targetNodeId;
 		if (!pairParticipates(sourceId, targetId, participatingNodeIds)) continue;
@@ -225,11 +250,12 @@ export function relaxEdgeDistancesStep(
 		const dy = target.y - source.y;
 		const distance = Math.hypot(dx, dy);
 		const gap = distance - sourceRadius - targetRadius;
+		const edgeStrength = springStrength * springFactorOf(edge);
 		const adjustment =
 			gap > maxGap
-				? (gap - maxGap) * springStrength
+				? (gap - maxGap) * edgeStrength
 				: gap < minGap
-					? (gap - minGap) * springStrength
+					? (gap - minGap) * edgeStrength
 					: 0;
 		if (Math.abs(adjustment) <= OVERLAP_EPSILON) continue;
 

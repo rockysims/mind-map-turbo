@@ -2,7 +2,7 @@ import type { MultigraphData, Point } from '../../types/multigraph';
 import { hopsFromPinned, radiusOf, scaleByHops, shortestPathHopsByNodeId } from './layout';
 import type { LayoutSettings } from './layoutSettings';
 import { withDefaultLayoutSettings } from './layoutSettings';
-import { relaxGraphPhysics } from './physics';
+import { relaxGraphPhysics, type EdgeEndpointIds } from './physics';
 import { normalizeRigidMotion } from './rigidMotion';
 
 const CENTERED_POSITION: Point = { x: 0, y: 0 };
@@ -37,6 +37,17 @@ export interface GraphLayoutOptions {
 	scaleByNodeId?: Record<string, number>;
 	participatingNodeIds?: ReadonlySet<string>;
 	mobilityByNodeId?: Record<string, number>;
+	/**
+	 * Edges that exert spring force, when that is not the same set that defines
+	 * the graph's shape. Defaults to `data.edges`.
+	 *
+	 * This exists so an edge can pull without also counting as a step through the
+	 * graph. Dataflow edges should draw related nodes together, but letting them
+	 * shorten hop distance would change node scale and which nodes are visible at
+	 * all — a much larger claim than "these two are related", and one the author
+	 * never made by writing an equation.
+	 */
+	springEdges?: readonly EdgeEndpointIds[];
 }
 
 export interface GraphRelaxationStep {
@@ -61,13 +72,15 @@ export function deriveGraphLayout(
 	const basePositions = positionsForNodes(data);
 	const anchoredIds = anchoredNodeIds(data, options);
 	const iterations = options.relaxIterations ?? settings.relaxIterations;
+	// Topology stays with `data.edges` throughout — hops above, shortest paths
+	// here — so spring-only edges cannot move a node into a different layer.
 	const shortestPathHops = shortestPathHopsByNodeId(data);
 	const posByNodeId =
 		iterations > 0
 			? relaxGraphPhysics(
 					basePositions,
 					radiusByNodeId,
-					data.edges,
+					[...(options.springEdges ?? data.edges)],
 					settings,
 					iterations,
 					anchoredIds,

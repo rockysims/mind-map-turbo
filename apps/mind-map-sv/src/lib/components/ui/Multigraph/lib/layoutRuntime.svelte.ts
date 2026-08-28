@@ -14,6 +14,7 @@ import {
 	type GraphLayoutOptions
 } from './graphLayout';
 import { hopsFromPinned, scaleByHops } from './layout';
+import type { EdgeEndpointIds } from './physics';
 import {
 	advanceLayeredRelayout,
 	initialLayeredRelayoutState,
@@ -78,6 +79,18 @@ export interface LayoutRuntimeOptions {
 	 * Defaults to identity, which leaves every existing behavior untouched.
 	 */
 	composeAdjacency?: (data: MultigraphData) => MultigraphData;
+	/**
+	 * Extra edges that exert spring force without joining the graph's topology,
+	 * currently the dataflow layer. Called with the visible graph, so the caller
+	 * can drop edges whose endpoints are not on screen.
+	 *
+	 * Separate from `composeAdjacency` because pulling and connecting are
+	 * different claims. A dataflow edge should draw two nodes together; making it
+	 * shorten hop distance would also resize nodes and change which are visible.
+	 *
+	 * Defaults to none, which leaves the force exactly as it was.
+	 */
+	composeSpringEdges?: (visibleGraph: MultigraphData) => readonly EdgeEndpointIds[];
 	scheduler?: LayoutRuntimeScheduler;
 	/** Returns true while enter/exit animations are active; keeps the frame loop running. */
 	getHasActiveTransitions?: () => boolean;
@@ -287,6 +300,7 @@ export class LayoutRuntime {
 
 		return {
 			settings: this.#options.getLayoutSettings(),
+			springEdges: this.#springEdgesFor(layoutGraph),
 			activeDragNodeId: overrides.activeDragNodeId ?? this.#options.getActiveDragNodeId(),
 			scaleAnchoredNodeIds: overrides.scaleAnchoredNodeIds ?? this.scaleAnchoredNodeIds,
 			hopOverridesByNodeId: beaconHopOverrides(beaconIds),
@@ -381,6 +395,19 @@ export class LayoutRuntime {
 
 	#adjacency(graph: MultigraphData): MultigraphData {
 		return this.#options.composeAdjacency?.(graph) ?? graph;
+	}
+
+	/**
+	 * The authored edges always pull; extra edges are appended rather than
+	 * replacing them. Returns undefined when there are none so the layout keeps
+	 * using `data.edges` directly and allocates nothing.
+	 */
+	#springEdgesFor(layoutGraph: MultigraphData): readonly EdgeEndpointIds[] | undefined {
+		const extra = this.#options.composeSpringEdges?.(layoutGraph);
+		if (extra === undefined || extra.length === 0) {
+			return undefined;
+		}
+		return [...layoutGraph.edges, ...extra];
 	}
 
 	#beaconIdsFor(graph: MultigraphData): Set<string> {

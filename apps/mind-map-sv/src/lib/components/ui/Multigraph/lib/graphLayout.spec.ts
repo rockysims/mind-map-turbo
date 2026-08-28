@@ -7,6 +7,7 @@ import {
 	withSettledGraphPositions
 } from './graphLayout';
 import { makeGraph } from './testFixtures';
+import type { EdgeEndpointIds } from './physics';
 
 function maxOverlapAmount(
 	positions: Record<string, { x: number; y: number }>,
@@ -51,6 +52,58 @@ describe('graphLayout', () => {
 		expect(layout.hopsByNodeId).toEqual({ n0: 0, n1: 1, n2: 2 });
 		expect(layout.scaleByNodeId).toEqual({ n0: 1, n1: 0.5, n2: 0.25 });
 		expect(layout.radiusByNodeId).toEqual({ n0: 100, n1: 50, n2: 25 });
+	});
+
+	describe('springEdges', () => {
+		// Two nodes with no authored edge between them, far enough apart that any
+		// spring between them has to pull.
+		const graph = {
+			...makeGraph({ nodeCount: 2, pinned: [0], edges: [] }),
+			posByNodeId: { n0: { x: 0, y: 0 }, n1: { x: 600, y: 0 } }
+		};
+		const settings = { baseRadius: 40, minScale: 0.2, hopRepulsionStrength: 0 };
+
+		function separationWith(springEdges?: EdgeEndpointIds[]) {
+			const positions = relaxGraphPositions(graph, { settings, relaxIterations: 1, springEdges });
+			return positions.n1.x - positions.n0.x;
+		}
+
+		it('pulls two nodes together that no authored edge connects', () => {
+			expect(separationWith([{ sourceNodeId: 'n0', targetNodeId: 'n1' }])).toBeLessThan(
+				separationWith()
+			);
+		});
+
+		it('leaves hop distance and scale to the authored edges', () => {
+			// The whole point of the separate list: a spring edge moves nodes without
+			// making them neighbors, so n1 stays unreachable from the pinned n0 and
+			// keeps the disconnected node's minimum scale.
+			const layout = deriveGraphLayout(graph, {
+				settings,
+				relaxIterations: 1,
+				springEdges: [{ sourceNodeId: 'n0', targetNodeId: 'n1' }]
+			});
+
+			expect(layout.hopsByNodeId.n1).toBe(Infinity);
+			expect(layout.scaleByNodeId.n1).toBe(0.2);
+		});
+
+		it('scales the pull by the edge factor', () => {
+			const full = separationWith([{ sourceNodeId: 'n0', targetNodeId: 'n1' }]);
+			const half = separationWith([{ sourceNodeId: 'n0', targetNodeId: 'n1', springFactor: 0.5 }]);
+
+			expect(half).toBeGreaterThan(full);
+			expect(half).toBeLessThan(separationWith());
+		});
+
+		it('falls back to the graph edges when not given', () => {
+			const connected = makeGraph({ nodeCount: 2, pinned: [0], edges: [[0, 1]] });
+			const spread = { ...connected, posByNodeId: graph.posByNodeId };
+
+			expect(relaxGraphPositions(spread, { settings, relaxIterations: 1 }).n1.x).toBeLessThan(
+				spread.posByNodeId.n1.x
+			);
+		});
 	});
 
 	it('uses min scale for disconnected nodes', () => {

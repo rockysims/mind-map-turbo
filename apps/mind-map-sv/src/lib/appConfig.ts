@@ -66,6 +66,7 @@ export const APP_CONFIG = {
 			edgeGapMinRadiusFactor: 0.42, // min edge gap as fraction of node radius
 			edgeGapMaxRadiusFactor: 0.84, // max edge gap as fraction of node radius
 			edgeSpringStrength: 0.5, // how strongly edges pull nodes together
+			derivedEdgeSpringFactor: 1, // derived dataflow edges pull this much relative to authored ones
 			hopRepulsionStrength: 0.3, // repulsion strength between distant hops
 			hopRepulsionMinHops: 0, // min hop distance before repulsion applies
 			hopRepulsionMaxHops: 4, // hop distance where repulsion peaks

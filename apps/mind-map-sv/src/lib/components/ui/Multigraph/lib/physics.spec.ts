@@ -100,6 +100,73 @@ describe('physics', () => {
 			);
 		});
 
+		describe('per-edge spring factor', () => {
+			const positions = { n0: { x: 0, y: 0 }, n1: { x: 300, y: 0 } };
+			const radii = { n0: 20, n1: 20 };
+
+			function pullFor(springFactor?: number): number {
+				const next = relaxEdgeDistancesStep(
+					positions,
+					radii,
+					[{ sourceNodeId: 'n0', targetNodeId: 'n1', springFactor }],
+					EDGE_DISTANCE_SETTINGS
+				);
+				return (next.n0?.x ?? 0) - positions.n0.x;
+			}
+
+			it('pulls at full strength when no factor is given', () => {
+				// Every edge predates factors, so silence has to mean "as before".
+				expect(pullFor(undefined)).toBe(pullFor(1));
+			});
+
+			it('scales the pull by the factor', () => {
+				expect(pullFor(0.5)).toBeCloseTo(pullFor(1) / 2, 10);
+			});
+
+			it('pulls harder above one', () => {
+				expect(pullFor(2)).toBeCloseTo(pullFor(1) * 2, 10);
+			});
+
+			it('exerts nothing at zero', () => {
+				expect(pullFor(0)).toBe(0);
+			});
+
+			// A negative factor would invert the spring into something that pushes
+			// harder the further apart two nodes get, which never settles.
+			it('treats a negative factor as zero rather than inverting the spring', () => {
+				expect(pullFor(-1)).toBe(0);
+			});
+
+			it('treats a non-finite factor as zero', () => {
+				expect(pullFor(Number.NaN)).toBe(0);
+			});
+
+			// Degree divides each node's displacement, so a forceless edge left in the
+			// count would quietly weaken the edges that do pull.
+			it('does not let a zero-factor edge dampen the edges that do pull', () => {
+				const withDeadEdge = relaxEdgeDistancesStep(
+					{ ...positions, n2: { x: 0, y: 300 } },
+					{ ...radii, n2: 20 },
+					[
+						{ sourceNodeId: 'n0', targetNodeId: 'n1' },
+						{ sourceNodeId: 'n0', targetNodeId: 'n2', springFactor: 0 }
+					],
+					EDGE_DISTANCE_SETTINGS
+				);
+				expect(withDeadEdge.n0?.x).toBeCloseTo(positions.n0.x + pullFor(1), 10);
+			});
+
+			it('leaves a zero-factor edge endpoint where it was', () => {
+				const next = relaxEdgeDistancesStep(
+					positions,
+					radii,
+					[{ sourceNodeId: 'n0', targetNodeId: 'n1', springFactor: 0 }],
+					EDGE_DISTANCE_SETTINGS
+				);
+				expect(next).toEqual(positions);
+			});
+		});
+
 		it('pulls more strongly as connected nodes get farther apart', () => {
 			const radii = { n0: 20, n1: 20 };
 			const near = relaxEdgeDistancesStep(

@@ -72,7 +72,7 @@
 		visibleNodeIdsForPinnedNeighborhood
 	} from './lib/boundedVisibility.js';
 	import { composeEdgesForRender, createDataflowModel } from './lib/dataflowLayer.js';
-	import { isDerivedEdgeId } from './lib/derivedEdges.js';
+	import { isDerivedEdgeId, type DerivedEdge } from './lib/derivedEdges.js';
 	import { computeDataflowDiagnostics } from './lib/dataflowDiagnostics.js';
 	import { nodeDiagnosticsView } from './lib/nodeDiagnosticsView.js';
 	import {
@@ -316,8 +316,23 @@
 		getGraph: () => graph,
 		composeAdjacency: (data) =>
 			dataflowInLayout
-				? composeEdgesForRender(data, dataflowModel(data, dataflowEnabled).edges)
+				? composeEdgesForRender(data, withSpringFactor(dataflowModel(data, dataflowEnabled).edges))
 				: data,
+		composeSpringEdges: (visibleGraph) => {
+			// Already in the topology when the toggle is on, and carrying the same
+			// factor, so adding them again would double every dataflow pull.
+			if (dataflowInLayout) return [];
+
+			const visibleNodeIds = new Set(visibleGraph.nodes.map((node) => node.id));
+			// A node off screen has no position or radius for physics to use, and an
+			// edge to it would still count toward its neighbor's degree, weakening
+			// every pull that node does feel.
+			return withSpringFactor(
+				dataflow.edges.filter(
+					(edge) => visibleNodeIds.has(edge.sourceNodeId) && visibleNodeIds.has(edge.targetNodeId)
+				)
+			);
+		},
 		getLayoutSettings: () => layoutSettings,
 		getActiveDragNodeId: () => activeDragNodeId,
 		getPreferredBeaconNodeIds: () => severedBeaconPreference,
@@ -344,6 +359,16 @@
 	});
 
 	const resolvedLayoutSettings = $derived(withDefaultLayoutSettings(layoutSettings));
+
+	/**
+	 * Tags derived edges with how hard they pull, so the same tuning applies
+	 * whether they reach physics as spring-only edges or as part of the topology.
+	 */
+	function withSpringFactor(edges: readonly DerivedEdge[]): DerivedEdge[] {
+		const springFactor = resolvedLayoutSettings.derivedEdgeSpringFactor;
+		return edges.map((edge) => ({ ...edge, springFactor }));
+	}
+
 	const dataflow = $derived(dataflowModel(graph, dataflowEnabled));
 	/**
 	 * What the renderer draws. Always composed, so dataflow edges appear whether
@@ -352,8 +377,9 @@
 	const renderGraph = $derived(composeEdgesForRender(graph, dataflow.edges));
 	/**
 	 * What determines hop distance, scaling, and bounded visibility. Authored-only
-	 * unless the user opts in — this single choice is what confines the blast
-	 * radius of the dataflow layer to drawing.
+	 * unless the user opts in, which keeps a written equation from deciding how
+	 * big a node is or whether it is on screen at all. Dataflow edges still pull,
+	 * through `composeSpringEdges` — pulling and connecting are separate here.
 	 */
 	const adjacencyGraph = $derived(dataflowInLayout ? renderGraph : graph);
 	/** Shared so a node below the size threshold allocates nothing per frame. */
@@ -508,8 +534,16 @@
 		const primary = untrack(() => defaultPrimaryNodeId);
 		const settings = untrack(() => layoutSettings);
 		layoutRuntime.reset();
+		// Dataflow pulls during the ingest settle too. A graph arriving from storage
+		// should come to rest under the same forces it will feel from the first
+		// interaction onward, instead of shifting once the runtime takes over.
+		const springEdges = untrack(() => [
+			...incoming.edges,
+			...withSpringFactor(dataflowModel(incoming, dataflowEnabled).edges)
+		]);
 		graph = withSettledGraphPositions(incoming, {
 			settings,
+			springEdges,
 			hopOverridesByNodeId: beaconHopOverrides(beaconNodeIds(incoming))
 		});
 		primaryNodeId = primary;

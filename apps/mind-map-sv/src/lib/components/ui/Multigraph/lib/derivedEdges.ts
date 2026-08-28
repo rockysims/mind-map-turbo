@@ -19,6 +19,12 @@ export interface DerivedEdge extends EdgeData {
 	directed: true;
 	/** Quantities flowing along this edge, so a bundle can still label itself. */
 	quantities: QuantitySymbol[];
+	/**
+	 * How hard this edge pulls relative to an authored one, read by the physics
+	 * spring. Set by whoever hands the edge to the layout rather than here,
+	 * because it is a tuning choice about layout, not a fact about the dataflow.
+	 */
+	springFactor?: number;
 }
 
 export function isDerivedEdgeId(id: string): boolean {

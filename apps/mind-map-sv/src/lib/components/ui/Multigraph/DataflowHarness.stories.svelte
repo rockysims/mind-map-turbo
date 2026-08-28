@@ -46,6 +46,47 @@
 			return `${node.dataset.nodeId}:${node.dataset.scale}:${node.style.transform}`;
 		});
 
+	/**
+	 * `a` defines g and `c` consumes it, with no authored edge anywhere. Any
+	 * movement between them has to come from the derived edge.
+	 */
+	const UNCONNECTED_PAIR = makeGraph({
+		nodes: [
+			{ id: 'a', title: 'Gravity', description: '$$g = 9.8$$' },
+			{ id: 'c', title: 'Weight', description: '' }
+		],
+		pinned: ['a'],
+		edges: [],
+		posByNodeId: { a: { x: -300, y: 0 }, c: { x: 300, y: 0 } }
+	});
+
+	/**
+	 * Hop repulsion off so the only force in play is the edge spring, and nodes
+	 * small enough that the fixture spacing sits well outside the spring's dead
+	 * band — at the default radius these nodes are already close enough to be at
+	 * rest, and nothing would move no matter how hard the edge pulled.
+	 */
+	const SPRINGS_ONLY = { hopRepulsionStrength: 0, baseRadius: 40 };
+
+	const FIXED_VIEW = { panX: 0, panY: 0, scale: 1 };
+
+	const centerOf = (canvasElement: HTMLElement, nodeId: string) => {
+		const rect = (
+			canvasElement.querySelector(`[data-node-id="${nodeId}"]`) as HTMLElement
+		).getBoundingClientRect();
+		return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+	};
+
+	const distanceBetween = (canvasElement: HTMLElement, fromId: string, toId: string) => {
+		const from = centerOf(canvasElement, fromId);
+		const to = centerOf(canvasElement, toId);
+		return Math.hypot(to.x - from.x, to.y - from.y);
+	};
+
+	const scaleOf = (canvasElement: HTMLElement, nodeId: string) =>
+		(canvasElement.querySelector(`[data-node-id="${nodeId}"]`) as HTMLElement | null)?.dataset
+			.scale;
+
 	const click = async (canvasElement: HTMLElement, selector: string) => {
 		(canvasElement.querySelector(selector) as HTMLElement).click();
 		await waitFor(() => expect(canvasElement.querySelector('.node')).toBeInTheDocument());
@@ -103,6 +144,78 @@
 
 		// The arrow is drawn, but nothing about node placement or scale moved.
 		expect(nodeGeometry(canvasElement)).toEqual(before);
+	}}
+/>
+
+<Story
+	name="DataflowPullsNodesTogetherWithoutAnAuthoredEdge"
+	args={{
+		baseGraph: UNCONNECTED_PAIR,
+		editNodeId: 'c',
+		equation: CONSUMES_G,
+		dataflowInLayout: false,
+		layoutSettings: SPRINGS_ONLY,
+		initialViewState: FIXED_VIEW
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitFor(() => expect(canvasElement.querySelector('.node')).toBeInTheDocument());
+		const before = distanceBetween(canvasElement, 'a', 'c');
+
+		await click(canvasElement, '[data-add-equation]');
+		await waitFor(() => expect(derivedEdge(canvasElement)).toBeInTheDocument());
+
+		// Nothing else connects these two, so the equation alone moved them.
+		await waitFor(() => expect(distanceBetween(canvasElement, 'a', 'c')).toBeLessThan(before));
+	}}
+/>
+
+<Story
+	name="AZeroSpringFactorLeavesTheLayoutAlone"
+	args={{
+		baseGraph: UNCONNECTED_PAIR,
+		editNodeId: 'c',
+		equation: CONSUMES_G,
+		dataflowInLayout: false,
+		layoutSettings: { ...SPRINGS_ONLY, derivedEdgeSpringFactor: 0 },
+		initialViewState: FIXED_VIEW
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitFor(() => expect(canvasElement.querySelector('.node')).toBeInTheDocument());
+		const before = distanceBetween(canvasElement, 'a', 'c');
+
+		await click(canvasElement, '[data-add-equation]');
+		await waitFor(() => expect(derivedEdge(canvasElement)).toBeInTheDocument());
+
+		// The arrow is still drawn; turning the factor down to nothing only takes
+		// away its say in where the nodes sit.
+		expect(distanceBetween(canvasElement, 'a', 'c')).toBeCloseTo(before, 6);
+	}}
+/>
+
+<Story
+	name="PullingDoesNotChangeHopDistanceOrScale"
+	args={{
+		baseGraph: CHAIN,
+		editNodeId: 'c',
+		equation: CONSUMES_G,
+		dataflowInLayout: false,
+		layoutSettings: SPRINGS_ONLY,
+		initialViewState: FIXED_VIEW
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitFor(() => expect(canvasElement.querySelector('.node')).toBeInTheDocument());
+		const scaleBefore = scaleOf(canvasElement, 'c');
+		const distanceBefore = distanceBetween(canvasElement, 'a', 'c');
+
+		await click(canvasElement, '[data-add-equation]');
+		await waitFor(() => expect(derivedEdge(canvasElement)).toBeInTheDocument());
+		await waitFor(() =>
+			expect(distanceBetween(canvasElement, 'a', 'c')).toBeLessThan(distanceBefore)
+		);
+
+		// `c` moved closer, but it is still two authored hops from the pinned node,
+		// so it stays the size the author's own edges say it should be.
+		expect(scaleOf(canvasElement, 'c')).toBe(scaleBefore);
 	}}
 />
 
@@ -327,17 +440,19 @@
 	args={{ baseGraph: CHAIN, editNodeId: 'c', equation: CONSUMES_G }}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitFor(() => expect(canvasElement.querySelector('.node')).toBeInTheDocument());
-		const titleBox = () =>
-			JSON.stringify(
-				(
-					canvasElement.querySelector('[data-node-id="b"] .square') as HTMLElement
-				).getBoundingClientRect()
-			);
-		const before = titleBox();
+		// Size, not placement: a dataflow edge is allowed to pull `b` sideways, but
+		// it must not resize the square a node's title is fitted into.
+		const titleSize = () => {
+			const rect = (
+				canvasElement.querySelector('[data-node-id="b"] .square') as HTMLElement
+			).getBoundingClientRect();
+			return `${rect.width}x${rect.height}`;
+		};
+		const before = titleSize();
 
 		await click(canvasElement, '[data-add-equation]');
 		await waitFor(() => expect(derivedEdge(canvasElement)).toBeInTheDocument());
 
-		expect(titleBox()).toEqual(before);
+		expect(titleSize()).toEqual(before);
 	}}
 />

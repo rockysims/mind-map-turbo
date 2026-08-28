@@ -11,6 +11,12 @@ export interface LayoutSettings {
 	edgeGapMinRadiusFactor: number;
 	edgeGapMaxRadiusFactor: number;
 	edgeSpringStrength: number;
+	/**
+	 * Derived dataflow edges pull this much relative to an authored edge. At 1 a
+	 * dataflow relationship shapes the graph exactly as a drawn one does; lower
+	 * values let it inform the layout without overruling what the author drew.
+	 */
+	derivedEdgeSpringFactor: number;
 	hopRepulsionStrength: number;
 	hopRepulsionMinHops: number;
 	hopRepulsionMaxHops: number;

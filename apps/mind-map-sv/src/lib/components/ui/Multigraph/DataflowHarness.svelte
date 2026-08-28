@@ -10,6 +10,7 @@
 	import Multigraph from './Multigraph.svelte';
 	import type { MultigraphData } from '../types/multigraph';
 	import type { ViewState } from '$lib/migrations';
+	import type { LayoutSettings } from './lib/layoutSettings';
 
 	let {
 		baseGraph,
@@ -17,7 +18,10 @@
 		equation,
 		dataflowInLayout = false,
 		startWithEquation = false,
-		initialViewState
+		initialViewState,
+		// Physics off by default so stories about drawing and topology assert on
+		// exact geometry. A story about force turns it on for itself.
+		layoutSettings = { relaxIterations: 0 }
 	}: {
 		baseGraph: MultigraphData;
 		editNodeId: string;
@@ -26,6 +30,7 @@
 		dataflowInLayout?: boolean;
 		startWithEquation?: boolean;
 		initialViewState?: ViewState;
+		layoutSettings?: Partial<LayoutSettings>;
 	} = $props();
 
 	// Read once on purpose: the story sets the starting state, the buttons own it after.
@@ -57,7 +62,7 @@
 			multigraphData={graph}
 			graphGeneration={generation}
 			defaultPrimaryNodeId={baseGraph.nodes[0]?.id ?? ''}
-			layoutSettings={{ relaxIterations: 0 }}
+			{layoutSettings}
 			{dataflowInLayout}
 			{initialViewState}
 		/>
