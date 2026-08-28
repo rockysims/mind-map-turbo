@@ -4,7 +4,7 @@
 **Depends on:** milestone 08 (LaTeX math in node descriptions), milestone 04e
 (directed edges), milestone 04k (parallel edge visualization), and milestone 04b
 (bounded neighborhood visibility).
-**Plan:** _none yet._
+**Plan:** [2026-08-27 09-variable-dataflow-layer.md](../plans/2026-08-27%2009-variable-dataflow-layer.md)
 
 ## Goal
 
