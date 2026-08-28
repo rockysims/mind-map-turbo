@@ -2,8 +2,8 @@
 	import { defineMeta } from '@storybook/addon-svelte-csf';
 	import { expect, fn, userEvent, waitFor } from 'storybook/test';
 	import NodeDetailsContent from './NodeDetailsContent.svelte';
-	import type { NodeData } from '../types/node';
-	import { symbolFor } from '../MathText/lib/mathSymbols';
+	import type { NodeData, QuantityDesignation } from '../types/node';
+	import { symbolFor, type QuantitySymbol } from '../MathText/lib/mathSymbols';
 	import { nodeQuantities } from './lib/nodeQuantities';
 	import type { QuantityIndexEntry } from './lib/quantityIndex';
 	import { designations } from './lib/testFixtures';
@@ -55,18 +55,176 @@
 
 	const MOON_AND_EARTH_TITLES = (nodeId: string) => (nodeId === 'earth' ? 'Earth' : 'Moon');
 
-	/** Open the peek for the one confirmed input, the way a reader does. */
-	async function peekAtG(canvasElement: HTMLElement): Promise<HTMLElement> {
-		const chip = canvasElement.querySelector('[data-designation-role="input"]');
-		expect(chip).toHaveAttribute('data-designation-key', 'g');
-		(chip as HTMLElement).click();
+	/** Open the peek for one confirmed input, the way a reader does. */
+	async function peekAt(canvasElement: HTMLElement, key: string): Promise<HTMLElement> {
+		const chip = canvasElement.querySelector(
+			`[data-designation-chips="view"] [data-designation-key="${key}"]`
+		);
+		if (!(chip instanceof HTMLElement)) throw new Error(`no view chip for ${key}`);
+		chip.click();
 
 		return await waitFor(() => {
-			const card = canvasElement.querySelector('[data-quantity-peek="g"]');
+			// The root card, specifically: nested cards carry the same label attribute.
+			const card = canvasElement.querySelector('[data-peek-path=""]');
 			expect(card).toBeInTheDocument();
 			return card as HTMLElement;
 		});
 	}
+
+	/** Open the peek for the one confirmed input, the way a reader does. */
+	async function peekAtG(canvasElement: HTMLElement): Promise<HTMLElement> {
+		const chip = canvasElement.querySelector('[data-designation-role="input"]');
+		expect(chip).toHaveAttribute('data-designation-key', 'g');
+
+		return await peekAt(canvasElement, 'g');
+	}
+
+	/** The symbol a designation label stands for — `v_0` included. */
+	function symbolOf(label: string): QuantitySymbol {
+		const [designation] = designations(label);
+		return symbolFor(designation.base, designation.subscript);
+	}
+
+	function definerRow(card: HTMLElement, definerNodeId: string): HTMLElement {
+		// The card's own row comes first in document order, so a nested card that
+		// happens to repeat a definer cannot shadow it.
+		const row = card.querySelector(`[data-peek-definer="${definerNodeId}"]`);
+		if (!(row instanceof HTMLElement)) throw new Error(`no definer row for ${definerNodeId}`);
+		return row;
+	}
+
+	/** The drill chips one row offers, in order, as quantity keys. */
+	function drillKeys(row: HTMLElement): string[] {
+		return Array.from(
+			row.querySelectorAll(':scope > [data-peek-drill-line] [data-peek-drill]')
+		).map((chip) => chip.getAttribute('data-peek-drill') ?? '');
+	}
+
+	/**
+	 * Matched by reading the attribute rather than by selector: a subscripted key
+	 * embeds a NUL, which no attribute selector can carry.
+	 */
+	function drillChip(row: HTMLElement, key: string): HTMLElement {
+		const found = Array.from(
+			row.querySelectorAll(':scope > [data-peek-drill-line] [data-peek-drill]')
+		).find((chip) => chip.getAttribute('data-peek-drill') === key);
+		if (!(found instanceof HTMLElement)) throw new Error(`no drill chip for ${key}`);
+		return found;
+	}
+
+	/** Drill one of a definer's inputs and wait for the card it opens. */
+	async function drillInto(
+		card: HTMLElement,
+		definerNodeId: string,
+		key: string
+	): Promise<HTMLElement> {
+		const chip = drillChip(definerRow(card, definerNodeId), key);
+		const pathKey = chip.getAttribute('data-peek-drill-path') ?? '';
+		chip.click();
+
+		return await waitFor(() => {
+			const nested = card.querySelector(`[data-peek-path="${pathKey}"]`);
+			expect(nested).toBeInTheDocument();
+			return nested as HTMLElement;
+		});
+	}
+
+	function entryOf(
+		label: string,
+		definers: ReadonlyArray<readonly [string, string | null]>
+	): [string, QuantityIndexEntry] {
+		const symbol = symbolOf(label);
+		return [
+			symbol.key,
+			{
+				symbol,
+				definerNodeIds: definers.map(([nodeId]) => nodeId),
+				definitions: definers
+					.filter((definer): definer is [string, string] => definer[1] !== null)
+					.map(([nodeId, sourceTex]) => ({
+						nodeId,
+						bodyKey: `${nodeId}-${symbol.key}`,
+						sourceTex,
+						displayMode: true
+					})),
+				consumerNodeIds: []
+			}
+		];
+	}
+
+	function inputTable(byNodeId: Record<string, string[]>): Record<string, QuantityDesignation[]> {
+		return Object.fromEntries(
+			Object.entries(byNodeId).map(([nodeId, labels]) => [nodeId, designations(...labels)])
+		);
+	}
+
+	/**
+	 * A graph deep enough to drill through, with everything a cascade can hit:
+	 * three definers of one quantity (one of which consumes nothing), two of them
+	 * sharing an input, a chain back to the root quantity, and an unresolved
+	 * subscripted quantity two levels down.
+	 */
+	const CASCADE_ENTRIES = new Map<string, QuantityIndexEntry>([
+		entryOf('g', [
+			['constant', 'g = 9.8'],
+			['earth', 'g = G m / r^2'],
+			['moon', 'g = 1.6']
+		]),
+		entryOf('m', [['mass', 'm = \\rho_0 V']]),
+		entryOf('r', [['radius', 'r = 6371']]),
+		entryOf('rho_0', [['density', '\\rho_0 = 1000']])
+	]);
+
+	const CASCADE_INPUTS = inputTable({
+		constant: [],
+		earth: ['m', 'r'],
+		moon: ['m'],
+		mass: ['g', 'rho_0'],
+		radius: ['T_0'],
+		density: []
+	});
+
+	const NO_INPUTS: QuantityDesignation[] = [];
+
+	const CASCADE_ARGS = {
+		node: WEIGHT_NODE,
+		quantities: nodeQuantities(WEIGHT_NODE),
+		quantityEntryFor: (key: string) => CASCADE_ENTRIES.get(key),
+		inputsForNodeId: (nodeId: string) => CASCADE_INPUTS[nodeId] ?? NO_INPUTS,
+		titleForNodeId: (nodeId: string) => nodeId
+	};
+
+	/** Seven quantities in a line, so a cascade can be driven past the indent cap. */
+	const CHAIN_LABELS = ['a', 'b', 'c', 'd', 'e', 'f', 'h'];
+	const CHAIN_ENTRIES = new Map<string, QuantityIndexEntry>(
+		CHAIN_LABELS.map((label, index) => {
+			const next = CHAIN_LABELS[index + 1];
+			return entryOf(label, [
+				[`n-${label}`, next === undefined ? `${label} = 1` : `${label} = ${next} + 1`]
+			]);
+		})
+	);
+	const CHAIN_INPUTS = inputTable(
+		Object.fromEntries(
+			CHAIN_LABELS.map((label, index) => {
+				const next = CHAIN_LABELS[index + 1];
+				return [`n-${label}`, next === undefined ? [] : [next]];
+			})
+		)
+	);
+	const CHAIN_NODE: NodeData = {
+		...makeNode('A long chain: $$z = a$$.'),
+		inputs: designations('a'),
+		outputs: designations('z')
+	};
+
+	const CHAIN_ARGS = {
+		node: CHAIN_NODE,
+		quantities: nodeQuantities(CHAIN_NODE),
+		quantityEntryFor: (key: string) => CHAIN_ENTRIES.get(key),
+		inputsForNodeId: (nodeId: string) => CHAIN_INPUTS[nodeId] ?? NO_INPUTS,
+		titleForNodeId: (nodeId: string) => nodeId
+	};
 
 	const { Story } = defineMeta({
 		title: 'Components/Multigraph/NodeDetailsContent',
@@ -362,6 +520,51 @@
 />
 
 <Story
+	name="TheWayOutIsStyledLikeTheWayThrough"
+	args={{
+		node: WEIGHT_NODE,
+		quantities: nodeQuantities(WEIGHT_NODE),
+		quantityEntryFor: entryLookup(G_DEFINED_TWICE),
+		titleForNodeId: MOON_AND_EARTH_TITLES,
+		onJumpToNode: fn()
+	}}
+	play={async ({ canvasElement }) => {
+		const card = await peekAtG(canvasElement);
+		const dismiss = card.querySelector('[aria-label="Close definition"]') as HTMLElement;
+		const goto = card.querySelector('[data-peek-goto="earth"]') as HTMLElement;
+
+		// Dismissing is a control the card offers, the same as going to a node, and
+		// the bare glyph it used to be read as decoration — which is also what left
+		// it sitting off the row buttons' baseline.
+		const dismissStyle = getComputedStyle(dismiss);
+		const gotoStyle = getComputedStyle(goto);
+		for (const property of [
+			'borderTopWidth',
+			'borderTopStyle',
+			'borderTopColor',
+			'borderRadius',
+			'backgroundColor',
+			'color',
+			'fontSize',
+			'padding'
+		] as const) {
+			expect(dismissStyle[property]).toBe(gotoStyle[property]);
+		}
+		// Same box, not just the same paint: a taller or shorter control would still
+		// look misaligned beside the row it shares an edge with.
+		expect(dismiss.getBoundingClientRect().height).toBeCloseTo(
+			goto.getBoundingClientRect().height,
+			1
+		);
+
+		// The rows still clear the corner it sits in.
+		expect(goto.getBoundingClientRect().right).toBeLessThanOrEqual(
+			dismiss.getBoundingClientRect().left
+		);
+	}}
+/>
+
+<Story
 	name="KeyboardEnterOnAChipLandsInsideThePeekCard"
 	args={{
 		node: WEIGHT_NODE,
@@ -401,6 +604,294 @@
 		});
 		// Dismissing hands the reader back to the chip they asked from, not to the
 		// top of the tab order.
+		expect(document.activeElement).toBe(chip);
+	}}
+/>
+
+<Story
+	name="PeekRowsOfferTheDefinersOwnInputs"
+	args={{ ...CASCADE_ARGS, onJumpToNode: fn() }}
+	play={async ({ canvasElement }) => {
+		const card = await peekAtG(canvasElement);
+
+		// The next question after "what is g?" is "and what is that symbol?", so
+		// each definer row offers the quantities that node itself takes in — read
+		// off its confirmed designations, in the order the author put them.
+		expect(drillKeys(definerRow(card, 'earth'))).toEqual(['m', 'r']);
+		expect(drillKeys(definerRow(card, 'moon'))).toEqual(['m']);
+
+		// A definer that consumes nothing has nothing to be asked about, and an
+		// empty line under its equation would read as something missing.
+		expect(definerRow(card, 'constant').querySelector('[data-peek-drill-line]')).toBeNull();
+	}}
+/>
+
+<Story
+	name="DrillingAnInputOpensANestedCardUnderThatRow"
+	args={{ ...CASCADE_ARGS, onJumpToNode: fn() }}
+	play={async ({ canvasElement }) => {
+		const card = await peekAtG(canvasElement);
+		const row = definerRow(card, 'earth');
+
+		const nested = await drillInto(card, 'earth', 'm');
+
+		// The answer belongs to the row that raised the question, so it hangs off
+		// that row rather than replacing the card the reader is reading.
+		expect(row.contains(nested)).toBe(true);
+		expect(nested).toHaveAttribute('data-peek-depth', '1');
+		expect(nested.querySelector('[data-peek-definer="mass"]')).toBeInTheDocument();
+		// Indented, so the nesting is visible without reading the equations.
+		expect(parseFloat(getComputedStyle(nested).marginLeft)).toBeGreaterThan(0);
+
+		// A nested card claims no modality: every level stays visible and usable at
+		// once, which is the opposite of what a dialog means.
+		expect(nested).toHaveAttribute('role', 'group');
+		expect(card).toHaveAttribute('role', 'dialog');
+
+		expect(drillChip(row, 'm')).toHaveAttribute('aria-pressed', 'true');
+	}}
+/>
+
+<Story
+	name="TwoBranchesStayOpenUnderOneCard"
+	args={{ ...CASCADE_ARGS, onJumpToNode: fn() }}
+	play={async ({ canvasElement }) => {
+		const card = await peekAtG(canvasElement);
+
+		const underM = await drillInto(card, 'earth', 'm');
+		const underR = await drillInto(card, 'earth', 'r');
+
+		// Comparing is the whole point of the card, so opening the second question
+		// must not collapse the first. This is a tree, not an accordion.
+		expect(underM).toBeInTheDocument();
+		expect(underR).toBeInTheDocument();
+		expect(underM.querySelector('[data-peek-definer="mass"]')).toBeInTheDocument();
+		expect(underR.querySelector('[data-peek-definer="radius"]')).toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="ClosingABranchClosesItsDescendants"
+	args={{ ...CASCADE_ARGS, onJumpToNode: fn() }}
+	play={async ({ canvasElement }) => {
+		const card = await peekAtG(canvasElement);
+		const underM = await drillInto(card, 'earth', 'm');
+		const underRho = await drillInto(underM, 'mass', symbolOf('rho_0').key);
+		expect(underRho).toBeInTheDocument();
+
+		drillChip(definerRow(card, 'earth'), 'm').click();
+
+		// The reader closed the question the deeper answers hang off; leaving them
+		// on screen would strand them under nothing.
+		await waitFor(() => {
+			expect(underM).not.toBeInTheDocument();
+		});
+		expect(underRho).not.toBeInTheDocument();
+		expect(drillChip(definerRow(card, 'earth'), 'm')).toHaveAttribute('aria-pressed', 'false');
+	}}
+/>
+
+<Story
+	name="AChipAlreadyOpenAboveRendersAsALoop"
+	args={{ ...CASCADE_ARGS, onJumpToNode: fn() }}
+	play={async ({ canvasElement }) => {
+		const card = await peekAtG(canvasElement);
+		const underM = await drillInto(card, 'earth', 'm');
+
+		// g → m → g. Opening it would produce the card the reader is already inside,
+		// forever, so the chip stays visible — the relationship is real — and says
+		// what it is instead of pretending to be a way forward.
+		const loop = drillChip(definerRow(underM, 'mass'), 'g');
+		expect(loop.tagName).toBe('SPAN');
+		expect(loop).toHaveAttribute('data-peek-loop', 'true');
+		expect(loop).toHaveAttribute('title', 'Already open in this chain');
+		expect(loop).not.toHaveAttribute('aria-pressed');
+
+		await userEvent.click(loop);
+		expect(definerRow(underM, 'mass').querySelector('[data-peek-path]')).toBeNull();
+
+		// Its sibling on the same row is an ordinary question and stays openable.
+		expect(drillChip(definerRow(underM, 'mass'), symbolOf('rho_0').key).tagName).toBe('BUTTON');
+	}}
+/>
+
+<Story
+	name="TheSameSymbolOpensIndependentlyUnderSiblingRows"
+	args={{ ...CASCADE_ARGS, onJumpToNode: fn() }}
+	play={async ({ canvasElement }) => {
+		const card = await peekAtG(canvasElement);
+
+		const underEarth = await drillInto(card, 'earth', 'm');
+		const underMoon = await drillInto(card, 'moon', 'm');
+
+		// Two definers of g both consuming m is ordinary, not circular, so neither
+		// chip is a loop and each owns its own card.
+		expect(underEarth).not.toBe(underMoon);
+		expect(definerRow(card, 'earth').contains(underEarth)).toBe(true);
+		expect(definerRow(card, 'moon').contains(underMoon)).toBe(true);
+
+		drillChip(definerRow(card, 'earth'), 'm').click();
+
+		await waitFor(() => {
+			expect(underEarth).not.toBeInTheDocument();
+		});
+		expect(underMoon).toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="EnterOnADrillChipLandsInsideTheNestedCard"
+	args={{ ...CASCADE_ARGS, onJumpToNode: fn() }}
+	play={async ({ canvasElement }) => {
+		const card = await peekAtG(canvasElement);
+		const chip = drillChip(definerRow(card, 'earth'), 'm');
+		chip.focus();
+
+		await userEvent.keyboard('{Enter}');
+
+		const nested = await waitFor(() => {
+			const found = definerRow(card, 'earth').querySelector('[data-peek-path]');
+			expect(found).toBeInTheDocument();
+			return found as HTMLElement;
+		});
+
+		// Same contract as the chip that opened the root card: what Enter opened is
+		// where the next Tab belongs, not the chip beside it.
+		await waitFor(() => {
+			expect(nested.contains(document.activeElement)).toBe(true);
+		});
+		expect(document.activeElement).toHaveAttribute('data-peek-goto', 'mass');
+	}}
+/>
+
+<Story
+	name="EscapeClosesTheCardHoldingFocusAndReturnsToItsChip"
+	args={{ ...CASCADE_ARGS, onJumpToNode: fn() }}
+	play={async ({ canvasElement }) => {
+		const detailsChip = canvasElement.querySelector('[data-designation-key="g"]') as HTMLElement;
+		const card = await peekAtG(canvasElement);
+		const underM = await drillInto(card, 'earth', 'm');
+		const rhoKey = symbolOf('rho_0').key;
+		const underRho = await drillInto(underM, 'mass', rhoKey);
+		await waitFor(() => {
+			expect(underRho.contains(document.activeElement)).toBe(true);
+		});
+
+		// Escape means "close what I am in", so it walks out one level at a time
+		// rather than throwing away every answer the reader has opened.
+		await userEvent.keyboard('{Escape}');
+		await waitFor(() => {
+			expect(underRho).not.toBeInTheDocument();
+		});
+		expect(document.activeElement).toBe(drillChip(definerRow(underM, 'mass'), rhoKey));
+
+		await userEvent.keyboard('{Escape}');
+		await waitFor(() => {
+			expect(underM).not.toBeInTheDocument();
+		});
+		expect(document.activeElement).toBe(drillChip(definerRow(card, 'earth'), 'm'));
+
+		await userEvent.keyboard('{Escape}');
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-peek-path]')).not.toBeInTheDocument();
+		});
+		// And out of the cascade entirely, back to the chip that started it.
+		expect(document.activeElement).toBe(detailsChip);
+	}}
+/>
+
+<Story
+	name="AnUnresolvedInputAtDepthOffersToDefineItThere"
+	args={{ ...CASCADE_ARGS, onCreateDefiningNode: fn() }}
+	play={async ({ canvasElement, args }) => {
+		const card = await peekAtG(canvasElement);
+		const underR = await drillInto(card, 'earth', 'r');
+		const underT = await drillInto(underR, 'radius', symbolOf('T_0').key);
+
+		expect(underT).toHaveTextContent('Nothing defines T_0 yet.');
+		(underT.querySelector('[data-create-defining-node="T_0"]') as HTMLElement).click();
+
+		// The offer belongs to the card that made it. Seeding the new node with the
+		// quantity the reader was reading three levels up would define the wrong
+		// thing — and would look right, because the label came from here.
+		const createSpy = args.onCreateDefiningNode as unknown as {
+			mock: { calls: Array<[string, string]> };
+		};
+		expect(createSpy.mock.calls.at(-1)).toEqual(['T_0', symbolOf('T_0').key]);
+	}}
+/>
+
+<Story
+	name="GoToNodeAtDepthLeavesForTheDefinerAndClosesEverything"
+	args={{ ...CASCADE_ARGS, onJumpToNode: fn() }}
+	play={async ({ canvasElement, args }) => {
+		const card = await peekAtG(canvasElement);
+		const underM = await drillInto(card, 'earth', 'm');
+
+		(underM.querySelector('[data-peek-goto="mass"]') as HTMLElement).click();
+
+		// Going there names the definer the reader pointed at, however deep it was,
+		// and the whole cascade goes with the canvas it was reading over.
+		const jumpSpy = args.onJumpToNode as unknown as JumpSpy;
+		expect(jumpSpy.mock.calls.at(-1)?.[0]).toBe('mass');
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-peek-path]')).not.toBeInTheDocument();
+		});
+	}}
+/>
+
+<Story
+	name="TheCascadeScrollsInsteadOfEscapingTheOverlay"
+	args={{ ...CHAIN_ARGS, onJumpToNode: fn() }}
+	play={async ({ canvasElement }) => {
+		const root = await peekAt(canvasElement, 'a');
+
+		let card = root;
+		for (let level = 0; level + 1 < CHAIN_LABELS.length; level += 1) {
+			card = await drillInto(
+				card,
+				`n-${CHAIN_LABELS[level]}`,
+				symbolOf(CHAIN_LABELS[level + 1]).key
+			);
+		}
+		expect(root.querySelector('[data-peek-depth="6"]')).toBeInTheDocument();
+
+		// The focus overlay has no scroll container on purpose — wheel input has to
+		// reach the ZoomWorld underneath — and its pan clamp puts below-frame
+		// content out of reach. So the card scrolls, or a deep cascade is lost.
+		const scroller = root.querySelector('[data-peek-scroll]') as HTMLElement;
+		expect(getComputedStyle(scroller).overflowY).toBe('auto');
+		await waitFor(() => {
+			expect(scroller.scrollHeight).toBeGreaterThan(scroller.clientHeight);
+		});
+
+		// Depth is unbounded but the indent is not: past four steps it costs more
+		// width than it buys, and the enclosing borders already show the nesting.
+		const indentAt = (depth: number) =>
+			getComputedStyle(root.querySelector(`[data-peek-depth="${depth}"]`) as HTMLElement)
+				.marginLeft;
+		expect(indentAt(4)).not.toBe(indentAt(3));
+		expect(indentAt(5)).toBe(indentAt(4));
+		expect(indentAt(6)).toBe(indentAt(4));
+	}}
+/>
+
+<Story
+	name="TappingTheChipAgainTakesTheQuestionBack"
+	args={{ ...CASCADE_ARGS, onJumpToNode: fn() }}
+	play={async ({ canvasElement }) => {
+		const chip = canvasElement.querySelector('[data-designation-key="g"]') as HTMLElement;
+		await peekAtG(canvasElement);
+		expect(chip).toHaveAttribute('aria-pressed', 'true');
+
+		chip.click();
+
+		// The chip reads as pressed, so it has to un-press: the tap that asked the
+		// question is the obvious way to take it back.
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-peek-path]')).not.toBeInTheDocument();
+		});
+		expect(chip).toHaveAttribute('aria-pressed', 'false');
 		expect(document.activeElement).toBe(chip);
 	}}
 />

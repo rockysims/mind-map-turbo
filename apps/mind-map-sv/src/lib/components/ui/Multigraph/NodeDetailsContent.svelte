@@ -2,16 +2,27 @@
 	import type { GraphAssetStore } from '$lib/assets/assetStore';
 	import MathText from '../MathText/MathText.svelte';
 	import type { GraphAssetMetadata } from '../types/multigraph';
-	import type { NodeData, NodeImageContent } from '../types/node';
+	import type { NodeData, NodeImageContent, QuantityDesignation } from '../types/node';
 	import type { NodeDiagnosticsView } from './lib/nodeDiagnosticsView';
 	import type { NodeQuantities } from './lib/nodeQuantities';
 	import type { QuantityIndexEntry } from './lib/quantityIndex';
 	import { designationView } from './lib/quantityDesignations';
+	import {
+		closeBranch,
+		isBranchOpen,
+		openCascade,
+		parsePath,
+		serializePath,
+		toggleBranch,
+		type PeekCascade,
+		type PeekPath
+	} from './lib/peekCascade';
 	import QuantityDesignationChips from './QuantityDesignationChips.svelte';
 	import QuantityPeekCard from './QuantityPeekCard.svelte';
 
 	const EMPTY_DIAGNOSTICS: NodeDiagnosticsView = { items: [], cycleNodeIds: [] };
 	const EMPTY_QUANTITIES: NodeQuantities = { defines: [], references: [] };
+	const EMPTY_DESIGNATIONS: readonly QuantityDesignation[] = [];
 
 	const DIAGNOSTIC_TEXT = {
 		unresolved: 'is not defined anywhere',
@@ -30,6 +41,7 @@
 		diagnostics = EMPTY_DIAGNOSTICS,
 		quantities = EMPTY_QUANTITIES,
 		quantityEntryFor,
+		inputsForNodeId = () => EMPTY_DESIGNATIONS,
 		titleForNodeId = (nodeId: string) => nodeId,
 		onCreateDefiningNode,
 		onJumpToNode
@@ -47,6 +59,12 @@
 		 * lookup rather than a map so nothing here depends on the whole index.
 		 */
 		quantityEntryFor?: (key: string) => QuantityIndexEntry | undefined;
+		/**
+		 * One node's confirmed inputs, for the drill line under each definer row.
+		 * A lookup for the same reason `quantityEntryFor` is one, and it hands back
+		 * the node's own array so the cards do no work per graph frame.
+		 */
+		inputsForNodeId?: (nodeId: string) => readonly QuantityDesignation[];
 		titleForNodeId?: (nodeId: string) => string;
 		/**
 		 * The key rides along with the label so the new node can be seeded with the
@@ -63,9 +81,22 @@
 	} = $props();
 
 	let imageUrls = $state<Record<string, string>>({});
-	let openPeekKey = $state<string | null>(null);
-	/** The chip the open card belongs to, so dismissing returns focus to it. */
+	/**
+	 * Every peek card on screen, as one tree. This is the whole cascade's state:
+	 * the cards themselves are presentational, because N cards each holding a
+	 * document listener would race — every one of them stopping propagation, and
+	 * the wrong one closing.
+	 */
+	let cascade = $state<PeekCascade | null>(null);
+	/** The chip the cascade belongs to, so dismissing returns focus to it. */
 	let peekAnchor: HTMLElement | null = null;
+	/**
+	 * The card that should take focus, addressed by serialized path. Consumed and
+	 * cleared by whichever card matches, or every later render would refocus it.
+	 */
+	let focusRequestPath = $state<string | null>(null);
+	/** The subtree the cards live in, for hit-testing a press against them. */
+	let peekSection = $state<HTMLElement | null>(null);
 
 	const designations = $derived(designationView(quantities, node.inputs, node.outputs));
 	const hasDesignations = $derived(
@@ -73,29 +104,117 @@
 			designations.outputs.length > 0 ||
 			designations.suggestions.length > 0
 	);
-	const peekEntry = $derived(openPeekKey === null ? undefined : quantityEntryFor?.(openPeekKey));
+	const peekKey = $derived(cascade?.rootKey ?? null);
+	const peekEntry = $derived(peekKey === null ? undefined : quantityEntryFor?.(peekKey));
 	const peekLabel = $derived(
-		designations.inputs.find((chip) => chip.symbol.key === openPeekKey)?.symbol.label ?? ''
+		designations.inputs.find((chip) => chip.symbol.key === peekKey)?.symbol.label ?? ''
 	);
 
-	// A quantity that stops being an input while its card is open has nothing left
-	// to explain, and the node it was read from may have gone with it.
+	// A quantity that stops being an input while its cascade is open has nothing
+	// left to explain, and the node it was read from may have gone with it. Only
+	// the root is watched: a nested chip that disappears already stops rendering,
+	// because the cards walk the definers' live designations.
 	$effect(() => {
-		if (openPeekKey === null) return;
-		if (designations.inputs.some((chip) => chip.symbol.key === openPeekKey)) return;
-		openPeekKey = null;
+		if (peekKey === null) return;
+		if (designations.inputs.some((chip) => chip.symbol.key === peekKey)) return;
+		cascade = null;
+		focusRequestPath = null;
+		peekAnchor = null;
 	});
 
-	function openPeek(key: string, anchor: HTMLElement) {
-		peekAnchor = anchor;
-		openPeekKey = key;
+	function rootCard(): Element | null {
+		return peekSection?.querySelector('[data-peek-path=""]') ?? null;
 	}
 
-	function closePeek() {
-		openPeekKey = null;
+	function openPeek(key: string, anchor: HTMLElement) {
+		// A chip that reads as pressed has to un-press: the same tap that asked the
+		// question is how a reader takes it back.
+		if (cascade?.rootKey === key) {
+			closeCascade();
+			return;
+		}
+		peekAnchor = anchor;
+		cascade = openCascade(key);
+		focusRequestPath = '';
+	}
+
+	function closeCascade() {
+		cascade = null;
+		focusRequestPath = null;
 		peekAnchor?.focus();
 		peekAnchor = null;
 	}
+
+	function toggleBranchAt(path: PeekPath) {
+		const open = cascade;
+		if (open === null) return;
+		const opening = !isBranchOpen(open, path);
+		cascade = toggleBranch(open, path);
+		// Opening is the same gesture as opening the root card, so it lands the
+		// reader inside the answer; closing leaves them on the chip they pressed.
+		focusRequestPath = opening ? serializePath(path) : null;
+	}
+
+	/**
+	 * The chip that opened the card at this path. It carries the same serialized
+	 * path the card does, which is what makes this a lookup rather than a search:
+	 * quantity keys embed a NUL, and `CSS.escape` turns that into U+FFFD rather
+	 * than escaping it, so the raw key is not usable in a selector.
+	 */
+	function drillChipFor(serializedPath: string): HTMLElement | null {
+		const found = rootCard()?.querySelector(`[data-peek-drill-path="${serializedPath}"]`);
+		return found instanceof HTMLElement ? found : null;
+	}
+
+	// One listener pair for the whole cascade, registered from inside the click
+	// that opened it, so the opening gesture's own pointerdown has been and gone.
+	$effect(() => {
+		if (cascade === null) return;
+
+		function onPointerDown(event: PointerEvent) {
+			const target = event.target;
+			if (target instanceof Node) {
+				if (rootCard()?.contains(target)) return;
+				// The chip is a toggle; letting the press close the cascade would leave
+				// its click reopening what the reader just asked to dismiss.
+				if (peekAnchor?.contains(target)) return;
+			}
+			closeCascade();
+		}
+
+		function onKeyDown(event: KeyboardEvent) {
+			if (event.key !== 'Escape') return;
+			const open = cascade;
+			if (open === null) return;
+			// The focus overlay closes on Escape too, and dismissing a card is the
+			// narrower intent while one is open.
+			event.stopPropagation();
+
+			// Deepest wins, read off the DOM rather than from a second copy of the
+			// tree: the card holding focus is the one the reader is in.
+			const active = document.activeElement;
+			const holder = active instanceof Element ? active.closest('[data-peek-path]') : null;
+			const serializedPath = holder?.getAttribute('data-peek-path') ?? '';
+			if (serializedPath === '') {
+				closeCascade();
+				return;
+			}
+
+			// Read the chip before the card goes, then hand the reader back to the
+			// question they had just asked rather than to the top of the tab order.
+			const chip = drillChipFor(serializedPath);
+			cascade = closeBranch(open, parsePath(serializedPath));
+			focusRequestPath = null;
+			chip?.focus();
+		}
+
+		document.addEventListener('pointerdown', onPointerDown, true);
+		document.addEventListener('keydown', onKeyDown, true);
+		return () => {
+			document.removeEventListener('pointerdown', onPointerDown, true);
+			document.removeEventListener('keydown', onKeyDown, true);
+		};
+	});
 
 	const imageBlocks = $derived(
 		(node.content ?? []).filter((block): block is NodeImageContent => block.type === 'image')
@@ -135,33 +254,35 @@
 			that quietly rewrote the graph would be indistinguishable from a tap that
 			navigated. Assignment lives in the edit sheet; peeking lives here.
 		-->
-		<section class="designation-section">
-			<QuantityDesignationChips
-				mode="view"
-				view={designations}
-				onPeek={openPeek}
-				peekKey={openPeekKey}
-			/>
-			{#if openPeekKey !== null}
+		<section class="designation-section" bind:this={peekSection}>
+			<QuantityDesignationChips mode="view" view={designations} onPeek={openPeek} {peekKey} />
+			{#if cascade !== null}
 				<!--
-					Keyed so asking about another quantity is a new dialog rather than the
-					old one re-labelled: the card takes focus on open, and reusing the
-					instance would leave the reader outside the answer they just asked for.
+					One instance for the whole cascade, and no remount when the reader asks
+					about another quantity: focus is directed by `focusRequestPath`, which
+					lands them inside the new answer without throwing away the DOM.
 				-->
-				{#key openPeekKey}
-					<QuantityPeekCard
-						entry={peekEntry}
-						label={peekLabel}
-						{titleForNodeId}
-						onJumpToNode={(nodeId) => {
-							openPeekKey = null;
-							onJumpToNode?.(nodeId);
-						}}
-						onCreateDefiningNode={(quantityLabel) =>
-							onCreateDefiningNode?.(quantityLabel, openPeekKey ?? '')}
-						onClose={closePeek}
-					/>
-				{/key}
+				<QuantityPeekCard
+					isRoot
+					entry={peekEntry}
+					label={peekLabel}
+					quantityKey={cascade.rootKey}
+					{cascade}
+					{titleForNodeId}
+					{inputsForNodeId}
+					{quantityEntryFor}
+					{focusRequestPath}
+					onFocusHandled={() => (focusRequestPath = null)}
+					onToggleBranch={toggleBranchAt}
+					onJumpToNode={(nodeId) => {
+						cascade = null;
+						focusRequestPath = null;
+						peekAnchor = null;
+						onJumpToNode?.(nodeId);
+					}}
+					{onCreateDefiningNode}
+					onClose={closeCascade}
+				/>
 			{/if}
 		</section>
 	{/if}

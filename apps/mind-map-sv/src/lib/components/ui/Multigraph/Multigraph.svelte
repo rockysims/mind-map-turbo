@@ -1,3 +1,15 @@
+<script module lang="ts">
+	import type { QuantityDesignation } from '../types/node';
+
+	/**
+	 * Shared so a node with no confirmed inputs allocates nothing. The peek
+	 * cascade asks for a definer's inputs on every render of every card, and
+	 * `nodeById` rebuilds on each settle frame, so a fresh `[]` here would churn
+	 * the cards' derived work for a graph that did not change.
+	 */
+	const EMPTY_DESIGNATIONS: readonly QuantityDesignation[] = [];
+</script>
+
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import Node from '$lib/components/ui/Node/Node.svelte';
@@ -8,6 +20,7 @@
 	import GraphQueryPanel from './GraphQueryPanel.svelte';
 	import NodeDetailsContent from './NodeDetailsContent.svelte';
 	import NodeActionMenu from './NodeActionMenu.svelte';
+	import NavBreadcrumbs from './NavBreadcrumbs.svelte';
 	import { mathPlainText } from '../MathText/lib/mathPlainText';
 	import NodeEditSheet from './NodeEditSheet.svelte';
 	import DeepZoomStack, { type StackFrameArgs, type LayerBaseSize } from './DeepZoomStack.svelte';
@@ -16,7 +29,7 @@
 	import { APP_CONFIG } from '$lib/appConfig';
 	import type { GraphAssetStore } from '$lib/assets/assetStore';
 	import { prefersReducedMotion } from '$lib/reducedMotion';
-	import type { NodeData, QuantityDesignation } from '../types/node';
+	import type { NodeData } from '../types/node';
 	import type { EdgeData } from '../types/edge';
 	import type {
 		GraphAssetMetadata,
@@ -90,6 +103,7 @@
 	} from './lib/quantityLabels.js';
 	import { LayoutRuntime } from './lib/layoutRuntime.svelte.js';
 	import { TransientRevealController } from './lib/transientReveal.svelte.js';
+	import { navBreadcrumbs } from './lib/navStack.js';
 	import { externalGraphSyncToken } from './lib/graphSync.js';
 	import type { EntryGestureDirection } from './lib/entryGestureGate.js';
 	import {
@@ -308,6 +322,18 @@
 	 * there. Session-only: it never reaches `graph`, so no jump is a graph edit.
 	 */
 	const transientReveal = new TransientRevealController();
+
+	/**
+	 * The node whose details the reader is in, for the trail's last crumb.
+	 *
+	 * `focus.focusedNodeId` is null at an image level, which would blank the tail
+	 * exactly when the reader is deepest — so the trail names the node the stack
+	 * was entered on, which is what a jump would return to anyway.
+	 */
+	const focusRootNodeId = $derived(
+		focus.levels[0]?.subjectKind === 'node' ? focus.levels[0].subjectId : null
+	);
+	const navCrumbs = $derived(navBreadcrumbs(transientReveal.entries, focusRootNodeId));
 
 	/** Internal enter animations for nodes added by the user (scale 0 → target). */
 	let nodeEnterAnimations = $state<Record<string, NodeEnterAnimation>>({});
@@ -1091,13 +1117,20 @@
 		enterFocusOnNode(targetNodeId);
 	}
 
-	/** Return to where the last jump started, taking its seed back out with it. */
-	function navigateBack() {
-		const entry = transientReveal.pop();
+	/**
+	 * Go back to where one jump started, dropping every jump made after it.
+	 *
+	 * Unwinding several at once is one restore, not a replay: the camera the
+	 * reader wants is the one recorded at the crumb they clicked, and stepping
+	 * through the intervening entries would fly them along a route they are
+	 * explicitly asking to skip.
+	 */
+	function navigateToCrumb(index: number) {
+		const entry = transientReveal.unwindTo(index);
 		if (!entry) return;
-		// Popping already removed the seed from the hop map. If the reader pinned
-		// the node while they were there, it stays for that reason instead — which
-		// is the correct outcome and needs no special case.
+		// Unwinding already removed the dropped seeds from the hop map. If the
+		// reader pinned one of those nodes while they were there, it stays for that
+		// reason instead — which is the correct outcome and needs no special case.
 		relaxAfterTransientRevealChange();
 		viewStateRequest = {
 			id: (viewStateRequestId += 1),
@@ -1105,9 +1138,15 @@
 			panY: entry.viewState.panY,
 			scale: entry.viewState.scale
 		};
-		// Back undoes the jump, so it has to undo what the jump put on screen too:
-		// the reader was reading the origin's details, not looking at the canvas.
+		// Going back undoes the jump, so it has to undo what the jump put on screen
+		// too: the reader was reading the origin's details, not looking at the
+		// canvas.
 		if (entry.originFocused) enterFocusOnNode(entry.originNodeId);
+	}
+
+	/** Return to where the last jump started — the trail's newest crumb. */
+	function navigateBack() {
+		navigateToCrumb(transientReveal.depth - 1);
 	}
 
 	/**
@@ -1473,13 +1512,14 @@
 		Find / Filter
 	</button>
 
-	{#if transientReveal.top}
+	{#if transientReveal.top && !focus.isFocused}
 		{@const backEntry = transientReveal.top}
 		<!--
-			Only affordance for undoing a jump, and a jump now lands in the target's
-			details — so it has to sit above the focus overlay rather than under it.
-			A stack is only ever non-empty because of a jump, so it appears exactly
-			when there is something to go back from.
+			The canvas's single-step way back. Inside the details view the breadcrumb
+			trail says the same thing and more, so this would be a second control for
+			one of the moves it already offers — and one that has to out-stack the
+			overlay to be clickable at all. A stack is only ever non-empty because of
+			a jump, so it appears exactly when there is something to go back from.
 		-->
 		<button
 			type="button"
@@ -1983,6 +2023,7 @@
 							diagnostics={nodeDiagnosticsView(dataflowDiagnostics, detailsNode.id)}
 							quantities={dataflow.index.byNodeId.get(detailsNode.id)}
 							quantityEntryFor={(key) => dataflow.index.entries.get(key)}
+							inputsForNodeId={(nodeId) => nodeById[nodeId]?.inputs ?? EMPTY_DESIGNATIONS}
 							{titleForNodeId}
 							onCreateDefiningNode={(quantityLabel, quantityKey) =>
 								createDefiningNode(detailsNode.id, quantityLabel, quantityKey)}
@@ -2008,6 +2049,15 @@
 				if (event.key === 'Escape') focus.closeFocus();
 			}}
 		>
+			{#if focus.dialogOpen && navCrumbs.length > 1}
+				<!--
+					Only worth drawing once there is somewhere to go back to: a lone
+					current crumb would be a trail naming where the reader is standing.
+				-->
+				<div class="focus-breadcrumbs">
+					<NavBreadcrumbs crumbs={navCrumbs} {titleForNodeId} onNavigate={navigateToCrumb} />
+				</div>
+			{/if}
 			{#if focus.dialogOpen}
 				<button
 					class="focus-close-button"
@@ -2202,6 +2252,18 @@
 		-webkit-user-drag: none;
 	}
 
+	/* Same layer as the Close button it shares the overlay's top edge with, and
+	   width-capped so a deep trail wraps under itself rather than running into
+	   Close at phone width. */
+	.focus-breadcrumbs {
+		position: fixed;
+		top: calc(1rem + env(safe-area-inset-top));
+		left: calc(1rem + env(safe-area-inset-left));
+		z-index: 65;
+		max-width: min(60vw, calc(100% - 12rem));
+		pointer-events: auto;
+	}
+
 	.focus-close-button {
 		position: fixed;
 		top: calc(1rem + env(safe-area-inset-top));
@@ -2240,11 +2302,10 @@
 	}
 
 	/* Stacked above Find / Filter rather than beside it: the label carries a node
-	   title, so its width is not ours to predict. Above the focus overlay (60)
-	   and its close button (65) because a jump lands in the target's details:
-	   under them the only way back would be to leave the details first. */
+	   title, so its width is not ours to predict. Keeps the toolbar's own z-index
+	   because it never renders over the focus overlay — inside the details view
+	   the breadcrumb trail is what goes back. */
 	.nav-back-button {
-		z-index: 70;
 		left: 0.75rem;
 		bottom: 3.5rem;
 		max-width: min(20rem, calc(100% - 1.5rem));

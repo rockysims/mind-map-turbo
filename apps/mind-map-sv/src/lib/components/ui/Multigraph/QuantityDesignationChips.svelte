@@ -14,6 +14,7 @@
 	 * somewhere new.
 	 */
 	import type { QuantitySymbol } from '../MathText/lib/mathSymbols';
+	import QuantityChip from './QuantityChip.svelte';
 	import type { DesignationChip, DesignationView } from './lib/quantityDesignations';
 
 	let {
@@ -75,50 +76,38 @@
 		if (chip.role !== 'input') return;
 		onPeek?.(chip.symbol.key, event.currentTarget as HTMLElement);
 	}
-</script>
 
-{#snippet chipContent(chip: DesignationChip)}
-	<span class="label">{chip.symbol.label}</span>
-	{#if chip.stale}
-		<span class="stale-mark" aria-hidden="true">!</span>
-	{/if}
-{/snippet}
+	/** How this column labels a chip: what it is, and what its tap would do. */
+	function chipAttributes(chip: DesignationChip): Record<string, string | undefined> {
+		const pressed =
+			mode === 'view' && chip.role === 'input'
+				? peekKey === chip.symbol.key
+					? 'true'
+					: 'false'
+				: undefined;
+		return {
+			'data-designation-role': chip.role,
+			'data-designation-stale': chip.stale ? 'true' : undefined,
+			'data-designation-key': chip.symbol.key,
+			'aria-pressed': pressed,
+			title: chipTitle(chip)
+		};
+	}
+</script>
 
 {#snippet chipList(chips: DesignationChip[], columnLabel: string)}
 	<ul aria-label={columnLabel}>
 		{#each chips as chip (chip.symbol.key)}
 			<li>
-				{#if isInteractive(chip)}
-					<button
-						type="button"
-						class="chip"
-						class:suggestion={chip.role === 'suggestion'}
-						class:stale={chip.stale}
-						class:peeking={mode === 'view' && peekKey === chip.symbol.key}
-						data-designation-role={chip.role}
-						data-designation-stale={chip.stale ? 'true' : undefined}
-						data-designation-key={chip.symbol.key}
-						aria-pressed={mode === 'view' && chip.role === 'input'
-							? peekKey === chip.symbol.key
-							: undefined}
-						title={chipTitle(chip)}
-						onclick={(event) => activate(chip, event)}
-					>
-						{@render chipContent(chip)}
-					</button>
-				{:else}
-					<span
-						class="chip inert"
-						class:suggestion={chip.role === 'suggestion'}
-						class:stale={chip.stale}
-						data-designation-role={chip.role}
-						data-designation-stale={chip.stale ? 'true' : undefined}
-						data-designation-key={chip.symbol.key}
-						title={chipTitle(chip)}
-					>
-						{@render chipContent(chip)}
-					</span>
-				{/if}
+				<QuantityChip
+					label={chip.symbol.label}
+					stale={chip.stale}
+					suggestion={chip.role === 'suggestion'}
+					peeking={mode === 'view' && peekKey === chip.symbol.key}
+					interactive={isInteractive(chip)}
+					attributes={chipAttributes(chip)}
+					onclick={(event) => activate(chip, event)}
+				/>
 			</li>
 		{/each}
 		{#if chips.length === 0}
@@ -196,65 +185,11 @@
 		display: flex;
 	}
 
-	.chip {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.2rem;
-		min-height: 2rem;
-		border: 1px solid #cbd5e1;
-		border-radius: 999px;
-		padding: 0.2rem 0.6rem;
-		background: #ffffff;
-		color: #0f172a;
-		font: inherit;
-		font-size: 0.9rem;
-	}
-
-	button.chip {
-		cursor: pointer;
-	}
-
-	.label {
-		font-style: italic;
-		font-weight: 600;
-	}
-
 	/*
-	 * A ghost reads as an offer rather than a fact: the same shape as a confirmed
-	 * chip so its column placement is legible, drawn faintly so the eye does not
-	 * count it among what the node actually does.
+	 * The chip's own rules live in `QuantityChip.svelte`: scoped styles do not
+	 * cross a component boundary, and the peek card's drill line renders the same
+	 * component.
 	 */
-	.chip.suggestion {
-		border-style: dotted;
-		background: transparent;
-		color: #475569;
-		opacity: 0.65;
-	}
-
-	/*
-	 * Still a real designation — it draws its edge — so it keeps the solid fill of
-	 * a confirmed chip and takes a warning tint instead of fading out.
-	 */
-	.chip.stale {
-		border-style: dashed;
-		border-color: #f59e0b;
-		background: #fffbeb;
-		color: #92400e;
-		opacity: 1;
-	}
-
-	.stale-mark {
-		font-weight: 700;
-	}
-
-	.chip.peeking {
-		border-color: #0f172a;
-		background: #e2e8f0;
-	}
-
-	.chip.inert {
-		cursor: default;
-	}
 
 	.empty-column,
 	.hint {

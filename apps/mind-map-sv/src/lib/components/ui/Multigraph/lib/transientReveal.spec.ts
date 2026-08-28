@@ -76,6 +76,27 @@ describe('transient reveal controller', () => {
 		expect(controller.revealedNodeIds).not.toBe(first);
 	});
 
+	it('unwinds several jumps at once, dropping their seeds with them', () => {
+		const controller = new TransientRevealController();
+		controller.push(entry('a', 'x'));
+		controller.push(entry('b', 'y'));
+		controller.push(entry('c', 'z'));
+
+		const target = controller.unwindTo(0);
+
+		expect(target?.originNodeId).toBe('a');
+		expect(controller.depth).toBe(0);
+		expect(controller.revealedNodeIds.size).toBe(0);
+	});
+
+	it('leaves the stack alone when the crumb no longer exists', () => {
+		const controller = new TransientRevealController();
+		controller.push(entry('a', 'x'));
+
+		expect(controller.unwindTo(3)).toBeUndefined();
+		expect(controller.depth).toBe(1);
+	});
+
 	it('clears the whole stack', () => {
 		const controller = new TransientRevealController();
 		controller.push(entry('a', 'x'));
