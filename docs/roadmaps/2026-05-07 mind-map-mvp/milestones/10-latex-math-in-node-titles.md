@@ -1,6 +1,6 @@
 # Milestone 10: LaTeX math in node titles
 
-**Status:** not started
+**Status:** complete
 **Depends on:** milestone 08 (LaTeX math in node descriptions) and milestone 09
 (variable dataflow layer).
 **Plan:** [plans/2026-08-27 10-latex-math-in-node-titles.md](../plans/2026-08-27%2010-latex-math-in-node-titles.md)
@@ -68,27 +68,22 @@ rendered math is not plain text.
 
 ## Risks and open questions
 
-To be resolved in the plan.
+All resolved in the plan; the reasoning lives there.
 
-- **Whether a title participates in the dataflow layer.** The milestone 09
-  inference reads descriptions only. A title of `$x = 1$` looks like a definition
-  and an author would likely expect it to behave as one, but titles are short
-  labels and promoting them could manufacture quantities from decorative math.
-  The plan should decide, and the decision should be the same one an author would
-  guess.
-- **What a symbol reads as aloud.** The dataflow layer already canonicalizes
-  symbols to a label like `v_0`. The plan should decide whether the projection
-  reuses that, uses the raw source, or uses MathML's own text content, and
-  whether the three ever disagree.
-- **When the re-fit runs.** `SquareText` fits inside an effect on mount. The plan
-  should decide how a font-driven re-fit is triggered without refitting every
-  node on every frame, given a large graph renders many titles at once.
-- **Whether search matches source, projection, or both.** Matching only the
-  projection makes `v_0` findable but `\alpha` not; matching both makes results
-  harder to explain. The plan should choose deliberately.
-- **Cost at graph scale.** Every visible node renders a title, so titles are a
-  far hotter path than descriptions, which render one at a time in focus. The
-  plan should decide what is cached and confirm math-free titles pay nothing.
+- **Whether a title participates in the dataflow layer.** Resolved: yes, on the
+  same terms as a description.
+- **What a symbol reads as aloud.** Resolved: MathML's own text content, so
+  `\alpha` is announced as `α`.
+- **When the re-fit runs.** Resolved: once per component on a document-level
+  `fonts.ready`, and only for content containing math.
+- **Whether search matches source, projection, or both.** Resolved: both.
+- **Cost at graph scale.** Resolved: math-free text short-circuits before
+  segmentation, and math renders through the existing memoized cache.
+
+One thing this milestone did not anticipate: `SquareText`'s fit tracked only its
+element binding, not its text, so a retitle kept the size found for the previous
+string. Harmless while titles were static prose and load-bearing once they can
+change shape. Fixed here.
 
 ## References
 

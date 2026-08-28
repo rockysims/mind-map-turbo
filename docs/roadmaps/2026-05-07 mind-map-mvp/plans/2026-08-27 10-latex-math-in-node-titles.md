@@ -3,7 +3,7 @@
 **Created:** 2026-08-27
 **Author:** Cursor agent
 **Milestone:** [milestones/10-latex-math-in-node-titles.md](../milestones/10-latex-math-in-node-titles.md)
-**Status:** draft
+**Status:** done
 **Total estimated effort:** M (six tasks, four waves)
 
 ## Summary
@@ -36,8 +36,8 @@ that needs a title as a string a plain-text projection instead of raw LaTeX.
   per node would run the same fit hundreds of times for one cause. Math-free
   titles skip it entirely, which keeps the common case free.
 
-- **Whether search matches source, projection, or both.** **Both, with the
-  projection tried first.** Matching only the projection makes `\alpha`
+- **Whether search matches source, projection, or both.** **Both.** Matching only
+  the projection makes `\alpha`
   unfindable by anyone who typed what they wrote; matching only the source makes
   `α` unfindable by anyone reading the screen. Both is explainable in one
   sentence — "you can search for what you see or what you typed" — which is the
@@ -225,3 +225,31 @@ Wave 3   T06                     (needs T02's rendering)
   then reported itself undefined. The general lesson — authors do not model the
   parser's internal distinctions — is why titles infer on the same terms as
   descriptions rather than on their own.
+
+### Execution notes
+
+- **Search tests the source first, not the projection.** The plan said projection
+  first. For a boolean OR the order cannot change the answer, only the cost, and
+  the source test is a substring check on a string already in hand while the
+  projection has to render. The stated semantics are unchanged.
+- **T04 was applied to descriptions as well as titles.** Descriptions have had
+  rendered math since milestone 08 and carried the identical gap. The fix is the
+  same call on the same helper, so scoping it to titles would have left a known
+  bug in place for no reason.
+- **`SquareText`'s fit did not track its text.** The effect read only the element
+  binding, so a retitle kept the size found for the previous string. Latent before
+  this milestone and load-bearing after it, since titles now change shape. Fixed
+  in T02 and covered in T06.
+- **The first version of that re-fit test passed against the unfixed code**,
+  because changing from plain text to math also trips the font effect, which calls
+  the same fit. Rewritten with two math-free strings and confirmed to fail with the
+  fix reverted. Worth recording as a pattern: a component with two effects calling
+  one function will happily accept a test that proves nothing.
+- **`MathText` gained a `singleLine` mode.** Its display-math path installs a
+  `ResizeObserver` on its parent to scale the equation, and `SquareText` fits by
+  repeatedly resizing that same parent. Routing display segments through the inline
+  path sidesteps the interaction instead of arbitrating it.
+- **Titles and descriptions were already `$`-guarded, but not equally.** T02
+  initially used a substring test where `hasMath` already existed and is stricter,
+  so `Costs \$5` would have taken the math path. Now guarded by the cheap test
+  followed by the real one.
