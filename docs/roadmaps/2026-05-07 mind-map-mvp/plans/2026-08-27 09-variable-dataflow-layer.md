@@ -32,6 +32,21 @@ resolved here.
   references to `m` and `c`. This is what keeps the feature quiet on graphs that
   merely happen to contain math.
 
+- **Whether reuse of an undefined letter is silent.** Yes on the canvas, no in
+  focus. The milestone asks for two things that read as contradictory: promotion
+  only on definition, so an isolated `E = mc^2` manufactures nothing, but also an
+  unresolved marker on a reference with no definer. They reconcile if the
+  promotion rule governs the **canvas** — edges, chips, labels — while unresolved
+  references are a **focus-mode affordance**. So `m` and `c` produce no arrow, no
+  chip, and no marker at graph scale; opening that node offers to create a node
+  defining them. That matches the milestone's own framing of an unresolved
+  quantity as an invitation rather than an error, and it keeps the canvas quiet
+  by default in the same spirit as the conflict decision below.
+
+  Consequence for T03: the index retains **every** reference, resolved or not,
+  and the promotion rule is applied where edges and chips are generated. Throwing
+  unclaimed symbols away at index time would leave T05 nothing to report.
+
 - **How aggressively to surface a symbol defined by two nodes.** _(User
   decision.)_ **Mark the competing nodes and record the conflict for the
   milestone 10 panel; do not interrupt with a toast or modal, and still draw the
