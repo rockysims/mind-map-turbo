@@ -2918,6 +2918,63 @@
 />
 
 <Story
+	name="UserAuthorsAMathTitleInlineAlongsideATag"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 1,
+			pinned: [0],
+			edges: []
+		}),
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: { panX: 0, panY: 0, scale: 0.5 },
+		layoutSettings: { relaxIterations: 1 },
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const stageRect = stage.getBoundingClientRect();
+		const sourceCircle = getCircle(canvasElement, 'n0');
+		const sourceCenter = getCenter(sourceCircle);
+		const bgX = stageRect.right - 20;
+		const bgY = stageRect.top + stageRect.height / 2;
+
+		await dispatchDoubleClickDrag(sourceCircle, sourceCenter.x, sourceCenter.y, stage, bgX, bgY);
+		await sleep();
+		await waitForLayout();
+
+		const titleInput = canvasElement.querySelector('.title-input') as HTMLInputElement | null;
+		expect(titleInput).toBeInTheDocument();
+
+		// Tag syntax and math share one line. `$` is not a tag marker and `#` is not
+		// a math delimiter, but the two parsers running over the same string is
+		// exactly where an interaction would hide.
+		titleInput!.value = '#kinematics $v = a t$';
+		titleInput!.dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+		);
+		await sleep();
+
+		expect(canvasElement.querySelector('.title-input')).not.toBeInTheDocument();
+
+		// Stored as source, so the author gets back what they typed on the next edit.
+		const changedGraph = lastChangedGraph(args);
+		expect(changedGraph.nodes.find((node) => node.id === 'n1')).toMatchObject({
+			title: '$v = a t$',
+			tags: ['kinematics']
+		});
+
+		// Displayed as math. Seeing the delimiters would mean the commit path
+		// bypassed the renderer.
+		const newTitle = canvasElement.querySelector('[data-node-id="n1"] .title') as HTMLElement;
+		await waitFor(() => {
+			expect(newTitle.querySelector('math')).not.toBeNull();
+		});
+		expect(newTitle.textContent).not.toContain('$');
+	}}
+/>
+
+<Story
 	name="UserLeavesInlineTitleEmpty"
 	args={{
 		multigraphData: makeGraph({

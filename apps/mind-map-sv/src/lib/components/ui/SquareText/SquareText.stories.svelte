@@ -28,6 +28,10 @@
 	};
 </script>
 
+<script lang="ts">
+	let retitleText = $state('i');
+</script>
+
 <Story name="Summary" args={defaultArgsSummary}>
 	{#snippet template(args)}
 		<div class="outerContainer">
@@ -132,6 +136,43 @@
 		await expect(context.canvasElement.textContent).toContain('Speed');
 	}}
 />
+
+<Story
+	name="Test:RefitsWhenTheTextChanges"
+	play={async (context) => {
+		// The fit effect used to track only the element binding, so a retitle kept
+		// the size found for the previous string. Titles change often now that they
+		// can hold math, which is how that would have surfaced.
+		const fitted = context.canvasElement.querySelector('.squareText') as HTMLElement;
+		const before = fitted.offsetWidth;
+
+		(context.canvasElement.querySelector('[data-retitle]') as HTMLElement).click();
+
+		await waitFor(() => {
+			expect(fitted.offsetWidth).not.toBe(before);
+		});
+	}}
+>
+	{#snippet template()}
+		<div class="outerContainer">
+			<div class="innerContainer">
+				<SquareText text={retitleText} classList={['title']} />
+			</div>
+			<!--
+				Both strings are math-free on purpose. Crossing into math would also
+				trip the font effect, which calls setSize too, and the test would pass
+				whether or not the fit tracks the text.
+			-->
+			<button
+				type="button"
+				data-retitle
+				onclick={() => (retitleText = 'A considerably longer replacement title')}
+			>
+				retitle
+			</button>
+		</div>
+	{/snippet}
+</Story>
 
 <style>
 	.innerContainer {
