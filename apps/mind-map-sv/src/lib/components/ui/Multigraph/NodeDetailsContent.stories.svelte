@@ -81,3 +81,98 @@
 		}
 	}}
 />
+
+<Story
+	name="ShowsNoDiagnosticsWhenEveryQuantityResolves"
+	play={async ({ canvasElement }) => {
+		// A clean description reads exactly as it did before diagnostics existed.
+		expect(
+			focusContent(canvasElement).querySelector('[data-quantity-diagnostics]')
+		).not.toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="OffersToDefineAnUnresolvedQuantity"
+	args={{
+		node: makeNode('Energy is $$E = m c^2$$.'),
+		diagnostics: {
+			items: [
+				{ key: 'm', label: 'm', state: 'unresolved', nodeIds: [] },
+				{ key: 'c', label: 'c', state: 'unresolved', nodeIds: [] }
+			],
+			cycleNodeIds: []
+		},
+		onCreateDefiningNode: () => {}
+	}}
+	play={async ({ canvasElement }) => {
+		const content = focusContent(canvasElement);
+		expect(content.querySelector('[data-quantity-diagnostics]')).toBeInTheDocument();
+		expect(content.querySelector('[data-diagnostic-quantity="m"]')).toHaveAttribute(
+			'data-diagnostic-state',
+			'unresolved'
+		);
+		// An unresolved quantity is an invitation to extend the graph.
+		expect(content.querySelector('[data-create-defining-node="m"]')).toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="OffersAWayToReachAnOutOfViewDefiner"
+	args={{
+		node: makeNode('Weight is $$w = m g$$.'),
+		diagnostics: {
+			items: [{ key: 'g', label: 'g', state: 'out-of-view', nodeIds: ['gravity-node'] }],
+			cycleNodeIds: []
+		},
+		titleForNodeId: () => 'Gravity',
+		onRevealNode: () => {}
+	}}
+	play={async ({ canvasElement }) => {
+		const content = focusContent(canvasElement);
+		expect(content.querySelector('[data-diagnostic-quantity="g"]')).toHaveAttribute(
+			'data-diagnostic-state',
+			'out-of-view'
+		);
+		// Reachable, and named, so it is not mistaken for an error.
+		expect(content.querySelector('[data-reveal-node="gravity-node"]')).toHaveTextContent('Gravity');
+		expect(content.querySelector('[data-create-defining-node="g"]')).not.toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="NamesTheCompetingDefinersOfAConflictingQuantity"
+	args={{
+		node: makeNode('Weight is $$w = m g$$.'),
+		diagnostics: {
+			items: [{ key: 'g', label: 'g', state: 'conflict', nodeIds: ['earth', 'moon'] }],
+			cycleNodeIds: []
+		},
+		titleForNodeId: (nodeId) => (nodeId === 'earth' ? 'Earth' : 'Moon'),
+		onRevealNode: () => {}
+	}}
+	play={async ({ canvasElement }) => {
+		const content = focusContent(canvasElement);
+		expect(content.querySelector('[data-diagnostic-quantity="g"]')).toHaveAttribute(
+			'data-diagnostic-state',
+			'conflict'
+		);
+		expect(content.querySelector('[data-reveal-node="earth"]')).toHaveTextContent('Earth');
+		expect(content.querySelector('[data-reveal-node="moon"]')).toHaveTextContent('Moon');
+	}}
+/>
+
+<Story
+	name="SurfacesACycleAndNamesTheOtherNodesInIt"
+	args={{
+		node: makeNode('Circular: $$x = y$$.'),
+		diagnostics: { items: [], cycleNodeIds: ['other'] },
+		titleForNodeId: () => 'Other',
+		onRevealNode: () => {}
+	}}
+	play={async ({ canvasElement }) => {
+		const content = focusContent(canvasElement);
+		expect(content.querySelector('[data-diagnostic-state="cycle"]')).toBeInTheDocument();
+		expect(content.querySelector('[data-reveal-node="other"]')).toHaveTextContent('Other');
+	}}
+/>

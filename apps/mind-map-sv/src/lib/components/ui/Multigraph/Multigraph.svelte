@@ -72,6 +72,8 @@
 	} from './lib/boundedVisibility.js';
 	import { composeEdgesForRender, createDataflowModel } from './lib/dataflowLayer.js';
 	import { isDerivedEdgeId } from './lib/derivedEdges.js';
+	import { computeDataflowDiagnostics } from './lib/dataflowDiagnostics.js';
+	import { nodeDiagnosticsView } from './lib/nodeDiagnosticsView.js';
 	import {
 		quantityChips,
 		shouldShowQuantityChips,
@@ -388,6 +390,10 @@
 		})
 	);
 	const visibleGraph = $derived(graphWithVisibleNodes(adjacencyGraph, visibleNodeIds));
+	/** Needs the visible set, so that out-of-view reads differently from undefined. */
+	const dataflowDiagnostics = $derived(
+		computeDataflowDiagnostics(dataflow.index, dataflow.edges, { visibleNodeIds })
+	);
 	/** Reads the render graph so derived edges get visibility, trimming, and fade. */
 	const edgeVisibility = $derived(
 		edgeVisibilityForPinnedNeighborhood(renderGraph, hopsByNodeId, {
@@ -890,6 +896,34 @@
 
 	function toggleNodePinned(nodeId: string) {
 		commitUserGraph(layoutRuntime.beginScaleChange(togglePinned(graph, nodeId), nodeId));
+	}
+
+	/**
+	 * Bring an out-of-view definer into the neighborhood by pinning it, which is
+	 * the existing mechanism for "I want to see this and what surrounds it".
+	 */
+	function revealNode(nodeId: string) {
+		if (nodeById[nodeId]?.pinned === true) {
+			return;
+		}
+		closeOverlays();
+		commitUserGraph(layoutRuntime.beginScaleChange(setNodePinned(graph, nodeId, true), nodeId));
+	}
+
+	/**
+	 * Turn an unresolved reference into a node that defines it, placed beside the
+	 * node that asked for it and left with an empty right-hand side — inventing a
+	 * value would be guessing at the author's intent.
+	 */
+	function createDefiningNode(consumerNodeId: string, quantityLabel: string) {
+		closeOverlays();
+		const origin = graphLayout.posByNodeId[consumerNodeId] ?? CENTERED_POSITION;
+		const nextGraph = addNode(graph, {
+			title: quantityLabel,
+			description: `$$${quantityLabel} = $$`,
+			position: { x: origin.x, y: origin.y + NODE_RADIUS * 2.5 }
+		});
+		commitUserGraph(layoutRuntime.relaxAfterMutation(nextGraph, null, 1));
 	}
 
 	function deleteNode(nodeId: string) {
@@ -1630,6 +1664,11 @@
 							assets={graph.assets ?? {}}
 							{assetStore}
 							{assetScope}
+							diagnostics={nodeDiagnosticsView(dataflowDiagnostics, detailsNode.id)}
+							titleForNodeId={(nodeId) => nodeById[nodeId]?.title ?? nodeId}
+							onCreateDefiningNode={(quantityLabel) =>
+								createDefiningNode(detailsNode.id, quantityLabel)}
+							onRevealNode={(nodeId) => revealNode(nodeId)}
 						/>
 					</NodeDetailsLayer>
 				</div>
