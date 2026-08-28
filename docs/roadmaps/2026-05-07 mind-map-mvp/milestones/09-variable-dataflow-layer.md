@@ -100,8 +100,10 @@ interaction.
 - Mark a reference with no definer anywhere as unresolved, and offer to create
   a node that defines it. An unresolved quantity is an invitation to extend the
   graph, not an error to suppress.
-- Flag a quantity defined by more than one node as a conflict, naming the
-  competing nodes.
+- Flag a quantity defined more than one _way_ as a conflict, naming the competing
+  nodes. Superseded on 2026-08-27: this originally read "defined by more than one
+  node", which flagged two nodes that agreed and could not see one node
+  contradicting itself. See the amendment below.
 - Detect cycles in the dataflow graph and surface them, since a quantity
   defined in terms of itself is usually a modeling mistake.
 
@@ -179,6 +181,33 @@ To be resolved in the plan.
   but complicates highlighting a single quantity later. Resolved by retaining the
   full quantity list on each bundled edge, which turned out to matter less than
   expected once the tracing milestone was cut.
+
+## Amendment: what a conflict means (2026-08-27)
+
+Shipped as "a quantity defined by more than one node." That rule never looked at
+what the definitions said, which was wrong in both directions.
+
+It fired on agreement: two nodes each stating `x = 1` were reported as
+conflicting, though they say one thing in two places. And it was blind to real
+contradiction inside a node, because extraction deduped definitions by symbol
+alone. A node with `$x = 1$` in its title and `$x = 2$` in its description
+discarded the second statement and reported nothing.
+
+The rule is now the same wherever the definitions live: a conflict is one quantity
+defined two different ways. Comparison is structural, over the rendered MathML, so
+`v_0` and `v_{0}` agree without special handling and spacing is ignored. It is not
+algebraic — `a + b` and `b + a` read as disagreement — because deciding otherwise
+means implementing algebra, which this milestone excludes.
+
+A node contradicting itself is reported as its own state. There is no second node
+to name and nowhere to navigate to, so the panel says that rather than offering to
+reveal the node being read.
+
+Worth keeping: the original rule was defensible when only descriptions defined
+quantities, because one node could not then produce two definitions of a symbol.
+Milestone 10 let titles define, which made the missing case reachable, and only
+then did the "duplication versus disagreement" confusion in the rule become
+visible.
 
 ## References
 
