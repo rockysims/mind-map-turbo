@@ -225,6 +225,27 @@
 		return event;
 	}
 
+	/**
+	 * Right-click whatever is actually topmost at a point — with the action menu
+	 * open that is its full-viewport overlay, not the node underneath.
+	 */
+	function dispatchContextMenuAt(clientX: number, clientY: number): MouseEvent {
+		const target = document.elementFromPoint(clientX, clientY);
+		if (!target) throw new Error(`No element at (${clientX}, ${clientY})`);
+		return dispatchContextMenu(target as HTMLElement, clientX, clientY);
+	}
+
+	function dispatchKeydown(target: Element | null, key: string): KeyboardEvent {
+		if (!target) throw new Error(`No target to receive ${key}`);
+		const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+		target.dispatchEvent(event);
+		return event;
+	}
+
+	function activeElementText(): string {
+		return document.activeElement?.textContent?.trim() ?? '';
+	}
+
 	function dispatchWheel(target: HTMLElement, deltaY: number, clientX?: number, clientY?: number) {
 		const center = getCenter(target);
 		target.dispatchEvent(
@@ -1638,6 +1659,171 @@
 		expect(canvas.getByRole('menuitem', { name: 'Focus' })).toBeInTheDocument();
 		expect(canvas.getByRole('menuitem', { name: 'Edit' })).toBeInTheDocument();
 		expect(canvas.getByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="UserGetsFocusOnFirstActionMenuItem"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1 }),
+		defaultPrimaryNodeId: 'n0'
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+
+		dispatchContextMenu(circle, center.x, center.y);
+		await tick();
+
+		const firstItem = within(canvasElement).getByRole('menuitem', { name: 'Add node/edge' });
+		expect(document.activeElement).toBe(firstItem);
+		// Roving tabindex: only the active item is a tab stop.
+		expect(firstItem).toHaveAttribute('tabindex', '0');
+		expect(within(canvasElement).getByRole('menuitem', { name: 'Delete' })).toHaveAttribute(
+			'tabindex',
+			'-1'
+		);
+	}}
+/>
+
+<Story
+	name="UserClosesActionMenuWithEscape"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1 }),
+		defaultPrimaryNodeId: 'n0'
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+
+		dispatchContextMenu(circle, center.x, center.y);
+		await tick();
+		expect(within(canvasElement).getByRole('menu')).toBeInTheDocument();
+
+		// Dispatched on whatever has focus, which is why the menu must have taken it.
+		dispatchKeydown(document.activeElement, 'Escape');
+		await tick();
+
+		expect(within(canvasElement).queryByRole('menu')).not.toBeInTheDocument();
+		expect(within(canvasElement).queryByRole('menuitem')).not.toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="UserMovesActionMenuFocusWithArrowKeys"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1 }),
+		defaultPrimaryNodeId: 'n0'
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+
+		dispatchContextMenu(circle, center.x, center.y);
+		await tick();
+		expect(activeElementText()).toBe('Add node/edge');
+
+		dispatchKeydown(document.activeElement, 'ArrowRight');
+		expect(activeElementText()).toBe('Pin');
+		dispatchKeydown(document.activeElement, 'ArrowDown');
+		expect(activeElementText()).toBe('Focus');
+		dispatchKeydown(document.activeElement, 'ArrowLeft');
+		expect(activeElementText()).toBe('Pin');
+		dispatchKeydown(document.activeElement, 'ArrowUp');
+		expect(activeElementText()).toBe('Add node/edge');
+
+		// Wraps backwards off the first item onto the last, and forwards back round.
+		dispatchKeydown(document.activeElement, 'ArrowLeft');
+		expect(activeElementText()).toBe('Delete');
+		dispatchKeydown(document.activeElement, 'ArrowRight');
+		expect(activeElementText()).toBe('Add node/edge');
+
+		dispatchKeydown(document.activeElement, 'End');
+		expect(activeElementText()).toBe('Delete');
+		dispatchKeydown(document.activeElement, 'Home');
+		expect(activeElementText()).toBe('Add node/edge');
+
+		await tick();
+		expect(within(canvasElement).getByRole('menuitem', { name: 'Delete' })).toHaveAttribute(
+			'tabindex',
+			'-1'
+		);
+	}}
+/>
+
+<Story
+	name="UserRestoresFocusWhenActionMenuCloses"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1 }),
+		defaultPrimaryNodeId: 'n0'
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const toolbarButton = within(canvasElement).getByRole('button', { name: 'Tag colors' });
+		toolbarButton.focus();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+
+		dispatchContextMenu(circle, center.x, center.y);
+		await tick();
+		expect(document.activeElement).not.toBe(toolbarButton);
+
+		dispatchKeydown(document.activeElement, 'Escape');
+		await tick();
+
+		expect(document.activeElement).toBe(toolbarButton);
+	}}
+/>
+
+<Story
+	name="UserRightClicksElsewhereWhileActionMenuIsOpen"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 2,
+			pinned: [0, 1],
+			edges: [[0, 1]],
+			// Stacked vertically so n0's pill (which floats above n0) never covers n1.
+			posByNodeId: {
+				n0: { x: 0, y: 140 },
+				n1: { x: 0, y: -140 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const stageRect = stage.getBoundingClientRect();
+		const sourceCenter = getCenter(getCircle(canvasElement, 'n0'));
+		const targetCenter = getCenter(getCircle(canvasElement, 'n1'));
+
+		dispatchContextMenu(getCircle(canvasElement, 'n0'), sourceCenter.x, sourceCenter.y);
+		await tick();
+		expect(within(canvasElement).getByRole('menu')).toHaveAttribute(
+			'aria-label',
+			'Actions for Node 0'
+		);
+
+		// The menu overlay swallows this right-click: it must not leak the native
+		// menu, and must not leave the menu stranded on n0 either.
+		const overNode = dispatchContextMenuAt(targetCenter.x, targetCenter.y);
+		await tick();
+		expect(overNode.defaultPrevented).toBe(true);
+		expect(within(canvasElement).getByRole('menu')).toHaveAttribute(
+			'aria-label',
+			'Actions for Node 1'
+		);
+		expect(activeElementText()).toBe('Add node/edge');
+
+		// Right-clicking empty background closes instead of re-targeting.
+		const overBackground = dispatchContextMenuAt(stageRect.right - 8, stageRect.bottom - 8);
+		await tick();
+		expect(overBackground.defaultPrevented).toBe(true);
+		expect(within(canvasElement).queryByRole('menu')).not.toBeInTheDocument();
 	}}
 />
 
