@@ -13,6 +13,7 @@ import {
 	prunedNavStack,
 	pushNavStackEntry,
 	revealedNodeIdsOf,
+	unwindNavStackTo,
 	type NavStackEntry
 } from './navStack';
 
@@ -54,11 +55,20 @@ export class TransientRevealController {
 		this.#entries = pushNavStackEntry(this.#entries, entry);
 	}
 
+	/**
+	 * Unwind to one entry, returning where the reader should land. Out of range
+	 * leaves the stack alone and returns undefined.
+	 */
+	unwindTo(index: number): NavStackEntry | undefined {
+		const unwound = unwindNavStackTo(this.#entries, index);
+		if (unwound === null) return undefined;
+		this.#entries = unwound.entries;
+		return unwound.target;
+	}
+
+	/** Back is unwinding to the newest entry — one path, so they cannot diverge. */
 	pop(): NavStackEntry | undefined {
-		const entry = this.top;
-		if (entry === undefined) return undefined;
-		this.#entries = this.#entries.slice(0, -1);
-		return entry;
+		return this.unwindTo(this.#entries.length - 1);
 	}
 
 	clear(): void {

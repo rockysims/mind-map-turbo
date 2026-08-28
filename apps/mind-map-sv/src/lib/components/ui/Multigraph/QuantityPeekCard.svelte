@@ -15,34 +15,153 @@
 	 * is no equation to show instead — a node that confirmed the output but whose
 	 * text no longer states it. It is still a real answer to "who defines this", so
 	 * hiding it would make the peek disagree with the edge on screen.
+	 *
+	 * The next question is almost always "and what is *that* symbol?", so each
+	 * definer row also offers that node's own confirmed inputs as chips, and a
+	 * chip opens another card of exactly this kind underneath. The card is
+	 * therefore recursive and entirely presentational: which branches are open,
+	 * where focus should land, and what Escape means all live in the one
+	 * controller above it, because N cards each holding a document listener would
+	 * race to close each other.
 	 */
 	import MathText from '../MathText/MathText.svelte';
+	import { symbolFor, type QuantitySymbol } from '../MathText/lib/mathSymbols';
+	import PeekCard from './QuantityPeekCard.svelte';
+	import QuantityChip from './QuantityChip.svelte';
+	import type { QuantityDesignation } from '../types/node';
 	import type { QuantityIndexEntry } from './lib/quantityIndex';
+	import {
+		isBranchOpen,
+		isLoop,
+		serializePath,
+		type PeekCascade,
+		type PeekPath
+	} from './lib/peekCascade';
+
+	/** Shared so a definer with nothing to drill into allocates nothing per render. */
+	const NO_INPUTS: readonly QuantityDesignation[] = [];
+
+	/**
+	 * Levels of visual indent before the cascade stops stepping right. Depth is
+	 * unbounded, but past four steps the indent is costing more width than it is
+	 * buying legibility, and the nesting is still readable from the enclosing
+	 * cards' borders.
+	 */
+	const MAX_INDENT_LEVELS = 4;
+	const INDENT_REM_PER_LEVEL = 0.75;
 
 	let {
 		entry,
 		label,
+		quantityKey,
+		path = [],
+		cascade,
+		isRoot = false,
 		titleForNodeId,
+		inputsForNodeId = () => NO_INPUTS,
+		quantityEntryFor,
+		focusRequestPath = null,
+		onFocusHandled,
+		onToggleBranch,
 		onJumpToNode,
 		onCreateDefiningNode,
 		onClose
 	}: {
-		/** The index entry for the peeked quantity, or undefined when nothing knows it. */
+		/** The index entry for this card's quantity, or undefined when nothing knows it. */
 		entry?: QuantityIndexEntry;
 		/** Human-readable quantity name, for the copy when there is no entry to read. */
 		label: string;
+		/** This card's own quantity key — what "Define x" here would be seeding. */
+		quantityKey: string;
+		/** Where this card sits in the cascade. Empty is the root card. */
+		path?: PeekPath;
+		/** Every branch open under the root quantity, owned by the controller. */
+		cascade: PeekCascade;
+		/** The root card is the dialog and owns the dismiss; nested cards are groups. */
+		isRoot?: boolean;
 		titleForNodeId: (nodeId: string) => string;
+		/** A definer's own confirmed inputs — the chips its drill line offers. */
+		inputsForNodeId?: (nodeId: string) => readonly QuantityDesignation[];
+		/** The graph-wide record for one quantity, read when a nested card opens. */
+		quantityEntryFor?: (key: string) => QuantityIndexEntry | undefined;
+		/** Serialized path of the card that should take focus, or null for none. */
+		focusRequestPath?: string | null;
+		/** Consume the focus request, so a re-render does not refocus. */
+		onFocusHandled?: () => void;
+		onToggleBranch?: (path: PeekPath) => void;
 		onJumpToNode?: (nodeId: string) => void;
-		onCreateDefiningNode?: (quantityLabel: string) => void;
-		onClose: () => void;
+		/**
+		 * The key rides along with the label so the new node can be seeded with the
+		 * designation that makes it a definer — and it is *this* card's key, not the
+		 * root's, or drilling three levels down would define the wrong quantity.
+		 */
+		onCreateDefiningNode?: (quantityLabel: string, quantityKey: string) => void;
+		/** Root card only: dismiss the whole cascade. */
+		onClose?: () => void;
 	} = $props();
 
 	let card = $state<HTMLDivElement | null>(null);
 
+	const selfPath = $derived(serializePath(path));
 	const definerNodeIds = $derived(entry?.definerNodeIds ?? []);
+	const indentRem = $derived(Math.min(path.length, MAX_INDENT_LEVELS) * INDENT_REM_PER_LEVEL);
 
 	function definitionsFor(nodeId: string) {
 		return (entry?.definitions ?? []).filter((definition) => definition.nodeId === nodeId);
+	}
+
+	/** One drill chip: the quantity it names, where opening it would land, and its state. */
+	interface DrillChip {
+		symbol: QuantitySymbol;
+		path: PeekPath;
+		pathKey: string;
+		/** Already open above this chip on its own path — following it would never end. */
+		loop: boolean;
+		open: boolean;
+	}
+
+	/**
+	 * The chips one definer row offers, read from that node's live designations.
+	 *
+	 * A node may designate the same quantity twice; the row shows it once, because
+	 * two identical chips would be two ways to ask one question.
+	 */
+	function drillChipsFor(definerNodeId: string): DrillChip[] {
+		// A list rather than a Set: a row's worth of designations is a handful, and
+		// this runs per row per render.
+		const seen: string[] = [];
+		const chips: DrillChip[] = [];
+		for (const designation of inputsForNodeId(definerNodeId)) {
+			const symbol = symbolFor(designation.base, designation.subscript);
+			if (seen.includes(symbol.key)) continue;
+			seen.push(symbol.key);
+			const childPath = [...path, { definerNodeId, key: symbol.key }];
+			chips.push({
+				symbol,
+				path: childPath,
+				pathKey: serializePath(childPath),
+				loop: isLoop(cascade, path, symbol.key),
+				open: isBranchOpen(cascade, childPath)
+			});
+		}
+		return chips;
+	}
+
+	function drillAttributes(chip: DrillChip): Record<string, string | undefined> {
+		if (chip.loop) {
+			return {
+				'data-peek-drill': chip.symbol.key,
+				'data-peek-drill-path': chip.pathKey,
+				'data-peek-loop': 'true',
+				title: 'Already open in this chain'
+			};
+		}
+		return {
+			'data-peek-drill': chip.symbol.key,
+			'data-peek-drill-path': chip.pathKey,
+			'aria-pressed': chip.open ? 'true' : 'false',
+			title: `Show where ${chip.symbol.label} is defined`
+		};
 	}
 
 	/**
@@ -54,45 +173,20 @@
 		return `$${definition.sourceTex}$`;
 	}
 
-	// Standard dialog entry: Enter on the chip opened this, so the next Tab has to
-	// land inside it rather than on the next chip. The row buttons come first in
-	// the DOM, so the first focusable is the leading "Go to node". A plain focus()
-	// so a pointer-opened card is left to :focus-visible rather than given a ring.
+	// Standard dialog entry: Enter on the chip opened this card, so the next Tab
+	// has to land inside it rather than on the next chip. The row buttons come
+	// first in the DOM, so the first focusable is the leading "Go to node". A plain
+	// focus() so a pointer-opened card is left to :focus-visible rather than given
+	// a ring. Only the card the request names reacts, and it clears the request as
+	// it does, or every later render would drag focus back here.
 	$effect(() => {
+		if (focusRequestPath !== selfPath) return;
 		card?.querySelector('button')?.focus();
-	});
-
-	$effect(() => {
-		// Registered from inside the click that opened the card, so the opening
-		// gesture's own pointerdown has already been and gone.
-		function onPointerDown(event: PointerEvent) {
-			const target = event.target;
-			if (target instanceof Node && card?.contains(target)) return;
-			onClose();
-		}
-		function onKeyDown(event: KeyboardEvent) {
-			if (event.key !== 'Escape') return;
-			// The focus overlay closes on Escape too, and dismissing the card is the
-			// narrower intent while it is open.
-			event.stopPropagation();
-			onClose();
-		}
-		document.addEventListener('pointerdown', onPointerDown, true);
-		document.addEventListener('keydown', onKeyDown, true);
-		return () => {
-			document.removeEventListener('pointerdown', onPointerDown, true);
-			document.removeEventListener('keydown', onKeyDown, true);
-		};
+		onFocusHandled?.();
 	});
 </script>
 
-<div
-	bind:this={card}
-	class="quantity-peek"
-	data-quantity-peek={label}
-	role="dialog"
-	aria-label={`Where ${label} is defined`}
->
+{#snippet cardBody()}
 	{#if definerNodeIds.length === 0}
 		<p class="note">Nothing defines {label} yet.</p>
 		{#if onCreateDefiningNode}
@@ -100,7 +194,7 @@
 				type="button"
 				class="create"
 				data-create-defining-node={label}
-				onclick={() => onCreateDefiningNode?.(label)}
+				onclick={() => onCreateDefiningNode?.(label, quantityKey)}
 			>
 				Define {label}
 			</button>
@@ -109,64 +203,166 @@
 		<ul>
 			{#each definerNodeIds as definerId (definerId)}
 				{@const definitions = definitionsFor(definerId)}
+				{@const drills = drillChipsFor(definerId)}
 				<li data-peek-definer={definerId}>
-					<span class="definition">
-						{#if definitions.length === 0}
-							{titleForNodeId(definerId)}
-						{:else}
-							{#each definitions as definition (definition.bodyKey)}
-								<MathText text={texOf(definition)} />
+					<div class="definition-row">
+						<span class="definition">
+							{#if definitions.length === 0}
+								{titleForNodeId(definerId)}
+							{:else}
+								{#each definitions as definition (definition.bodyKey)}
+									<MathText text={texOf(definition)} />
+								{/each}
+							{/if}
+						</span>
+						<button
+							type="button"
+							class="goto"
+							data-peek-goto={definerId}
+							onclick={() => onJumpToNode?.(definerId)}
+						>
+							Go to node
+						</button>
+					</div>
+
+					{#if drills.length > 0}
+						<!--
+							The definer's own inputs, in the same visual language as the
+							Inputs column overhead: the reader has already learned that a
+							pill with an italic letter is a quantity worth asking about.
+						-->
+						<div class="drill" data-peek-drill-line={definerId}>
+							{#each drills as drill (drill.pathKey)}
+								<QuantityChip
+									label={drill.symbol.label}
+									interactive={!drill.loop}
+									peeking={drill.open}
+									marker={drill.loop ? '↺' : undefined}
+									attributes={drillAttributes(drill)}
+									onclick={() => onToggleBranch?.(drill.path)}
+								/>
 							{/each}
+						</div>
+					{/if}
+
+					{#each drills as drill (drill.pathKey)}
+						{#if drill.open}
+							<PeekCard
+								entry={quantityEntryFor?.(drill.symbol.key)}
+								label={drill.symbol.label}
+								quantityKey={drill.symbol.key}
+								path={drill.path}
+								{cascade}
+								{titleForNodeId}
+								{inputsForNodeId}
+								{quantityEntryFor}
+								{focusRequestPath}
+								{onFocusHandled}
+								{onToggleBranch}
+								{onJumpToNode}
+								{onCreateDefiningNode}
+							/>
 						{/if}
-					</span>
-					<button
-						type="button"
-						class="goto"
-						data-peek-goto={definerId}
-						onclick={() => onJumpToNode?.(definerId)}
-					>
-						Go to node
-					</button>
+					{/each}
 				</li>
 			{/each}
 		</ul>
 	{/if}
+{/snippet}
 
-	<!-- Last in the DOM so Tab runs the answers before the way out, and parked in
-	     the corner so it never competes with them for the row. -->
-	<button type="button" class="dismiss" aria-label="Close definition" onclick={onClose}>✕</button>
-</div>
+{#if isRoot}
+	<div
+		bind:this={card}
+		class="quantity-peek root"
+		data-quantity-peek={label}
+		data-peek-path=""
+		data-peek-depth="0"
+		role="dialog"
+		aria-label={`Where ${label} is defined`}
+	>
+		<!-- The focus overlay has no scroll container on purpose — wheel input has to
+		     reach the ZoomWorld underneath — and its pan clamp puts below-frame
+		     content out of reach, so a deep cascade has to scroll here. -->
+		<div class="peek-scroll" data-peek-scroll>
+			{@render cardBody()}
+		</div>
+
+		<!-- Last in the DOM so Tab runs the answers before the way out, parked in the
+		     corner so it never competes with them for the row, and outside the
+		     scroller so it cannot scroll away from the reader who wants it. -->
+		<button type="button" class="dismiss" aria-label="Close definition" onclick={() => onClose?.()}
+			>✕</button
+		>
+	</div>
+{:else}
+	<!-- A group rather than a dialog: nested cards claim no modality, since every
+	     level of the cascade stays visible and interactive at once. -->
+	<div
+		bind:this={card}
+		class="quantity-peek nested"
+		data-quantity-peek={label}
+		data-peek-path={selfPath}
+		data-peek-depth={path.length}
+		role="group"
+		aria-label={`Where ${label} is defined`}
+		style={`margin-left: ${indentRem}rem`}
+	>
+		{@render cardBody()}
+	</div>
+{/if}
 
 <style>
 	.quantity-peek {
+		display: grid;
+		gap: 0.4rem;
+		border: 1px solid #cbd5e1;
+		border-radius: 0.75rem;
+		background: #ffffff;
+		font-size: 0.95rem;
+	}
+
+	.quantity-peek.root {
 		position: absolute;
 		top: calc(100% + 0.35rem);
 		left: 0;
 		right: 0;
 		z-index: 5;
+		/* Right padding keeps the rows clear of the corner dismiss, which is now a
+		   full-width control rather than a bare glyph. */
+		padding: 0.5rem 2.75rem 0.5rem 0.75rem;
+		box-shadow: 0 12px 32px rgb(15 23 42 / 18%);
+	}
+
+	/* Indented and edged rather than shadowed: a nested card is part of the row
+	   above it, not a new surface floating over one. */
+	.quantity-peek.nested {
+		margin-top: 0.35rem;
+		border-left: 3px solid #94a3b8;
+		padding: 0.5rem 0.75rem;
+	}
+
+	.peek-scroll {
 		display: grid;
 		gap: 0.4rem;
-		border: 1px solid #cbd5e1;
-		border-radius: 0.75rem;
-		/* Right padding keeps the rows clear of the corner dismiss. */
-		padding: 0.5rem 2rem 0.5rem 0.75rem;
-		background: #ffffff;
-		box-shadow: 0 12px 32px rgb(15 23 42 / 18%);
-		font-size: 0.95rem;
+		max-height: min(24rem, 55vh);
+		overflow: auto;
+		overscroll-behavior: contain;
 	}
 
 	ul {
 		display: grid;
 		gap: 0.3rem;
-		/* The list scrolls, not the card, so the dismiss stays in its corner. */
-		max-height: 16rem;
-		overflow: auto;
 		margin: 0;
 		padding: 0;
 		list-style: none;
 	}
 
 	li {
+		display: grid;
+		gap: 0.25rem;
+	}
+
+	.definition-row {
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
@@ -177,6 +373,13 @@
 		min-width: 0;
 		color: #0f172a;
 		overflow-x: auto;
+	}
+
+	.drill {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.3rem;
 	}
 
 	.note {
@@ -197,14 +400,13 @@
 		cursor: pointer;
 	}
 
+	/* Border, background and colour deliberately left to the shared `button` rule
+	   above: the way out is the same kind of control as "Go to node", and styling
+	   it as a bare glyph made it read as decoration and sit off their baseline. */
 	button.dismiss {
 		position: absolute;
-		top: 0.4rem;
-		right: 0.4rem;
-		border-color: transparent;
-		background: transparent;
-		color: #64748b;
-		line-height: 1;
+		top: 0.5rem;
+		right: 0.5rem;
 	}
 
 	button.create {

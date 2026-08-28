@@ -73,6 +73,82 @@ export function prunedNavStack(
 	return kept.length === entries.length ? entries : kept;
 }
 
+/** What unwinding produced: the stack that remains, and where to go. */
+export interface NavStackUnwind {
+	entries: NavStackEntry[];
+	target: NavStackEntry;
+}
+
+/**
+ * Unwind to one entry, dropping it and everything after it.
+ *
+ * The dropped entries' seeds need no separate cleanup: `revealedNodeIdsOf`
+ * derives the held-open set from whatever array remains, and the entries kept
+ * (0..index-1) are exactly the ones whose seeds are holding the target on
+ * screen. Popping is this with `index = length - 1`.
+ *
+ * Out of range — including a negative index — returns null rather than throwing
+ * or clamping: a crumb that no longer exists is a stale click, and silently
+ * unwinding to a different entry than the one pointed at would move the reader
+ * somewhere they did not ask for.
+ */
+export function unwindNavStackTo(
+	entries: readonly NavStackEntry[],
+	index: number
+): NavStackUnwind | null {
+	const target = entries[index];
+	if (target === undefined) return null;
+	return { entries: entries.slice(0, index), target };
+}
+
+/**
+ * One rendered step of the jump trail.
+ *
+ * An `entry` crumb carries its index in the *stack*, not in the rendered array,
+ * because that index is what unwinding takes — truncation must not renumber it.
+ */
+export type NavCrumb =
+	| { kind: 'entry'; index: number; nodeId: string }
+	| { kind: 'ellipsis'; hiddenCount: number }
+	| { kind: 'current'; nodeId: string };
+
+/**
+ * Node crumbs shown before the trail collapses its middle. The ellipsis is not
+ * counted: it replaces crumbs rather than being one.
+ */
+export const NAV_BREADCRUMB_MAX = 4;
+
+/**
+ * Project the stack as the trail `A › B › current`.
+ *
+ * The head is kept whatever the depth, because "where did this start" is the
+ * question a long trail is asked, and the tail is kept because that is where
+ * the reader is. The middle collapses.
+ *
+ * `currentNodeId` is null while nothing is focused, in which case the trail is
+ * the stack alone and the caller is expected not to render it.
+ */
+export function navBreadcrumbs(
+	entries: readonly NavStackEntry[],
+	currentNodeId: string | null,
+	maxCrumbs: number = NAV_BREADCRUMB_MAX
+): NavCrumb[] {
+	const crumbs: NavCrumb[] = entries.map((entry, index) => ({
+		kind: 'entry',
+		index,
+		nodeId: entry.originNodeId
+	}));
+	if (currentNodeId !== null) crumbs.push({ kind: 'current', nodeId: currentNodeId });
+	if (crumbs.length <= maxCrumbs) return crumbs;
+
+	const tailCount = Math.max(maxCrumbs - 1, 0);
+	return [
+		crumbs[0],
+		{ kind: 'ellipsis', hiddenCount: crumbs.length - 1 - tailCount },
+		...crumbs.slice(crumbs.length - tailCount)
+	];
+}
+
 /** The nodes the stack is holding on screen; empty is the shared constant. */
 export function revealedNodeIdsOf(entries: readonly NavStackEntry[]): ReadonlySet<string> {
 	const revealed = new Set<string>();

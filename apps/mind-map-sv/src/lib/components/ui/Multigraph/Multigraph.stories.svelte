@@ -643,6 +643,49 @@
 		}
 	});
 
+	/** One link longer again: `scale` needs r, which `radius` defines — three jumps. */
+	const JUMP_THRICE_TO_DEFINERS = makeGraph({
+		nodes: [
+			{
+				id: 'reader',
+				title: 'Weight',
+				description: '$$w = m g$$',
+				inputs: designations('g'),
+				outputs: designations('w')
+			},
+			{ id: 'mid', title: 'Middle', description: '' },
+			{
+				id: 'gravity',
+				title: 'Gravity',
+				description: '$$g = 9.8 h$$',
+				inputs: designations('h'),
+				outputs: designations('g')
+			},
+			{
+				id: 'scale',
+				title: 'Scale',
+				description: '$$h = 2 r$$',
+				inputs: designations('r'),
+				outputs: designations('h')
+			},
+			{ id: 'radius', title: 'Radius', description: '$$r = 6$$', outputs: designations('r') }
+		],
+		pinned: ['reader'],
+		edges: [
+			['reader', 'mid'],
+			['mid', 'gravity'],
+			['gravity', 'scale'],
+			['scale', 'radius']
+		],
+		posByNodeId: {
+			reader: { x: 0, y: 0 },
+			mid: { x: 400, y: 0 },
+			gravity: { x: 800, y: 0 },
+			scale: { x: 1200, y: 0 },
+			radius: { x: 1600, y: 0 }
+		}
+	});
+
 	/**
 	 * Open one named node's focus overlay through its action menu.
 	 *
@@ -703,6 +746,23 @@
 			expect(isSettling(canvasElement)).toBe(false);
 		});
 		await waitForLayout();
+	}
+
+	/** The jump trail as the reader reads it, oldest first. */
+	function navTrail(canvasElement: HTMLElement): string[] {
+		return Array.from(canvasElement.querySelectorAll('[data-nav-breadcrumbs] .crumb')).map(
+			(crumb) => crumb.textContent?.trim() ?? ''
+		);
+	}
+
+	/** Unwind to one crumb, named by the node it goes back to. */
+	async function clickCrumb(canvasElement: HTMLElement, originNodeId: string): Promise<void> {
+		const crumb = await waitFor(() => {
+			const found = canvasElement.querySelector(`[data-nav-crumb-node="${originNodeId}"]`);
+			expect(found).toBeInTheDocument();
+			return found as HTMLElement;
+		});
+		crumb.click();
 	}
 
 	function isSettling(el: HTMLElement): boolean {
@@ -4905,7 +4965,13 @@
 		expect(
 			canvasElement.querySelector('[data-node-id="reader"] [data-pinned="true"]')
 		).toBeInTheDocument();
-		expect(canvasElement.querySelector('[data-nav-back="reader"]')).toBeInTheDocument();
+
+		// The trail reads as the route the reader took, ending where they are.
+		expect(navTrail(canvasElement)).toEqual(['Weight', 'Gravity']);
+		// And it is the only way back while they are in the details: the floating
+		// button would be a second control for one of the moves the trail offers,
+		// and one that has to out-stack the overlay to be clickable at all.
+		expect(canvasElement.querySelector('[data-nav-back]')).not.toBeInTheDocument();
 	}}
 />
 
@@ -4931,7 +4997,7 @@
 		// than a no-op that would pass whatever back did.
 		expect(getStageTransform(canvasElement)).not.toEqual(before);
 
-		(canvasElement.querySelector('[data-nav-back]') as HTMLElement).click();
+		await clickCrumb(canvasElement, 'reader');
 		await waitForLayout();
 
 		// Verbatim pan and scale, not a fit: a fit clamps to what it can frame and
@@ -4944,7 +5010,8 @@
 		await waitFor(() => {
 			expect(canvasElement.querySelector('[data-node-id="gravity"]')).not.toBeInTheDocument();
 		});
-		expect(canvasElement.querySelector('[data-nav-back]')).not.toBeInTheDocument();
+		// One crumb left is no trail: it would name where the reader is standing.
+		expect(canvasElement.querySelector('[data-nav-breadcrumbs]')).not.toBeInTheDocument();
 		const changeSpy = args.onMultigraphChange as unknown as ChangeSpy;
 		expect(changeSpy.mock.calls).toHaveLength(0);
 	}}
@@ -4965,7 +5032,7 @@
 		await enterFocusOn(canvasElement, 'reader');
 		await jumpFromPeek(canvasElement, 'g', 'gravity');
 		await waitFor(() => {
-			expect(canvasElement.querySelector('[data-nav-back="reader"]')).toBeInTheDocument();
+			expect(navTrail(canvasElement)).toEqual(['Weight', 'Gravity']);
 		});
 
 		// `gravity` needs h in turn, and the first jump already left the reader
@@ -4973,28 +5040,129 @@
 		// no trip back out to the canvas to re-enter what they are already reading.
 		await jumpFromPeek(canvasElement, 'h', 'scale');
 		await waitFor(() => {
-			expect(canvasElement.querySelector('[data-nav-back="gravity"]')).toBeInTheDocument();
+			expect(navTrail(canvasElement)).toEqual(['Weight', 'Gravity', 'Scale']);
 		});
 		expect(canvasElement.querySelector('[data-node-id="scale"]')).toBeInTheDocument();
 
-		// Back unwinds one hop at a time, in the order the reader made them, and
-		// each hop lands in the details the jump before it was made from.
-		(canvasElement.querySelector('[data-nav-back]') as HTMLElement).click();
+		// Clicking the crumb one back unwinds one hop, in the order the reader made
+		// them, and lands in the details the jump before it was made from.
+		await clickCrumb(canvasElement, 'gravity');
 		await waitFor(() => {
-			expect(canvasElement.querySelector('[data-nav-back="reader"]')).toBeInTheDocument();
+			expect(navTrail(canvasElement)).toEqual(['Weight', 'Gravity']);
 		});
 		await expectFocusOn(canvasElement, 'gravity');
 		expect(canvasElement.querySelector('[data-node-id="scale"]')).not.toBeInTheDocument();
 		expect(canvasElement.querySelector('[data-node-id="gravity"]')).toBeInTheDocument();
 
-		(canvasElement.querySelector('[data-nav-back]') as HTMLElement).click();
+		await clickCrumb(canvasElement, 'reader');
 		await waitFor(() => {
-			expect(canvasElement.querySelector('[data-nav-back]')).not.toBeInTheDocument();
+			expect(canvasElement.querySelector('[data-nav-breadcrumbs]')).not.toBeInTheDocument();
 		});
 		await expectFocusOn(canvasElement, 'reader');
 		expect(canvasElement.querySelector('[data-node-id="gravity"]')).not.toBeInTheDocument();
 
 		const changeSpy = args.onMultigraphChange as unknown as ChangeSpy;
 		expect(changeSpy.mock.calls).toHaveLength(0);
+	}}
+/>
+
+<Story
+	name="BreadcrumbUnwindsSeveralJumpsInOneStep"
+	args={{
+		multigraphData: JUMP_THRICE_TO_DEFINERS,
+		defaultPrimaryNodeId: 'reader',
+		initialViewState: { panX: 0, panY: 0, scale: APP_CONFIG.multigraph.zoom.maxScale },
+		layoutSettings: NO_REVEALS,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+
+		await enterFocusOn(canvasElement, 'reader');
+		const atReader = getStageTransform(canvasElement);
+
+		await jumpFromPeek(canvasElement, 'g', 'gravity');
+		const atGravity = getStageTransform(canvasElement);
+		await jumpFromPeek(canvasElement, 'h', 'scale');
+		const atScale = getStageTransform(canvasElement);
+		await jumpFromPeek(canvasElement, 'r', 'radius');
+
+		await waitFor(() => {
+			expect(navTrail(canvasElement)).toEqual(['Weight', 'Gravity', 'Scale', 'Radius']);
+		});
+
+		// The trail shares the overlay's top edge with Close, at the phone width
+		// these stories run at. Four crumbs is the deepest it draws before it
+		// collapses its middle, so this is the widest it ever gets.
+		const trailRect = (
+			canvasElement.querySelector('[data-nav-breadcrumbs]') as HTMLElement
+		).getBoundingClientRect();
+		const closeRect = within(canvasElement)
+			.getByRole('button', { name: 'Close node focus' })
+			.getBoundingClientRect();
+		expect(trailRect.right).toBeLessThanOrEqual(closeRect.left);
+
+		// One click on the oldest crumb, not three on Back. Unwinding several jumps
+		// is a single restore of the camera recorded at that crumb — stepping
+		// through the entries in between would fly the reader along the route they
+		// are explicitly asking to skip.
+		await clickCrumb(canvasElement, 'reader');
+		await waitForLayout();
+
+		expect(getStageTransform(canvasElement)).toEqual(atReader);
+		expect(getStageTransform(canvasElement)).not.toEqual(atGravity);
+		expect(getStageTransform(canvasElement)).not.toEqual(atScale);
+		await expectFocusOn(canvasElement, 'reader');
+
+		// Every seed the dropped entries were holding goes with them, so the canvas
+		// is back to what it looked like before the first jump.
+		await waitFor(() => {
+			for (const nodeId of ['gravity', 'scale', 'radius']) {
+				expect(canvasElement.querySelector(`[data-node-id="${nodeId}"]`)).not.toBeInTheDocument();
+			}
+		});
+		expect(canvasElement.querySelector('[data-nav-breadcrumbs]')).not.toBeInTheDocument();
+
+		// Reading is still not editing, however many jumps deep it went.
+		const changeSpy = args.onMultigraphChange as unknown as ChangeSpy;
+		expect(changeSpy.mock.calls).toHaveLength(0);
+	}}
+/>
+
+<Story
+	name="TheFloatingBackButtonReturnsOnTheCanvas"
+	args={{
+		multigraphData: JUMP_TO_DEFINER,
+		defaultPrimaryNodeId: 'reader',
+		initialViewState: { panX: 0, panY: 0, scale: APP_CONFIG.multigraph.zoom.maxScale },
+		layoutSettings: NO_REVEALS,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+
+		await enterFocusOn(canvasElement, 'reader');
+		const before = getStageTransform(canvasElement);
+		await jumpFromPeek(canvasElement, 'g', 'gravity');
+
+		// In the details the trail is the way back and the floating button stands
+		// down; on the canvas there is no trail, so it comes back as the single-step
+		// affordance it was.
+		expect(canvasElement.querySelector('[data-nav-back]')).not.toBeInTheDocument();
+		within(canvasElement).getByRole('button', { name: 'Close node focus' }).click();
+
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-nav-breadcrumbs]')).not.toBeInTheDocument();
+			expect(canvasElement.querySelector('[data-nav-back="reader"]')).toBeInTheDocument();
+		});
+
+		(canvasElement.querySelector('[data-nav-back]') as HTMLElement).click();
+		await waitForLayout();
+
+		expect(getStageTransform(canvasElement)).toEqual(before);
+		await expectFocusOn(canvasElement, 'reader');
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-nav-back]')).not.toBeInTheDocument();
+		});
 	}}
 />
