@@ -634,6 +634,20 @@
 		actionMenu = { nodeId: node.id, position: point };
 	}
 
+	/**
+	 * The open menu's overlay swallows right-clicks that would otherwise reach the
+	 * stage, so it hands the point back here for the same hit test the stage uses:
+	 * move the menu onto the node under the cursor, or close over background.
+	 */
+	function retargetNodeActionMenu(point: Point) {
+		const node = getNodeAt(point.x, point.y);
+		if (!node) {
+			actionMenu = null;
+			return;
+		}
+		openNodeActionMenu(node, point);
+	}
+
 	const previewDurationMs = $derived(reduceMotion ? 0 : resolvedLayoutSettings.enterExitDurationMs);
 
 	function handleCreationDragUpdate(
@@ -1439,6 +1453,7 @@
 			onFocus={() => focus.openFocus(actionMenuNode)}
 			onDelete={() => deleteNode(actionMenuNode.id)}
 			onClose={() => (actionMenu = null)}
+			onRetarget={retargetNodeActionMenu}
 		/>
 	{/if}
 
