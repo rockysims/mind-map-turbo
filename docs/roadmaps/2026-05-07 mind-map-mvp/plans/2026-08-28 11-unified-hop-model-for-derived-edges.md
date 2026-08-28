@@ -3,7 +3,7 @@
 **Created:** 2026-08-28
 **Author:** Claude Code agent
 **Milestone:** [milestones/11-unified-hop-model-for-derived-edges.md](../milestones/11-unified-hop-model-for-derived-edges.md)
-**Status:** executing
+**Status:** done — T01–T08 landed 2026-08-28
 **Total estimated effort:** L
 
 ## Summary

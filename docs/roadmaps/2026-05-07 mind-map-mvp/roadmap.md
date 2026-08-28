@@ -64,7 +64,7 @@ individual PR-sized tasks.
 | 08  | LaTeX math in node descriptions                    | complete    | [milestone](milestones/08-latex-math-in-node-descriptions.md), [plan](plans/2026-08-27%2008-latex-math-in-node-descriptions.md)                       |
 | 09  | Variable dataflow layer                            | complete    | [milestone](milestones/09-variable-dataflow-layer.md), [plan](plans/2026-08-27%2009-variable-dataflow-layer.md)                                       |
 | 10  | LaTeX math in node titles                          | complete    | [milestone](milestones/10-latex-math-in-node-titles.md), [plan](plans/2026-08-27%2010-latex-math-in-node-titles.md)                                   |
-| 11  | Unified hop model for derived edges                | not started | [milestone](milestones/11-unified-hop-model-for-derived-edges.md), [plan](plans/2026-08-28%2011-unified-hop-model-for-derived-edges.md)               |
+| 11  | Unified hop model for derived edges                | complete    | [milestone](milestones/11-unified-hop-model-for-derived-edges.md), [plan](plans/2026-08-28%2011-unified-hop-model-for-derived-edges.md)               |
 
 Milestones 04a-04m deepen the local-first graph experience before multiplayer.
 Milestone 04b intentionally supersedes 04a's Fibonacci reveal and dimming

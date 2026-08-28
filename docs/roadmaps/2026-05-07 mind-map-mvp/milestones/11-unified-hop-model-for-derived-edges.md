@@ -1,6 +1,6 @@
 # Milestone 11: Unified hop model for derived edges
 
-**Status:** not started
+**Status:** complete
 **Depends on:** milestone 09 (variable dataflow layer), milestone 04b (bounded
 neighborhood visibility), milestone 02 (hop-distance scaling).
 **Plan:** [2026-08-28 11-unified-hop-model-for-derived-edges.md](../plans/2026-08-28%2011-unified-hop-model-for-derived-edges.md)
