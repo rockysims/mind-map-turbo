@@ -1,6 +1,6 @@
 # Milestone 08: LaTeX math in node descriptions
 
-**Status:** not started
+**Status:** complete
 **Depends on:** milestone 03 (node editing UX), milestone 04l/04n
 (self-contained offline HTML app shell), and milestone 06 (node focus content
 surface).

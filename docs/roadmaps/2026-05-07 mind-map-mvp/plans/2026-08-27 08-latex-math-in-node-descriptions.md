@@ -3,7 +3,7 @@
 **Created:** 2026-08-27
 **Author:** Cursor agent
 **Milestone:** [milestones/08-latex-math-in-node-descriptions.md](../milestones/08-latex-math-in-node-descriptions.md)
-**Status:** draft
+**Status:** complete (all tasks T01–T07 delivered 2026-08-27)
 **Total estimated effort:** M
 
 ## Summary
@@ -403,8 +403,26 @@ entries when you add them.
   24,727 B, and 259,792 B across 20 `woff2` faces (~347 KB base64'd), so roughly
   640 KB for the full package or ~455 KB with a seven-face subset. Baseline
   `static/offline-app-shell.html` is 278,791 B.
-- 2026-08-27: **Measured shell size after T07.** 278,791 B → 512,306 B, a delta
-  of +233,515 B (+228.0 KB, +83.8%). Close to the 505,581 B the spike predicted;
+- 2026-08-27: **Temml separates hard and soft failures**, found while building
+  T03 and pinned by spec. A parse failure such as `\frac{1}{` returns no `<math>`
+  element at all, only a `span.temml-error`; the render adapter reports this as
+  `ok: false`. An _unknown command_ such as `\notarealcommand` is a soft failure:
+  it returns valid MathML with the offending token as
+  `<mtext style="color:#b22222;">`, so `ok` stays true and the rest of the
+  expression still renders. Milestone 09 must not read those `mtext` nodes as
+  identifiers — the existing "never scan inside literal text spans" rule already
+  covers it, but the case is easy to miss because the node looks like content.
+- 2026-08-27: **`document.fonts.check('16px Temml')` is only meaningful for
+  content that uses the face.** Temml-Local delegates ordinary symbols to the OS
+  math font and uses its bundled `woff2` for `math .mathscr` and `mo.tml-prime`
+  only. An equation of plain symbols never loads it, so a font assertion over
+  such an equation reports false whether or not inlining worked. T07's e2e uses
+  `\mathscr` for this reason.
+- 2026-08-27: **Measured shell size after T07.** 278,791 B → 512,377 B as
+  committed, a delta of +233,586 B (+228.1 KB, +83.8%). The build emits
+  512,306 B; the pre-commit Prettier pass reformats the tracked file and adds
+  71 B, so measuring the build output and the committed file gives slightly
+  different answers. Close to the 505,581 B the spike predicted;
   the extra ~6.7 KB is milestone 08's own component and adapter code, which the
   spike did not include. Roughly 220 KB of the delta is Temml itself, which is
   the floor for any client-side math engine — KaTeX with a font subset would

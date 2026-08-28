@@ -61,7 +61,7 @@ individual PR-sized tasks.
 | 06c | Single-surface morph (one frame element)           | complete    | [milestone](milestones/06c-single-surface-morph.md), [plan](plans/2026-07-10%2006c-single-surface-morph.md)                                           |
 | 06d | Deep zoom hardening and nested image zoom          | complete    | [milestone](milestones/06d-deep-zoom-hardening-and-nested-image-zoom.md), [plan](plans/2026-07-11%2006d-deep-zoom-hardening-and-nested-image-zoom.md) |
 | 07  | Multiplayer                                        | not started | [milestones/07-multiplayer.md](milestones/07-multiplayer.md)                                                                                          |
-| 08  | LaTeX math in node descriptions                    | not started | [milestone](milestones/08-latex-math-in-node-descriptions.md), [plan](plans/2026-08-27%2008-latex-math-in-node-descriptions.md)                       |
+| 08  | LaTeX math in node descriptions                    | complete    | [milestone](milestones/08-latex-math-in-node-descriptions.md), [plan](plans/2026-08-27%2008-latex-math-in-node-descriptions.md)                       |
 | 09  | Variable dataflow layer                            | not started | [milestones/09-variable-dataflow-layer.md](milestones/09-variable-dataflow-layer.md)                                                                  |
 | 10  | Dataflow tracing and navigation                    | not started | [milestones/10-dataflow-tracing-and-navigation.md](milestones/10-dataflow-tracing-and-navigation.md)                                                  |
 
