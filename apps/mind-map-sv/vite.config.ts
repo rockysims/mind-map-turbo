@@ -11,6 +11,11 @@ const dirname =
 // More info at: https://storybook.js.org/docs/next/writing-tests/integrations/vitest-addon
 export default defineConfig({
 	plugins: [tailwindcss(), sveltekit()],
+	build: {
+		// Temml's 9.4 KB woff2 must exceed the 4 KB default to be inlined, because
+		// the offline build inlines stylesheet text but deletes sibling asset files.
+		assetsInlineLimit: 16384
+	},
 	server: {
 		fs: {
 			allow: [path.resolve(__dirname, '..'), path.resolve(__dirname, '../../node_modules/.pnpm')]

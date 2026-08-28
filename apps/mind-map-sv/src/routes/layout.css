@@ -1,4 +1,8 @@
 @import 'tailwindcss';
+/* Local delegates the main math face to the OS and ships one small woff2 for
+   script letters and prime alignment. Vite base64s that font into the stylesheet
+   so the offline single-file shell stays one file. */
+@import 'temml/dist/Temml-Local.css';
 
 @custom-variant dark (&:is(.dark *));
 
