@@ -1053,16 +1053,20 @@
 	 * never fires. The target is held on screen only by the nav stack, and leaves
 	 * with it. Pinning remains available where it means what it says — the node
 	 * menu's Pin — rather than as the side effect of following a reference.
+	 *
+	 * The reader asked this from inside a node's details, so they land inside the
+	 * target's details: the question was "what does that node say", and answering
+	 * it by parking them on the canvas made them re-open the same overlay by hand.
 	 */
 	function jumpToNode(originNodeId: string, targetNodeId: string) {
-		if (!nodeById[targetNodeId]) return;
+		const targetNode = nodeById[targetNodeId];
+		if (!targetNode) return;
 		// Read before pushing: the push changes the hop map, and what matters is
 		// whether the reader could already see the target — a node that was
 		// already on screen must not be taken away again when this entry pops.
 		const alreadyVisible = visibleNodeIds.has(targetNodeId);
-		// The jump acts on the canvas the focus overlay is covering; leaving it open
-		// would make a working jump look like a dead button.
-		leaveFocusForCanvasAction();
+		const originFocused = focus.isFocused;
+		closeOverlays();
 		// `stageViewState` is Stage's live pan/zoom, reported on every change — so
 		// the snapshot is the exact camera the reader is looking at, not a
 		// reconstruction of one.
@@ -1073,11 +1077,18 @@
 				panY: stageViewState.panY,
 				scale: stageViewState.scale
 			},
-			revealedNodeId: alreadyVisible ? null : targetNodeId
+			revealedNodeId: alreadyVisible ? null : targetNodeId,
+			originFocused
 		});
+		// Seed, settle and camera all before the overlay opens: the target may have
+		// been off-view, and the details view morphs back down onto the node's
+		// on-screen frame when it closes. Nothing here waits on a frame — the
+		// layout is derived synchronously from the seeded hop map, and an explicit
+		// focus entry commits at once rather than tracking a zoom gesture.
 		relaxAfterTransientRevealChange();
 		const bounds = boundsForNodeIds([targetNodeId]);
 		if (bounds) fitViewRequest = { id: (fitViewRequestId += 1), bounds };
+		enterFocusOnNode(targetNodeId);
 	}
 
 	/** Return to where the last jump started, taking its seed back out with it. */
@@ -1094,6 +1105,20 @@
 			panY: entry.viewState.panY,
 			scale: entry.viewState.scale
 		};
+		// Back undoes the jump, so it has to undo what the jump put on screen too:
+		// the reader was reading the origin's details, not looking at the canvas.
+		if (entry.originFocused) enterFocusOnNode(entry.originNodeId);
+	}
+
+	/**
+	 * Enter the details view without a zoom gesture — the same commit the node
+	 * menu's Focus item makes. Swapping subjects goes straight through it rather
+	 * than closing first: a close tween would play the old node's details shrinking
+	 * back onto the canvas before the new one opened.
+	 */
+	function enterFocusOnNode(nodeId: string) {
+		const node = nodeById[nodeId];
+		if (node) focus.openFocus(node);
 	}
 
 	/**
@@ -1451,9 +1476,10 @@
 	{#if transientReveal.top}
 		{@const backEntry = transientReveal.top}
 		<!--
-			Only affordance for undoing a jump, so it has to be reachable from the
-			canvas the jump left the reader on — not from inside the overlay the jump
-			closed.
+			Only affordance for undoing a jump, and a jump now lands in the target's
+			details — so it has to sit above the focus overlay rather than under it.
+			A stack is only ever non-empty because of a jump, so it appears exactly
+			when there is something to go back from.
 		-->
 		<button
 			type="button"
@@ -2214,8 +2240,11 @@
 	}
 
 	/* Stacked above Find / Filter rather than beside it: the label carries a node
-	   title, so its width is not ours to predict. */
+	   title, so its width is not ours to predict. Above the focus overlay (60)
+	   and its close button (65) because a jump lands in the target's details:
+	   under them the only way back would be to leave the details first. */
 	.nav-back-button {
+		z-index: 70;
 		left: 0.75rem;
 		bottom: 3.5rem;
 		max-width: min(20rem, calc(100% - 1.5rem));

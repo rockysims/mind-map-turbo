@@ -143,18 +143,25 @@
 				peekKey={openPeekKey}
 			/>
 			{#if openPeekKey !== null}
-				<QuantityPeekCard
-					entry={peekEntry}
-					label={peekLabel}
-					{titleForNodeId}
-					onJumpToNode={(nodeId) => {
-						openPeekKey = null;
-						onJumpToNode?.(nodeId);
-					}}
-					onCreateDefiningNode={(quantityLabel) =>
-						onCreateDefiningNode?.(quantityLabel, openPeekKey ?? '')}
-					onClose={closePeek}
-				/>
+				<!--
+					Keyed so asking about another quantity is a new dialog rather than the
+					old one re-labelled: the card takes focus on open, and reusing the
+					instance would leave the reader outside the answer they just asked for.
+				-->
+				{#key openPeekKey}
+					<QuantityPeekCard
+						entry={peekEntry}
+						label={peekLabel}
+						{titleForNodeId}
+						onJumpToNode={(nodeId) => {
+							openPeekKey = null;
+							onJumpToNode?.(nodeId);
+						}}
+						onCreateDefiningNode={(quantityLabel) =>
+							onCreateDefiningNode?.(quantityLabel, openPeekKey ?? '')}
+						onClose={closePeek}
+					/>
+				{/key}
 			{/if}
 		</section>
 	{/if}

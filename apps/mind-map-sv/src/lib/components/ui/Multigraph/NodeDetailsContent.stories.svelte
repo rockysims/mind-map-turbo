@@ -1,6 +1,6 @@
 <script module lang="ts">
 	import { defineMeta } from '@storybook/addon-svelte-csf';
-	import { expect, fn, waitFor } from 'storybook/test';
+	import { expect, fn, userEvent, waitFor } from 'storybook/test';
 	import NodeDetailsContent from './NodeDetailsContent.svelte';
 	import type { NodeData } from '../types/node';
 	import { symbolFor } from '../MathText/lib/mathSymbols';
@@ -31,6 +31,14 @@
 			{ nodeId: 'earth', bodyKey: 'earth-g', sourceTex: 'g = 9.8', displayMode: true },
 			{ nodeId: 'moon', bodyKey: 'moon-g', sourceTex: 'g = 1.6', displayMode: true }
 		],
+		consumerNodeIds: ['node-1']
+	};
+
+	/** Confirmed the output, but its text no longer states it — nothing to render. */
+	const G_CLAIMED_WITHOUT_AN_EQUATION: QuantityIndexEntry = {
+		symbol: symbolFor('g', null),
+		definerNodeIds: ['earth'],
+		definitions: [],
 		consumerNodeIds: ['node-1']
 	};
 
@@ -269,10 +277,15 @@
 		// claiming g comes to them, each with the equation it actually wrote.
 		const rows = Array.from(card.querySelectorAll('[data-peek-definer]'));
 		expect(rows.map((row) => row.getAttribute('data-peek-definer'))).toEqual(['earth', 'moon']);
-		expect(rows[0]).toHaveTextContent('Earth');
 		for (const row of rows) {
 			expect(row.querySelector('math')).not.toBeNull();
 		}
+		// The equation is the answer, so it is the whole row. Repeating the node's
+		// title above it would push what was asked for below what was not, and the
+		// chip that opened the card already names the quantity overhead.
+		expect(card.textContent).not.toContain('Earth');
+		expect(card.textContent).not.toContain('Moon');
+		expect(card.querySelector('header')).toBeNull();
 		// Typeset as written — the source of a definition is never shown raw.
 		expect(card.textContent).not.toContain('$');
 		expect(content.querySelector('[data-designation-key="g"]')).toHaveAttribute(
@@ -323,5 +336,71 @@
 		expect(card).toHaveTextContent('Nothing defines g yet.');
 		expect(card.querySelector('[data-create-defining-node="g"]')).toBeInTheDocument();
 		expect(card.querySelector('[data-peek-definer]')).toBeNull();
+	}}
+/>
+
+<Story
+	name="PeekNamesADefinerThatHasNoEquationLeftToShow"
+	args={{
+		node: WEIGHT_NODE,
+		quantities: nodeQuantities(WEIGHT_NODE),
+		quantityEntryFor: entryLookup(G_CLAIMED_WITHOUT_AN_EQUATION),
+		titleForNodeId: MOON_AND_EARTH_TITLES,
+		onJumpToNode: fn()
+	}}
+	play={async ({ canvasElement }) => {
+		const card = await peekAtG(canvasElement);
+		const row = card.querySelector('[data-peek-definer="earth"]');
+
+		// It confirmed the output, so it is still a real answer to "who defines this"
+		// and dropping it would make the peek disagree with the edge on screen. With
+		// no equation to stand in for it, the row falls back to naming the node.
+		expect(row).toHaveTextContent('Earth');
+		expect(row?.querySelector('math')).toBeNull();
+		expect(card.querySelector('[data-peek-goto="earth"]')).toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="KeyboardEnterOnAChipLandsInsideThePeekCard"
+	args={{
+		node: WEIGHT_NODE,
+		quantities: nodeQuantities(WEIGHT_NODE),
+		quantityEntryFor: entryLookup(G_DEFINED_TWICE),
+		titleForNodeId: MOON_AND_EARTH_TITLES,
+		onJumpToNode: fn()
+	}}
+	play={async ({ canvasElement }) => {
+		const chip = canvasElement.querySelector('[data-designation-key="g"]') as HTMLElement;
+		chip.focus();
+		await userEvent.keyboard('{Enter}');
+
+		const card = await waitFor(() => {
+			const found = canvasElement.querySelector('[data-quantity-peek="g"]');
+			expect(found).toBeInTheDocument();
+			return found as HTMLElement;
+		});
+
+		// The card is what Enter opened, so the next Tab belongs to it. Leaving focus
+		// on the chip would send the reader to the following quantity instead of into
+		// the answer they just asked for.
+		await waitFor(() => {
+			expect(card.contains(document.activeElement)).toBe(true);
+		});
+		expect(document.activeElement).toHaveAttribute('data-peek-goto', 'earth');
+
+		// Every control the card offers is reachable in order, the way out last.
+		await userEvent.tab();
+		expect(document.activeElement).toHaveAttribute('data-peek-goto', 'moon');
+		await userEvent.tab();
+		expect(document.activeElement).toHaveAttribute('aria-label', 'Close definition');
+
+		await userEvent.keyboard('{Escape}');
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-quantity-peek]')).not.toBeInTheDocument();
+		});
+		// Dismissing hands the reader back to the chip they asked from, not to the
+		// top of the tab order.
+		expect(document.activeElement).toBe(chip);
 	}}
 />
