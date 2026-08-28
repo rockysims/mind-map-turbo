@@ -813,11 +813,13 @@
 
 		// The offer belongs to the card that made it. Seeding the new node with the
 		// quantity the reader was reading three levels up would define the wrong
-		// thing — and would look right, because the label came from here.
+		// thing — and would look right, because the label came from here. The
+		// consumer rides along too, so the new node lands beside the node whose
+		// input this is (radius), not beside the node the reader is focused on.
 		const createSpy = args.onCreateDefiningNode as unknown as {
-			mock: { calls: Array<[string, string]> };
+			mock: { calls: Array<[string, string, string | undefined]> };
 		};
-		expect(createSpy.mock.calls.at(-1)).toEqual(['T_0', symbolOf('T_0').key]);
+		expect(createSpy.mock.calls.at(-1)).toEqual(['T_0', symbolOf('T_0').key, 'radius']);
 	}}
 />
 

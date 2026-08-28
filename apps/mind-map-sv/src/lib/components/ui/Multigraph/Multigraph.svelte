@@ -2025,8 +2025,8 @@
 							quantityEntryFor={(key) => dataflow.index.entries.get(key)}
 							inputsForNodeId={(nodeId) => nodeById[nodeId]?.inputs ?? EMPTY_DESIGNATIONS}
 							{titleForNodeId}
-							onCreateDefiningNode={(quantityLabel, quantityKey) =>
-								createDefiningNode(detailsNode.id, quantityLabel, quantityKey)}
+							onCreateDefiningNode={(quantityLabel, quantityKey, consumerNodeId) =>
+								createDefiningNode(consumerNodeId ?? detailsNode.id, quantityLabel, quantityKey)}
 							onJumpToNode={(nodeId) => jumpToNode(detailsNode.id, nodeId)}
 						/>
 					</NodeDetailsLayer>
