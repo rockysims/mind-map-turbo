@@ -13,6 +13,12 @@ export const APP_CONFIG = {
 		quotaBudgetBytes: 5 * 1024 * 1024, // localStorage budget before quota warnings
 		quotaWarningRatio: 0.8 // usage ratio that triggers a quota warning
 	},
+	math: {
+		renderCacheMaxEntries: 500, // rendered expressions kept before eviction
+		maxSizeEm: 10, // cap on em-relative sizes so a rule cannot fill the screen
+		maxSizePt: 100, // cap on absolute sizes in points
+		maxExpand: 1000 // macro expansion cap that stops runaway definitions
+	},
 	multigraph: {
 		nodeRadiusPx: NODE_RADIUS_PX, // default rendered node radius
 		nodeTextFontSizePx: 38, // default title and description font size
