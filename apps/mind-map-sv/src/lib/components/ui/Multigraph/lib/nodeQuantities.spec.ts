@@ -235,4 +235,20 @@ describe('nodeQuantities titles', () => {
 	it('treats a missing title as no title', () => {
 		expect(nodeQuantities({ description: '$$a = 1$$', tags: [] }).defines).toHaveLength(1);
 	});
+
+	// Restating the definition in the title and the description is how a person
+	// writes a node about one quantity, not a claim that there are two of them.
+	it('defines a quantity once when the title and description agree', () => {
+		expect(labels(titled('$x = 1$', 'Restated: $x = 1$').defines)).toEqual(['x']);
+	});
+
+	it('defines a quantity once even when the two forms differ', () => {
+		// `x_0` and `x_{0}` canonicalize to the same symbol, so restating one as the
+		// other must not look like a second definition either.
+		expect(labels(titled('$x_0 = 1$', '$x_{0} = 1$').defines)).toHaveLength(1);
+	});
+
+	it('does not count a title definition as a reference in the description', () => {
+		expect(labels(titled('$x = 1$', 'and $x$ again').references)).toEqual([]);
+	});
 });

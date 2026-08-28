@@ -206,6 +206,17 @@ describe('memoization', () => {
 		expect(definersOf(after, 'x')).toEqual(['a']);
 	});
 
+	// A conflict means two nodes disagree about a quantity. One node saying the
+	// same thing twice is not a disagreement, and reporting it as one would make
+	// the warning fire on the most ordinary way to write a node.
+	it('records one definer when a node defines the same quantity in its title and description', () => {
+		const { build } = countingIndexer();
+		const index = build([
+			{ id: 'a', title: '$x = 1$', description: 'Restated: $x = 1$', tags: [] }
+		]);
+		expect(definersOf(index, 'x')).toEqual(['a']);
+	});
+
 	it('reflects a title edit that removes a definition', () => {
 		const { build } = countingIndexer();
 		build([{ id: 'a', title: '$x = 1$', description: '', tags: [] }]);

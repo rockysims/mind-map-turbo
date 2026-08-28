@@ -105,6 +105,16 @@ describe('conflicts', () => {
 		expect(diagnose(chain).conflicts).toEqual([]);
 	});
 
+	// A conflict is two nodes disagreeing. One node stating the same definition in
+	// its title and its description is the ordinary way to write a node about a
+	// quantity, and warning about it would make the feature feel broken.
+	it('does not flag a node that defines the same quantity in its title and description', () => {
+		const diagnostics = diagnose([
+			{ id: 'a', title: '$x = 1$', description: 'Restated: $x = 1$', tags: [] }
+		]);
+		expect(diagnostics.conflicts).toEqual([]);
+	});
+
 	it('does not flag a quantity referenced by many but defined once', () => {
 		expect(
 			diagnose([node('def', '$$g = 9.8$$'), node('a', '$$x = g$$'), node('b', '$$y = g$$')])
