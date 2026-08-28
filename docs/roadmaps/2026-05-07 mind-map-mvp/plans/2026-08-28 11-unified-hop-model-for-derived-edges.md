@@ -3,7 +3,7 @@
 **Created:** 2026-08-28
 **Author:** Claude Code agent
 **Milestone:** [milestones/11-unified-hop-model-for-derived-edges.md](../milestones/11-unified-hop-model-for-derived-edges.md)
-**Status:** draft
+**Status:** executing
 **Total estimated effort:** L
 
 ## Summary
@@ -372,6 +372,13 @@ ship before the redesign is agreed final.
   intake (small math-layer improvements). The defect list and reproduction
   numbers (950px vs. 736px standoff, ~43% wave snap) are preserved in the
   task descriptions above so the regression tests have concrete targets.
+- 2026-08-28: User directive — the two standalone bug fixes surfaced by the
+  review are to be addressed right after this plan lands. The first (content
+  commits never relaxing the layout) is T01 of this plan and is handled by
+  executing it; the second (the `mathSymbols.ts` inference fixes: structural
+  conflict key, definition LHS whitelist, prime handling) stays out of scope
+  here and is the immediate follow-up once the plan's Definition of Done is
+  met.
 - 2026-08-28: Milestone 09's plan resolved "whether derived edges feed
   layout" with the `dataflowInLayout` toggle, off by default, noting the
   toggle "lets us try the other behavior without a migration". Five commits
