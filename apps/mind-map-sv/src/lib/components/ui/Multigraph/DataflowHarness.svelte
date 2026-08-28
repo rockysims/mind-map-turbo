@@ -16,7 +16,6 @@
 		baseGraph,
 		editNodeId,
 		equation,
-		dataflowInLayout = false,
 		startWithEquation = false,
 		initialViewState,
 		// Physics off by default so stories about drawing and topology assert on
@@ -27,7 +26,6 @@
 		editNodeId: string;
 		/** Description applied to `editNodeId` when the equation is present. */
 		equation: string;
-		dataflowInLayout?: boolean;
 		startWithEquation?: boolean;
 		initialViewState?: ViewState;
 		layoutSettings?: Partial<LayoutSettings>;
@@ -63,7 +61,6 @@
 			graphGeneration={generation}
 			defaultPrimaryNodeId={baseGraph.nodes[0]?.id ?? ''}
 			{layoutSettings}
-			{dataflowInLayout}
 			{initialViewState}
 		/>
 	</div>

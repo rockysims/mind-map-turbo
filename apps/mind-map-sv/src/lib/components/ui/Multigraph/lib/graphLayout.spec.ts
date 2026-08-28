@@ -6,6 +6,7 @@ import {
 	withRelaxedGraphPositions,
 	withSettledGraphPositions
 } from './graphLayout';
+import { hopsFromPinned } from './layout';
 import { makeGraph } from './testFixtures';
 import type { EdgeEndpointIds } from './physics';
 
@@ -44,6 +45,7 @@ describe('graphLayout', () => {
 		});
 
 		const layout = deriveGraphLayout(graph, {
+			hopsByNodeId: hopsFromPinned(graph),
 			settings: { baseRadius: 100, scaleFalloff: 0.5, minScale: 0.2 },
 			relaxIterations: 0
 		});
@@ -64,7 +66,12 @@ describe('graphLayout', () => {
 		const settings = { baseRadius: 40, minScale: 0.2, hopRepulsionStrength: 0 };
 
 		function separationWith(springEdges?: EdgeEndpointIds[]) {
-			const positions = relaxGraphPositions(graph, { settings, relaxIterations: 1, springEdges });
+			const positions = relaxGraphPositions(graph, {
+				hopsByNodeId: hopsFromPinned(graph),
+				settings,
+				relaxIterations: 1,
+				springEdges
+			});
 			return positions.n1.x - positions.n0.x;
 		}
 
@@ -79,6 +86,7 @@ describe('graphLayout', () => {
 			// making them neighbors, so n1 stays unreachable from the pinned n0 and
 			// keeps the disconnected node's minimum scale.
 			const layout = deriveGraphLayout(graph, {
+				hopsByNodeId: hopsFromPinned(graph),
 				settings,
 				relaxIterations: 1,
 				springEdges: [{ sourceNodeId: 'n0', targetNodeId: 'n1' }]
@@ -100,9 +108,13 @@ describe('graphLayout', () => {
 			const connected = makeGraph({ nodeCount: 2, pinned: [0], edges: [[0, 1]] });
 			const spread = { ...connected, posByNodeId: graph.posByNodeId };
 
-			expect(relaxGraphPositions(spread, { settings, relaxIterations: 1 }).n1.x).toBeLessThan(
-				spread.posByNodeId.n1.x
-			);
+			expect(
+				relaxGraphPositions(spread, {
+					hopsByNodeId: hopsFromPinned(spread),
+					settings,
+					relaxIterations: 1
+				}).n1.x
+			).toBeLessThan(spread.posByNodeId.n1.x);
 		});
 	});
 
@@ -114,6 +126,7 @@ describe('graphLayout', () => {
 		});
 
 		const layout = deriveGraphLayout(graph, {
+			hopsByNodeId: hopsFromPinned(graph),
 			settings: { baseRadius: 100, minScale: 0.2 },
 			relaxIterations: 0
 		});
@@ -123,7 +136,11 @@ describe('graphLayout', () => {
 		expect(layout.radiusByNodeId.n2).toBe(20);
 	});
 
-	it('uses hop overrides for scale instead of the pinned BFS', () => {
+	it('scales from the hop map it is handed rather than measuring the graph itself', () => {
+		// n2 has no edge to the pin, so a BFS over this graph would call it
+		// unreachable. Whoever owns the whole graph knows better — an equation
+		// reaches it, or it is its cluster's beacon — and the layout takes their
+		// word for it. Nodes the map has never heard of are simply not here.
 		const graph = makeGraph({
 			nodeCount: 3,
 			pinned: [0],
@@ -132,7 +149,7 @@ describe('graphLayout', () => {
 
 		const layout = deriveGraphLayout(graph, {
 			settings: { baseRadius: 100, scaleFalloff: 0.5, minScale: 0.2 },
-			hopOverridesByNodeId: { n2: 1, 'missing-node': 1 },
+			hopsByNodeId: { n0: 0, n1: 1, n2: 1, 'missing-node': 1 },
 			relaxIterations: 0
 		});
 
@@ -140,6 +157,19 @@ describe('graphLayout', () => {
 		expect(layout.scaleByNodeId.n2).toBe(0.5);
 		expect(layout.radiusByNodeId.n2).toBe(50);
 		expect('missing-node' in layout.hopsByNodeId).toBe(false);
+	});
+
+	it('treats a node the hop map leaves out as unreachable', () => {
+		const graph = makeGraph({ nodeCount: 2, pinned: [0], edges: [[0, 1]] });
+
+		const layout = deriveGraphLayout(graph, {
+			settings: { baseRadius: 100, minScale: 0.2 },
+			hopsByNodeId: { n0: 0 },
+			relaxIterations: 0
+		});
+
+		expect(layout.hopsByNodeId.n1).toBe(Infinity);
+		expect(layout.scaleByNodeId.n1).toBe(0.2);
 	});
 
 	it('uses animated scale overrides for radii and physics', () => {
@@ -153,6 +183,7 @@ describe('graphLayout', () => {
 		});
 
 		const layout = deriveGraphLayout(graph, {
+			hopsByNodeId: hopsFromPinned(graph),
 			settings: { baseRadius: 100, minScale: 0.2, hopRepulsionStrength: 0 },
 			scaleByNodeId: { n1: 0.6 },
 			relaxIterations: 1
@@ -174,6 +205,7 @@ describe('graphLayout', () => {
 		});
 
 		const layout = deriveGraphLayout(graph, {
+			hopsByNodeId: hopsFromPinned(graph),
 			settings: { baseRadius: 50, minScale: 1, relaxIterations: 1 },
 			scaleAnchoredNodeIds: ['n0']
 		});
@@ -195,6 +227,7 @@ describe('graphLayout', () => {
 		});
 
 		const layout = deriveGraphLayout(graph, {
+			hopsByNodeId: hopsFromPinned(graph),
 			activeDragNodeId: 'n2',
 			settings: { baseRadius: 50, minScale: 1 },
 			relaxIterations: 1
@@ -218,6 +251,7 @@ describe('graphLayout', () => {
 		});
 
 		const layout = deriveGraphLayout(graph, {
+			hopsByNodeId: hopsFromPinned(graph),
 			activeDragNodeId: 'n0',
 			settings: {
 				baseRadius: 20,
@@ -244,6 +278,7 @@ describe('graphLayout', () => {
 		});
 
 		const positions = relaxGraphPositions(graph, {
+			hopsByNodeId: hopsFromPinned(graph),
 			settings: { baseRadius: 50, minScale: 1, hopRepulsionStrength: 0 },
 			relaxIterations: 1
 		});
@@ -264,6 +299,7 @@ describe('graphLayout', () => {
 		});
 
 		const relaxed = withRelaxedGraphPositions(graph, {
+			hopsByNodeId: hopsFromPinned(graph),
 			settings: { baseRadius: 50, minScale: 1, hopRepulsionStrength: 0 },
 			relaxIterations: 1
 		});
@@ -287,6 +323,7 @@ describe('graphLayout', () => {
 		});
 
 		const step = relaxGraphPositionsStep(graph, {
+			hopsByNodeId: hopsFromPinned(graph),
 			settings: { baseRadius: 50, minScale: 1, hopRepulsionStrength: 0 },
 			relaxIterations: 1
 		});
@@ -314,11 +351,13 @@ describe('graphLayout', () => {
 		};
 
 		const step = relaxGraphPositionsStep(graph, {
+			hopsByNodeId: hopsFromPinned(graph),
 			settings,
 			relaxIterations: 1,
 			mobilityByNodeId: { n0: 0.25, n1: 1 }
 		});
 		const unnormalizedStep = relaxGraphPositionsStep(graph, {
+			hopsByNodeId: hopsFromPinned(graph),
 			settings: {
 				...settings,
 				normalizeRelaxationTranslation: false,
@@ -356,12 +395,14 @@ describe('graphLayout', () => {
 		};
 
 		const step = relaxGraphPositionsStep(graph, {
+			hopsByNodeId: hopsFromPinned(graph),
 			activeDragNodeId: 'dragging-node',
 			settings,
 			relaxIterations: 1,
 			mobilityByNodeId: { n0: 0.25, n1: 1 }
 		});
 		const normalizationDisabledStep = relaxGraphPositionsStep(graph, {
+			hopsByNodeId: hopsFromPinned(graph),
 			activeDragNodeId: 'dragging-node',
 			settings: {
 				...settings,
@@ -395,11 +436,20 @@ describe('graphLayout', () => {
 			edgeSpringStrength: 0,
 			hopRepulsionStrength: 0
 		};
-		const lightlyRelaxed = deriveGraphLayout(graph, { settings, relaxIterations: 4 });
-		const settled = deriveGraphLayout(withSettledGraphPositions(graph, { settings }), {
+		const hopsByNodeId = hopsFromPinned(graph);
+		const lightlyRelaxed = deriveGraphLayout(graph, {
+			hopsByNodeId,
 			settings,
-			relaxIterations: 0
+			relaxIterations: 4
 		});
+		const settled = deriveGraphLayout(
+			withSettledGraphPositions(graph, { hopsByNodeId, settings }),
+			{
+				hopsByNodeId,
+				settings,
+				relaxIterations: 0
+			}
+		);
 
 		expect(
 			maxOverlapAmount(lightlyRelaxed.posByNodeId, lightlyRelaxed.radiusByNodeId)

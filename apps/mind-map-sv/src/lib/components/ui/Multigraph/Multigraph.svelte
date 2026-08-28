@@ -62,15 +62,15 @@
 	} from './lib/graph.js';
 	import { deriveGraphLayout, withSettledGraphPositions } from './lib/graphLayout.js';
 	import { evaluateGraphQuery, type GraphQueryElementState } from './lib/graphQuery.js';
-	import { beaconHopOverrides, beaconNodeIds, withBeaconHops } from './lib/beacons.js';
+	import { beaconNodeIds } from './lib/beacons.js';
 	import { hopsFromPinned } from './lib/layout.js';
 	import type { LayoutSettings } from './lib/layoutSettings.js';
 	import { withDefaultLayoutSettings } from './lib/layoutSettings.js';
 	import {
+		computeBoundedHops,
 		edgeVisibilityForPinnedNeighborhood,
 		graphWithVisibleNodes,
-		visibleNodeIdsForPinnedNeighborhood,
-		withRevealedNeighborHops
+		visibleNodeIdsForPinnedNeighborhood
 	} from './lib/boundedVisibility.js';
 	import { composeEdgesForRender, createDataflowModel } from './lib/dataflowLayer.js';
 	import { isDerivedEdgeId, type DerivedEdge } from './lib/derivedEdges.js';
@@ -200,8 +200,7 @@
 		exitingBuffer,
 		assetStore = null,
 		assetScope = '',
-		dataflowEnabled = true,
-		dataflowInLayout = false
+		dataflowEnabled = true
 	}: {
 		multigraphData: MultigraphData;
 		graphGeneration?: number;
@@ -221,12 +220,6 @@
 		assetScope?: string;
 		/** Draw dataflow edges inferred from the math in node descriptions. */
 		dataflowEnabled?: boolean;
-		/**
-		 * Let derived edges influence hop distance, node scaling, and which nodes
-		 * are visible. Off by default: adjacency drives all three, so turning this
-		 * on rearranges any graph the moment a description contains an equation.
-		 */
-		dataflowInLayout?: boolean;
 	} = $props();
 
 	let graph = $state<MultigraphData>({
@@ -315,15 +308,8 @@
 
 	const layoutRuntime: LayoutRuntime = new LayoutRuntime({
 		getGraph: () => graph,
-		composeAdjacency: (data) =>
-			dataflowInLayout
-				? composeEdgesForRender(data, withSpringFactor(dataflowModel(data, dataflowEnabled).edges))
-				: data,
+		computeHops: (data) => hopsFor(data),
 		composeSpringEdges: (visibleGraph) => {
-			// Already in the topology when the toggle is on, and carrying the same
-			// factor, so adding them again would double every dataflow pull.
-			if (dataflowInLayout) return [];
-
 			const visibleNodeIds = new Set(visibleGraph.nodes.map((node) => node.id));
 			// A node off screen has no position or radius for physics to use, and an
 			// edge to it would still count toward its neighbor's degree, weakening
@@ -334,7 +320,6 @@
 				)
 			);
 		},
-		composeRevealEdges: (data) => dataflowModel(data, dataflowEnabled).edges,
 		getLayoutSettings: () => layoutSettings,
 		getActiveDragNodeId: () => activeDragNodeId,
 		getPreferredBeaconNodeIds: () => severedBeaconPreference,
@@ -362,28 +347,39 @@
 
 	const resolvedLayoutSettings = $derived(withDefaultLayoutSettings(layoutSettings));
 
-	/**
-	 * Tags derived edges with how hard they pull, so the same tuning applies
-	 * whether they reach physics as spring-only edges or as part of the topology.
-	 */
+	/** Tags derived edges with how hard they pull. */
 	function withSpringFactor(edges: readonly DerivedEdge[]): DerivedEdge[] {
 		const springFactor = resolvedLayoutSettings.derivedEdgeSpringFactor;
 		return edges.map((edge) => ({ ...edge, springFactor }));
 	}
 
+	/**
+	 * The one hop map: how far every node is from where reading starts. Visibility,
+	 * node scale, the reveal wave, and physics distance all read the result, and
+	 * `LayoutRuntime` is handed this very function rather than rebuilding its own
+	 * chain — it needs answers for graphs that do not exist yet (a mutation being
+	 * relaxed, the before/after pair of a reveal wave), so it takes the graph.
+	 *
+	 * Beacons come off the authored edges alone: two clusters an equation ties
+	 * together each keep their own anchor, so neither can mostly vanish because
+	 * someone wrote an equation. The dataflow model is identity-stable, so a graph
+	 * whose content did not change costs a lookup here.
+	 */
+	function hopsFor(data: MultigraphData): Record<string, number> {
+		return computeBoundedHops(
+			data,
+			dataflowModel(data, dataflowEnabled).edges,
+			beaconNodeIds(data, { preferredNodeIds: severedBeaconPreference }),
+			{
+				displayedLayers: resolvedLayoutSettings.displayedLayers,
+				dataflowDisplayedLayers: resolvedLayoutSettings.dataflowDisplayedLayers
+			}
+		);
+	}
+
 	const dataflow = $derived(dataflowModel(graph, dataflowEnabled));
-	/**
-	 * What the renderer draws. Always composed, so dataflow edges appear whether
-	 * or not they are allowed to influence layout.
-	 */
+	/** What the renderer draws: authored edges plus the derived ones. */
 	const renderGraph = $derived(composeEdgesForRender(graph, dataflow.edges));
-	/**
-	 * What determines hop distance, scaling, and bounded visibility. Authored-only
-	 * unless the user opts in, which keeps a written equation from deciding how
-	 * big a node is or whether it is on screen at all. Dataflow edges still pull,
-	 * through `composeSpringEdges` — pulling and connecting are separate here.
-	 */
-	const adjacencyGraph = $derived(dataflowInLayout ? renderGraph : graph);
 	/** Shared so a node below the size threshold allocates nothing per frame. */
 	const EMPTY_QUANTITY_CHIPS: QuantityChips = { labels: [], overflowCount: 0 };
 	/**
@@ -411,27 +407,13 @@
 			])
 		)
 	);
-	const beaconIds = $derived(
-		beaconNodeIds(adjacencyGraph, { preferredNodeIds: severedBeaconPreference })
-	);
-	/**
-	 * Pinned BFS, then beacons, then dataflow reveals. `LayoutRuntime` runs the
-	 * same three steps in the same order; they have to match or a node shows up
-	 * on the canvas without being placed by physics.
-	 */
-	const hopsByNodeId = $derived(
-		withRevealedNeighborHops(
-			withBeaconHops(hopsFromPinned(adjacencyGraph), beaconIds),
-			dataflow.edges,
-			{ displayedLayers: resolvedLayoutSettings.displayedLayers }
-		)
-	);
+	const hopsByNodeId = $derived(hopsFor(graph));
 	const visibleNodeIds = $derived(
-		visibleNodeIdsForPinnedNeighborhood(adjacencyGraph, hopsByNodeId, {
+		visibleNodeIdsForPinnedNeighborhood(graph, hopsByNodeId, {
 			displayedLayers: resolvedLayoutSettings.displayedLayers
 		})
 	);
-	const visibleGraph = $derived(graphWithVisibleNodes(adjacencyGraph, visibleNodeIds));
+	const visibleGraph = $derived(graphWithVisibleNodes(graph, visibleNodeIds));
 	/** Needs the visible set, so that out-of-view reads differently from undefined. */
 	const dataflowDiagnostics = $derived(
 		computeDataflowDiagnostics(dataflow.index, dataflow.edges, { visibleNodeIds })
@@ -453,7 +435,7 @@
 	const graphLayout = $derived(
 		deriveGraphLayout(
 			visibleGraph,
-			layoutRuntime.layoutOptions(visibleGraph, { relaxIterations: 0 })
+			layoutRuntime.layoutOptions(visibleGraph, { hopsByNodeId, relaxIterations: 0 })
 		)
 	);
 	const visibleEdgeOcclusionNodes = $derived.by((): EdgeOcclusionNode[] =>
@@ -547,6 +529,9 @@
 		const primary = untrack(() => defaultPrimaryNodeId);
 		const settings = untrack(() => layoutSettings);
 		layoutRuntime.reset();
+		// Cleared before the settle measures anything: a preference left over from
+		// the graph being replaced must not pick a beacon in the one arriving.
+		severedBeaconPreference = [];
 		// Dataflow pulls during the ingest settle too. A graph arriving from storage
 		// should come to rest under the same forces it will feel from the first
 		// interaction onward, instead of shifting once the runtime takes over.
@@ -554,13 +539,15 @@
 			...incoming.edges,
 			...withSpringFactor(dataflowModel(incoming, dataflowEnabled).edges)
 		]);
+		// The same hop map the canvas will draw from, so the graph settles at the
+		// sizes it is about to appear at rather than at a first guess.
+		const hopsByNodeIdForIngest = untrack(() => hopsFor(incoming));
 		graph = withSettledGraphPositions(incoming, {
 			settings,
 			springEdges,
-			hopOverridesByNodeId: beaconHopOverrides(beaconNodeIds(incoming))
+			hopsByNodeId: hopsByNodeIdForIngest
 		});
 		primaryNodeId = primary;
-		severedBeaconPreference = [];
 		internalExitingBuffer = EMPTY_EXITING_BUFFER;
 		nodeEnterAnimations = {};
 		edgeEnterAnimations = {};

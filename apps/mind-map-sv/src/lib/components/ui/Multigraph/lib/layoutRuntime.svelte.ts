@@ -1,11 +1,11 @@
 import type { MultigraphData } from '../../types/multigraph';
-import { BEACON_HOP, beaconNodeIds, withBeaconHops } from './beacons';
+import { beaconNodeIds } from './beacons';
 import {
+	computeBoundedHops,
 	edgeVisibilityForPinnedNeighborhood,
 	graphWithVisibleNodes,
 	pinnedNodeIds,
-	visibleNodeIdsForPinnedNeighborhood,
-	withRevealedNeighborHops
+	visibleNodeIdsForPinnedNeighborhood
 } from './boundedVisibility';
 import type { EdgeVisibility } from './boundedVisibility';
 import {
@@ -14,7 +14,7 @@ import {
 	withRelaxedGraphPositions,
 	type GraphLayoutOptions
 } from './graphLayout';
-import { hopsFromPinned, scaleByHops, withHopsThroughEdges } from './layout';
+import { scaleByHops } from './layout';
 import type { EdgeEndpointIds } from './physics';
 import {
 	advanceLayeredRelayout,
@@ -71,39 +71,30 @@ export interface LayoutRuntimeOptions {
 	getPreferredBeaconNodeIds: () => readonly string[];
 	applyGraph: (data: MultigraphData) => void;
 	/**
-	 * Adds edges that should influence hop distance and physics but must never be
-	 * persisted, currently the dataflow layer. Applied only where a graph is read
-	 * for topology; the value that flows back through `applyGraph` is always the
-	 * authored graph with merged positions, so composed edges cannot leak into
-	 * saved data.
+	 * The one hop map, computed by whoever owns the graph — in the app, the same
+	 * `computeBoundedHops` call the renderer draws from. Visibility, node scale,
+	 * the reveal wave, and physics distance all read the result, so a node on the
+	 * canvas is in the physics graph by construction rather than by two chains
+	 * being kept in step.
 	 *
-	 * Defaults to identity, which leaves every existing behavior untouched.
+	 * Takes the graph as an argument because the runtime asks about graphs that
+	 * do not exist yet: the mutation being relaxed, and the before/after pair a
+	 * reveal wave cross-fades. Always a whole graph, never a visible subgraph —
+	 * inside one, a beacon or a node an equation revealed has no edges left to be
+	 * measured along.
+	 *
+	 * Defaults to authored hops plus beacons, which is every graph with no math
+	 * in it.
 	 */
-	composeAdjacency?: (data: MultigraphData) => MultigraphData;
+	computeHops?: (graph: MultigraphData) => Record<string, number>;
 	/**
 	 * Extra edges that exert spring force without joining the graph's topology,
 	 * currently the dataflow layer. Called with the visible graph, so the caller
 	 * can drop edges whose endpoints are not on screen.
 	 *
-	 * Separate from `composeAdjacency` because pulling and connecting are
-	 * different claims. A dataflow edge should draw two nodes together; making it
-	 * shorten hop distance would also resize nodes and change which are visible.
-	 *
 	 * Defaults to none, which leaves the force exactly as it was.
 	 */
 	composeSpringEdges?: (visibleGraph: MultigraphData) => readonly EdgeEndpointIds[];
-	/**
-	 * Edges whose hidden endpoint should be pulled into view beside the node it
-	 * hangs off, without joining the topology. Currently the dataflow layer.
-	 *
-	 * The runtime needs this rather than leaving it to the renderer: a node drawn
-	 * on the canvas but missing from the runtime's visible graph gets no physics,
-	 * so it would sit at a stale position while everything else moves around and
-	 * through it.
-	 *
-	 * Defaults to none, which leaves visibility exactly as it was.
-	 */
-	composeRevealEdges?: (graph: MultigraphData) => readonly EdgeEndpointIds[];
 	scheduler?: LayoutRuntimeScheduler;
 	/** Returns true while enter/exit animations are active; keeps the frame loop running. */
 	getHasActiveTransitions?: () => boolean;
@@ -200,10 +191,12 @@ export class LayoutRuntime {
 		dragNodeId: string | null = this.#options.getActiveDragNodeId(),
 		relaxIterations = this.#options.getLayoutSettings().relaxIterations
 	): MultigraphData {
-		const nextVisibleGraph = this.#visibleGraphFor(nextGraph);
+		const hopsByNodeId = this.#hopsFor(nextGraph);
+		const nextVisibleGraph = this.visibleGraphFor(nextGraph, hopsByNodeId);
 		const relaxedVisibleGraph = withRelaxedGraphPositions(
 			nextVisibleGraph,
 			this.layoutOptions(nextVisibleGraph, {
+				hopsByNodeId,
 				activeDragNodeId: dragNodeId,
 				relaxIterations
 			})
@@ -215,16 +208,26 @@ export class LayoutRuntime {
 	beginScaleChange(nextGraph: MultigraphData, focalNodeId: string): MultigraphData {
 		this.scaleChangeFocalNodeId = focalNodeId;
 		const currentGraph = this.#options.getGraph();
-		const currentVisibleGraph = this.#visibleGraphFor(currentGraph);
-		const nextVisibleGraph = this.#visibleGraphFor(nextGraph);
-		this.scaleChangeRevealState = this.#createScaleChangeRevealState(currentGraph, nextGraph);
+		const currentHopsByNodeId = this.#hopsFor(currentGraph);
+		const nextHopsByNodeId = this.#hopsFor(nextGraph);
+		const currentVisibleGraph = this.visibleGraphFor(currentGraph, currentHopsByNodeId);
+		const nextVisibleGraph = this.visibleGraphFor(nextGraph, nextHopsByNodeId);
+		this.scaleChangeRevealState = this.#createScaleChangeRevealState(
+			currentGraph,
+			nextGraph,
+			currentHopsByNodeId,
+			nextHopsByNodeId
+		);
 		const fromLayout = deriveGraphLayout(
 			currentVisibleGraph,
-			this.layoutOptions(currentVisibleGraph, { relaxIterations: 0 })
+			this.layoutOptions(currentVisibleGraph, {
+				hopsByNodeId: currentHopsByNodeId,
+				relaxIterations: 0
+			})
 		);
 		const targetLayout = deriveGraphLayout(
 			nextVisibleGraph,
-			this.layoutOptions(nextVisibleGraph, { relaxIterations: 0 })
+			this.layoutOptions(nextVisibleGraph, { hopsByNodeId: nextHopsByNodeId, relaxIterations: 0 })
 		);
 		const nowMs = this.#scheduler.now();
 		const scaleAnimationDurationMs = this.#resolvedSettings().scaleAnimationDurationMs;
@@ -272,6 +275,7 @@ export class LayoutRuntime {
 		const relaxedVisibleGraph = withRelaxedGraphPositions(
 			nextVisibleGraph,
 			this.layoutOptions(nextVisibleGraph, {
+				hopsByNodeId: nextHopsByNodeId,
 				relaxIterations: this.#options.getLayoutSettings().relaxIterations,
 				scaleByNodeId: animatedScalesAt(nextAnimations, nowMs),
 				scaleAnchoredNodeIds: [focalNodeId]
@@ -291,9 +295,17 @@ export class LayoutRuntime {
 		this.animationNowMs = nowMs;
 	}
 
+	/**
+	 * `layoutGraph` is the visible subgraph; `hopsByNodeId` must be the map for
+	 * the whole graph it came out of, so a beacon or an equation-revealed node —
+	 * both edgeless once the hidden nodes are gone — keeps the distance it was
+	 * actually measured at. Beacons stay unanchored: overlap resolution and
+	 * (bounded) hop repulsion must be able to move them off other clusters.
+	 */
 	layoutOptions(
 		layoutGraph: MultigraphData,
 		overrides: {
+			hopsByNodeId?: Record<string, number>;
 			activeDragNodeId?: string | null;
 			relaxIterations?: number;
 			scaleByNodeId?: Record<string, number>;
@@ -305,24 +317,13 @@ export class LayoutRuntime {
 		const nodeIds = layoutGraph.nodes.map((node) => node.id);
 		const relayoutParticipating =
 			overrides.participatingNodeIds ?? participatingNodeIds(nodeIds, this.layeredRelayoutState);
-		// layoutGraph is always a visible graph, where beacon selection is
-		// idempotent: each beacon is the sole member of its pinless component.
-		// Beacons stay unanchored: overlap resolution and (bounded) hop
-		// repulsion must be able to move them off other clusters.
-		//
-		// The layout recomputes hops from the visible graph alone, where a beacon
-		// or a revealed node has no edges at all and would fall to the minimum
-		// scale. Handing it hops measured through the dataflow edges instead is
-		// what makes a node one dataflow edge from your pin the same size as one
-		// authored edge away, and one behind that a size smaller again.
-		const hopOverridesByNodeId = this.#scaleHopsFor(layoutGraph);
 
 		return {
 			settings: this.#options.getLayoutSettings(),
 			springEdges: this.#springEdgesFor(layoutGraph),
 			activeDragNodeId: overrides.activeDragNodeId ?? this.#options.getActiveDragNodeId(),
 			scaleAnchoredNodeIds: overrides.scaleAnchoredNodeIds ?? this.scaleAnchoredNodeIds,
-			hopOverridesByNodeId,
+			hopsByNodeId: overrides.hopsByNodeId ?? this.#hopsFor(layoutGraph),
 			relaxIterations: overrides.relaxIterations,
 			scaleByNodeId: overrides.scaleByNodeId ?? this.animatedScaleByNodeId,
 			participatingNodeIds: relayoutParticipating,
@@ -344,10 +345,12 @@ export class LayoutRuntime {
 
 		if (shouldRelax) {
 			const currentGraph = this.#options.getGraph();
-			const currentVisibleGraph = this.#visibleGraphFor(currentGraph);
+			const hopsByNodeId = this.#hopsFor(currentGraph);
+			const currentVisibleGraph = this.visibleGraphFor(currentGraph, hopsByNodeId);
 			const step = relaxGraphPositionsStep(
 				currentVisibleGraph,
 				this.layoutOptions(currentVisibleGraph, {
+					hopsByNodeId,
 					relaxIterations: 1,
 					scaleByNodeId: nextScaleByNodeId
 				})
@@ -412,8 +415,24 @@ export class LayoutRuntime {
 		}
 	}
 
-	#adjacency(graph: MultigraphData): MultigraphData {
-		return this.#options.composeAdjacency?.(graph) ?? graph;
+	/**
+	 * The hop map for a whole graph. One call, one answer, read by visibility,
+	 * sizing, and the reveal wave alike.
+	 */
+	#hopsFor(graph: MultigraphData): Record<string, number> {
+		const computeHops = this.#options.computeHops;
+		if (computeHops) return computeHops(graph);
+
+		const settings = this.#resolvedSettings();
+		return computeBoundedHops(
+			graph,
+			[],
+			beaconNodeIds(graph, { preferredNodeIds: this.#options.getPreferredBeaconNodeIds() }),
+			{
+				displayedLayers: settings.displayedLayers,
+				dataflowDisplayedLayers: settings.dataflowDisplayedLayers
+			}
+		);
 	}
 
 	/**
@@ -429,76 +448,21 @@ export class LayoutRuntime {
 		return [...layoutGraph.edges, ...extra];
 	}
 
-	#beaconIdsFor(graph: MultigraphData): Set<string> {
-		return beaconNodeIds(this.#adjacency(graph), {
-			preferredNodeIds: this.#options.getPreferredBeaconNodeIds()
-		});
-	}
-
 	/**
-	 * Hops for sizing, which is a different question from hops for visibility.
-	 * Only ever called with a graph that is already on screen, so re-measuring
-	 * through the dataflow edges cannot pull anything new into view.
+	 * The graph physics runs over: exactly the nodes the canvas draws, because
+	 * both sides filter the same hop map by the same budget. Public so a spec can
+	 * hold it against the renderer's visible set — a node drawn without taking
+	 * part in the physics that places it would sit stale while everything else
+	 * moves around and through it.
 	 */
-	#scaleHopsFor(layoutGraph: MultigraphData): Record<string, number> {
-		const dataflowEdges = this.#options.composeRevealEdges?.(layoutGraph) ?? [];
-		return withHopsThroughEdges(layoutGraph, this.#effectiveHopsFor(layoutGraph), dataflowEdges, {
-			displayedLayers: this.#resolvedSettings().displayedLayers,
-			origins: this.#distanceOriginsFor(layoutGraph, dataflowEdges)
-		});
-	}
-
-	/**
-	 * Where measuring distance starts. Pinned nodes anchor at zero; a cluster
-	 * with no pin in it anchors on its beacon, which is the one node of that
-	 * cluster on screen and so the only thing there is to measure from. Without
-	 * the second case, unpinning everything leaves no origin at all and every
-	 * node keeps the flat hop it came in with.
-	 *
-	 * Beacons are picked here over the dataflow-joined graph rather than the
-	 * authored one. Two clusters an equation ties together are one cluster to
-	 * the reader, so they need one origin between them; picked separately, both
-	 * beacons start at the same hop and the graph reads as two unrelated things.
-	 */
-	#distanceOriginsFor(
+	visibleGraphFor(
 		graph: MultigraphData,
-		dataflowEdges: readonly EdgeEndpointIds[]
-	): Record<string, number> {
-		const origins: Record<string, number> = {};
-		for (const node of graph.nodes) {
-			if (node.pinned) origins[node.id] = 0;
-		}
-		for (const beaconId of beaconNodeIds(graph, {
-			preferredNodeIds: this.#options.getPreferredBeaconNodeIds(),
-			extraEdges: dataflowEdges
-		})) {
-			origins[beaconId] = BEACON_HOP;
-		}
-		return origins;
-	}
-
-	#effectiveHopsFor(graph: MultigraphData): Record<string, number> {
-		const adjacency = this.#adjacency(graph);
-		// Same three steps, in the same order, as the renderer's own hop chain. The
-		// two must agree or a node appears on the canvas without taking part in the
-		// physics that places it.
-		return withRevealedNeighborHops(
-			withBeaconHops(hopsFromPinned(adjacency), this.#beaconIdsFor(adjacency)),
-			this.#options.composeRevealEdges?.(adjacency) ?? [],
-			{ displayedLayers: this.#resolvedSettings().displayedLayers }
-		);
-	}
-
-	#visibleGraphFor(graph: MultigraphData): MultigraphData {
-		const adjacency = this.#adjacency(graph);
-		const visibleNodeIds = visibleNodeIdsForPinnedNeighborhood(
-			adjacency,
-			this.#effectiveHopsFor(adjacency),
-			{
-				displayedLayers: this.#resolvedSettings().displayedLayers
-			}
-		);
-		return graphWithVisibleNodes(adjacency, visibleNodeIds);
+		hopsByNodeId: Record<string, number> = this.#hopsFor(graph)
+	): MultigraphData {
+		const visibleNodeIds = visibleNodeIdsForPinnedNeighborhood(graph, hopsByNodeId, {
+			displayedLayers: this.#resolvedSettings().displayedLayers
+		});
+		return graphWithVisibleNodes(graph, visibleNodeIds);
 	}
 
 	get revealWaveProgress(): number {
@@ -638,38 +602,34 @@ export class LayoutRuntime {
 
 	#createScaleChangeRevealState(
 		currentGraph: MultigraphData,
-		nextGraph: MultigraphData
+		nextGraph: MultigraphData,
+		previousHopsByNodeId: Record<string, number>,
+		nextHopsByNodeId: Record<string, number>
 	): ScaleChangeRevealState {
 		const settings = this.#resolvedSettings();
-		// The wave cross-fades what is drawn, so it reasons over composed edges.
-		const currentAdjacency = this.#adjacency(currentGraph);
-		const nextAdjacency = this.#adjacency(nextGraph);
-		const previousHopsByNodeId = this.#effectiveHopsFor(currentAdjacency);
-		const nextHopsByNodeId = this.#effectiveHopsFor(nextAdjacency);
 		const previousVisibleNodeIds = Array.from(
-			visibleNodeIdsForPinnedNeighborhood(currentAdjacency, previousHopsByNodeId, {
+			visibleNodeIdsForPinnedNeighborhood(currentGraph, previousHopsByNodeId, {
 				displayedLayers: settings.displayedLayers
 			})
 		);
 		const nextVisibleNodeIds = Array.from(
-			visibleNodeIdsForPinnedNeighborhood(nextAdjacency, nextHopsByNodeId, {
+			visibleNodeIdsForPinnedNeighborhood(nextGraph, nextHopsByNodeId, {
 				displayedLayers: settings.displayedLayers
 			})
 		);
+		// The edge sets are the authored edges alone: the wave cross-fades what is
+		// drawn, and what is drawn is the composed render graph, so a derived arrow
+		// currently snaps rather than fading. T06 owns composing these.
 		const previousRenderableEdges = edgeVisibilityForPinnedNeighborhood(
-			currentAdjacency,
+			currentGraph,
 			previousHopsByNodeId,
 			{
 				displayedLayers: settings.displayedLayers
 			}
 		).filter((visibility): visibility is RenderableEdgeVisibility => visibility.kind !== 'hidden');
-		const nextRenderableEdges = edgeVisibilityForPinnedNeighborhood(
-			nextAdjacency,
-			nextHopsByNodeId,
-			{
-				displayedLayers: settings.displayedLayers
-			}
-		).filter((visibility): visibility is RenderableEdgeVisibility => visibility.kind !== 'hidden');
+		const nextRenderableEdges = edgeVisibilityForPinnedNeighborhood(nextGraph, nextHopsByNodeId, {
+			displayedLayers: settings.displayedLayers
+		}).filter((visibility): visibility is RenderableEdgeVisibility => visibility.kind !== 'hidden');
 		const nextRenderableEdgeIds = nextRenderableEdges.map((visibility) => visibility.edge.id);
 
 		return {

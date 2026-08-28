@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { togglePinned } from './graph';
 import { deriveGraphLayout } from './graphLayout';
+import { hopsFromPinned } from './layout';
 import { makeGraph } from './testFixtures';
 import {
 	activeScaleAnimationNodeIds,
@@ -26,8 +27,13 @@ describe('scaleAnimation', () => {
 				[1, 2]
 			]
 		});
-		const currentLayout = deriveGraphLayout(graph, { settings: pinningLayoutSettings });
-		const pinnedLayout = deriveGraphLayout(togglePinned(graph, 'n0'), {
+		const pinnedGraph = togglePinned(graph, 'n0');
+		const currentLayout = deriveGraphLayout(graph, {
+			hopsByNodeId: hopsFromPinned(graph),
+			settings: pinningLayoutSettings
+		});
+		const pinnedLayout = deriveGraphLayout(pinnedGraph, {
+			hopsByNodeId: hopsFromPinned(pinnedGraph),
 			settings: pinningLayoutSettings
 		});
 

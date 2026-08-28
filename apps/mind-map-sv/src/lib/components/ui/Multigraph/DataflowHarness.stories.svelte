@@ -85,15 +85,15 @@
 		canvasElement.querySelector(`[data-node-id="${nodeId}"]`);
 
 	/**
-	 * root -dataflow-> a -authored-> b, where `b` is on screen in its own right
-	 * as its component's beacon (it has pin history, which wins the slot). Both
-	 * used to sit at the flat beacon hop with nothing relating them.
+	 * root -dataflow-> a -authored-> b. `a` wins its component's beacon slot on
+	 * degree and id, so `b` has nothing of its own keeping it on screen and
+	 * reaching it means a second step after the equation.
 	 */
 	const BEHIND_A_CONSUMER = makeGraph({
 		nodes: [
 			{ id: 'root', title: 'Gravity', description: '$$g = 9.8$$' },
 			{ id: 'a', title: 'Weight', description: '' },
-			{ id: 'b', title: 'Behind', description: '', lastPinnedSeq: 1 }
+			{ id: 'b', title: 'Behind', description: '' }
 		],
 		pinned: ['root'],
 		edges: [['a', 'b']],
@@ -106,9 +106,9 @@
 
 	/**
 	 * The same shape with nothing pinned. `root` and `b` each light a beacon of
-	 * their own on the authored edges, so both used to sit at the flat beacon
-	 * hop while `a`, the one actually next to `root`, came out smaller than
-	 * either. `root` was pinned most recently, so it is where reading starts.
+	 * their own — beacons come off the authored edges, so an equation cannot
+	 * collapse two clusters into one anchor and leave the second one mostly
+	 * gone — and `a`, which only the equation reaches, sits a step past `root`.
 	 */
 	const BEHIND_A_CONSUMER_UNPINNED = makeGraph({
 		nodes: [
@@ -239,7 +239,7 @@
 
 <Story
 	name="ANodeTheDataflowDoesNotTouchIsLeftAlone"
-	args={{ baseGraph: CHAIN, editNodeId: 'c', equation: CONSUMES_G, dataflowInLayout: false }}
+	args={{ baseGraph: CHAIN, editNodeId: 'c', equation: CONSUMES_G }}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitFor(() => expect(canvasElement.querySelector('.edge')).toBeInTheDocument());
 		const before = nodeGeometry(canvasElement, 'b');
@@ -259,7 +259,6 @@
 		baseGraph: UNCONNECTED_PAIR,
 		editNodeId: 'c',
 		equation: CONSUMES_G,
-		dataflowInLayout: false,
 		layoutSettings: SPRINGS_ONLY,
 		initialViewState: FIXED_VIEW
 	}}
@@ -315,7 +314,7 @@
 />
 
 <Story
-	name="ANodeBehindADataflowLinkIsSizedAHopFurtherOut"
+	name="ANodeBehindADataflowLinkStaysHidden"
 	args={{
 		baseGraph: BEHIND_A_CONSUMER,
 		editNodeId: 'a',
@@ -324,12 +323,13 @@
 		layoutSettings: { relaxIterations: 0 }
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
-		await waitFor(() => expect(nodeOnCanvas(canvasElement, 'b')).toBeInTheDocument());
+		await waitFor(() => expect(nodeOnCanvas(canvasElement, 'a')).toBeInTheDocument());
 
-		// `b` reaches the pin only by going through `a`, so it is one step further
-		// out and reads smaller. It stays on screen either way — it is the beacon
-		// for its cluster — this is about size alone.
-		expect(Number(scaleOf(canvasElement, 'b'))).toBeLessThan(Number(scaleOf(canvasElement, 'a')));
+		// Crossing the equation spends the authored budget: `a` comes into view
+		// beside the node defining what it consumes, and the `b` it was drawn to
+		// does not follow. One equation cannot open up a cluster the author never
+		// joined to the pinned node.
+		expect(nodeOnCanvas(canvasElement, 'b')).not.toBeInTheDocument();
 	}}
 />
 
@@ -345,13 +345,14 @@
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitFor(() => expect(nodeOnCanvas(canvasElement, 'b')).toBeInTheDocument());
 
-		// Reading starts at `root` and falls away from there, rather than `root`
-		// and `b` both claiming to be a start because the author drew no edge
-		// between the two clusters the equation joins.
+		// `a` is a step out from `root` across the equation, so it reads smaller.
+		// `b` anchors its own authored cluster and reads at the same size as
+		// `root`: an equation about one node must not shrink a cluster the author
+		// never joined to it.
 		expect(Number(scaleOf(canvasElement, 'a'))).toBeLessThan(
 			Number(scaleOf(canvasElement, 'root'))
 		);
-		expect(Number(scaleOf(canvasElement, 'b'))).toBeLessThan(Number(scaleOf(canvasElement, 'a')));
+		expect(scaleOf(canvasElement, 'b')).toBe(scaleOf(canvasElement, 'root'));
 	}}
 />
 
@@ -379,7 +380,6 @@
 		baseGraph: UNCONNECTED_PAIR,
 		editNodeId: 'c',
 		equation: CONSUMES_G,
-		dataflowInLayout: false,
 		layoutSettings: { ...SPRINGS_ONLY, derivedEdgeSpringFactor: 0 },
 		initialViewState: FIXED_VIEW
 	}}
@@ -402,7 +402,6 @@
 		baseGraph: CHAIN,
 		editNodeId: 'c',
 		equation: CONSUMES_G,
-		dataflowInLayout: false,
 		layoutSettings: SPRINGS_ONLY,
 		initialViewState: FIXED_VIEW
 	}}
@@ -422,27 +421,6 @@
 		// by an edge the author drew rather than one an equation implied.
 		expect(scaleOf(canvasElement, 'c')).not.toBe(scaleBefore);
 		expect(scaleOf(canvasElement, 'c')).toBe(scaleOf(canvasElement, 'b'));
-	}}
-/>
-
-<Story
-	name="LayoutRespondsWhenDataflowFeedsIt"
-	args={{
-		baseGraph: CHAIN_BEYOND_LAYERS,
-		editNodeId: 'e',
-		equation: CONSUMES_G,
-		startWithEquation: true,
-		dataflowInLayout: true,
-		layoutSettings: TWO_LAYERS
-	}}
-	play={async ({ canvasElement }: PlayContext) => {
-		await waitFor(() => expect(nodeOnCanvas(canvasElement, 'e')).toBeInTheDocument());
-
-		// With the toggle on a dataflow edge is a step through the graph like any
-		// other, so `d` rides in behind `e`. This is the whole of what the toggle
-		// still decides: size follows the dataflow link either way, and only here
-		// does one equation open up a cluster the author never joined to the pin.
-		expect(nodeOnCanvas(canvasElement, 'd')).toBeInTheDocument();
 	}}
 />
 

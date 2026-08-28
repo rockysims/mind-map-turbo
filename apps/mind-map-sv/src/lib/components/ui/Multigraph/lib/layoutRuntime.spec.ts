@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { MultigraphData } from '../../types/multigraph';
-import { graphWithVisibleNodes } from './boundedVisibility';
+import { beaconNodeIds } from './beacons';
+import {
+	computeBoundedHops,
+	visibleNodeIdsForPinnedNeighborhood,
+	type BoundedHopsOptions
+} from './boundedVisibility';
 import { togglePinned } from './graph';
 import { deriveGraphLayout } from './graphLayout';
 import type { LayoutRuntimeScheduler } from './layoutRuntime.svelte';
@@ -26,6 +31,18 @@ class TestScheduler implements LayoutRuntimeScheduler {
 	now(): number {
 		return this.nowMs;
 	}
+}
+
+/**
+ * The `computeHops` the app hands the runtime, with the dataflow layer standing
+ * in as a fixed list of derived edges. Beacons come off the authored edges, as
+ * they do in `Multigraph.svelte`.
+ */
+function hopsThrough(
+	derivedEdges: readonly EdgeEndpointIds[],
+	options: BoundedHopsOptions
+): (graph: MultigraphData) => Record<string, number> {
+	return (graph) => computeBoundedHops(graph, derivedEdges, beaconNodeIds(graph), options);
 }
 
 interface RuntimeFixture {
@@ -348,7 +365,7 @@ describe('LayoutRuntime', () => {
 		});
 	});
 
-	describe('composeRevealEdges', () => {
+	describe('computeHops', () => {
 		// n4 is four authored hops from the pin with only two layers shown, and it
 		// starts sitting on top of the pinned node. Overlap resolution will shove it
 		// clear, but only if it is in the graph physics runs over at all.
@@ -370,14 +387,14 @@ describe('LayoutRuntime', () => {
 			}
 		});
 
-		function relaxedN4(composeRevealEdges?: (graph: MultigraphData) => readonly EdgeEndpointIds[]) {
+		function relaxedN4(derivedEdges: readonly EdgeEndpointIds[] = []) {
 			const runtime = new LayoutRuntime({
 				getGraph: () => graph,
 				getLayoutSettings: () => ({ displayedLayers: 2 }),
 				getActiveDragNodeId: () => null,
 				getPreferredBeaconNodeIds: () => [],
 				applyGraph: () => {},
-				composeRevealEdges,
+				computeHops: hopsThrough(derivedEdges, { displayedLayers: 2 }),
 				scheduler: new TestScheduler()
 			});
 			return runtime.relaxAfterMutation(graph, null, 4).posByNodeId.n4;
@@ -390,7 +407,7 @@ describe('LayoutRuntime', () => {
 		it('places a revealed node along with everything else', () => {
 			// Without this the node would be drawn on the canvas and then never
 			// moved, sitting stale on top of whatever it happened to overlap.
-			expect(relaxedN4(() => [{ sourceNodeId: 'n0', targetNodeId: 'n4' }])).not.toEqual(
+			expect(relaxedN4([{ sourceNodeId: 'n0', targetNodeId: 'n4' }])).not.toEqual(
 				graph.posByNodeId.n4
 			);
 		});
@@ -398,9 +415,9 @@ describe('LayoutRuntime', () => {
 		it('scales a revealed node like an authored neighbor of the same anchor', () => {
 			// n2 and n3 both hang off the pin by a dataflow edge and are joined to
 			// each other, so inside the visible graph they form one pinless component
-			// and the beacon rule rescues only n2. Unless the reveal hops reach the
-			// scale computation, n3 drops to the minimum scale while n1 — the same
-			// one step from the pin — sits a good deal larger.
+			// and a fresh measure would call them unreachable. The layout is handed
+			// the hops the whole graph was measured at instead, where n3 is the same
+			// one step from the pin as the authored n1.
 			const paired = makeGraph({
 				nodeCount: 4,
 				pinned: [0],
@@ -409,59 +426,65 @@ describe('LayoutRuntime', () => {
 					[2, 3]
 				]
 			});
+			const computeHops = hopsThrough(
+				[
+					{ sourceNodeId: 'n0', targetNodeId: 'n2' },
+					{ sourceNodeId: 'n0', targetNodeId: 'n3' }
+				],
+				{ displayedLayers: 2 }
+			);
 			const runtime = new LayoutRuntime({
 				getGraph: () => paired,
 				getLayoutSettings: () => ({ displayedLayers: 2 }),
 				getActiveDragNodeId: () => null,
 				getPreferredBeaconNodeIds: () => [],
 				applyGraph: () => {},
-				composeRevealEdges: () => [
-					{ sourceNodeId: 'n0', targetNodeId: 'n2' },
-					{ sourceNodeId: 'n0', targetNodeId: 'n3' }
-				],
+				computeHops,
 				scheduler: new TestScheduler()
 			});
-			const visible = graphWithVisibleNodes(paired, new Set(['n0', 'n1', 'n2', 'n3']));
+			const hopsByNodeId = computeHops(paired);
+			const visible = runtime.visibleGraphFor(paired, hopsByNodeId);
 			const layout = deriveGraphLayout(
 				visible,
-				runtime.layoutOptions(visible, { relaxIterations: 0 })
+				runtime.layoutOptions(visible, { hopsByNodeId, relaxIterations: 0 })
 			);
 
 			expect(layout.scaleByNodeId.n3).toBe(layout.scaleByNodeId.n1);
 		});
 
-		it('sizes a node behind a dataflow-linked one as a hop further out', () => {
-			// root -dataflow-> n1 -authored-> n2, with n2 visible on its own account
-			// as its component's beacon. Both used to sit at the flat beacon hop,
-			// with nothing relating them, so they came out the same size despite n2
-			// being a step further from the pin than n1.
+		it('keeps the drawn neighbor of a dataflow-linked node off the canvas and out of the physics', () => {
+			// root -dataflow-> n1 -authored-> n2. Crossing the derived edge spends the
+			// authored budget, so n1 arrives and the n2 it was drawn to does not —
+			// sizing and visibility saying the same thing, rather than one of them
+			// holding n2 at a flat hop nothing relates to.
 			const behind = makeGraph({ nodeCount: 3, pinned: [0], edges: [[1, 2]] });
-			const behindWithHistory = {
-				...behind,
-				nodes: behind.nodes.map((node) => (node.id === 'n2' ? { ...node, lastPinnedSeq: 1 } : node))
-			};
+			const computeHops = hopsThrough([{ sourceNodeId: 'n0', targetNodeId: 'n1' }], {
+				displayedLayers: 3
+			});
 			const runtime = new LayoutRuntime({
-				getGraph: () => behindWithHistory,
+				getGraph: () => behind,
 				getLayoutSettings: () => ({ displayedLayers: 3 }),
 				getActiveDragNodeId: () => null,
 				getPreferredBeaconNodeIds: () => [],
 				applyGraph: () => {},
-				composeRevealEdges: () => [{ sourceNodeId: 'n0', targetNodeId: 'n1' }],
+				computeHops,
 				scheduler: new TestScheduler()
 			});
-			const visible = graphWithVisibleNodes(behindWithHistory, new Set(['n0', 'n1', 'n2']));
-			const layout = deriveGraphLayout(
-				visible,
-				runtime.layoutOptions(visible, { relaxIterations: 0 })
-			);
+			const hopsByNodeId = computeHops(behind);
 
-			expect(layout.scaleByNodeId.n2).toBeLessThan(layout.scaleByNodeId.n1);
+			expect(hopsByNodeId.n1).toBe(1);
+			expect(hopsByNodeId.n2).toBe(Infinity);
+			expect(runtime.visibleGraphFor(behind, hopsByNodeId).nodes.map((node) => node.id)).toEqual([
+				'n0',
+				'n1'
+			]);
 		});
 
 		it('sizes by distance with nothing pinned at all', () => {
-			// Same chain, no pin anywhere. n0 and n2 each light a beacon of their own
-			// on the authored edges, which put them at the same hop and so the same
-			// size, with n1 — the one actually next to n0 — smaller than both.
+			// Same chain, no pin anywhere. Each authored cluster keeps its own anchor
+			// — an equation must not be able to make one of them mostly vanish — so
+			// n0 and n2 both start reading at the beacon hop, and n1, the one the
+			// equation reaches out of n0, sits a step past it.
 			const unpinned = makeGraph({ nodeCount: 3, edges: [[1, 2]] });
 			const withHistory = {
 				...unpinned,
@@ -473,32 +496,176 @@ describe('LayoutRuntime', () => {
 							: node
 				)
 			};
+			const computeHops = hopsThrough([{ sourceNodeId: 'n0', targetNodeId: 'n1' }], {
+				displayedLayers: 3
+			});
 			const runtime = new LayoutRuntime({
 				getGraph: () => withHistory,
 				getLayoutSettings: () => ({ displayedLayers: 3 }),
 				getActiveDragNodeId: () => null,
 				getPreferredBeaconNodeIds: () => [],
 				applyGraph: () => {},
-				composeRevealEdges: () => [{ sourceNodeId: 'n0', targetNodeId: 'n1' }],
+				computeHops,
 				scheduler: new TestScheduler()
 			});
-			const visible = graphWithVisibleNodes(withHistory, new Set(['n0', 'n1', 'n2']));
+			const hopsByNodeId = computeHops(withHistory);
+			const visible = runtime.visibleGraphFor(withHistory, hopsByNodeId);
 			const layout = deriveGraphLayout(
 				visible,
-				runtime.layoutOptions(visible, { relaxIterations: 0 })
+				runtime.layoutOptions(visible, { hopsByNodeId, relaxIterations: 0 })
 			);
 
-			// n0 was pinned most recently, so it is where reading starts and the
-			// other two fall away from it in order.
 			expect(layout.scaleByNodeId.n1).toBeLessThan(layout.scaleByNodeId.n0);
-			expect(layout.scaleByNodeId.n2).toBeLessThan(layout.scaleByNodeId.n1);
+			expect(layout.scaleByNodeId.n2).toBe(layout.scaleByNodeId.n0);
 		});
 
 		it('does not reveal a node whose partner is hidden too', () => {
 			// n3 and n4 are both out of view, so there is nothing to hang n4 off.
-			expect(relaxedN4(() => [{ sourceNodeId: 'n3', targetNodeId: 'n4' }])).toEqual(
-				graph.posByNodeId.n4
-			);
+			expect(relaxedN4([{ sourceNodeId: 'n3', targetNodeId: 'n4' }])).toEqual(graph.posByNodeId.n4);
 		});
+	});
+
+	describe('renderer and runtime agree on who is on screen', () => {
+		// The guarantee one hop map buys: a node on the canvas is in the physics
+		// graph and a node in the physics graph is on the canvas. The renderer
+		// filters the map itself; the runtime is handed the same function. Before
+		// this, two hand-synchronized chains computed the two answers, and a node
+		// drawn without physics sat stale while everything moved around and
+		// through it.
+		const derived = (sourceNodeId: string, targetNodeId: string) => ({
+			sourceNodeId,
+			targetNodeId
+		});
+
+		const fixtures: {
+			name: string;
+			graph: MultigraphData;
+			derivedEdges: readonly EdgeEndpointIds[];
+			displayedLayers: number;
+		}[] = [
+			{
+				name: 'a pinned chain running past the displayed layers',
+				graph: makeGraph({
+					nodeCount: 5,
+					pinned: [0],
+					edges: [
+						[0, 1],
+						[1, 2],
+						[2, 3],
+						[3, 4]
+					]
+				}),
+				derivedEdges: [],
+				displayedLayers: 2
+			},
+			{
+				name: 'nothing pinned, two authored clusters on their beacons',
+				graph: makeGraph({
+					nodeCount: 5,
+					edges: [
+						[0, 1],
+						[2, 3]
+					],
+					pinHistory: { 0: 2, 2: 1 }
+				}),
+				derivedEdges: [],
+				displayedLayers: 2
+			},
+			{
+				name: 'a derived edge revealing a node past the layers',
+				graph: makeGraph({
+					nodeCount: 5,
+					pinned: [0],
+					edges: [
+						[0, 1],
+						[1, 2],
+						[2, 3],
+						[3, 4]
+					]
+				}),
+				derivedEdges: [derived('n0', 'n4')],
+				displayedLayers: 2
+			},
+			{
+				// n4 arrives across one equation; n5, a second derived step behind it,
+				// does not — the case that used to leave a stub arrow pointing at
+				// somewhere the reader cannot go.
+				name: 'a chained equation whose far end is past the derived budget',
+				graph: makeGraph({
+					nodeCount: 6,
+					pinned: [0],
+					edges: [
+						[0, 1],
+						[1, 2],
+						[2, 3],
+						[3, 4],
+						[4, 5]
+					]
+				}),
+				derivedEdges: [derived('n2', 'n4'), derived('n4', 'n5')],
+				displayedLayers: 2
+			},
+			{
+				name: 'a derived edge between two nodes that are already visible',
+				graph: makeGraph({
+					nodeCount: 5,
+					pinned: [0],
+					edges: [
+						[0, 1],
+						[1, 2],
+						[2, 3],
+						[3, 4]
+					]
+				}),
+				derivedEdges: [derived('n0', 'n2')],
+				displayedLayers: 3
+			},
+			{
+				name: 'a mix of pins, beacons and equations',
+				graph: makeGraph({
+					nodeCount: 7,
+					pinned: [0],
+					edges: [
+						[0, 1],
+						[1, 2],
+						[3, 4],
+						[5, 6]
+					],
+					pinHistory: { 3: 1 }
+				}),
+				derivedEdges: [derived('n1', 'n5'), derived('n4', 'n6')],
+				displayedLayers: 2
+			}
+		];
+
+		for (const fixture of fixtures) {
+			it(`draws exactly the nodes physics places: ${fixture.name}`, () => {
+				const computeHops = hopsThrough(fixture.derivedEdges, {
+					displayedLayers: fixture.displayedLayers
+				});
+				const runtime = new LayoutRuntime({
+					getGraph: () => fixture.graph,
+					getLayoutSettings: () => ({ displayedLayers: fixture.displayedLayers }),
+					getActiveDragNodeId: () => null,
+					getPreferredBeaconNodeIds: () => [],
+					applyGraph: () => {},
+					computeHops,
+					scheduler: new TestScheduler()
+				});
+
+				const drawnNodeIds = visibleNodeIdsForPinnedNeighborhood(
+					fixture.graph,
+					computeHops(fixture.graph),
+					{ displayedLayers: fixture.displayedLayers }
+				);
+				const physicsNodeIds = new Set(
+					runtime.visibleGraphFor(fixture.graph).nodes.map((node) => node.id)
+				);
+
+				expect([...physicsNodeIds].sort()).toEqual([...drawnNodeIds].sort());
+				// A fixture that shows everything would pass without saying anything.
+				expect(physicsNodeIds.size).toBeLessThan(fixture.graph.nodes.length);
+			});
+		}
 	});
 });

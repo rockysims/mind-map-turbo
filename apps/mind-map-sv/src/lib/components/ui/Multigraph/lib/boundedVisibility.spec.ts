@@ -7,8 +7,7 @@ import {
 	graphWithVisibleNodes,
 	pinnedNodeIds,
 	visibleNodeIdsForPinnedNeighborhood,
-	withDerivedHops,
-	withRevealedNeighborHops
+	withDerivedHops
 } from './boundedVisibility';
 import { makeGraph } from './testFixtures';
 
@@ -64,126 +63,6 @@ describe('boundedVisibility', () => {
 		expect([
 			...visibleNodeIdsForPinnedNeighborhood(graph, hopsFromPinned(graph), { displayedLayers: 1 })
 		]).toEqual(['n0', 'n1', 'n3', 'n4', 'n5']);
-	});
-
-	describe('withRevealedNeighborHops', () => {
-		// n0 pinned, a chain out to n3, and n4/n5 in a component of their own.
-		const graph = makeGraph({
-			nodeCount: 6,
-			pinned: [0],
-			edges: [
-				[0, 1],
-				[1, 2],
-				[2, 3],
-				[4, 5]
-			]
-		});
-		const baseHops = () => hopsFromPinned(graph);
-		const visible = (hops: Record<string, number>, displayedLayers = 2) => [
-			...visibleNodeIdsForPinnedNeighborhood(graph, hops, { displayedLayers })
-		];
-
-		it('brings a hidden endpoint into view one layer out from its anchor', () => {
-			const hops = withRevealedNeighborHops(
-				baseHops(),
-				[{ sourceNodeId: 'n0', targetNodeId: 'n4' }],
-				{ displayedLayers: 2 }
-			);
-
-			expect(hops.n4).toBe(1);
-			expect(visible(hops)).toContain('n4');
-		});
-
-		it('does not drag the revealed node\u2019s own neighbors along', () => {
-			// The whole point of the rule: n4 appears, n5 does not, so one equation
-			// cannot open up a cluster the author never connected.
-			const hops = withRevealedNeighborHops(
-				baseHops(),
-				[{ sourceNodeId: 'n0', targetNodeId: 'n4' }],
-				{ displayedLayers: 2 }
-			);
-
-			expect(hops.n5).toBe(Infinity);
-			expect(visible(hops)).not.toContain('n5');
-		});
-
-		it('does not let a revealed node anchor another reveal', () => {
-			// Measured against the hops passed in, so n4 being revealed in this same
-			// pass cannot make n5 visible through a second dataflow edge.
-			const hops = withRevealedNeighborHops(
-				baseHops(),
-				[
-					{ sourceNodeId: 'n0', targetNodeId: 'n4' },
-					{ sourceNodeId: 'n4', targetNodeId: 'n5' }
-				],
-				{ displayedLayers: 2 }
-			);
-
-			expect(hops.n5).toBe(Infinity);
-		});
-
-		it('reveals in either direction', () => {
-			const hops = withRevealedNeighborHops(
-				baseHops(),
-				[{ sourceNodeId: 'n4', targetNodeId: 'n0' }],
-				{ displayedLayers: 2 }
-			);
-
-			expect(hops.n4).toBe(1);
-		});
-
-		it('takes the closest anchor when several reveal the same node', () => {
-			const hops = withRevealedNeighborHops(
-				baseHops(),
-				[
-					{ sourceNodeId: 'n2', targetNodeId: 'n4' },
-					{ sourceNodeId: 'n0', targetNodeId: 'n4' }
-				],
-				{ displayedLayers: 2 }
-			);
-
-			expect(hops.n4).toBe(1);
-		});
-
-		it('caps the revealed hop so a node hanging off the last layer still shows', () => {
-			// n2 sits on the outermost visible layer; n4 would land at 3 and be
-			// filtered straight back out.
-			const hops = withRevealedNeighborHops(
-				baseHops(),
-				[{ sourceNodeId: 'n2', targetNodeId: 'n4' }],
-				{ displayedLayers: 2 }
-			);
-
-			expect(hops.n4).toBe(2);
-			expect(visible(hops)).toContain('n4');
-		});
-
-		it('leaves an edge between two hidden nodes alone', () => {
-			const hops = withRevealedNeighborHops(
-				baseHops(),
-				[{ sourceNodeId: 'n4', targetNodeId: 'n5' }],
-				{ displayedLayers: 2 }
-			);
-
-			expect(hops.n4).toBe(Infinity);
-			expect(hops.n5).toBe(Infinity);
-		});
-
-		it('returns the same object when nothing is revealed', () => {
-			const hops = baseHops();
-
-			expect(withRevealedNeighborHops(hops, [], { displayedLayers: 2 })).toBe(hops);
-		});
-
-		it('ignores an edge naming a node the graph does not have', () => {
-			const hops = baseHops();
-
-			expect(
-				withRevealedNeighborHops(hops, [{ sourceNodeId: 'n0', targetNodeId: 'gone' }], {
-					displayedLayers: 2
-				})
-			).toBe(hops);
-		});
 	});
 
 	describe('computeBoundedHops', () => {
@@ -327,9 +206,9 @@ describe('boundedVisibility', () => {
 	});
 
 	describe('withDerivedHops', () => {
-		// The behavior block that pinned withRevealedNeighborHops, restated against
-		// the derived phase of the unified computation: n0 pinned, a chain out to
-		// n3, and n4/n5 in a component of their own.
+		// The behavior block that pinned the old non-cascading reveal override,
+		// restated against the derived phase of the unified computation: n0 pinned,
+		// a chain out to n3, and n4/n5 in a component of their own.
 		const graph = makeGraph({
 			nodeCount: 6,
 			pinned: [0],

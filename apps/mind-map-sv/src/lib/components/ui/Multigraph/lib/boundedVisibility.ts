@@ -76,55 +76,6 @@ export function edgeVisibilityForPinnedNeighborhood(
 	});
 }
 
-/**
- * Pulls the far endpoint of an off-topology edge into view, one layer out from
- * the node it hangs off.
- *
- * Dataflow edges do not shorten hop distance, so a node that only an equation
- * connects to your pinned node fails the visibility rule and its arrow renders
- * as a stub trailing off into nothing. Drawing an arrow to somewhere the reader
- * cannot go is worse than drawing no arrow.
- *
- * Deliberately no BFS, exactly as with beacons: every reveal is measured against
- * the hops passed in, so a node revealed here cannot anchor another reveal and
- * one equation can never cascade a whole cluster into view. The hop is capped at
- * `displayedLayers` so a node hanging off the outermost layer still lands inside
- * it rather than being computed into view and then filtered back out.
- */
-export function withRevealedNeighborHops(
-	hops: Record<string, number>,
-	edges: readonly EdgeEndpointIds[],
-	options: PinnedNeighborhoodVisibilityOptions = {}
-): Record<string, number> {
-	const displayedLayers = normalizeDisplayedLayers(options.displayedLayers);
-	const isVisible = (nodeId: string): boolean => {
-		const hopCount = hops[nodeId];
-		return hopCount !== undefined && Number.isFinite(hopCount) && hopCount <= displayedLayers;
-	};
-
-	let revealed: Record<string, number> | null = null;
-
-	for (const edge of edges) {
-		const sourceVisible = isVisible(edge.sourceNodeId);
-		const targetVisible = isVisible(edge.targetNodeId);
-		// Both visible, nothing to do. Both hidden, nothing to hang the reveal off.
-		if (sourceVisible === targetVisible) continue;
-
-		const anchorId = sourceVisible ? edge.sourceNodeId : edge.targetNodeId;
-		const hiddenId = sourceVisible ? edge.targetNodeId : edge.sourceNodeId;
-		if (!(hiddenId in hops)) continue;
-
-		const hop = Math.min(hops[anchorId] + 1, displayedLayers);
-		revealed ??= {};
-		revealed[hiddenId] = Math.min(revealed[hiddenId] ?? Number.POSITIVE_INFINITY, hop);
-	}
-
-	// Identity when nothing was revealed: this feeds a derived chain that would
-	// otherwise invalidate on every frame for graphs with no math in them.
-	if (revealed === null) return hops;
-	return { ...hops, ...revealed };
-}
-
 export interface BoundedHopsOptions {
 	/** Authored-step budget: how many layers of drawn edges a path may spend. */
 	displayedLayers?: number;
