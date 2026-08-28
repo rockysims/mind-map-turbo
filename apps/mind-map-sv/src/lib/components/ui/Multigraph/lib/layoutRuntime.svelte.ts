@@ -14,7 +14,7 @@ import {
 	withRelaxedGraphPositions,
 	type GraphLayoutOptions
 } from './graphLayout';
-import { hopsFromPinned, scaleByHops } from './layout';
+import { hopsFromPinned, scaleByHops, withHopsThroughEdges } from './layout';
 import type { EdgeEndpointIds } from './physics';
 import {
 	advanceLayeredRelayout,
@@ -312,9 +312,10 @@ export class LayoutRuntime {
 		//
 		// The layout recomputes hops from the visible graph alone, where a beacon
 		// or a revealed node has no edges at all and would fall to the minimum
-		// scale. Handing it the effective hops instead is what makes a node one
-		// dataflow edge from your pin the same size as one authored edge away.
-		const hopOverridesByNodeId = this.#effectiveHopsFor(layoutGraph);
+		// scale. Handing it hops measured through the dataflow edges instead is
+		// what makes a node one dataflow edge from your pin the same size as one
+		// authored edge away, and one behind that a size smaller again.
+		const hopOverridesByNodeId = this.#scaleHopsFor(layoutGraph);
 
 		return {
 			settings: this.#options.getLayoutSettings(),
@@ -432,6 +433,20 @@ export class LayoutRuntime {
 		return beaconNodeIds(this.#adjacency(graph), {
 			preferredNodeIds: this.#options.getPreferredBeaconNodeIds()
 		});
+	}
+
+	/**
+	 * Hops for sizing, which is a different question from hops for visibility.
+	 * Only ever called with a graph that is already on screen, so re-measuring
+	 * through the dataflow edges cannot pull anything new into view.
+	 */
+	#scaleHopsFor(layoutGraph: MultigraphData): Record<string, number> {
+		return withHopsThroughEdges(
+			layoutGraph,
+			this.#effectiveHopsFor(layoutGraph),
+			this.#options.composeRevealEdges?.(layoutGraph) ?? [],
+			{ displayedLayers: this.#resolvedSettings().displayedLayers }
+		);
 	}
 
 	#effectiveHopsFor(graph: MultigraphData): Record<string, number> {

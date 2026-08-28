@@ -40,8 +40,12 @@
 	const derivedEdge = (canvasElement: HTMLElement) =>
 		canvasElement.querySelector('[data-edge-id="dataflow:a->c"]');
 
-	const nodeGeometry = (canvasElement: HTMLElement) =>
-		Array.from(canvasElement.querySelectorAll('[data-node-id]')).map((element) => {
+	const nodeGeometry = (canvasElement: HTMLElement, nodeId?: string) =>
+		Array.from(
+			canvasElement.querySelectorAll(
+				nodeId === undefined ? '[data-node-id]' : `[data-node-id="${nodeId}"]`
+			)
+		).map((element) => {
 			const node = element as HTMLElement;
 			return `${node.dataset.nodeId}:${node.dataset.scale}:${node.style.transform}`;
 		});
@@ -79,6 +83,26 @@
 
 	const nodeOnCanvas = (canvasElement: HTMLElement, nodeId: string) =>
 		canvasElement.querySelector(`[data-node-id="${nodeId}"]`);
+
+	/**
+	 * root -dataflow-> a -authored-> b, where `b` is on screen in its own right
+	 * as its component's beacon (it has pin history, which wins the slot). Both
+	 * used to sit at the flat beacon hop with nothing relating them.
+	 */
+	const BEHIND_A_CONSUMER = makeGraph({
+		nodes: [
+			{ id: 'root', title: 'Gravity', description: '$$g = 9.8$$' },
+			{ id: 'a', title: 'Weight', description: '' },
+			{ id: 'b', title: 'Behind', description: '', lastPinnedSeq: 1 }
+		],
+		pinned: ['root'],
+		edges: [['a', 'b']],
+		posByNodeId: {
+			root: { x: -300, y: 0 },
+			a: { x: 0, y: 0 },
+			b: { x: 300, y: 0 }
+		}
+	});
 
 	/**
 	 * `a` defines two quantities and the pair d–e consumes one each, so both are
@@ -193,17 +217,18 @@
 />
 
 <Story
-	name="LayoutIsUnchangedWhenDataflowDoesNotFeedIt"
+	name="ANodeTheDataflowDoesNotTouchIsLeftAlone"
 	args={{ baseGraph: CHAIN, editNodeId: 'c', equation: CONSUMES_G, dataflowInLayout: false }}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitFor(() => expect(canvasElement.querySelector('.edge')).toBeInTheDocument());
-		const before = nodeGeometry(canvasElement);
+		const before = nodeGeometry(canvasElement, 'b');
 
 		await click(canvasElement, '[data-add-equation]');
 		await waitFor(() => expect(derivedEdge(canvasElement)).toBeInTheDocument());
 
-		// The arrow is drawn, but nothing about node placement or scale moved.
-		expect(nodeGeometry(canvasElement)).toEqual(before);
+		// `b` neither defines nor consumes, so the new arrow says nothing about how
+		// far away it is and leaves its placement and size exactly as they were.
+		expect(nodeGeometry(canvasElement, 'b')).toEqual(before);
 	}}
 />
 
@@ -269,6 +294,25 @@
 />
 
 <Story
+	name="ANodeBehindADataflowLinkIsSizedAHopFurtherOut"
+	args={{
+		baseGraph: BEHIND_A_CONSUMER,
+		editNodeId: 'a',
+		equation: CONSUMES_G,
+		startWithEquation: true,
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitFor(() => expect(nodeOnCanvas(canvasElement, 'b')).toBeInTheDocument());
+
+		// `b` reaches the pin only by going through `a`, so it is one step further
+		// out and reads smaller. It stays on screen either way — it is the beacon
+		// for its cluster — this is about size alone.
+		expect(Number(scaleOf(canvasElement, 'b'))).toBeLessThan(Number(scaleOf(canvasElement, 'a')));
+	}}
+/>
+
+<Story
 	name="ARevealedNodeDoesNotBringItsNeighborsAlong"
 	args={{
 		baseGraph: CHAIN_BEYOND_LAYERS,
@@ -310,7 +354,7 @@
 />
 
 <Story
-	name="PullingDoesNotChangeHopDistanceOrScale"
+	name="PullingAlsoSizesTheConsumerByItsNewDistance"
 	args={{
 		baseGraph: CHAIN,
 		editNodeId: 'c',
@@ -330,29 +374,32 @@
 			expect(distanceBetween(canvasElement, 'a', 'c')).toBeLessThan(distanceBefore)
 		);
 
-		// `c` moved closer, but it is still two authored hops from the pinned node,
-		// so it stays the size the author's own edges say it should be.
-		expect(scaleOf(canvasElement, 'c')).toBe(scaleBefore);
+		// `c` was two authored hops out and consuming g puts it one dataflow hop
+		// from the pinned node, so it grows to the size of `b` — also one hop away,
+		// by an edge the author drew rather than one an equation implied.
+		expect(scaleOf(canvasElement, 'c')).not.toBe(scaleBefore);
+		expect(scaleOf(canvasElement, 'c')).toBe(scaleOf(canvasElement, 'b'));
 	}}
 />
 
 <Story
 	name="LayoutRespondsWhenDataflowFeedsIt"
-	args={{ baseGraph: CHAIN, editNodeId: 'c', equation: CONSUMES_G, dataflowInLayout: true }}
+	args={{
+		baseGraph: CHAIN_BEYOND_LAYERS,
+		editNodeId: 'e',
+		equation: CONSUMES_G,
+		startWithEquation: true,
+		dataflowInLayout: true,
+		layoutSettings: TWO_LAYERS
+	}}
 	play={async ({ canvasElement }: PlayContext) => {
-		await waitFor(() => expect(canvasElement.querySelector('.edge')).toBeInTheDocument());
-		const scaleOfC = () =>
-			Number(
-				(canvasElement.querySelector('[data-node-id="c"]') as HTMLElement | null)?.dataset.scale
-			);
-		const before = scaleOfC();
+		await waitFor(() => expect(nodeOnCanvas(canvasElement, 'e')).toBeInTheDocument());
 
-		await click(canvasElement, '[data-add-equation]');
-		await waitFor(() => expect(derivedEdge(canvasElement)).toBeInTheDocument());
-
-		// `c` was two authored hops from the pinned node; the derived edge from `a`
-		// brings it to one, so it scales up.
-		expect(scaleOfC()).toBeGreaterThan(before);
+		// With the toggle on a dataflow edge is a step through the graph like any
+		// other, so `d` rides in behind `e`. This is the whole of what the toggle
+		// still decides: size follows the dataflow link either way, and only here
+		// does one equation open up a cluster the author never joined to the pin.
+		expect(nodeOnCanvas(canvasElement, 'd')).toBeInTheDocument();
 	}}
 />
 

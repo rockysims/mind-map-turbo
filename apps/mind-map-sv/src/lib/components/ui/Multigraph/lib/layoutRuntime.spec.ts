@@ -430,6 +430,34 @@ describe('LayoutRuntime', () => {
 			expect(layout.scaleByNodeId.n3).toBe(layout.scaleByNodeId.n1);
 		});
 
+		it('sizes a node behind a dataflow-linked one as a hop further out', () => {
+			// root -dataflow-> n1 -authored-> n2, with n2 visible on its own account
+			// as its component's beacon. Both used to sit at the flat beacon hop,
+			// with nothing relating them, so they came out the same size despite n2
+			// being a step further from the pin than n1.
+			const behind = makeGraph({ nodeCount: 3, pinned: [0], edges: [[1, 2]] });
+			const behindWithHistory = {
+				...behind,
+				nodes: behind.nodes.map((node) => (node.id === 'n2' ? { ...node, lastPinnedSeq: 1 } : node))
+			};
+			const runtime = new LayoutRuntime({
+				getGraph: () => behindWithHistory,
+				getLayoutSettings: () => ({ displayedLayers: 3 }),
+				getActiveDragNodeId: () => null,
+				getPreferredBeaconNodeIds: () => [],
+				applyGraph: () => {},
+				composeRevealEdges: () => [{ sourceNodeId: 'n0', targetNodeId: 'n1' }],
+				scheduler: new TestScheduler()
+			});
+			const visible = graphWithVisibleNodes(behindWithHistory, new Set(['n0', 'n1', 'n2']));
+			const layout = deriveGraphLayout(
+				visible,
+				runtime.layoutOptions(visible, { relaxIterations: 0 })
+			);
+
+			expect(layout.scaleByNodeId.n2).toBeLessThan(layout.scaleByNodeId.n1);
+		});
+
 		it('does not reveal a node whose partner is hidden too', () => {
 			// n3 and n4 are both out of view, so there is nothing to hang n4 off.
 			expect(relaxedN4(() => [{ sourceNodeId: 'n3', targetNodeId: 'n4' }])).toEqual(
