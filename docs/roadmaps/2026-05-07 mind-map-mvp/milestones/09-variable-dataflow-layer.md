@@ -28,12 +28,15 @@ interaction.
 - Identify symbols by walking the MathML that milestone 08 already produces,
   not by pattern-matching LaTeX source. The engine normalizes `v_0` and `v_{0}`
   into identical markup and turns `\alpha` into a single identifier, so symbol
-  identity is a structural comparison rather than string normalization.
+  identity is a structural comparison rather than string normalization. A spike
+  during milestone 08 confirmed both cases produce byte-identical output.
 - Define a canonical key for a symbol, covering a bare identifier and an
   identifier carrying a subscript.
-- Exclude things that look like symbols but are not quantities: multi-character
-  upright identifiers such as function names, numbers, and a configurable
-  stoplist of conventional constants.
+- Exclude things that look like symbols but are not quantities: function names,
+  numbers, and a configurable stoplist of conventional constants. Function names
+  are marked structurally rather than heuristically — the engine emits an
+  invisible function-application operator (U+2061) directly after them, which is
+  a more reliable signal than inspecting identifier length or upright styling.
 - Never scan inside literal text spans, so prose embedded in an equation cannot
   create spurious references.
 - Keep the extractor pure over a plain tree structure so it is testable in the
@@ -46,7 +49,9 @@ interaction.
   reference but never define, which gives authors a predictable rule.
 - Infer a definition when a display expression has exactly one top-level
   equality and its left side is a single symbol. `F = ma` defines `F`;
-  `a + b = c` defines nothing.
+  `a + b = c` defines nothing. "Top level" means the children of the single
+  `<mrow>` the engine wraps a multi-token expression in, not the `<math>`
+  element's own children.
 - Treat every other symbol occurrence as a reference.
 - Promote a symbol to a tracked variable only when some node defines it.
   Unclaimed symbols stay ordinary math, so writing `E = mc^2` in isolation does

@@ -101,18 +101,18 @@ one `.html` file with no sibling font or stylesheet requests.
 
 Resolved in the plan; kept here for context.
 
-- **Font inlining is the one genuine unknown.** The build inlines stylesheet
-  text but does not itself rewrite `url()` references, and it deletes every
-  sibling file afterward. The plan should decide whether to lean on the
-  bundler's asset inlining threshold or to extend the inlining script, and must
-  verify the result from `file://` rather than assuming it.
+- **Font inlining was the one genuine unknown; a spike settled it.** The build
+  inlines stylesheet text but does not itself rewrite `url()` references, and it
+  deletes every sibling file afterward. Raising the bundler's asset inlining
+  threshold proved sufficient, verified from `file://`, with no change to the
+  inlining script.
 - **MathML rendering quality varies by engine and by installed math font.**
   Extensible arrows and radical degrees are known to render worse in Chromium
   and WebKit than in Gecko. The plan should decide whether to ship the engine's
   small companion font, and which stylesheet variant to use.
 - **Shell size is committed to git on every build.** The propagated shell is a
-  tracked file, so its growth is permanent history cost. The plan should record
-  the measured before/after size.
+  tracked file, so its growth is permanent history cost. Measured at ~221 KB
+  added, taking the shell from 278,791 to 505,581 bytes.
 - **This is the first use of `{@html}` in the codebase.** Descriptions arrive
   from untrusted save files, so the plan should state the exact engine options
   that make injection impossible and cover them with a spec.

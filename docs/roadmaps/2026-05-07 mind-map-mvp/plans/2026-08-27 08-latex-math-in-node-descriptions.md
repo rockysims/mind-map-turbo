@@ -17,9 +17,13 @@ will read MathML from.
 - **How the math font gets into the single-file build.** **Raise Vite's
   `build.assetsInlineLimit` to 16 KB rather than extending
   `inline-static-build.mjs`.** Temml ships one 9.4 KB `woff2`, so the bundler
-  will base64 it into the CSS text that `inlineStylesheets()` already inlines,
-  and the app's only other asset is an SVG favicon that `inlineIcons()` handles
-  on its own path — so the blast radius of raising the threshold is nil.
+  base64s it into the CSS text that `inlineStylesheets()` already inlines, and
+  the app's only other asset is an SVG favicon that `inlineIcons()` handles on
+  its own path — so the blast radius of raising the threshold is nil. **Verified
+  by a throwaway spike on 2026-08-27** (see Notes): `build/` held only
+  `index.html`, the shell contained exactly one base64 asset
+  (`src:url(data:font/woff2;base64,…)`) and no residual `Temml.woff2`
+  reference, and no change to `inline-static-build.mjs` was needed.
 - **Which Temml stylesheet, and whether to ship its companion font.**
   **`Temml-Local.css` plus the bundled `Temml.woff2`.** Local delegates the main
   math face to the OS (Cambria Math on Windows, STIX Two on macOS/iOS, Noto Sans
@@ -53,8 +57,12 @@ will read MathML from.
   on the description, so it only runs when text changes, and identical
   expressions repeated across nodes cost nothing after the first.
 - **Size budget.** **Fail T07 if the shell exceeds 600 KB.** Measured baseline
-  is 278,791 bytes; the expected addition is ~185 KB, so 600 KB leaves headroom
-  without quietly permitting a regression to KaTeX-with-all-fonts scale.
+  is 278,791 bytes and the spike measured the real addition at 226,790 bytes
+  (~221 KB) for a 505,581-byte shell, leaving ~106 KB of headroom. The addition
+  exceeds the ~185 KB predicted from published file sizes because Vite bundles
+  and minifies `temml.mjs` itself rather than consuming Temml's pre-minified
+  `temml.min.js`. The budget still holds, and it keeps a silent regression to
+  KaTeX-with-all-fonts scale from slipping through.
 
 ## Out of scope (for this plan)
 
@@ -90,9 +98,12 @@ Add `temml` as the app's first runtime dependency. Import `Temml-Local.css` from
 `src/routes/layout.css` (which both the app layout and `.storybook/preview.ts`
 already load). Set `build.assetsInlineLimit` to `16384` in `vite.config.ts`.
 
-This is the only genuinely unknown task in the plan, so it lands first and
-alone. Do not write component code here — the deliverable is proof that the
-packaging works.
+A throwaway spike on 2026-08-27 confirmed this exact recipe works end to end, so
+this task is a known quantity rather than an experiment. `import temml from
+'temml'` resolves cleanly (package `exports` maps `.` to `dist/temml.mjs`), and
+`temml/dist/Temml-Local.css` resolves through the `./*` export. Do not write
+component code here — the deliverable is the packaging plus its regression
+checks.
 
 **Acceptance**
 
@@ -101,7 +112,11 @@ packaging works.
 - The built `index.html` contains no `url(` reference that points at a file
   path; the Temml font is present as a `data:` URI.
 - A scratch page rendering one expression displays typeset math when
-  `build/index.html` is opened directly from disk via `file://`.
+  `build/index.html` is opened directly from disk via `file://`, with no console
+  errors and no failed requests.
+- `document.fonts.check('16px Temml')` is true in that page, proving the inlined
+  font loads rather than silently falling back. Rendering `\mathscr{L}` is a
+  quick visual equivalent, since that glyph exists only in `Temml.woff2`.
 - Record the before/after byte size of `build/index.html` in the PR body and in
   this plan's Notes.
 - Lint and check pass.
@@ -151,14 +166,22 @@ constant rule. Fixed defaults: `trust: false`, `throwOnError: false`, capped
 `maxSize` and `maxExpand`. Memoize in a module-level map keyed by display mode
 plus source, evicting when the map exceeds 500 entries.
 
+Note from the spike: with `throwOnError: false`, Temml does not return a `<math>`
+element for invalid input — it returns `<span class="temml-error" style="…">`
+containing the source and the parse message. Detect that shape to drive the
+error branch rather than assuming a `<math>` root, and pass the parse message
+through so T04 can show it.
+
 **Acceptance**
 
 - Spec runs in the `server` project (Temml's ESM build works under Node).
 - Valid input returns markup containing a `<math>` element.
-- Invalid LaTeX returns the error branch rather than throwing.
+- Invalid LaTeX returns the error branch rather than throwing, and the branch
+  carries the parse message.
 - A description containing a `<script>` tag inside `\text{}` produces output
   with no `<script>` element; an `\includegraphics`-style payload produces no
-  external resource URL.
+  external resource URL. The spike confirmed both hold with `trust: false`:
+  script tags are escaped inside `<mtext>` and `\href` emits no URL at all.
 - A macro loop terminates rather than hanging, proving `maxExpand` is applied.
 - Repeated identical calls return cache-identical results, and the cache evicts
   past its bound.
@@ -177,8 +200,9 @@ plus source, evicting when the map exceeds 500 entries.
 
 Takes a description string, derives segments via T02, renders text segments as
 text and math segments via `{@html}` from T03. Preserve the current
-`white-space: pre-wrap` behavior for text segments. Render the error branch as a
-visibly marked inline span that shows the offending source. Scale display math
+`white-space: pre-wrap` behavior for text segments. For the error branch, prefer
+rendering Temml's own `span.temml-error` markup over inventing a second error
+style; it already carries the source and the parse message. Scale display math
 down when its rendered width exceeds the container, using
 `min(1, container.clientWidth / math.scrollWidth)` on a `transform-origin` at
 the leading edge.
@@ -286,12 +310,11 @@ has all its `Depends on` items already merged to `main`.
 
 ## Risks and rollback
 
-- **T01 is the plan's single point of failure.** If `assetsInlineLimit` does not
-  inline the font — for example if the CSS is emitted outside the bundler's
-  asset pipeline — fall back to extending `inline-static-build.mjs` with a step
-  that rewrites remaining `url()` references to data URIs before
-  `removeSiblingArtifacts()` runs. That is a known-shaped change to a script we
-  already own, so the risk is schedule, not feasibility.
+- **T01 was the plan's single point of failure; the spike retired it.** The
+  `assetsInlineLimit` route was verified end to end on 2026-08-27. Kept for the
+  record: if a future dependency bump breaks font inlining, the fallback is to
+  extend `inline-static-build.mjs` with a step that rewrites remaining `url()`
+  references to data URIs before `removeSiblingArtifacts()` runs.
 - **MathML fidelity may disappoint.** Chromium and WebKit render extensible
   arrows and radical degrees worse than Gecko, and quality depends on the
   installed OS math font. The T03 adapter boundary is the mitigation: switching
@@ -301,12 +324,16 @@ has all its `Depends on` items already merged to `main`.
 - **Shell growth is permanent git history.** Every build rewrites a tracked
   file, so a bad size decision compounds. The 600 KB gate in T07 exists to catch
   this before it is committed repeatedly.
-- **First `{@html}` in the codebase.** If T03's safety spec finds any gap in
-  Temml's escaping, switch that module to render into a detached element and
-  hand `MathText` a cloned node instead of a string, which removes the injection
-  surface entirely at the cost of a slightly heavier cache.
-- **Package resolution under Vite.** If `import temml from 'temml'` does not
-  resolve cleanly, import `temml/dist/temml.mjs` directly and note it in T01.
+- **First `{@html}` in the codebase.** The spike found no escaping gap, but if
+  T03's safety spec finds one, switch that module to render into a detached
+  element and hand `MathText` a cloned node instead of a string, which removes
+  the injection surface entirely at the cost of a slightly heavier cache.
+- **Build output is not byte-reproducible.** Rebuilding without any source
+  change still rewrites the tracked shell, because SvelteKit emits a random
+  `__sveltekit_<token>` namespace and the minifier reshuffles local names.
+  Expect a nonzero diff on every rebuild and do not treat one as evidence of a
+  real change; `pnpm check:offline-shell` compares the source fingerprint, not
+  the bytes.
 - **Storybook assertions should test structure, not pixels.** Story `play`
   functions run in headless Chromium where math metrics depend on available
   fonts; assert on the presence and content of `math` elements rather than on
@@ -338,8 +365,21 @@ entries when you add them.
   640 KB for the full package or ~455 KB with a seven-face subset. Baseline
   `static/offline-app-shell.html` is 278,791 B. Record the measured post-T01 and
   post-T07 sizes here.
+- 2026-08-27: Throwaway spike run to de-risk T01, then fully reverted. Results:
+  shell went 278,791 B to 505,581 B, so **+226,790 B (~221 KB)** against a
+  600 KB budget, leaving ~106 KB headroom. `build/` contained only `index.html`;
+  the file held exactly one base64 asset, `data:font/woff2`, and no residual
+  `Temml.woff2` reference. Opened from `file://` in Chromium: four `<math>`
+  elements rendered, `document.fonts.check('16px Temml')` was true, and there
+  were zero console errors and zero failed requests. `\mathscr{L}`,
+  `\sum` with limits, nested `\sqrt`, and `\oint` all rendered correctly.
+  No change to `inline-static-build.mjs` was required.
 - 2026-08-27: Milestone 09 will consume `mathRender`'s output by parsing the
   MathML string. Keep the adapter returning markup rather than a Svelte-specific
-  shape so that consumer stays straightforward.
+  shape so that consumer stays straightforward. The spike confirmed 09's core
+  premise directly: `v_0` and `v_{0}` both render to byte-identical
+  `<msub><mi>v</mi><mn>0</mn></msub>`, and `\alpha` and a literal `α` both
+  render to `<mi>α</mi>`. Output carries no `<annotation>` element by default
+  (`annotate` defaults to false), so the tree stays compact for walking.
 - 2026-08-27: `vite.config.ts` sets `expect.requireAssertions: true`, so every
   new spec must assert something — watch for placeholder tests.
