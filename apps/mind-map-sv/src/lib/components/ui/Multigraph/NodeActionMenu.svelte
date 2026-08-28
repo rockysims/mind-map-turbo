@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { NodeData } from '../types/node';
 	import type { Point } from '../types/multigraph';
+	import { mathPlainText } from '../MathText/lib/mathPlainText';
 
 	let {
 		node,
@@ -33,7 +34,7 @@
 	<div
 		class="node-action-menu"
 		role="menu"
-		aria-label={`Actions for ${node.title}`}
+		aria-label={`Actions for ${mathPlainText(node.title)}`}
 		style={`left: ${position.x}px; top: ${position.y}px;`}
 		tabindex="-1"
 		onkeydown={handleKeydown}

@@ -569,6 +569,32 @@ describe('graph mutations', () => {
 
 			expect(duplicateEdgeIdentifier(graph, 'e0')).toBe(`${NEW_NODE_TITLE} -- ${NEW_NODE_TITLE}`);
 		});
+
+		// This string is shown to someone choosing which edge to remove, so raw
+		// `$E = mc^2$` would be worse than the node id it replaced.
+		it('typesets math endpoint titles as readable text', () => {
+			const graph = makeGraph({
+				nodes: [
+					{ id: 'source', title: '$E = mc^2$', description: '', tags: [] },
+					{ id: 'target', title: 'Energy', description: '', tags: [] }
+				],
+				edges: [['source', 'target']]
+			});
+
+			expect(duplicateEdgeIdentifier(graph, 'e0')).toBe('E=mc2 -- Energy');
+		});
+
+		it('leaves a title without math exactly as written', () => {
+			const graph = makeGraph({
+				nodes: [
+					{ id: 'source', title: 'Costs \\$5', description: '', tags: [] },
+					{ id: 'target', title: 'Budget', description: '', tags: [] }
+				],
+				edges: [['source', 'target']]
+			});
+
+			expect(duplicateEdgeIdentifier(graph, 'e0')).toBe('Costs $5 -- Budget');
+		});
 	});
 
 	describe('removeEdge immutability', () => {

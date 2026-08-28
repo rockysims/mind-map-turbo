@@ -6,6 +6,7 @@
 	import { prefersReducedMotion } from '$lib/reducedMotion';
 	import MathText from '../MathText/MathText.svelte';
 	import { hasMath } from '../MathText/lib/mathSegments';
+	import { mathPlainText } from '../MathText/lib/mathPlainText';
 	import { normalizeNodeTitle, type EdgePatch } from './lib/graph';
 	import { normalizeTagList } from './lib/titleSyntax';
 
@@ -176,9 +177,15 @@
 		return null;
 	}
 
+	/**
+	 * Projected: every use of this is a label naming which edge a control acts on,
+	 * both on screen and in the accessible name. None of them is an editing
+	 * surface, so none of them wants LaTeX source.
+	 */
 	function neighborTitle(edge: EdgeData): string {
 		const neighborId = otherEndpoint(edge);
-		return nodes.find((candidate) => candidate.id === neighborId)?.title ?? 'Unknown node';
+		const title = nodes.find((candidate) => candidate.id === neighborId)?.title;
+		return title === undefined ? 'Unknown node' : mathPlainText(title);
 	}
 
 	function handleKeydown(event: KeyboardEvent) {
@@ -199,7 +206,9 @@
 		<header>
 			<div>
 				<p class="eyebrow">Editing node</p>
-				<h2 id="node-edit-sheet-title">{node.title}</h2>
+				<h2 id="node-edit-sheet-title" aria-label={mathPlainText(node.title)}>
+					<MathText text={node.title} singleLine />
+				</h2>
 			</div>
 			<button type="button" class="secondary" onclick={onCancel}>Close</button>
 		</header>

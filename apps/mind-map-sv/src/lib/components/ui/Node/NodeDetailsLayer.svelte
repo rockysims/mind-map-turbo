@@ -1,5 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import MathText from '../MathText/MathText.svelte';
+	import { mathPlainText } from '../MathText/lib/mathPlainText';
 
 	const {
 		title,
@@ -12,6 +14,13 @@
 		detailsMode?: boolean;
 		children?: Snippet;
 	}>();
+
+	/**
+	 * This heading names the focus dialog, so its accessible name is stated
+	 * explicitly rather than left to how a given screen reader chooses to walk the
+	 * MathML inside it. The projection is what a person would say out loud.
+	 */
+	const spokenTitle = $derived(mathPlainText(title));
 </script>
 
 <article
@@ -20,7 +29,9 @@
 	aria-hidden={!detailsMode ? 'true' : undefined}
 >
 	<header>
-		<h1 id={detailsTitleId} class="details-title">{title}</h1>
+		<h1 id={detailsTitleId} class="details-title" aria-label={spokenTitle}>
+			<MathText text={title} singleLine />
+		</h1>
 	</header>
 	{#if children}
 		<div class="details-body">

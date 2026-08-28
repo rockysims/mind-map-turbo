@@ -8,6 +8,7 @@
 	import GraphQueryPanel from './GraphQueryPanel.svelte';
 	import NodeDetailsContent from './NodeDetailsContent.svelte';
 	import NodeActionMenu from './NodeActionMenu.svelte';
+	import { mathPlainText } from '../MathText/lib/mathPlainText';
 	import NodeEditSheet from './NodeEditSheet.svelte';
 	import DeepZoomStack, { type StackFrameArgs, type LayerBaseSize } from './DeepZoomStack.svelte';
 	import Stage from './Stage.svelte';
@@ -1675,7 +1676,7 @@
 							{assetStore}
 							{assetScope}
 							diagnostics={nodeDiagnosticsView(dataflowDiagnostics, detailsNode.id)}
-							titleForNodeId={(nodeId) => nodeById[nodeId]?.title ?? nodeId}
+							titleForNodeId={(nodeId) => mathPlainText(nodeById[nodeId]?.title ?? nodeId)}
 							onCreateDefiningNode={(quantityLabel) =>
 								createDefiningNode(detailsNode.id, quantityLabel)}
 							onRevealNode={(nodeId) => revealNode(nodeId)}

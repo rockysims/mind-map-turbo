@@ -1,5 +1,6 @@
 <script lang="ts">
 	import MathText from '../MathText/MathText.svelte';
+	import { hasMath as containsMath } from '../MathText/lib/mathSegments';
 
 	const { text = 'SquareText fallback text.', classList = [] } = $props<{
 		text: string;
@@ -9,10 +10,13 @@
 	let squareTextRef = $state<HTMLElement | null>(null);
 
 	/**
-	 * Cheap enough to run for every visible node, and it keeps text without math
-	 * on the plain path so its markup and its fit are untouched by this feature.
+	 * Keeps text without math on the plain path, so its markup and its fit are
+	 * untouched by this feature. The substring test short-circuits the real check
+	 * because this runs for every visible node and most titles have no `$` at all;
+	 * the real check still has to run, or a price like `\$5` would take the math
+	 * path and gain a wrapper it does not need.
 	 */
-	const hasMath = $derived(text.includes('$'));
+	const hasMath = $derived(text.includes('$') && containsMath(text));
 
 	function checkOverflow(el: HTMLElement) {
 		const oldOverflow = el.style.overflow;

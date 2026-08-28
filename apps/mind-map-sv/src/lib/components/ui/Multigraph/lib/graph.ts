@@ -6,6 +6,7 @@ import type {
 	TagColorNamespace
 } from '../../types/multigraph';
 import type { NodeData, NodeImageContent } from '../../types/node';
+import { mathPlainText } from '../../MathText/lib/mathPlainText';
 import { parseTitleSyntax } from './titleSyntax';
 
 export interface AddNodeInput {
@@ -61,11 +62,13 @@ export function duplicateEdgeIdentifier(data: MultigraphData, edgeId: string): s
 	const edge = data.edges.find((candidate) => candidate.id === edgeId);
 	if (!edge) return 'Unknown edge';
 
-	const sourceTitle = normalizeNodeTitle(
-		data.nodes.find((node) => node.id === edge.sourceNodeId)?.title ?? ''
+	// Projected, because this string is shown to a person deciding which edge to
+	// remove. Raw `$v_0$` would be worse than the node id it replaced.
+	const sourceTitle = mathPlainText(
+		normalizeNodeTitle(data.nodes.find((node) => node.id === edge.sourceNodeId)?.title ?? '')
 	);
-	const targetTitle = normalizeNodeTitle(
-		data.nodes.find((node) => node.id === edge.targetNodeId)?.title ?? ''
+	const targetTitle = mathPlainText(
+		normalizeNodeTitle(data.nodes.find((node) => node.id === edge.targetNodeId)?.title ?? '')
 	);
 
 	return `${sourceTitle} -- ${targetTitle}`;

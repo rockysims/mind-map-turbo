@@ -4049,3 +4049,37 @@
 		});
 	}}
 />
+
+<Story
+	name="MathTitleIsTypesetOnCanvasAndSpokenAsTextInFocus"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [{ id: 'n0', title: '$E = mc^2$', description: 'Mass-energy equivalence.' }],
+			pinned: ['n0'],
+			posByNodeId: { n0: { x: 0, y: 0 } }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: { panX: 0, panY: 0, scale: APP_CONFIG.multigraph.zoom.maxScale },
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+
+		// On the canvas the title is typeset. Seeing a dollar sign here would mean
+		// the author's LaTeX leaked through as source.
+		const canvasTitle = canvasElement.querySelector('.node .title') as HTMLElement;
+		expect(canvasTitle.querySelector('math')).not.toBeNull();
+		expect(canvasTitle.textContent).not.toContain('$');
+
+		const stage = getStage(canvasElement);
+		dispatchWheel(stage, -800, getCenter(getCircle(canvasElement, 'n0')).x, 0);
+		const dialog = await within(canvasElement).findByRole('dialog');
+
+		// The heading names the dialog, so the name a screen reader announces is
+		// stated outright rather than left to how it chooses to walk the MathML.
+		const heading = canvasElement.querySelector('.details-title') as HTMLElement;
+		expect(heading.querySelector('math')).not.toBeNull();
+		expect(heading.getAttribute('aria-label')).toBe('E=mc2');
+		expect(dialog.getAttribute('aria-labelledby')).toBe(heading.id);
+	}}
+/>
