@@ -141,7 +141,8 @@ interaction.
 - Namespacing or scoping quantities by tag or subgraph. The conflict badge is
   the collision remedy until real graphs show it is insufficient.
 - Tracing, spotlighting, upstream/downstream navigation, a variables panel, or
-  search integration. That is milestone 10.
+  search integration. This was to be milestone 10 and was cut on 2026-08-27;
+  seeing the dataflow structure proved to be the valuable part on its own.
 - Renaming a quantity everywhere at once.
 - Multiline or aligned equation environments as definition sources.
 
@@ -175,8 +176,9 @@ To be resolved in the plan.
   square and borders already encode tags. The plan should decide where defined
   quantities sit without harming title legibility.
 - **Bundled edges versus per-quantity edges.** Bundling keeps the canvas calm
-  but complicates highlighting a single quantity later. The plan should confirm
-  the bundled edge retains enough detail for milestone 10.
+  but complicates highlighting a single quantity later. Resolved by retaining the
+  full quantity list on each bundled edge, which turned out to matter less than
+  expected once the tracing milestone was cut.
 
 ## References
 

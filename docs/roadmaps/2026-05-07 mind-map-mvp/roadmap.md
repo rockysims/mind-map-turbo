@@ -63,7 +63,7 @@ individual PR-sized tasks.
 | 07  | Multiplayer                                        | not started | [milestones/07-multiplayer.md](milestones/07-multiplayer.md)                                                                                          |
 | 08  | LaTeX math in node descriptions                    | complete    | [milestone](milestones/08-latex-math-in-node-descriptions.md), [plan](plans/2026-08-27%2008-latex-math-in-node-descriptions.md)                       |
 | 09  | Variable dataflow layer                            | complete    | [milestone](milestones/09-variable-dataflow-layer.md), [plan](plans/2026-08-27%2009-variable-dataflow-layer.md)                                       |
-| 10  | Dataflow tracing and navigation                    | planned     | [milestone](milestones/10-dataflow-tracing-and-navigation.md), [plan](plans/2026-08-27%2010-dataflow-tracing-and-navigation.md)                       |
+| 10  | LaTeX math in node titles                          | planned     | [milestone](milestones/10-latex-math-in-node-titles.md), [plan](plans/2026-08-27%2010-latex-math-in-node-titles.md)                                   |
 
 Milestones 04a-04m deepen the local-first graph experience before multiplayer.
 Milestone 04b intentionally supersedes 04a's Fibonacci reveal and dimming
@@ -109,9 +109,17 @@ propagated offline shell stays small. Milestone 09 reads that rendered MathML to
 infer which node defines a quantity and which nodes use it, then draws the
 resulting producer-to-consumer arrows as derived edges that are computed rather
 than stored; there is no new authoring syntax, so writing the equation is the
-whole interaction. Milestone 10 makes that structure navigable — trace a quantity
-across the graph, walk upstream or downstream, and jump to a definition — largely
-by reusing milestone 05's query roles and milestone 06d's focus controller.
+whole interaction. Milestone 10 finishes the notation story by typesetting titles
+too, so a node about a quantity can be titled with it rather than describing it
+in prose.
+
+Making that dataflow structure traversable — tracing a quantity across the graph,
+walking upstream and downstream, jumping to a definition — was planned as a
+milestone and cut on 2026-08-27: seeing the structure turned out to be the
+valuable part, and the navigation on top of it was not worth its cost. The
+dropped milestone and its plan are recoverable from git history if that judgement
+changes.
+
 Numeric evaluation and units stay out of scope throughout; these milestones
 visualize structure, not results.
 
