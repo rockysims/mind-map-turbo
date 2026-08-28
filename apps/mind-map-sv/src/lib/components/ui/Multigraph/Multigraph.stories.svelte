@@ -3986,3 +3986,66 @@
 		expect(persistedEdgeIds.some((id) => id.startsWith('dataflow:'))).toBe(false);
 	}}
 />
+
+<Story
+	name="DefineButtonInFocusCreatesTheMissingNode"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [{ id: 'n0', title: 'Energy', description: 'Energy is $E = m c^2$.' }],
+			pinned: ['n0'],
+			posByNodeId: { n0: { x: 0, y: 0 } }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: { panX: 0, panY: 0, scale: APP_CONFIG.multigraph.zoom.maxScale },
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const center = getCenter(getCircle(canvasElement, 'n0'));
+
+		dispatchWheel(stage, -800, center.x, center.y);
+		await within(canvasElement).findByRole('dialog');
+
+		const defineButton = await waitFor(() => {
+			const button = canvasElement.querySelector('[data-create-defining-node]');
+			expect(button).toBeInTheDocument();
+			return button as HTMLElement;
+		});
+
+		// A button the pointer cannot reach is the same as no button at all, so
+		// assert reachability rather than just presence.
+		const rect = defineButton.getBoundingClientRect();
+		expect(rect.width).toBeGreaterThan(0);
+		expect(rect.height).toBeGreaterThan(0);
+		const topElement = document.elementFromPoint(
+			rect.left + rect.width / 2,
+			rect.top + rect.height / 2
+		);
+		expect(defineButton.contains(topElement)).toBe(true);
+
+		const quantity = defineButton.getAttribute('data-create-defining-node');
+
+		// Drive the real pointer sequence rather than calling .click(). A synthetic
+		// click skips pointerdown, which is exactly where a swallowed gesture hides.
+		const point = { clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
+		for (const type of ['pointerdown', 'pointerup', 'click']) {
+			defineButton.dispatchEvent(
+				new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1, ...point })
+			);
+		}
+
+		// Focus must give way, or the new node is created behind a full-screen
+		// overlay and a working button looks like a dead one.
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
+		});
+
+		await waitFor(() => {
+			const titles = Array.from(canvasElement.querySelectorAll('.node')).map(
+				(node) => (node as HTMLElement).querySelector('.title')?.textContent
+			);
+			expect(titles).toContain(quantity);
+		});
+	}}
+/>

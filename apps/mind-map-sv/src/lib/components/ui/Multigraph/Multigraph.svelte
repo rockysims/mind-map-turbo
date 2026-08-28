@@ -903,11 +903,21 @@
 	 * the existing mechanism for "I want to see this and what surrounds it".
 	 */
 	function revealNode(nodeId: string) {
+		// Both diagnostic actions are offered from inside the focus overlay, which
+		// covers the canvas they act on. Leaving focus open would make a successful
+		// action look like a dead button, since every visible effect is behind it.
+		leaveFocusForCanvasAction();
 		if (nodeById[nodeId]?.pinned === true) {
 			return;
 		}
-		closeOverlays();
 		commitUserGraph(layoutRuntime.beginScaleChange(setNodePinned(graph, nodeId, true), nodeId));
+	}
+
+	function leaveFocusForCanvasAction() {
+		closeOverlays();
+		if (focus.isFocused) {
+			focus.closeFocus();
+		}
 	}
 
 	/**
@@ -916,7 +926,7 @@
 	 * value would be guessing at the author's intent.
 	 */
 	function createDefiningNode(consumerNodeId: string, quantityLabel: string) {
-		closeOverlays();
+		leaveFocusForCanvasAction();
 		const origin = graphLayout.posByNodeId[consumerNodeId] ?? CENTERED_POSITION;
 		const nextGraph = addNode(graph, {
 			title: quantityLabel,
