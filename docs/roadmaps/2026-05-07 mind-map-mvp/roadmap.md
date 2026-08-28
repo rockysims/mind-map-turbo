@@ -64,6 +64,7 @@ individual PR-sized tasks.
 | 08  | LaTeX math in node descriptions                    | complete    | [milestone](milestones/08-latex-math-in-node-descriptions.md), [plan](plans/2026-08-27%2008-latex-math-in-node-descriptions.md)                       |
 | 09  | Variable dataflow layer                            | complete    | [milestone](milestones/09-variable-dataflow-layer.md), [plan](plans/2026-08-27%2009-variable-dataflow-layer.md)                                       |
 | 10  | LaTeX math in node titles                          | complete    | [milestone](milestones/10-latex-math-in-node-titles.md), [plan](plans/2026-08-27%2010-latex-math-in-node-titles.md)                                   |
+| 11  | Unified hop model for derived edges                | not started | [milestone](milestones/11-unified-hop-model-for-derived-edges.md), [plan](plans/2026-08-28%2011-unified-hop-model-for-derived-edges.md)               |
 
 Milestones 04a-04m deepen the local-first graph experience before multiplayer.
 Milestone 04b intentionally supersedes 04a's Fibonacci reveal and dimming
@@ -111,7 +112,13 @@ resulting producer-to-consumer arrows as derived edges that are computed rather
 than stored; there is no new authoring syntax, so writing the equation is the
 whole interaction. Milestone 10 finishes the notation story by typesetting titles
 too, so a node about a quantity can be titled with it rather than describing it
-in prose.
+in prose. Milestone 11 reworks how milestone 09's derived edges meet the hop
+system: a 2026-08-28 review traced the recurring dataflow sizing/visibility
+bugs to four parallel hop computations patched into agreement, and replaces
+them with one bounded computation where a derived edge differs from an
+authored one in exactly one way — its own visibility budget
+(`dataflowDisplayedLayers`, default 1). It supersedes milestone 09's
+`dataflowInLayout` toggle.
 
 Making that dataflow structure traversable — tracing a quantity across the graph,
 walking upstream and downstream, jumping to a definition — was planned as a

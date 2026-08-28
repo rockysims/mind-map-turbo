@@ -96,3 +96,13 @@ folded into the 08/09/10 math and dataflow milestones:
   - `10-dataflow-tracing-and-navigation.md`: tracing a quantity across the graph, upstream/downstream chain walking, jump-to-definition, the quantities panel, and query integration.
 
 - Consider allowing deep zoom to show iframe (with url configured by node) so third party websites can be accessed smoothly via deep zoom
+
+from the 2026-08-28 derived-edges review (small math-layer improvements; the
+big findings became milestone 11 and two standalone bug-fix tasks):
+
+- Render cache is FIFO, not LRU — a hit should refresh recency (delete+reinsert), or long-lived expressions get evicted while typing fills the cache with dead prefixes. Also `cacheMaxEntries` as a per-call option on a module-global cache means the effective cap is whoever called last.
+- Accept `\text{}` subscripts in symbol keys so `T_{\text{max}}` doesn't collapse to `T` (word subscripts are everywhere in physics notes).
+- Accept `≔` / `\equiv` as definition operators — those are the symbols people reach for precisely when they mean _definition_, and today only `=` defines.
+- Edit-sheet note for "looks like a definition but isn't" (chained equalities, `f(x) = …`, rejected left sides currently fail silently; extraction already knows why). Canvas stays quiet; the note is focus-only.
+- `hasDerivedEdges` guard has no production caller — wire it into the save path or drop it.
+- Group diagnostics references by node id at compute time (`referencesForNode` is a linear scan per rendered node).
