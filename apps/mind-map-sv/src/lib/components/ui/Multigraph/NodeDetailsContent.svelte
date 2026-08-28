@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { GraphAssetStore } from '$lib/assets/assetStore';
+	import MathText from '../MathText/MathText.svelte';
 	import type { GraphAssetMetadata } from '../types/multigraph';
 	import type { NodeData, NodeImageContent } from '../types/node';
 
@@ -46,7 +47,7 @@
 
 <div class="focus-content" data-focus-zoom-scale="1">
 	{#if node.description.trim()}
-		<p class="description">{node.description}</p>
+		<p class="description"><MathText text={node.description} /></p>
 	{/if}
 
 	{#if imageBlocks.length > 0}
