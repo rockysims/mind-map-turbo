@@ -32,6 +32,7 @@
 		edgeStyle,
 		type RenderableEdgeVisibility
 	} from './lib/edgeStyle.js';
+	import { trimSegmentToNodeBorders } from './lib/edgeRender.js';
 	import {
 		computeEdgeOcclusionWindows,
 		edgeOcclusionParametersForZoom,
@@ -392,6 +393,28 @@
 		posByNodeId: graphLayout.posByNodeId,
 		radiusByNodeId: combinedRadiusByNodeId
 	});
+	/** Live layout position of the preview's source node; null while it has no layout slot. */
+	const creationPreviewSourcePos = $derived(
+		creationPreview ? (graphLayout.posByNodeId[creationPreview.sourceNodeId] ?? null) : null
+	);
+	const creationPreviewScale = $derived(
+		creationPreview ? creationPreviewScaleAt(creationPreview, layoutRuntime.animationNowMs) : 0
+	);
+	/**
+	 * Preview edge trimmed to the node borders exactly like a real edge (source by
+	 * its layout radius, target by the preview node's animated radius) so the
+	 * handoff to the committed edge does not snap shorter.
+	 */
+	const creationPreviewEdgePoints = $derived.by(() => {
+		const preview = creationPreview;
+		if (!preview || preview.ending || !creationPreviewSourcePos) return null;
+		return trimSegmentToNodeBorders(
+			creationPreviewSourcePos,
+			preview.point,
+			graphLayout.radiusByNodeId[preview.sourceNodeId] ?? 0,
+			resolvedLayoutSettings.baseRadius * creationPreviewScale
+		);
+	});
 	const editNode = $derived(graph.nodes.find((node) => node.id === editNodeId) ?? null);
 	const actionMenuNode = $derived.by(() => {
 		const menu = actionMenu;
@@ -554,9 +577,9 @@
 	}
 
 	function handleNodeDoubleClickDropOntoNode(sourceNode: NodeData, targetNode: NodeData) {
-		closeOverlays();
 		const hadPreviewEdge = creationPreview !== null && !creationPreview.ending;
-		creationPreview = null;
+		// closeOverlays() drops the preview, so read it first.
+		closeOverlays();
 		const existing = findExistingEdge(graph, sourceNode.id, targetNode.id);
 		if (existing) {
 			duplicateEdgeConfirm = { edgeId: existing.id };
@@ -581,12 +604,12 @@
 	}
 
 	function handleNodeDoubleClickDropOntoBackground(sourceNode: NodeData, point: Point) {
-		closeOverlays();
 		const handoffScale = creationPreview
 			? creationPreviewScaleAt(creationPreview, layoutRuntime.now())
 			: 0;
 		const hadPreviewEdge = creationPreview !== null && !creationPreview.ending;
-		creationPreview = null;
+		// closeOverlays() drops the preview, so read it first.
+		closeOverlays();
 		const graphWithNode = addNode(graph, { pinned: true, position: point });
 		const newNode = graphWithNode.nodes[graphWithNode.nodes.length - 1] ?? null;
 		const graphWithEdge = newNode
@@ -655,8 +678,8 @@
 		layoutRuntime.start();
 	}
 
-	function handleCreationCancel() {
-		if (!creationPreview) return;
+	function handleCreationCancel(sourceNode: NodeData) {
+		if (!creationPreview || creationPreview.sourceNodeId !== sourceNode.id) return;
 		const nowMs = layoutRuntime.now();
 		const ended = endCreationPreview(creationPreview, nowMs, previewDurationMs);
 		creationPreview = ended && !isCreationPreviewSettled(ended, nowMs) ? ended : null;
@@ -692,6 +715,7 @@
 	function closeOverlays() {
 		actionMenu = null;
 		editNodeId = null;
+		creationPreview = null;
 		duplicateEdgeConfirm = null;
 		titleEditContext = null;
 		tagColorLegendOpen = false;
@@ -1290,19 +1314,16 @@
 					></div>
 				{/if}
 			{/each}
-			{#if creationPreview && !creationPreview.ending}
-				{@const previewSourcePos = graphLayout.posByNodeId[creationPreview.sourceNodeId]}
-				{#if previewSourcePos}
-					{@const previewEdgeColor = edgeStrokeColor(
-						CREATION_PREVIEW_EDGE,
-						graph.tagColorConfig.edgeTags
-					)}
-					<div
-						class="edge"
-						data-creation-preview-edge="true"
-						style={`${edgeStyle(previewSourcePos, creationPreview.point)} --edge-background: ${previewEdgeColor}; color: ${previewEdgeColor}; --edge-stroke-width: ${EDGE_STROKE_WIDTH}px; pointer-events: none;`}
-					></div>
-				{/if}
+			{#if creationPreviewEdgePoints}
+				{@const previewEdgeColor = edgeStrokeColor(
+					CREATION_PREVIEW_EDGE,
+					graph.tagColorConfig.edgeTags
+				)}
+				<div
+					class="edge"
+					data-creation-preview-edge="true"
+					style={`${edgeStyle(creationPreviewEdgePoints.source, creationPreviewEdgePoints.target)} --edge-background: ${previewEdgeColor}; color: ${previewEdgeColor}; --edge-stroke-width: ${EDGE_STROKE_WIDTH}px; pointer-events: none;`}
+				></div>
 			{/if}
 		</div>
 
@@ -1402,27 +1423,21 @@
 				/>
 			</div>
 		{/each}
-		{#if creationPreview}
-			{@const previewScale = creationPreviewScaleAt(creationPreview, layoutRuntime.animationNowMs)}
-			{#if previewScale > 0}
-				<div
-					class="node-wrapper"
-					data-creation-preview-node="true"
-					data-scale={previewScale}
-					data-x={creationPreview.point.x}
-					data-y={creationPreview.point.y}
-					style={`left: calc(50% + ${creationPreview.point.x}px); top: calc(50% + ${creationPreview.point.y}px); transform: translate(-50%, -50%) scale(${previewScale}); pointer-events: none;`}
-				>
-					<Node
-						nodeData={CREATION_PREVIEW_NODE}
-						isTitleEditing={false}
-						borderSegments={nodeBorderSegments(
-							CREATION_PREVIEW_NODE,
-							graph.tagColorConfig.nodeTags
-						)}
-					/>
-				</div>
-			{/if}
+		{#if creationPreview && creationPreviewSourcePos && creationPreviewScale > 0}
+			<div
+				class="node-wrapper"
+				data-creation-preview-node="true"
+				data-scale={creationPreviewScale}
+				data-x={creationPreview.point.x}
+				data-y={creationPreview.point.y}
+				style={`left: calc(50% + ${creationPreview.point.x}px); top: calc(50% + ${creationPreview.point.y}px); transform: translate(-50%, -50%) scale(${creationPreviewScale}); pointer-events: none;`}
+			>
+				<Node
+					nodeData={CREATION_PREVIEW_NODE}
+					isTitleEditing={false}
+					borderSegments={nodeBorderSegments(CREATION_PREVIEW_NODE, graph.tagColorConfig.nodeTags)}
+				/>
+			</div>
 		{/if}
 	</Stage>
 

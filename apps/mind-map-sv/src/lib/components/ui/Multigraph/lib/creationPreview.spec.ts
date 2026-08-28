@@ -91,6 +91,19 @@ describe('updateCreationPreview', () => {
 		expect(creationPreviewScaleAt(state, 1000 + 2 * DURATION)).toBe(0);
 	});
 
+	it('does not resurrect an ending preview', () => {
+		let state = beginCreationPreview('n0', { x: 0, y: 0 }, 1000);
+		state = updateCreationPreview(state, { point: { x: 50, y: 0 }, hoverNodeId: null }, 1000, 0);
+		const ended = endCreationPreview(state, 2000, DURATION)!;
+		const updated = updateCreationPreview(
+			ended,
+			{ point: { x: 60, y: 0 }, hoverNodeId: null },
+			2000,
+			DURATION
+		);
+		expect(updated.ending).toBe(true);
+	});
+
 	it('settles immediately when duration is 0', () => {
 		let state = beginCreationPreview('n0', { x: 0, y: 0 }, 1000);
 		state = updateCreationPreview(state, { point: { x: 50, y: 0 }, hoverNodeId: null }, 1000, 0);

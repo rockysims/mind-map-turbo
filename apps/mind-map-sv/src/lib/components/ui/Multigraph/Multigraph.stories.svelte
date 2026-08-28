@@ -1685,6 +1685,111 @@
 />
 
 <Story
+	name="UserClicksChromeWhileMenuGestureArmed"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1, pinned: [0] }),
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: { panX: 0, panY: 0, scale: 0.5 },
+		layoutSettings: { enterExitDurationMs: 0, relaxIterations: 1 },
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const stageRect = stage.getBoundingClientRect();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+		const bgX = stageRect.right - 20;
+		const bgY = stageRect.top + stageRect.height / 2;
+
+		dispatchContextMenu(circle, center.x, center.y);
+		await sleep();
+		within(canvasElement).getByRole('menuitem', { name: 'Add node/edge' }).click();
+		await sleep();
+		dispatchPointer(stage, 'pointermove', bgX, bgY);
+		await sleep();
+		expect(canvasElement.querySelector('[data-creation-preview-node]')).toBeInTheDocument();
+
+		// Pressing app chrome outside the stage disarms the gesture and drops the preview.
+		const toolbarButton = canvasElement.querySelector('.tag-color-button') as HTMLElement;
+		const toolbarCenter = getCenter(toolbarButton);
+		dispatchPointer(toolbarButton, 'pointerdown', toolbarCenter.x, toolbarCenter.y);
+		dispatchPointer(toolbarButton, 'pointerup', toolbarCenter.x, toolbarCenter.y);
+		toolbarButton.click();
+		await sleep();
+		await waitForLayout();
+		expect(canvasElement.querySelector('[data-creation-preview-node]')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-creation-preview-edge]')).not.toBeInTheDocument();
+
+		// The next canvas click pans instead of silently creating a node.
+		dispatchPointer(stage, 'pointerdown', bgX, bgY);
+		dispatchPointer(stage, 'pointerup', bgX, bgY);
+		await sleep();
+		expect(canvasElement.querySelector('[data-node-id="n1"]')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('.title-input')).not.toBeInTheDocument();
+		const changeSpy = args.onMultigraphChange as ChangeSpy | undefined;
+		expect(changeSpy?.mock.calls).toHaveLength(0);
+	}}
+/>
+
+<Story
+	name="UserSeesNoEdgeSnapOnCreationHandoff"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1, pinned: [0] }),
+		defaultPrimaryNodeId: 'n0',
+		// Zoomed out far enough that the drop point clears both node radii, so the
+		// trimmed edge has real length to compare.
+		initialViewState: { panX: 0, panY: 0, scale: 0.25 },
+		layoutSettings: { enterExitDurationMs: 0, relaxIterations: 1 },
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const stageRect = stage.getBoundingClientRect();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+		const bgX = stageRect.right - 20;
+		const bgY = stageRect.top + stageRect.height / 2;
+
+		dispatchContextMenu(circle, center.x, center.y);
+		await sleep();
+		within(canvasElement).getByRole('menuitem', { name: 'Add node/edge' }).click();
+		await sleep();
+		dispatchPointer(stage, 'pointermove', bgX, bgY);
+		await sleep();
+
+		const previewEdge = canvasElement.querySelector(
+			'[data-creation-preview-edge]'
+		) as HTMLElement | null;
+		expect(previewEdge).toBeInTheDocument();
+		const previewEdgeWidth = Number.parseFloat(previewEdge!.style.width);
+		const previewNode = canvasElement.querySelector(
+			'[data-creation-preview-node]'
+		) as HTMLElement | null;
+		const centerToCenter = distanceBetween(nodePosition(canvasElement, 'n0'), {
+			x: Number(previewNode!.dataset.x),
+			y: Number(previewNode!.dataset.y)
+		});
+		// The preview edge is trimmed to both node borders, not drawn center to center.
+		expect(previewEdgeWidth).toBeCloseTo(centerToCenter - 2 * NODE_RADIUS, 1);
+
+		dispatchPointer(stage, 'pointerdown', bgX, bgY);
+		dispatchPointer(stage, 'pointerup', bgX, bgY);
+		await sleep();
+		await waitForLayout();
+
+		const realEdge = canvasElement.querySelector(
+			'[data-source-node-id="n0"][data-target-node-id="n1"]'
+		) as HTMLElement | null;
+		expect(realEdge).toBeInTheDocument();
+		// Handoff happens at the preview's settled scale, so the committed edge has
+		// the same geometry: no visible snap.
+		expect(Number.parseFloat(realEdge!.style.width)).toBeCloseTo(previewEdgeWidth, 1);
+	}}
+/>
+
+<Story
 	name="UserCancelsMenuGestureWithEscape"
 	args={{
 		multigraphData: makeGraph({ nodeCount: 1, pinned: [0] }),

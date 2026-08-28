@@ -40,7 +40,8 @@ export function beginCreationPreview(
 /**
  * Track the cursor and retarget the scale animation whenever preview-node
  * visibility flips. Retargeting starts from the current interpolated scale so
- * mid-animation flips never snap.
+ * mid-animation flips never snap. An ending preview is never resurrected: the
+ * caller starts a fresh preview instead.
  */
 export function updateCreationPreview(
 	state: CreationPreviewState,
@@ -60,7 +61,7 @@ export function updateCreationPreview(
 					startedAtMs: nowMs,
 					durationMs: Math.max(0, durationMs)
 				};
-	return { ...state, point: input.point, hoverNodeId: input.hoverNodeId, anim, ending: false };
+	return { ...state, point: input.point, hoverNodeId: input.hoverNodeId, anim };
 }
 
 /**
