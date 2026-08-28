@@ -1,6 +1,6 @@
 # Milestone 09: Variable dataflow layer
 
-**Status:** not started
+**Status:** complete
 **Depends on:** milestone 08 (LaTeX math in node descriptions), milestone 04e
 (directed edges), milestone 04k (parallel edge visualization), and milestone 04b
 (bounded neighborhood visibility).

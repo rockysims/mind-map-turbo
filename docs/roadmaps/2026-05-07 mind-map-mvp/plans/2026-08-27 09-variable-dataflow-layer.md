@@ -3,8 +3,20 @@
 **Created:** 2026-08-27
 **Author:** Cursor agent
 **Milestone:** [milestones/09-variable-dataflow-layer.md](../milestones/09-variable-dataflow-layer.md)
-**Status:** executing — all open questions resolved 2026-08-27
-**Total estimated effort:** L
+**Status:** complete — T01–T09 landed 2026-08-27
+
+Two pieces are deliberately deferred and are not part of this milestone's
+delivery:
+
+- **Glyph-level marking inside a typeset equation.** Diagnostics surface as a
+  list in the focused node instead. Marking the individual symbol needs an
+  annotated render path with its own cache key, because the shared render cache
+  hands the same tree to every caller and cannot carry per-node annotations.
+- **A user-facing control for `dataflowInLayout`.** The prop exists and defaults
+  to off as decided, and stories cover both positions, but nothing in the app
+  surfaces it yet. Exposing it means a persisted setting, so it belongs with
+  whatever milestone owns the settings surface.
+  **Total estimated effort:** L
 
 ## Summary
 

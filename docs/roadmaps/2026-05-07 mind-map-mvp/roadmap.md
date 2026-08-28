@@ -62,7 +62,7 @@ individual PR-sized tasks.
 | 06d | Deep zoom hardening and nested image zoom          | complete    | [milestone](milestones/06d-deep-zoom-hardening-and-nested-image-zoom.md), [plan](plans/2026-07-11%2006d-deep-zoom-hardening-and-nested-image-zoom.md) |
 | 07  | Multiplayer                                        | not started | [milestones/07-multiplayer.md](milestones/07-multiplayer.md)                                                                                          |
 | 08  | LaTeX math in node descriptions                    | complete    | [milestone](milestones/08-latex-math-in-node-descriptions.md), [plan](plans/2026-08-27%2008-latex-math-in-node-descriptions.md)                       |
-| 09  | Variable dataflow layer                            | planned     | [milestone](milestones/09-variable-dataflow-layer.md), [plan](plans/2026-08-27%2009-variable-dataflow-layer.md)                                       |
+| 09  | Variable dataflow layer                            | complete    | [milestone](milestones/09-variable-dataflow-layer.md), [plan](plans/2026-08-27%2009-variable-dataflow-layer.md)                                       |
 | 10  | Dataflow tracing and navigation                    | not started | [milestones/10-dataflow-tracing-and-navigation.md](milestones/10-dataflow-tracing-and-navigation.md)                                                  |
 
 Milestones 04a-04m deepen the local-first graph experience before multiplayer.
