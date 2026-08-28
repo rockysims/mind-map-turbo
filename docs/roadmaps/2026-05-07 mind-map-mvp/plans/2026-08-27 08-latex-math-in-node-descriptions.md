@@ -159,25 +159,49 @@ of the string. No DOM, no Temml — this task must not depend on T01.
 | **Files**      | new `components/ui/MathText/lib/mathRender.ts`, new `mathRender.spec.ts` |
 | **PR title**   | `feat(math): add temml render adapter with safe options and memoization` |
 
-The single place Temml is imported. Export a render function returning either
-rendered MathML markup or a structured error, taking display mode and the
-security tunables as parameters with defaults per the repo's configurable-not-
-constant rule. Fixed defaults: `trust: false`, `throwOnError: false`, capped
-`maxSize` and `maxExpand`. Memoize in a module-level map keyed by display mode
-plus source, evicting when the map exceeds 500 entries.
+The single place Temml is imported. Take display mode and the security tunables
+as parameters with defaults per the repo's configurable-not-constant rule. Fixed
+defaults: `trust: false`, `throwOnError: false`, capped `maxSize` and
+`maxExpand`. Memoize in a module-level map keyed by display mode plus source,
+evicting when the map exceeds 500 entries.
 
-Note from the spike: with `throwOnError: false`, Temml does not return a `<math>`
-element for invalid input — it returns `<span class="temml-error" style="…">`
-containing the source and the parse message. Detect that shape to drive the
-error branch rather than assuming a `<math>` root, and pass the parse message
-through so T04 can show it.
+**Render through `temml.__renderToMathMLTree`, not `renderToString`, and return
+both the tree and its markup:**
+
+```ts
+type MathRenderResult =
+  | { ok: true; markup: string; tree: MathNode }
+  | { ok: false; markup: string; message: string };
+```
+
+This contract exists because milestone 09 must walk the MathML to extract
+symbols, and per repo convention that pure logic gets a spec in the `server`
+project — where `DOMParser` is `undefined` and no DOM or HTML parser is
+declared anywhere in the repo. Returning only a markup string would force 09 to
+either add a parser dependency or move its core spec into the browser project.
+`__renderToMathMLTree` avoids both: it runs DOM-free under Node and returns a
+plain `MathNode` of `{ type, attributes, children, classes, style, label }` that
+a recursive walk traverses directly. Rendering once and deriving markup from
+`tree.toMarkup()` also avoids a redundant second parse.
+
+Discriminate the branches on the returned node's `type`. A success returns a
+`MathNode` with `type === 'math'`; an error returns a `Span` whose `type` is
+`undefined`, carrying the `temml-error` markup with the source and parse
+message. That is a structural check rather than sniffing the markup string for
+a class name. Extract `message` for T04 by walking the Span's text children with
+the same DOM-free traversal.
 
 **Acceptance**
 
 - Spec runs in the `server` project (Temml's ESM build works under Node).
-- Valid input returns markup containing a `<math>` element.
-- Invalid LaTeX returns the error branch rather than throwing, and the branch
-  carries the parse message.
+- Valid input returns `ok: true` with `markup` containing a `<math>` element.
+- `tree.toMarkup()` is byte-identical to `renderToString()` for the same source
+  and options. This pins the `__`-prefixed internal API so a Temml upgrade that
+  changes it fails a test instead of silently degrading milestone 09.
+- A recursive walk of `tree` collects the expected `mi`/`mn`/`mo` nodes with no
+  DOM present, proving milestone 09's extraction can be a pure `server` spec.
+- Invalid LaTeX returns `ok: false` rather than throwing, and the branch carries
+  the parse message.
 - A description containing a `<script>` tag inside `\text{}` produces output
   with no `<script>` element; an `\includegraphics`-style payload produces no
   external resource URL. The spike confirmed both hold with `trust: false`:
@@ -328,6 +352,14 @@ has all its `Depends on` items already merged to `main`.
   T03's safety spec finds one, switch that module to render into a detached
   element and hand `MathText` a cloned node instead of a string, which removes
   the injection surface entirely at the cost of a slightly heavier cache.
+- **T03 depends on `__renderToMathMLTree`, a `__`-prefixed internal.** It is
+  declared in Temml's shipped `.d.ts`, so it is semi-public rather than private,
+  but it carries weaker stability guarantees than `renderToString`. Mitigated by
+  the design already in place: Temml is imported in exactly one module, and
+  T03's spec asserts `tree.toMarkup() === renderToString(...)`, so a breaking
+  upgrade surfaces as a failing test. If it ever disappears, the fallback is to
+  parse the markup string with `linkedom` behind the same adapter signature,
+  which changes one module rather than milestone 09's call sites.
 - **Build output is not byte-reproducible.** Rebuilding without any source
   change still rewrites the tracked shell, because SvelteKit emits a random
   `__sveltekit_<token>` namespace and the minifier reshuffles local names.
@@ -374,10 +406,16 @@ entries when you add them.
   were zero console errors and zero failed requests. `\mathscr{L}`,
   `\sum` with limits, nested `\sqrt`, and `\oint` all rendered correctly.
   No change to `inline-static-build.mjs` was required.
-- 2026-08-27: Milestone 09 will consume `mathRender`'s output by parsing the
-  MathML string. Keep the adapter returning markup rather than a Svelte-specific
-  shape so that consumer stays straightforward. The spike confirmed 09's core
-  premise directly: `v_0` and `v_{0}` both render to byte-identical
+- 2026-08-27: T03's return contract was settled before coding, against milestone
+  09's needs. `temml.__renderToMathMLTree` was verified to run with
+  `DOMParser === undefined`, to return a walkable plain-object `MathNode`, and
+  to produce `toMarkup()` byte-identical to `renderToString()`. Invalid input
+  returns a `Span` with `type === undefined` instead of throwing, and a
+  recursive macro is capped by `maxExpand` rather than hanging. So the adapter
+  returns tree plus markup, and milestone 09 needs no DOM, no re-parse, and no
+  new dependency. Supersedes the earlier note here that suggested returning
+  markup alone.
+- 2026-08-27: The spike confirmed 09's core premise directly: `v_0` and `v_{0}` both render to byte-identical
   `<msub><mi>v</mi><mn>0</mn></msub>`, and `\alpha` and a literal `α` both
   render to `<mi>α</mi>`. Output carries no `<annotation>` element by default
   (`annotate` defaults to false), so the tree stays compact for walking.

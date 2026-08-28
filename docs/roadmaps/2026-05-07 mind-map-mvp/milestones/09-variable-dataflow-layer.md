@@ -30,6 +30,11 @@ interaction.
   into identical markup and turns `\alpha` into a single identifier, so symbol
   identity is a structural comparison rather than string normalization. A spike
   during milestone 08 confirmed both cases produce byte-identical output.
+- Walk the `MathNode` tree that milestone 08's render adapter returns, rather
+  than re-parsing its markup string. The tree is plain objects, so extraction
+  stays a pure function with a `server`-project spec and needs no DOM — which
+  matters because `DOMParser` does not exist in that environment. Milestone 08
+  shaped its adapter contract around this requirement.
 - Define a canonical key for a symbol, covering a bare identifier and an
   identifier carrying a subscript.
 - Exclude things that look like symbols but are not quantities: function names,
@@ -39,9 +44,9 @@ interaction.
   a more reliable signal than inspecting identifier length or upright styling.
 - Never scan inside literal text spans, so prose embedded in an equation cannot
   create spurious references.
-- Keep the extractor pure over a plain tree structure so it is testable in the
-  node test project, with a thin browser-side adapter that converts a live DOM
-  subtree into that structure.
+- Keep the extractor pure over the plain tree structure so it is testable in the
+  node test project. No browser-side DOM adapter is needed: the render adapter
+  hands over the same tree in both environments.
 
 ### Definition and reference inference
 
