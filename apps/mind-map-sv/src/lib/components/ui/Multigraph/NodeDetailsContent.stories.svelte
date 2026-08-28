@@ -1,14 +1,64 @@
 <script module lang="ts">
 	import { defineMeta } from '@storybook/addon-svelte-csf';
-	import { expect } from 'storybook/test';
+	import { expect, fn, waitFor } from 'storybook/test';
 	import NodeDetailsContent from './NodeDetailsContent.svelte';
 	import type { NodeData } from '../types/node';
+	import { symbolFor } from '../MathText/lib/mathSymbols';
+	import { nodeQuantities } from './lib/nodeQuantities';
+	import type { QuantityIndexEntry } from './lib/quantityIndex';
+	import { designations } from './lib/testFixtures';
 
 	function makeNode(description: string): NodeData {
 		return { id: 'node-1', title: 'Kinematics', description, tags: [] };
 	}
 
 	const PROSE_ONLY = 'First line.\nSecond line.\n\nAfter a blank line.';
+
+	type JumpSpy = { mock: { calls: Array<[string]> } };
+
+	/** A node that has confirmed g as one of its inputs, with the text to match. */
+	const WEIGHT_NODE: NodeData = {
+		...makeNode('Weight is $$w = m g$$.'),
+		inputs: designations('g'),
+		outputs: designations('w')
+	};
+
+	/** Two nodes claim g, and they disagree — the case the peek exists to show. */
+	const G_DEFINED_TWICE: QuantityIndexEntry = {
+		symbol: symbolFor('g', null),
+		definerNodeIds: ['earth', 'moon'],
+		definitions: [
+			{ nodeId: 'earth', bodyKey: 'earth-g', sourceTex: 'g = 9.8', displayMode: true },
+			{ nodeId: 'moon', bodyKey: 'moon-g', sourceTex: 'g = 1.6', displayMode: true }
+		],
+		consumerNodeIds: ['node-1']
+	};
+
+	/** Confirmed as an input, and nothing anywhere answers it. */
+	const G_UNDEFINED: QuantityIndexEntry = {
+		symbol: symbolFor('g', null),
+		definerNodeIds: [],
+		definitions: [],
+		consumerNodeIds: ['node-1']
+	};
+
+	const entryLookup = (entry: QuantityIndexEntry) => (key: string) =>
+		key === 'g' ? entry : undefined;
+
+	const MOON_AND_EARTH_TITLES = (nodeId: string) => (nodeId === 'earth' ? 'Earth' : 'Moon');
+
+	/** Open the peek for the one confirmed input, the way a reader does. */
+	async function peekAtG(canvasElement: HTMLElement): Promise<HTMLElement> {
+		const chip = canvasElement.querySelector('[data-designation-role="input"]');
+		expect(chip).toHaveAttribute('data-designation-key', 'g');
+		(chip as HTMLElement).click();
+
+		return await waitFor(() => {
+			const card = canvasElement.querySelector('[data-quantity-peek="g"]');
+			expect(card).toBeInTheDocument();
+			return card as HTMLElement;
+		});
+	}
 
 	const { Story } = defineMeta({
 		title: 'Components/Multigraph/NodeDetailsContent',
@@ -126,7 +176,7 @@
 			cycleNodeIds: []
 		},
 		titleForNodeId: () => 'Gravity',
-		onRevealNode: () => {}
+		onJumpToNode: () => {}
 	}}
 	play={async ({ canvasElement }) => {
 		const content = focusContent(canvasElement);
@@ -149,7 +199,7 @@
 			cycleNodeIds: []
 		},
 		titleForNodeId: (nodeId) => (nodeId === 'earth' ? 'Earth' : 'Moon'),
-		onRevealNode: () => {}
+		onJumpToNode: () => {}
 	}}
 	play={async ({ canvasElement }) => {
 		const content = focusContent(canvasElement);
@@ -171,7 +221,7 @@
 			cycleNodeIds: []
 		},
 		titleForNodeId: (nodeId) => nodeId,
-		onRevealNode: () => {}
+		onJumpToNode: () => {}
 	}}
 	play={async ({ canvasElement }) => {
 		const content = focusContent(canvasElement);
@@ -192,11 +242,86 @@
 		node: makeNode('Circular: $$x = y$$.'),
 		diagnostics: { items: [], cycleNodeIds: ['other'] },
 		titleForNodeId: () => 'Other',
-		onRevealNode: () => {}
+		onJumpToNode: () => {}
 	}}
 	play={async ({ canvasElement }) => {
 		const content = focusContent(canvasElement);
 		expect(content.querySelector('[data-diagnostic-state="cycle"]')).toBeInTheDocument();
 		expect(content.querySelector('[data-reveal-node="other"]')).toHaveTextContent('Other');
+	}}
+/>
+
+<Story
+	name="PeekShowsEveryDefinerOfAConfirmedInput"
+	args={{
+		node: WEIGHT_NODE,
+		quantities: nodeQuantities(WEIGHT_NODE),
+		quantityEntryFor: entryLookup(G_DEFINED_TWICE),
+		titleForNodeId: MOON_AND_EARTH_TITLES,
+		onJumpToNode: fn()
+	}}
+	play={async ({ canvasElement }) => {
+		const content = focusContent(canvasElement);
+		const card = await peekAtG(canvasElement);
+
+		// The question at an input chip is "what is this?", and flying the canvas
+		// somewhere else to answer it costs the reader their place. So every node
+		// claiming g comes to them, each with the equation it actually wrote.
+		const rows = Array.from(card.querySelectorAll('[data-peek-definer]'));
+		expect(rows.map((row) => row.getAttribute('data-peek-definer'))).toEqual(['earth', 'moon']);
+		expect(rows[0]).toHaveTextContent('Earth');
+		for (const row of rows) {
+			expect(row.querySelector('math')).not.toBeNull();
+		}
+		// Typeset as written — the source of a definition is never shown raw.
+		expect(card.textContent).not.toContain('$');
+		expect(content.querySelector('[data-designation-key="g"]')).toHaveAttribute(
+			'aria-pressed',
+			'true'
+		);
+	}}
+/>
+
+<Story
+	name="GoToNodeFromThePeekAsksToLeaveForTheDefiner"
+	args={{
+		node: WEIGHT_NODE,
+		quantities: nodeQuantities(WEIGHT_NODE),
+		quantityEntryFor: entryLookup(G_DEFINED_TWICE),
+		titleForNodeId: MOON_AND_EARTH_TITLES,
+		onJumpToNode: fn()
+	}}
+	play={async ({ canvasElement, args }) => {
+		const card = await peekAtG(canvasElement);
+
+		(card.querySelector('[data-peek-goto="moon"]') as HTMLElement).click();
+
+		// Going there is an explicit choice rather than the price of asking, and it
+		// names the definer the reader pointed at — not the quantity.
+		const jumpSpy = args.onJumpToNode as unknown as JumpSpy;
+		expect(jumpSpy.mock.calls.at(-1)?.[0]).toBe('moon');
+		// The card closes with the canvas it was reading over.
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-quantity-peek]')).not.toBeInTheDocument();
+		});
+	}}
+/>
+
+<Story
+	name="PeekOffersToDefineAnInputNothingAnswers"
+	args={{
+		node: WEIGHT_NODE,
+		quantities: nodeQuantities(WEIGHT_NODE),
+		quantityEntryFor: entryLookup(G_UNDEFINED),
+		onCreateDefiningNode: fn()
+	}}
+	play={async ({ canvasElement }) => {
+		const card = await peekAtG(canvasElement);
+
+		// An unresolved input is a claim the author made — "this node needs a value
+		// for g" — so the answer to it is an offer to supply one.
+		expect(card).toHaveTextContent('Nothing defines g yet.');
+		expect(card.querySelector('[data-create-defining-node="g"]')).toBeInTheDocument();
+		expect(card.querySelector('[data-peek-definer]')).toBeNull();
 	}}
 />

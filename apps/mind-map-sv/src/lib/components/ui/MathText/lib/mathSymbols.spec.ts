@@ -4,6 +4,7 @@ import {
 	canonicalExpressionKey,
 	collectSymbols,
 	singleSymbolOf,
+	symbolFor,
 	topLevelChildren,
 	DEFAULT_CONSTANT_STOPLIST,
 	type SymbolExtractionOptions
@@ -243,5 +244,21 @@ describe('canonicalExpressionKey', () => {
 
 	it('gives an empty expression an empty key', () => {
 		expect(canonicalExpressionKey([])).toBe('');
+	});
+});
+
+describe('symbolFor', () => {
+	// A persisted designation must land on the same identity extraction produces,
+	// or a stale designation would silently stop matching its own symbol.
+	it('agrees with extraction for a bare identifier', () => {
+		expect(symbolFor('v', null)).toEqual(collectSymbols(treeOf('v'))[0]);
+	});
+
+	it('agrees with extraction for a subscripted identifier', () => {
+		expect(symbolFor('v', '0')).toEqual(collectSymbols(treeOf('v_0'))[0]);
+	});
+
+	it('agrees with extraction for a Greek identifier', () => {
+		expect(symbolFor('θ', null)).toEqual(collectSymbols(treeOf('\\theta'))[0]);
 	});
 });

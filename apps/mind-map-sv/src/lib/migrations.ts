@@ -6,9 +6,9 @@ import type {
 	Point,
 	TagColorConfig
 } from './components/ui/types/multigraph';
-import type { NodeContentBlock, NodeData } from './components/ui/types/node';
+import type { NodeContentBlock, NodeData, QuantityDesignation } from './components/ui/types/node';
 
-export const CURRENT_SCHEMA_VERSION = 5;
+export const CURRENT_SCHEMA_VERSION = 6;
 
 const EMPTY_TAG_COLOR_CONFIG: TagColorConfig = {
 	nodeTags: {},
@@ -96,7 +96,7 @@ function unwrapPersistedGraphData(payload: unknown): MultigraphData {
 		) {
 			throw new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload');
 		}
-		return migrateGraphDataToV5(migrateGraphDataToV4(payload.data));
+		return migrateGraphDataToV6(migrateGraphDataToV5(migrateGraphDataToV4(payload.data)));
 	}
 
 	if (payload.schemaVersion === 4) {
@@ -108,7 +108,19 @@ function unwrapPersistedGraphData(payload: unknown): MultigraphData {
 		) {
 			throw new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload');
 		}
-		return migrateGraphDataToV5(payload.data);
+		return migrateGraphDataToV6(migrateGraphDataToV5(payload.data));
+	}
+
+	if (payload.schemaVersion === 5) {
+		if (
+			!isMultigraphData(payload.data, {
+				allowMissingContent: true,
+				allowMissingAssets: true
+			})
+		) {
+			throw new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload');
+		}
+		return migrateGraphDataToV6(payload.data);
 	}
 
 	if (payload.schemaVersion !== CURRENT_SCHEMA_VERSION) {
@@ -143,16 +155,18 @@ function migrateLegacyGraphData(
 	data: MultigraphData,
 	options: { allowMissingTags?: boolean } = {}
 ): MultigraphData {
-	return migrateGraphDataToV5(
-		migrateGraphDataToV4({
-			...data,
-			nodes: data.nodes.map((node) => ({
-				...node,
-				tags: options.allowMissingTags ? (node.tags ?? []) : node.tags
-			})),
-			edges: data.edges.map(migrateLegacyEdge),
-			tagColorConfig: { ...EMPTY_TAG_COLOR_CONFIG }
-		})
+	return migrateGraphDataToV6(
+		migrateGraphDataToV5(
+			migrateGraphDataToV4({
+				...data,
+				nodes: data.nodes.map((node) => ({
+					...node,
+					tags: options.allowMissingTags ? (node.tags ?? []) : node.tags
+				})),
+				edges: data.edges.map(migrateLegacyEdge),
+				tagColorConfig: { ...EMPTY_TAG_COLOR_CONFIG }
+			})
+		)
 	);
 }
 
@@ -179,6 +193,15 @@ function migrateGraphDataToV5(data: MultigraphData): MultigraphData {
 	});
 
 	return { ...data, nodes, pinSequence };
+}
+
+/**
+ * v6 adds optional `inputs`/`outputs` designations to nodes; absent means none,
+ * so older data needs no rewriting. Named anyway so the branch chain reads like
+ * the others and v7 has a place to hang.
+ */
+function migrateGraphDataToV6(data: MultigraphData): MultigraphData {
+	return data;
 }
 
 /**
@@ -254,7 +277,21 @@ function isNodeData(
 			(typeof value.lastPinnedSeq === 'number' && Number.isFinite(value.lastPinnedSeq))) &&
 		(options.allowMissingContent
 			? value.content === undefined || isNodeContent(value.content)
-			: isNodeContent(value.content))
+			: isNodeContent(value.content)) &&
+		(value.inputs === undefined || isDesignationArray(value.inputs)) &&
+		(value.outputs === undefined || isDesignationArray(value.outputs))
+	);
+}
+
+function isDesignationArray(value: unknown): value is QuantityDesignation[] {
+	return Array.isArray(value) && value.every(isDesignation);
+}
+
+function isDesignation(value: unknown): value is QuantityDesignation {
+	return (
+		isRecord(value) &&
+		typeof value.base === 'string' &&
+		(value.subscript === null || typeof value.subscript === 'string')
 	);
 }
 

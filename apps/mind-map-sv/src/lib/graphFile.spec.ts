@@ -42,6 +42,23 @@ describe('serializeGraphFile', () => {
 		expect(JSON.parse(json)).toMatchObject({ schemaVersion: CURRENT_SCHEMA_VERSION });
 	});
 
+	it('round-trips quantity designations through JSON and HTML', () => {
+		const base = makeGraph({ nodeCount: 2, edges: [[0, 1]], pinned: [0] });
+		const doc = makeDoc({
+			data: {
+				...base,
+				nodes: base.nodes.map((node, index) =>
+					index === 0
+						? { ...node, outputs: [{ base: 'v', subscript: '0' }] }
+						: { ...node, inputs: [{ base: 'v', subscript: '0' }] }
+				)
+			}
+		});
+
+		expect(parseGraphFile(serializeGraphFile(doc)).data).toEqual(doc.data);
+		expect(parseGraphFileText(serializeGraphHtmlFile(doc)).data).toEqual(doc.data);
+	});
+
 	it('does not include updatedAt in the exported file', () => {
 		const json = serializeGraphFile(makeDoc());
 		expect(json).not.toContain('updatedAt');

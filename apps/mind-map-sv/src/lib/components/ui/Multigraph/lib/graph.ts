@@ -5,8 +5,9 @@ import type {
 	Point,
 	TagColorNamespace
 } from '../../types/multigraph';
-import type { NodeData, NodeImageContent } from '../../types/node';
+import type { NodeData, NodeImageContent, QuantityDesignation } from '../../types/node';
 import { mathPlainText } from '../../MathText/lib/mathPlainText';
+import { symbolFor } from '../../MathText/lib/mathSymbols';
 import { parseTitleSyntax } from './titleSyntax';
 
 export interface AddNodeInput {
@@ -16,6 +17,8 @@ export interface AddNodeInput {
 	tags?: string[];
 	pinned?: boolean;
 	position?: Point;
+	inputs?: QuantityDesignation[];
+	outputs?: QuantityDesignation[];
 }
 
 export interface AddEdgeInput {
@@ -88,7 +91,9 @@ export function addNode(data: MultigraphData, input: AddNodeInput = {}): Multigr
 		description: input.description ?? '',
 		tags: input.tags ?? [],
 		pinned: input.pinned,
-		lastPinnedSeq: pinSequence
+		lastPinnedSeq: pinSequence,
+		inputs: input.inputs === undefined ? undefined : dedupeDesignations(input.inputs),
+		outputs: input.outputs === undefined ? undefined : dedupeDesignations(input.outputs)
 	};
 
 	return {
@@ -194,7 +199,8 @@ export function setNodePinned(
 export function updateNodeContent(
 	data: MultigraphData,
 	nodeId: string,
-	content: Pick<NodeData, 'title' | 'description'> & Partial<Pick<NodeData, 'tags' | 'content'>>
+	content: Pick<NodeData, 'title' | 'description'> &
+		Partial<Pick<NodeData, 'tags' | 'content' | 'inputs' | 'outputs'>>
 ): MultigraphData {
 	if (!hasNode(data, nodeId)) return data;
 
@@ -204,6 +210,48 @@ export function updateNodeContent(
 			node.id === nodeId ? { ...node, ...content, title: normalizeNodeTitle(content.title) } : node
 		)
 	};
+}
+
+/**
+ * Replaces a node's confirmed input/output designations. Duplicates collapse to
+ * the first occurrence; user order is otherwise preserved.
+ */
+export function setNodeDesignations(
+	data: MultigraphData,
+	nodeId: string,
+	io: { inputs: QuantityDesignation[]; outputs: QuantityDesignation[] }
+): MultigraphData {
+	if (!hasNode(data, nodeId)) return data;
+
+	return {
+		...data,
+		nodes: data.nodes.map((node) =>
+			node.id === nodeId
+				? {
+						...node,
+						inputs: dedupeDesignations(io.inputs),
+						outputs: dedupeDesignations(io.outputs)
+					}
+				: node
+		)
+	};
+}
+
+/** A designation's canonical identity — the key of the symbol it designates. */
+export function designationKey(designation: QuantityDesignation): string {
+	return symbolFor(designation.base, designation.subscript).key;
+}
+
+function dedupeDesignations(designations: readonly QuantityDesignation[]): QuantityDesignation[] {
+	const seen = new Set<string>();
+	const result: QuantityDesignation[] = [];
+	for (const designation of designations) {
+		const key = designationKey(designation);
+		if (seen.has(key)) continue;
+		seen.add(key);
+		result.push(designation);
+	}
+	return result;
 }
 
 export function addNodeImageContent(

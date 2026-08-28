@@ -200,6 +200,43 @@ describe('nodeQuantities deduplication', () => {
 	});
 });
 
+// `bodyKey` says whether two definitions agree; it cannot be rendered. A reader
+// looking at a consumer node is shown the definition itself, which means keeping
+// the LaTeX the author wrote and how they set it.
+describe('nodeQuantities definition source', () => {
+	it('keeps the inner LaTeX of an inline definition', () => {
+		const [definition] = nodeQuantities(node('$x = 1$')).defines;
+		expect(definition.sourceTex).toBe('x = 1');
+		expect(definition.displayMode).toBe(false);
+	});
+
+	it('keeps the inner LaTeX of a display definition', () => {
+		const [definition] = nodeQuantities(node('$$x = 1$$')).defines;
+		expect(definition.sourceTex).toBe('x = 1');
+		expect(definition.displayMode).toBe(true);
+	});
+
+	it('keeps the source of a definition written in a title', () => {
+		const [definition] = nodeQuantities({ title: '$$F = ma$$', description: '', tags: [] }).defines;
+		expect(definition.sourceTex).toBe('F = ma');
+		expect(definition.displayMode).toBe(true);
+	});
+
+	it('keeps spacing the author wrote, which bodyKey discards', () => {
+		const [definition] = nodeQuantities(node('$$v = a + b$$')).defines;
+		expect(definition.sourceTex).toBe('v = a + b');
+		expect(definition.bodyKey).toBe('a+b');
+	});
+
+	it('gives each of two contradicting statements its own source', () => {
+		expect(
+			nodeQuantities(node('$$v = 1$$ and again $$v = 2$$')).defines.map(
+				(definition) => definition.sourceTex
+			)
+		).toEqual(['v = 1', 'v = 2']);
+	});
+});
+
 describe('nodeQuantities titles', () => {
 	function titled(title: string, description = '') {
 		return nodeQuantities({ title, description, tags: [] });

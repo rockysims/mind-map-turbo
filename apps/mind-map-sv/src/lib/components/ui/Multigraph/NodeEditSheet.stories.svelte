@@ -2,7 +2,7 @@
 	import { defineMeta } from '@storybook/addon-svelte-csf';
 	import { expect, fn, within } from 'storybook/test';
 	import NodeEditSheet from './NodeEditSheet.svelte';
-	import type { NodeData } from '../types/node';
+	import type { NodeData, QuantityDesignation } from '../types/node';
 
 	const NODE: NodeData = {
 		id: 'node-1',
@@ -28,8 +28,40 @@
 	});
 
 	type SaveSpy = {
-		mock: { calls: Array<[{ title: string; description: string; tags: string[] }]> };
+		mock: {
+			calls: Array<
+				[
+					{
+						title: string;
+						description: string;
+						tags: string[];
+						inputs: QuantityDesignation[];
+						outputs: QuantityDesignation[];
+					}
+				]
+			>;
+		};
 	};
+
+	/** `$$w = m g$$`: one definition and two mentions, all with plain one-letter keys. */
+	const WEIGHT_EQUATION = 'Weight is $$w = m g$$.';
+
+	function chip(canvasElement: HTMLElement, key: string): HTMLElement {
+		const found = canvasElement.querySelector(`[data-designation-key="${key}"]`);
+		if (!(found instanceof HTMLElement)) {
+			throw new Error(`no chip for ${key}`);
+		}
+		return found;
+	}
+
+	function roleOf(canvasElement: HTMLElement, key: string): string | null {
+		return chip(canvasElement, key).getAttribute('data-designation-role');
+	}
+
+	/** The chips are `$derived` off the draft, so a keystroke lands a microtask later. */
+	function settle(): Promise<void> {
+		return new Promise((resolve) => setTimeout(resolve, 0));
+	}
 
 	/** Type into the description the way a user would, so bound state updates. */
 	function typeDescription(canvasElement: HTMLElement, value: string): void {
@@ -109,5 +141,99 @@
 		canvas.getByRole('button', { name: 'Save' }).click();
 		const saveSpy = args.onSave as unknown as SaveSpy;
 		expect(saveSpy.mock.calls.at(-1)?.[0].description).toBe(draft);
+	}}
+/>
+
+<Story
+	name="TypingMathOffersItsQuantitiesAsSuggestions"
+	play={async ({ canvasElement }) => {
+		// Prose only: nothing to offer, and the sheet says so rather than showing
+		// empty columns with no explanation.
+		expect(canvasElement.querySelector('[data-designation-key]')).toBeNull();
+
+		typeDescription(canvasElement, WEIGHT_EQUATION);
+		await settle();
+
+		// Every symbol the draft mentions, offered where it would land: what the
+		// node states goes to the right, what it merely uses to the left.
+		expect(roleOf(canvasElement, 'w')).toBe('suggestion');
+		expect(roleOf(canvasElement, 'm')).toBe('suggestion');
+		expect(roleOf(canvasElement, 'g')).toBe('suggestion');
+		expect(
+			canvasElement.querySelector('[aria-label="Output quantities"] [data-designation-key="w"]')
+		).toBeInTheDocument();
+		expect(
+			canvasElement.querySelector('[aria-label="Input quantities"] [data-designation-key="g"]')
+		).toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="TappingASuggestedOutputConfirmsItInOneTap"
+	play={async ({ canvasElement }) => {
+		typeDescription(canvasElement, WEIGHT_EQUATION);
+		await settle();
+
+		// One tap, in the column the ghost was already drawn in. Landing it in the
+		// opposite column would contradict what the tap visibly pointed at.
+		chip(canvasElement, 'w').click();
+		await settle();
+		expect(roleOf(canvasElement, 'w')).toBe('output');
+
+		// A second tap is the correction for a wrong guess, and a third releases it
+		// — so tapping the wrong chip costs at most two more taps.
+		chip(canvasElement, 'w').click();
+		await settle();
+		expect(roleOf(canvasElement, 'w')).toBe('input');
+
+		chip(canvasElement, 'w').click();
+		await settle();
+		expect(roleOf(canvasElement, 'w')).toBe('suggestion');
+	}}
+/>
+
+<Story
+	name="DeletingTheEquationLeavesAConfirmedQuantityFlaggedStale"
+	play={async ({ canvasElement }) => {
+		typeDescription(canvasElement, WEIGHT_EQUATION);
+		await settle();
+		chip(canvasElement, 'w').click();
+		await settle();
+		expect(chip(canvasElement, 'w')).not.toHaveAttribute('data-designation-stale');
+
+		typeDescription(canvasElement, 'Weight, described in words.');
+		await settle();
+
+		// Still confirmed, still an output, still drawing whatever edge it drew.
+		// The parser is a heuristic over prose, and silently dropping a designation
+		// because a sentence was reworded is exactly the surprise this replaced.
+		expect(roleOf(canvasElement, 'w')).toBe('output');
+		expect(chip(canvasElement, 'w')).toHaveAttribute('data-designation-stale', 'true');
+		// The symbols that were only ever suggestions leave with the text.
+		expect(canvasElement.querySelector('[data-designation-key="g"]')).toBeNull();
+	}}
+/>
+
+<Story
+	name="SavesTheConfirmedQuantitiesAlongsideTheText"
+	play={async ({ canvasElement, args }) => {
+		const canvas = within(canvasElement);
+		typeDescription(canvasElement, WEIGHT_EQUATION);
+		await settle();
+
+		chip(canvasElement, 'w').click();
+		await settle();
+		chip(canvasElement, 'g').click();
+		await settle();
+
+		canvas.getByRole('button', { name: 'Save' }).click();
+
+		// Structured pairs, not symbol keys: a key embeds a NUL to separate base
+		// from subscript, which must never reach a save file.
+		const saveSpy = args.onSave as unknown as SaveSpy;
+		const saved = saveSpy.mock.calls.at(-1)?.[0];
+		expect(saved?.description).toBe(WEIGHT_EQUATION);
+		expect(saved?.outputs).toEqual([{ base: 'w', subscript: null }]);
+		expect(saved?.inputs).toEqual([{ base: 'g', subscript: null }]);
 	}}
 />

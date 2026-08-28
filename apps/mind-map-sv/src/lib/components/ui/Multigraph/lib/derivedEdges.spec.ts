@@ -7,9 +7,28 @@ import {
 	type DerivedEdge
 } from './derivedEdges';
 import { buildQuantityIndex, type IndexableNode } from './quantityIndex';
+import { nodeQuantities } from './nodeQuantities';
+import type { QuantitySymbol } from '../../MathText/lib/mathSymbols';
+import type { QuantityDesignation } from '../../types/node';
 
+function designationOf(symbol: QuantitySymbol): QuantityDesignation {
+	return { base: symbol.base, subscript: symbol.subscript };
+}
+
+/**
+ * A node whose designations say what its text says: the author confirmed every
+ * suggestion. Edges come from designations alone, so a fixture that only wrote
+ * math would exercise nothing here.
+ */
 function node(id: string, description: string, tags: string[] = []): IndexableNode {
-	return { id, description, tags };
+	const parsed = nodeQuantities({ description, tags });
+	return {
+		id,
+		description,
+		tags,
+		inputs: parsed.references.map(designationOf),
+		outputs: parsed.defines.map((definition) => designationOf(definition.symbol))
+	};
 }
 
 function edgesFor(nodes: readonly IndexableNode[]): DerivedEdge[] {
@@ -53,6 +72,17 @@ describe('deriveDataflowEdges direction and shape', () => {
 
 	it('produces nothing for a graph with no math', () => {
 		expect(edgesFor([node('a', 'prose'), node('b', 'more prose')])).toEqual([]);
+	});
+
+	// The same pair with nothing confirmed on it. Everything else in this file
+	// reads as it used to only because the fixtures confirm what they write.
+	it('produces nothing from math nobody confirmed', () => {
+		expect(
+			edgesFor([
+				{ id: 'def', description: '$$g = 9.8$$', tags: [] },
+				{ id: 'use', description: '$$w = m g$$', tags: [] }
+			])
+		).toEqual([]);
 	});
 });
 

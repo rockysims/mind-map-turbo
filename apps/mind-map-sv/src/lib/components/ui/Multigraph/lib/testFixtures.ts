@@ -6,7 +6,7 @@
  * extend the builders here so every test gets the new defaults for free.
  */
 
-import type { NodeData } from '../../types/node';
+import type { NodeData, QuantityDesignation } from '../../types/node';
 import type { EdgeData } from '../../types/edge';
 import type { MultigraphData, Point, TagColorConfig } from '../../types/multigraph';
 import type { ParsedTitleDirection } from './titleSyntax';
@@ -88,6 +88,50 @@ export function makeGraph(input: MakeGraphInput = {}): MultigraphData {
 			nodeTags: {},
 			edgeTags: {}
 		}
+	};
+}
+
+/**
+ * Confirmed designations, written the way a test reads them: `designations('g',
+ * 'v_0')`. The stored shape is a `{base, subscript}` pair rather than a symbol
+ * key, so a label is the only readable way to say one in a fixture.
+ */
+export function designations(...labels: string[]): QuantityDesignation[] {
+	return labels.map((label) => {
+		const separator = label.indexOf('_');
+		if (separator === -1) return { base: label, subscript: null };
+		return { base: label.slice(0, separator), subscript: label.slice(separator + 1) };
+	});
+}
+
+/** Inputs and outputs for one node, as labels. */
+export interface NodeDesignationInput {
+	inputs?: string[];
+	outputs?: string[];
+}
+
+/**
+ * A copy of `data` with confirmed designations on the named nodes.
+ *
+ * Only designations draw dataflow edges, so a fixture whose nodes carry
+ * equations still has no dataflow until this is applied — which is exactly the
+ * distinction stories about the two states need to make from one base graph.
+ */
+export function withDesignations(
+	data: MultigraphData,
+	byNodeId: Record<string, NodeDesignationInput>
+): MultigraphData {
+	return {
+		...data,
+		nodes: data.nodes.map((node) => {
+			const io = byNodeId[node.id];
+			if (!io) return node;
+			return {
+				...node,
+				...(io.inputs ? { inputs: designations(...io.inputs) } : {}),
+				...(io.outputs ? { outputs: designations(...io.outputs) } : {})
+			};
+		})
 	};
 }
 

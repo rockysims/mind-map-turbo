@@ -61,6 +61,15 @@ function makeSymbol(base: string, subscript: string | null): QuantitySymbol {
 	};
 }
 
+/**
+ * Symbol for a structural identity that arrived without an expression to parse —
+ * a persisted designation whose equation no longer appears in the node's text.
+ * Produces the same key/label extraction would, so identities always compare.
+ */
+export function symbolFor(base: string, subscript: string | null): QuantitySymbol {
+	return makeSymbol(base, subscript);
+}
+
 /** True when this node is the invisible operator marking the previous `mi` as a function. */
 function isFunctionApplication(node: MathNode | undefined): boolean {
 	return node?.type === 'mo' && textOf(node) === FUNCTION_APPLICATION;

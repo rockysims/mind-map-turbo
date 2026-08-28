@@ -13,11 +13,13 @@
 		NODE_RADIUS
 	} from '$lib/constants';
 	import {
+		designations,
 		makeClusteredRandomEdges,
 		makeGraph,
 		makeRandomEdges,
 		OPPOSITE_DIRECTION_PARALLEL_EDGES_GRAPH,
 		SAME_DIRECTION_PARALLEL_EDGES_GRAPH,
+		withDesignations,
 		withRandomTagsAndDirections
 	} from './lib/testFixtures';
 	import type { MultigraphData, Point } from '../types/multigraph';
@@ -532,18 +534,25 @@
 	} satisfies MultigraphData;
 
 	/**
-	 * `d` consumes g and nothing defines it yet, so `d` sits three authored hops
-	 * from the pin with two layers on show — off screen. Writing the definition
-	 * into `a` is a pure content edit that changes the topology, which is the
-	 * case the harness stories cannot reach: they re-ingest the whole graph on
-	 * every equation change, and ingest settles everything on its way in.
+	 * `d` has confirmed g as an input and nothing defines it yet, so `d` sits
+	 * three authored hops from the pin with two layers on show — off screen.
+	 * Writing the definition into `a` and confirming it there is a pure content
+	 * edit that changes the topology, which is the case the harness stories
+	 * cannot reach: they re-ingest the whole graph on every equation change, and
+	 * ingest settles everything on its way in.
 	 */
 	const DATAFLOW_CONTENT_COMMIT_CHAIN = makeGraph({
 		nodes: [
 			{ id: 'a', title: 'Gravity', description: '' },
 			{ id: 'b', title: 'Middle', description: '' },
 			{ id: 'c', title: 'Third', description: '' },
-			{ id: 'd', title: 'Weight', description: '$$w = m g$$' }
+			{
+				id: 'd',
+				title: 'Weight',
+				description: '$$w = m g$$',
+				inputs: designations('g'),
+				outputs: designations('w')
+			}
 		],
 		pinned: ['a'],
 		edges: [
@@ -563,17 +572,181 @@
 
 	const TWO_LAYERS_SETTLING = { displayedLayers: 2 };
 
+	/**
+	 * One layer on show and no derived budget, so a definer stays off screen
+	 * however many quantities point at it. That is the situation the jump exists
+	 * for: the reader can see that g comes from somewhere and cannot see where.
+	 */
+	const NO_REVEALS = { displayedLayers: 1, relaxIterations: 0, dataflowDisplayedLayers: 0 };
+
+	/** `reader` needs g; `gravity` defines it, three authored hops away. */
+	const JUMP_TO_DEFINER = makeGraph({
+		nodes: [
+			{
+				id: 'reader',
+				title: 'Weight',
+				description: '$$w = m g$$',
+				inputs: designations('g'),
+				outputs: designations('w')
+			},
+			{ id: 'mid', title: 'Middle', description: '' },
+			{
+				id: 'gravity',
+				title: 'Gravity',
+				description: '$$g = 9.8$$',
+				outputs: designations('g')
+			}
+		],
+		pinned: ['reader'],
+		edges: [
+			['reader', 'mid'],
+			['mid', 'gravity']
+		],
+		posByNodeId: {
+			reader: { x: 0, y: 0 },
+			mid: { x: 400, y: 0 },
+			gravity: { x: 800, y: 0 }
+		}
+	});
+
+	/** The same shape one link longer: `gravity` in turn needs h, which `scale` defines. */
+	const JUMP_TWICE_TO_DEFINERS = makeGraph({
+		nodes: [
+			{
+				id: 'reader',
+				title: 'Weight',
+				description: '$$w = m g$$',
+				inputs: designations('g'),
+				outputs: designations('w')
+			},
+			{ id: 'mid', title: 'Middle', description: '' },
+			{
+				id: 'gravity',
+				title: 'Gravity',
+				description: '$$g = 9.8 h$$',
+				inputs: designations('h'),
+				outputs: designations('g')
+			},
+			{ id: 'scale', title: 'Scale', description: '$$h = 2$$', outputs: designations('h') }
+		],
+		pinned: ['reader'],
+		edges: [
+			['reader', 'mid'],
+			['mid', 'gravity'],
+			['gravity', 'scale']
+		],
+		posByNodeId: {
+			reader: { x: 0, y: 0 },
+			mid: { x: 400, y: 0 },
+			gravity: { x: 800, y: 0 },
+			scale: { x: 1200, y: 0 }
+		}
+	});
+
+	/**
+	 * Open one named node's focus overlay through its action menu.
+	 *
+	 * The overzoom gesture is the everyday route and has its own stories; a story
+	 * about what happens *inside* the overlay wants the node it asked for, not
+	 * whichever one the camera happened to leave under the cursor.
+	 */
+	async function enterFocusOn(canvasElement: HTMLElement, nodeId: string): Promise<HTMLElement> {
+		const circle = getCircle(canvasElement, nodeId);
+		const center = getCenter(circle);
+		await dispatchLongPress(circle, center.x, center.y);
+		within(canvasElement).getByRole('menuitem', { name: 'Focus' }).click();
+
+		const dialog = await within(canvasElement).findByRole('dialog');
+		expect(canvasElement.querySelector('.focus-surface')).toHaveAttribute(
+			'data-focus-subject-id',
+			nodeId
+		);
+		return dialog;
+	}
+
+	/** Open the peek card for one confirmed input and follow it to its definer. */
+	async function jumpFromPeek(
+		canvasElement: HTMLElement,
+		quantityKey: string,
+		definerNodeId: string
+	): Promise<void> {
+		const chip = await waitFor(() => {
+			const found = canvasElement.querySelector(
+				`[data-designation-chips="view"] [data-designation-key="${quantityKey}"]`
+			);
+			expect(found).toBeInTheDocument();
+			return found as HTMLElement;
+		});
+		expect(chip).toHaveAttribute('data-designation-role', 'input');
+		chip.click();
+
+		const goto = await waitFor(() => {
+			const button = canvasElement.querySelector(`[data-peek-goto="${definerNodeId}"]`);
+			expect(button).toBeInTheDocument();
+			return button as HTMLElement;
+		});
+		goto.click();
+		// The overlay the jump was made from has to give way before the next step:
+		// it covers the canvas the jump acts on, and a story that read through it
+		// would be reading the node it just left.
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
+		});
+		// A reveal changes who is on screen, which the layout settles for — and a
+		// story that reached for a node mid-settle would be aiming at where it was.
+		await waitFor(() => {
+			expect(isSettling(canvasElement)).toBe(false);
+		});
+		await waitForLayout();
+	}
+
 	function isSettling(el: HTMLElement): boolean {
 		const graph = el.querySelector('.graph');
 		if (!graph) throw new Error('Graph root not found');
 		return (graph as HTMLElement).dataset.settling === 'true';
 	}
 
-	/** Long-press a node, open its sheet, replace the description, and save. */
+	/** One tap on each ghost chip, which confirms it in the column it is drawn in. */
+	async function confirmSuggestedChips(canvasElement: HTMLElement): Promise<void> {
+		const suggestions = canvasElement.querySelectorAll('[data-designation-role="suggestion"]');
+		expect(suggestions.length).toBeGreaterThan(0);
+		for (const chip of Array.from(suggestions)) {
+			(chip as HTMLElement).click();
+			await tick();
+		}
+	}
+
+	/**
+	 * Tap confirmed chips until nothing is assigned. A stale chip has no suggested
+	 * role to enter the cycle at, so the number of taps depends on which column it
+	 * sits in — looping is what makes "take them all off" one step for a story.
+	 */
+	async function clearDesignationChips(canvasElement: HTMLElement): Promise<void> {
+		const confirmed = () =>
+			canvasElement.querySelector(
+				'[data-designation-role="input"], [data-designation-role="output"]'
+			);
+		for (let taps = 0; taps < 24 && confirmed(); taps += 1) {
+			(confirmed() as HTMLElement).click();
+			await tick();
+		}
+		expect(confirmed()).toBeNull();
+	}
+
+	/**
+	 * Long-press a node, open its sheet, replace the description, settle the
+	 * quantity chips, and save.
+	 *
+	 * The chips are part of the edit, not decoration on top of it: text alone
+	 * designates nothing, so a story about an equation arriving has to confirm
+	 * what it suggests, and one about an equation leaving has to take the
+	 * designations off — otherwise they stand as stale, and the edge with them.
+	 */
 	async function commitDescriptionThroughSheet(
 		canvasElement: HTMLElement,
 		nodeId: string,
-		description: string
+		description: string,
+		designationStep?: (canvasElement: HTMLElement) => Promise<void>
 	): Promise<void> {
 		const circle = getCircle(canvasElement, nodeId);
 		const center = getCenter(circle);
@@ -586,6 +759,8 @@
 		const descriptionInput = canvas.getByLabelText('Description') as HTMLTextAreaElement;
 		descriptionInput.value = description;
 		descriptionInput.dispatchEvent(new Event('input', { bubbles: true }));
+		await tick();
+		await designationStep?.(canvasElement);
 		canvas.getByRole('button', { name: 'Save' }).click();
 		// A microtask flush, not a frame: the settle kick has to be observable
 		// before the first animation frame could have consumed it.
@@ -1460,9 +1635,9 @@
 		// Three authored hops out with two layers on show.
 		expect(canvasElement.querySelector('[data-node-id="d"]')).not.toBeInTheDocument();
 
-		await commitDescriptionThroughSheet(canvasElement, 'a', DEFINES_G);
+		await commitDescriptionThroughSheet(canvasElement, 'a', DEFINES_G, confirmSuggestedChips);
 
-		// Defining g links `a` to `d`, which brings `d` on screen at whatever
+		// Confirming g links `a` to `d`, which brings `d` on screen at whatever
 		// position it was last given. Without a settle it stays there frozen —
 		// drawn at its new, much larger size on top of whatever it overlaps —
 		// until the reader happens to drag something.
@@ -1478,12 +1653,15 @@
 <Story
 	name="RemovingAnEquationInTheSheetSettlesTheGraphToo"
 	args={{
-		multigraphData: {
-			...DATAFLOW_CONTENT_COMMIT_CHAIN,
-			nodes: DATAFLOW_CONTENT_COMMIT_CHAIN.nodes.map((node) =>
-				node.id === 'a' ? { ...node, description: DEFINES_G } : node
-			)
-		},
+		multigraphData: withDesignations(
+			{
+				...DATAFLOW_CONTENT_COMMIT_CHAIN,
+				nodes: DATAFLOW_CONTENT_COMMIT_CHAIN.nodes.map((node) =>
+					node.id === 'a' ? { ...node, description: DEFINES_G } : node
+				)
+			},
+			{ a: { outputs: ['g'] } }
+		),
 		defaultPrimaryNodeId: 'a',
 		layoutSettings: TWO_LAYERS_SETTLING,
 		onMultigraphChange: fn()
@@ -1492,10 +1670,11 @@
 		await waitForLayout();
 		expect(canvasElement.querySelector('[data-node-id="d"]')).toBeInTheDocument();
 
-		await commitDescriptionThroughSheet(canvasElement, 'a', 'No math here.');
+		await commitDescriptionThroughSheet(canvasElement, 'a', 'No math here.', clearDesignationChips);
 
-		// Taking the definition away drops `d` back out of view, which leaves a
-		// hole in the layout the remaining nodes have to close.
+		// Taking the definition away — text and designation both, since the chip
+		// would otherwise stand as stale and keep drawing its edge — drops `d` back
+		// out of view, which leaves a hole in the layout the rest have to close.
 		expect(canvasElement.querySelector('[data-node-id="d"]')).not.toBeInTheDocument();
 		expect(isSettling(canvasElement)).toBe(true);
 	}}
@@ -4511,8 +4690,19 @@
 	args={{
 		multigraphData: makeGraph({
 			nodes: [
-				{ id: 'n0', title: 'Gravity', description: '$$g = 9.8$$' },
-				{ id: 'n1', title: 'Weight', description: '$$w = m g$$' }
+				{
+					id: 'n0',
+					title: 'Gravity',
+					description: '$$g = 9.8$$',
+					outputs: designations('g')
+				},
+				{
+					id: 'n1',
+					title: 'Weight',
+					description: '$$w = m g$$',
+					inputs: designations('g'),
+					outputs: designations('w')
+				}
 			],
 			pinned: [0],
 			posByNodeId: {
@@ -4559,7 +4749,18 @@
 	name="DefineButtonInFocusCreatesTheMissingNode"
 	args={{
 		multigraphData: makeGraph({
-			nodes: [{ id: 'n0', title: 'Energy', description: 'Energy is $E = m c^2$.' }],
+			// Confirmed inputs, because an unresolved quantity is now a claim the
+			// author made — "this node needs a value for m" — rather than a letter
+			// the parser noticed in their prose.
+			nodes: [
+				{
+					id: 'n0',
+					title: 'Energy',
+					description: 'Energy is $E = m c^2$.',
+					inputs: designations('m'),
+					outputs: designations('E')
+				}
+			],
 			pinned: ['n0'],
 			posByNodeId: { n0: { x: 0, y: 0 } }
 		}),
@@ -4615,6 +4816,16 @@
 			);
 			expect(titles).toContain(quantity);
 		});
+
+		// Asking for the node IS the confirmation that it defines the quantity, so
+		// its arrow is there on arrival. Without the seeded output the repair flow
+		// would end in a node whose edge never appears, and a second trip through
+		// the edit sheet to say what the button already said.
+		await waitFor(() => {
+			expect(
+				canvasElement.querySelector('[data-edge-derived="true"][data-target-node-id="n0"]')
+			).toBeInTheDocument();
+		});
 	}}
 />
 
@@ -4649,5 +4860,133 @@
 		expect(heading.querySelector('math')).not.toBeNull();
 		expect(heading.getAttribute('aria-label')).toBe('E=mc2');
 		expect(dialog.getAttribute('aria-labelledby')).toBe(heading.id);
+	}}
+/>
+
+<Story
+	name="JumpFromAPeekRevealsTheDefinerWithoutPinningIt"
+	args={{
+		multigraphData: JUMP_TO_DEFINER,
+		defaultPrimaryNodeId: 'reader',
+		initialViewState: { panX: 0, panY: 0, scale: APP_CONFIG.multigraph.zoom.maxScale },
+		layoutSettings: NO_REVEALS,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		// Two authored hops out with one layer on show, and no derived budget to
+		// bring it in — the reader can see that g comes from somewhere and not where.
+		expect(canvasElement.querySelector('[data-node-id="gravity"]')).not.toBeInTheDocument();
+
+		await enterFocusOn(canvasElement, 'reader');
+		await jumpFromPeek(canvasElement, 'g', 'gravity');
+
+		// The definer arrives, and the overlay the jump was made from gets out of
+		// the way — a jump that left the reader looking at the node they left would
+		// be indistinguishable from a dead button.
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-node-id="gravity"]')).toBeInTheDocument();
+		});
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
+		});
+
+		// The invariant this whole flow exists for: following a reference is
+		// reading, not editing. Nothing was written to the graph, so nothing was
+		// pinned, and the node is held on screen by the nav stack alone.
+		const changeSpy = args.onMultigraphChange as unknown as ChangeSpy;
+		expect(changeSpy.mock.calls).toHaveLength(0);
+		expect(
+			canvasElement.querySelector('[data-node-id="gravity"] [data-pinned="true"]')
+		).not.toBeInTheDocument();
+		expect(
+			canvasElement.querySelector('[data-node-id="reader"] [data-pinned="true"]')
+		).toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-nav-back="reader"]')).toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="BackFromAJumpRestoresTheExactPriorView"
+	args={{
+		multigraphData: JUMP_TO_DEFINER,
+		defaultPrimaryNodeId: 'reader',
+		initialViewState: { panX: 0, panY: 0, scale: APP_CONFIG.multigraph.zoom.maxScale },
+		layoutSettings: NO_REVEALS,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		await enterFocusOn(canvasElement, 'reader');
+		const before = getStageTransform(canvasElement);
+
+		await jumpFromPeek(canvasElement, 'g', 'gravity');
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-node-id="gravity"]')).toBeInTheDocument();
+		});
+		// The camera moved to the definer, so returning is a real restore rather
+		// than a no-op that would pass whatever back did.
+		expect(getStageTransform(canvasElement)).not.toEqual(before);
+
+		(canvasElement.querySelector('[data-nav-back]') as HTMLElement).click();
+		await waitForLayout();
+
+		// Verbatim pan and scale, not a fit: a fit clamps to what it can frame and
+		// would drop the reader somewhere near where they were.
+		expect(getStageTransform(canvasElement)).toEqual(before);
+		// The seed goes back out with the entry that carried it — the graph never
+		// held it, so there is nothing to undo.
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-node-id="gravity"]')).not.toBeInTheDocument();
+		});
+		expect(canvasElement.querySelector('[data-nav-back]')).not.toBeInTheDocument();
+		const changeSpy = args.onMultigraphChange as unknown as ChangeSpy;
+		expect(changeSpy.mock.calls).toHaveLength(0);
+	}}
+/>
+
+<Story
+	name="TwoJumpsUnwindInTheOrderTheyWereMade"
+	args={{
+		multigraphData: JUMP_TWICE_TO_DEFINERS,
+		defaultPrimaryNodeId: 'reader',
+		initialViewState: { panX: 0, panY: 0, scale: APP_CONFIG.multigraph.zoom.maxScale },
+		layoutSettings: NO_REVEALS,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+
+		await enterFocusOn(canvasElement, 'reader');
+		await jumpFromPeek(canvasElement, 'g', 'gravity');
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-nav-back="reader"]')).toBeInTheDocument();
+		});
+
+		// `gravity` needs h in turn, so the reader follows a second reference from
+		// where the first one left them.
+		await enterFocusOn(canvasElement, 'gravity');
+		await jumpFromPeek(canvasElement, 'h', 'scale');
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-nav-back="gravity"]')).toBeInTheDocument();
+		});
+		expect(canvasElement.querySelector('[data-node-id="scale"]')).toBeInTheDocument();
+
+		// Back unwinds one hop at a time, in the order the reader made them.
+		(canvasElement.querySelector('[data-nav-back]') as HTMLElement).click();
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-nav-back="reader"]')).toBeInTheDocument();
+		});
+		expect(canvasElement.querySelector('[data-node-id="scale"]')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-node-id="gravity"]')).toBeInTheDocument();
+
+		(canvasElement.querySelector('[data-nav-back]') as HTMLElement).click();
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-nav-back]')).not.toBeInTheDocument();
+		});
+		expect(canvasElement.querySelector('[data-node-id="gravity"]')).not.toBeInTheDocument();
+
+		const changeSpy = args.onMultigraphChange as unknown as ChangeSpy;
+		expect(changeSpy.mock.calls).toHaveLength(0);
 	}}
 />
