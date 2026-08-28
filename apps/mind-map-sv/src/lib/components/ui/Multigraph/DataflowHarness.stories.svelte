@@ -1,5 +1,6 @@
 <script module lang="ts">
 	import { defineMeta } from '@storybook/addon-svelte-csf';
+	import { tick } from 'svelte';
 	import DataflowHarness from './DataflowHarness.svelte';
 	import { expect, waitFor } from 'storybook/test';
 	import { makeGraph } from './lib/testFixtures';
@@ -14,8 +15,8 @@
 
 	/**
 	 * `a` defines g, `c` will come to consume it. The authored chain a–b–c keeps
-	 * `c` two hops from the pinned node, so switching the layout toggle on has a
-	 * visible effect to assert.
+	 * `c` two hops from the pinned node, so the equation has somewhere to move it
+	 * from: crossing it is a single hop, which is both nearer and larger.
 	 */
 	const CHAIN = makeGraph({
 		nodes: [
@@ -249,6 +250,103 @@
 			?.id ?? '';
 
 	const ONE_LAYER = { displayedLayers: 1, relaxIterations: 0 };
+
+	/** The same chain of equations, with the budget to pay for the second step. */
+	const ONE_LAYER_TWO_DERIVED = { ...ONE_LAYER, dataflowDisplayedLayers: 2 };
+
+	/**
+	 * `v` defines x and both `near` and `far` consume it, but `far` is three
+	 * authored hops out with one layer on show. Whatever the derived budget does,
+	 * the `v`–`near` arrow is between two nodes already on screen.
+	 */
+	const NEAR_AND_FAR_CONSUMERS = makeGraph({
+		nodes: [
+			{ id: 'v', title: 'Source', description: '$$x = 3$$' },
+			{ id: 'near', title: 'Drawn consumer', description: '' },
+			{ id: 'mid', title: 'Past the layer', description: '' },
+			{ id: 'far', title: 'Distant consumer', description: '$$w = x$$' }
+		],
+		pinned: ['v'],
+		edges: [
+			['v', 'near'],
+			['near', 'mid'],
+			['mid', 'far']
+		],
+		posByNodeId: {
+			v: { x: -300, y: 0 },
+			near: { x: -100, y: 0 },
+			mid: { x: 100, y: 0 },
+			far: { x: 300, y: 0 }
+		}
+	});
+
+	/**
+	 * `d` consumes g and nothing defines it yet, so with two layers on show it is
+	 * three authored hops out and off screen. Writing the definition into `a` is a
+	 * pure content edit that changes the topology — the case the re-ingest route
+	 * cannot reach, because ingest settles everything on its way in.
+	 */
+	const CONTENT_COMMIT_CHAIN = makeGraph({
+		nodes: [
+			{ id: 'a', title: 'Gravity', description: '' },
+			{ id: 'b', title: 'Middle', description: '' },
+			{ id: 'c', title: 'Third', description: '' },
+			{ id: 'd', title: 'Weight', description: '$$w = m g$$' }
+		],
+		pinned: ['a'],
+		edges: [
+			['a', 'b'],
+			['b', 'c'],
+			['c', 'd']
+		],
+		posByNodeId: {
+			a: { x: -300, y: 0 },
+			b: { x: -100, y: 0 },
+			c: { x: 100, y: 0 },
+			d: { x: 300, y: 0 }
+		}
+	});
+
+	const DEFINES_G = '$$g = 9.8$$';
+
+	/**
+	 * Presses one of the harness's save buttons and waits for the edit sheet flow
+	 * behind it to finish. Microtasks, not frames: the settle the commit kicks has
+	 * to be observable before an animation frame could have consumed it.
+	 */
+	const saveThroughSheet = async (canvasElement: HTMLElement, selector: string) => {
+		const harness = canvasElement.querySelector('.harness') as HTMLElement;
+		const saveCount = () => Number(harness.dataset.saveCount);
+		const before = saveCount();
+
+		(canvasElement.querySelector(selector) as HTMLElement).click();
+		for (let attempt = 0; attempt < 20 && saveCount() === before; attempt += 1) {
+			await tick();
+		}
+		expect(saveCount()).toBe(before + 1);
+	};
+
+	const isSettling = (canvasElement: HTMLElement) =>
+		(canvasElement.querySelector('.graph') as HTMLElement).dataset.settling === 'true';
+
+	const positionOf = (canvasElement: HTMLElement, nodeId: string) => {
+		const wrapper = canvasElement.querySelector(`[data-node-id="${nodeId}"]`) as HTMLElement;
+		return `${wrapper.dataset.x},${wrapper.dataset.y}`;
+	};
+
+	const waitForFrames = (count: number) =>
+		new Promise<void>((resolve) => {
+			let remaining = count;
+			const step = () => {
+				remaining -= 1;
+				if (remaining <= 0) {
+					resolve();
+					return;
+				}
+				requestAnimationFrame(step);
+			};
+			requestAnimationFrame(step);
+		});
 </script>
 
 <Story
@@ -258,7 +356,9 @@
 		await waitFor(() => expect(canvasElement.querySelector('.edge')).toBeInTheDocument());
 		expect(derivedEdge(canvasElement)).not.toBeInTheDocument();
 
-		await click(canvasElement, '[data-add-equation]');
+		// Written through `c`'s own edit sheet, so the graph is committed the way a
+		// reader commits it and the canvas is never handed a fresh one to ingest.
+		await saveThroughSheet(canvasElement, '[data-save-equation]');
 		await waitFor(() => expect(derivedEdge(canvasElement)).toBeInTheDocument());
 
 		// Inferred dataflow is always directed, definer to consumer.
@@ -266,8 +366,40 @@
 		expect(derivedEdge(canvasElement)).toHaveAttribute('data-source-node-id', 'a');
 		expect(derivedEdge(canvasElement)).toHaveAttribute('data-target-node-id', 'c');
 
-		await click(canvasElement, '[data-remove-equation]');
+		await saveThroughSheet(canvasElement, '[data-clear-equation]');
 		await waitFor(() => expect(derivedEdge(canvasElement)).not.toBeInTheDocument());
+	}}
+/>
+
+<Story
+	name="AnEquationSavedOnTheCanvasSettlesTheRevealedNode"
+	args={{
+		baseGraph: CONTENT_COMMIT_CHAIN,
+		editNodeId: 'a',
+		equation: DEFINES_G,
+		// Physics on: the point of the story is that they run.
+		layoutSettings: { displayedLayers: 2 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitFor(() => expect(nodeOnCanvas(canvasElement, 'a')).toBeInTheDocument());
+		// Three authored hops out with two layers on show, and the graph arrived at
+		// rest — so any motion after the save is the save's doing.
+		expect(nodeOnCanvas(canvasElement, 'd')).not.toBeInTheDocument();
+		expect(isSettling(canvasElement)).toBe(false);
+
+		await saveThroughSheet(canvasElement, '[data-save-equation]');
+
+		// Defining g links `a` to `d`, which brings `d` on screen at whatever
+		// position it was last given — drawn at its new, much larger size on top of
+		// whatever it overlaps. Nothing re-ingests the graph on this route, so the
+		// canvas has to relax and settle by itself or `d` stays frozen there until
+		// the reader happens to drag something.
+		expect(nodeOnCanvas(canvasElement, 'd')).toBeInTheDocument();
+		expect(isSettling(canvasElement)).toBe(true);
+
+		const revealedAt = positionOf(canvasElement, 'd');
+		await waitForFrames(5);
+		expect(positionOf(canvasElement, 'd')).not.toEqual(revealedAt);
 	}}
 />
 
@@ -342,8 +474,8 @@
 
 		await click(canvasElement, '[data-add-equation]');
 
-		// Consuming g puts `e` beside the node that defines it, rather than leaving
-		// an arrow pointing at somewhere the reader cannot go.
+		// Consuming g spends the one derived layer the default budget allows, which
+		// puts `e` beside the node defining what it consumes.
 		await waitFor(() => expect(nodeOnCanvas(canvasElement, 'e')).toBeInTheDocument());
 	}}
 />
@@ -450,7 +582,7 @@
 />
 
 <Story
-	name="PullingAlsoSizesTheConsumerByItsNewDistance"
+	name="AnEquationPullsTheConsumerInAndSizesItByItsNewHop"
 	args={{
 		baseGraph: CHAIN,
 		editNodeId: 'c',
@@ -727,6 +859,61 @@
 		).map((edge) => (edge as HTMLElement).dataset.edgeId ?? '');
 		expect(boundaryEdgeIds).toContain(AUTHORED_FADE_EDGE_ID);
 		expect(boundaryEdgeIds.filter((id) => id.startsWith('dataflow:'))).toEqual([]);
+	}}
+/>
+
+<Story
+	name="ASecondDerivedLayerPaysForTheChainedEquation"
+	args={{
+		baseGraph: CHAINED_EQUATIONS,
+		editNodeId: 'h3',
+		equation: '$$z = y$$',
+		startWithEquation: true,
+		layoutSettings: ONE_LAYER_TWO_DERIVED
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitFor(() => expect(nodeOnCanvas(canvasElement, 'h1')).toBeInTheDocument());
+
+		// The same fixture that leaves `h3` off screen at the default budget of one
+		// — see ADerivedEdgeToAHiddenNodeIsNotDrawn. Two derived layers pay for the
+		// second equation, so `h3` arrives and both arrows around it can be drawn.
+		expect(nodeOnCanvas(canvasElement, 'h3')).toBeInTheDocument();
+		expect(edgeOnCanvas(canvasElement, 'dataflow:h1->h3')).toBeInTheDocument();
+		expect(edgeOnCanvas(canvasElement, 'dataflow:h3->h4')).toBeInTheDocument();
+
+		// The derived budget buys derived steps and nothing else: `p2` is what `h1`
+		// was drawn to, still two authored hops out with one layer on show.
+		expect(nodeOnCanvas(canvasElement, 'p2')).not.toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="ABudgetOfNoLayersStillDrawsTheArrowsOnScreen"
+	args={{
+		baseGraph: NEAR_AND_FAR_CONSUMERS,
+		editNodeId: 'near',
+		equation: '$$q = x$$',
+		startWithEquation: true,
+		layoutSettings: { displayedLayers: 1, relaxIterations: 0, dataflowDisplayedLayers: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitFor(() => expect(nodeOnCanvas(canvasElement, 'near')).toBeInTheDocument());
+
+		// Nothing is revealed: `far` consumes x like `near` does, and with no budget
+		// the equation buys it no way onto the canvas.
+		expect(nodeOnCanvas(canvasElement, 'mid')).not.toBeInTheDocument();
+		expect(nodeOnCanvas(canvasElement, 'far')).not.toBeInTheDocument();
+
+		// The arrow between two nodes already on screen is still drawn — turning the
+		// budget off takes away reveals, not the reading of what flows where.
+		expect(edgeOnCanvas(canvasElement, 'dataflow:v->near')).toBeInTheDocument();
+
+		// And no stub trails off toward `far`.
+		expect(edgeOnCanvas(canvasElement, 'dataflow:v->far')).not.toBeInTheDocument();
+		const derivedEdgeIds = Array.from(canvasElement.querySelectorAll('.edge'))
+			.map((edge) => (edge as HTMLElement).dataset.edgeId ?? '')
+			.filter((id) => id.startsWith('dataflow:'));
+		expect(derivedEdgeIds).toEqual(['dataflow:v->near']);
 	}}
 />
 
