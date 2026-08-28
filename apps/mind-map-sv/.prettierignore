@@ -9,6 +9,10 @@ bun.lockb
 /static/
 src/lib/appConfig.ts
 
+# Vendored third-party sources, kept formatted as upstream ships them so that
+# re-syncing after an upgrade is a readable diff.
+src/lib/vendor/
+
 # Generated / build outputs (mirrors .gitignore)
 .svelte-kit/
 build/

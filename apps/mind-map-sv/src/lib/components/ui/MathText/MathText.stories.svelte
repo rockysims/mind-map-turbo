@@ -132,6 +132,26 @@
 	{/snippet}
 </Story>
 
+<Story
+	name="RendersScriptCapitalsFromOurOwnFontFile"
+	args={{ text: '$\\mathscr{F}$' }}
+	play={async ({ canvasElement }) => {
+		// The stylesheet serving this family is vendored so that it points at our
+		// own woff2 rather than Temml's mislicensed one. If that wiring breaks the
+		// letter still renders, in a fallback face, so assert on the font instead
+		// of on appearance. See THIRD-PARTY-NOTICES.md.
+		await document.fonts.ready;
+
+		const scripted = mathText(canvasElement).querySelector('.mathscr');
+		expect(scripted).toBeTruthy();
+		expect(getComputedStyle(scripted as Element).fontFamily).toContain('MindMapScript');
+
+		const loaded = [...document.fonts].filter((face) => face.family === 'MindMapScript');
+		expect(loaded).toHaveLength(1);
+		expect(loaded[0].status).toBe('loaded');
+	}}
+/>
+
 <style>
 	.narrow-column {
 		/* Narrow enough that the sample equation overflows on any platform's math
