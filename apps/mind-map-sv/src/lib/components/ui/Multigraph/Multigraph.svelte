@@ -441,6 +441,17 @@
 		return Object.entries(effectiveExitingBuffer.edges).filter(([id]) => !renderableIds.has(id));
 	});
 
+	/**
+	 * Reveal-wave leftovers minus anything the exiting buffer is already fading:
+	 * a deleted node's edges appear in both, and only the buffer still holds the
+	 * geometry to place them (the live layout dropped the node).
+	 */
+	const revealWaveOnlyEdgeVisibility = $derived(
+		layoutRuntime.revealWavePreviousOnlyEdgeVisibility.filter(
+			(visibility) => !(visibility.edge.id in effectiveExitingBuffer.edges)
+		)
+	);
+
 	$effect(() => {
 		const generation = externalGraphSyncToken(graphGeneration);
 		if (generation === lastSyncedGeneration) return;
@@ -856,8 +867,26 @@
 			.filter((v) => v.edge.sourceNodeId === nodeId || v.edge.targetNodeId === nodeId)
 			.map((v) => v.edge);
 
-		severedBeaconPreference = neighborsOf(graph, nodeId).map((neighbor) => neighbor.id);
-		commitUserGraph(layoutRuntime.relaxAfterMutation(removeNode(graph, nodeId)));
+		const neighborIds = neighborsOf(graph, nodeId).map((neighbor) => neighbor.id);
+		const nextGraph = removeNode(graph, nodeId);
+		const nextHops = hopsFromPinned(nextGraph);
+		const survivorId = neighborIds.find((id) => Number.isFinite(nextHops[id]));
+		const seversComponent =
+			survivorId !== undefined && neighborIds.some((id) => !Number.isFinite(nextHops[id]));
+		// Only a severing deletion creates a pinless component to hint about.
+		severedBeaconPreference = seversComponent ? neighborIds : [];
+
+		if (seversComponent && survivorId !== undefined) {
+			// The deletion cut a component off from every pinned node. Play the reveal
+			// wave (as a severing edge removal does) so the orphaned side fades down to
+			// its beacon instead of popping. The deleted node and its edges keep using
+			// the exiting-buffer fade below: their live geometry is gone, so only the
+			// buffer can still place them (the wave's leftovers skip them, see
+			// revealWaveOnlyEdgeVisibility).
+			commitUserGraph(layoutRuntime.beginScaleChange(nextGraph, survivorId));
+		} else {
+			commitUserGraph(layoutRuntime.relaxAfterMutation(nextGraph));
+		}
 
 		if (durationMs > 0) {
 			let nextBuffer = internalExitingBuffer;
@@ -899,14 +928,19 @@
 			}
 		}
 
-		if (primaryNodeId === nodeId) {
-			primaryNodeId =
-				graph.nodes.find((candidate) => candidate.pinned)?.id ??
-				graph.nodes.find((candidate) => candidate.id === defaultPrimaryNodeId)?.id ??
-				graph.nodes[0]?.id ??
-				'';
-		}
+		restorePrimaryNodeAfterDelete(nodeId);
 		closeOverlays();
+	}
+
+	/** Re-points the primary node after `nodeId` was deleted (no-op otherwise). */
+	function restorePrimaryNodeAfterDelete(nodeId: string) {
+		if (primaryNodeId !== nodeId) return;
+
+		primaryNodeId =
+			graph.nodes.find((candidate) => candidate.pinned)?.id ??
+			graph.nodes.find((candidate) => candidate.id === defaultPrimaryNodeId)?.id ??
+			graph.nodes[0]?.id ??
+			'';
 	}
 
 	function saveNodeContent(
@@ -1242,7 +1276,7 @@
 					></div>
 				{/if}
 			{/each}
-			{#each layoutRuntime.revealWavePreviousOnlyEdgeVisibility as visibility (visibility.edge.id)}
+			{#each revealWaveOnlyEdgeVisibility as visibility (visibility.edge.id)}
 				{@const edge = visibility.edge}
 				{@const edgePoints = edgeRenderPoints(visibility, combinedEdgeLayout, graph.posByNodeId)}
 				{@const edgeLengthPx = Math.hypot(
@@ -1598,15 +1632,16 @@
 			onCancel={() => (duplicateEdgeConfirm = null)}
 			onConfirm={() => {
 				const removedEdge = graph.edges.find((e) => e.id === confirmEdgeId) ?? null;
-				if (removedEdge) {
-					severedBeaconPreference = [removedEdge.sourceNodeId, removedEdge.targetNodeId];
-				}
 				const nextGraph = removeEdge(graph, confirmEdgeId);
 				const nextHops = hopsFromPinned(nextGraph);
 				const endpointIds = removedEdge ? [removedEdge.sourceNodeId, removedEdge.targetNodeId] : [];
 				const survivorId = endpointIds.find((id) => Number.isFinite(nextHops[id]));
 				const seversComponent =
 					survivorId !== undefined && endpointIds.some((id) => !Number.isFinite(nextHops[id]));
+				// Only a severing removal creates a pinless component to hint about;
+				// keeping a stale hint would steer a later beacon election (e.g. after
+				// removing one of two parallel edges, which severs nothing).
+				severedBeaconPreference = seversComponent ? endpointIds : [];
 
 				if (seversComponent && survivorId !== undefined) {
 					// The removal cut a component off from every pinned node. Play the
@@ -1617,6 +1652,7 @@
 					edgeEnterAnimations = Object.fromEntries(
 						Object.entries(edgeEnterAnimations).filter(([k]) => k !== confirmEdgeId)
 					);
+					internalExitingBuffer = cancelExitingEdge(internalExitingBuffer, confirmEdgeId);
 					commitUserGraph(layoutRuntime.beginScaleChange(nextGraph, survivorId));
 					duplicateEdgeConfirm = null;
 					return;

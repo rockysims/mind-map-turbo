@@ -1,3 +1,4 @@
+import { beaconNodeIds } from './components/ui/Multigraph/lib/beacons';
 import type { EdgeData } from './components/ui/types/edge';
 import type {
 	GraphAssetMetadata,
@@ -46,6 +47,10 @@ export function wrapPersistedGraph(data: MultigraphData): PersistedGraphPayload 
 }
 
 export function unwrapPersistedGraph(payload: unknown): MultigraphData {
+	return withSeededComponentPins(unwrapPersistedGraphData(payload));
+}
+
+function unwrapPersistedGraphData(payload: unknown): MultigraphData {
 	if (!isRecord(payload)) {
 		throw new PersistedGraphError(
 			'Persisted graph payload must be an object.',
@@ -171,6 +176,32 @@ function migrateGraphDataToV5(data: MultigraphData): MultigraphData {
 		if (!node.pinned || node.lastPinnedSeq !== undefined) return node;
 		pinSequence += 1;
 		return { ...node, lastPinnedSeq: pinSequence };
+	});
+
+	return { ...data, nodes, pinSequence };
+}
+
+/**
+ * Load/import-time seeding for graphs with no pinned node at all (pre-v5 files
+ * predate pinning, and hand-written JSON often omits it). Without a pin every
+ * component collapses to its single beacon node, so the file would open as a
+ * scattering of lone nodes. Pinning the node each component's beacon election
+ * would pick — its hub — opens that hub's neighborhood instead.
+ *
+ * Only runs here, on data entering the app: a user who deliberately unpins
+ * their last pin during a session keeps the beacon view they asked for.
+ */
+function withSeededComponentPins(data: MultigraphData): MultigraphData {
+	if (data.nodes.some((node) => node.pinned)) return data;
+
+	const seedNodeIds = beaconNodeIds(data);
+	if (seedNodeIds.size === 0) return data;
+
+	let pinSequence = data.pinSequence ?? 0;
+	const nodes = data.nodes.map((node) => {
+		if (!seedNodeIds.has(node.id)) return node;
+		pinSequence += 1;
+		return { ...node, pinned: true, lastPinnedSeq: pinSequence };
 	});
 
 	return { ...data, nodes, pinSequence };

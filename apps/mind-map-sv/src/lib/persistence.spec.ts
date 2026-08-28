@@ -46,7 +46,9 @@ describe('LocalStoragePersistence', () => {
 	it('round-trips saved graph data through the schema envelope', async () => {
 		const storage = new MemoryStorage();
 		const persistence = new LocalStoragePersistence(storage, 'test', () => 123);
-		const graph = makeGraph({ nodeCount: 2, edges: [[0, 1]] });
+		// Pinned so the round trip compares like with like: loading a graph with
+		// zero pins seeds a pin per component (see withSeededComponentPins).
+		const graph = makeGraph({ nodeCount: 2, edges: [[0, 1]], pinned: [0] });
 		const viewState = { panX: 10, panY: -5, scale: 1.25 };
 
 		await persistence.save('graph one', { data: graph, viewState });
@@ -142,7 +144,7 @@ describe('LocalStoragePersistence', () => {
 
 describe('ServerPersistence', () => {
 	it('loads graph data from a schema envelope', async () => {
-		const graph = makeGraph({ nodeCount: 1 });
+		const graph = makeGraph({ nodeCount: 1, pinned: [0] });
 		const viewState = { panX: 1, panY: 2, scale: 1.5 };
 		const fetchGraph = vi.fn(async () =>
 			Response.json({ schemaVersion: CURRENT_SCHEMA_VERSION, data: graph, viewState })

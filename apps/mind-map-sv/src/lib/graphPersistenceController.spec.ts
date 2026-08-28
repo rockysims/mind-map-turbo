@@ -495,8 +495,11 @@ describe('GraphPersistenceController', () => {
 
 	it('exports current graph and view state as a self-contained HTML artifact', async () => {
 		const { controller } = setup();
+		// Pinned so the export/parse round trip compares like with like: loading a
+		// graph with zero pins seeds a pin per component.
 		const graph = makeGraph({
 			nodeCount: 3,
+			pinned: [0],
 			edges: [
 				[0, 1],
 				[1, 2]
@@ -532,7 +535,7 @@ describe('GraphPersistenceController', () => {
 		const generationBeforeImport = controller.getView().graphGeneration;
 
 		controller.notifyGraphChanged(makeGraph({ nodeCount: 4 }));
-		const importedGraph = makeGraph({ nodeCount: 3, edges: [[0, 1]] });
+		const importedGraph = makeGraph({ nodeCount: 3, pinned: [0], edges: [[0, 1]] });
 		const importedViewState = { panX: 50, panY: -20, scale: 1.25 };
 		const importResult = await controller.importGraphDocument(
 			serializeGraphHtmlFile({

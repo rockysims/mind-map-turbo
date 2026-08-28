@@ -1513,6 +1513,80 @@
 />
 
 <Story
+	name="UserDeletesNodeOrphaningAComponent"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 5,
+			pinned: [0],
+			// Deleting n1 cuts n2..n4 off from the only pinned node, exactly as a
+			// severing edge removal does, so the orphaned side must fade with the
+			// reveal wave instead of popping. n4 sits outside the default three
+			// displayed layers; it is here so edge e3 has two newly hidden ends.
+			edges: [
+				[0, 1],
+				[1, 2],
+				[2, 3],
+				[3, 4]
+			],
+			posByNodeId: {
+				n0: { x: -400, y: 0 },
+				n1: { x: -200, y: 0 },
+				n2: { x: 0, y: 0 },
+				n3: { x: 200, y: 0 },
+				n4: { x: 400, y: 0 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: {
+			relaxIterations: 0,
+			enterExitDurationMs: 120,
+			scaleAnimationDurationMs: 200,
+			postScaleChangeSettleMaxFrames: 0
+		},
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const circle = getCircle(canvasElement, 'n1');
+		const center = getCenter(circle);
+
+		await dispatchLongPress(circle, center.x, center.y);
+		within(canvasElement).getByRole('menuitem', { name: 'Delete' }).click();
+		await waitForFrames(2);
+
+		expect(lastChangedGraph(args).nodes.map((node) => node.id)).toEqual(['n0', 'n2', 'n3', 'n4']);
+
+		// n3 drops out of the visible set and fades with the wave, as does the edge
+		// between the two newly hidden nodes.
+		expect(getNodeWrapper(canvasElement, 'n3').dataset.nodeRevealBuffer).toBe('true');
+		const wavingEdges = canvasElement.querySelectorAll('[data-edge-id="e3"]');
+		expect(wavingEdges).toHaveLength(1);
+		expect((wavingEdges[0] as HTMLElement).dataset.edgeRevealBuffer).toBe('true');
+
+		// The deleted node keeps the exiting-buffer fade (the wave has no geometry
+		// for it), and is drawn exactly once.
+		const deletedNodes = canvasElement.querySelectorAll('[data-node-id="n1"].node-wrapper');
+		expect(deletedNodes).toHaveLength(1);
+		expect((deletedNodes[0] as HTMLElement).dataset.nodeExiting).toBe('true');
+		expect((deletedNodes[0] as HTMLElement).dataset.nodeRevealBuffer).toBeUndefined();
+
+		// After the wave, only the pinned node and the orphaned component's beacon
+		// remain on screen.
+		await waitFor(() => {
+			expect(
+				canvasElement.querySelector('[data-node-id="n3"].node-wrapper')
+			).not.toBeInTheDocument();
+		});
+		expect(canvasElement.querySelector('[data-node-id="n1"].node-wrapper')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-edge-id="e3"]')).not.toBeInTheDocument();
+		expect(getNodeWrapper(canvasElement, 'n2')).toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-node-id="n2"] .node')).not.toHaveAttribute(
+			'data-pinned'
+		);
+	}}
+/>
+
+<Story
 	name="UserLongPressesTinyDistantNode"
 	args={{
 		multigraphData: makeGraph({

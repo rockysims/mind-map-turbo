@@ -369,7 +369,7 @@ export class LayoutRuntime {
 		}
 	}
 
-	#beaconIdsFor(graph: MultigraphData): Set<string> {
+	#beaconIdsFor(graph: MultigraphData): ReadonlySet<string> {
 		return beaconNodeIds(graph, {
 			preferredNodeIds: this.#options.getPreferredBeaconNodeIds()
 		});

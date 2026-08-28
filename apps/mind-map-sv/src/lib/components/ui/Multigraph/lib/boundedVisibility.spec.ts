@@ -82,7 +82,7 @@ describe('boundedVisibility', () => {
 		]);
 	});
 
-	it('classifies every beacon edge as a boundary half-edge', () => {
+	it("classifies a beacon's edges to hidden neighbors as boundary half-edges", () => {
 		const graph = makeGraph({
 			nodeCount: 4,
 			pinned: [0],
@@ -100,6 +100,32 @@ describe('boundedVisibility', () => {
 				(visibility) => visibility.kind
 			)
 		).toEqual(['boundary', 'boundary']);
+	});
+
+	it('classifies a self-loop on a beacon as a visible edge', () => {
+		// The exception to the rule above: both endpoints of a self-loop are the
+		// visible beacon. Self-loops only arrive via externally written JSON and
+		// render at zero length, so this is tolerated rather than special-cased.
+		const graph = makeGraph({
+			nodeCount: 3,
+			pinned: [0],
+			edges: [
+				[1, 1],
+				[1, 2]
+			],
+			pinHistory: { 1: 1 }
+		});
+
+		const hops = withBeaconHops(hopsFromPinned(graph), beaconNodeIds(graph));
+
+		expect(visibleNodeIdsForPinnedNeighborhood(graph, hops, { displayedLayers: 3 })).toEqual(
+			new Set(['n0', 'n1'])
+		);
+		expect(
+			edgeVisibilityForPinnedNeighborhood(graph, hops, { displayedLayers: 3 }).map(
+				(visibility) => visibility.kind
+			)
+		).toEqual(['visible', 'boundary']);
 	});
 
 	it('returns a graph with only visible nodes and edges between visible endpoints', () => {

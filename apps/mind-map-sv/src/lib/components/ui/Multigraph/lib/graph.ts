@@ -417,8 +417,16 @@ function hasNode(data: MultigraphData, nodeId: string): boolean {
 }
 
 function nextPinSequence(data: MultigraphData): number {
-	// Max over nodes keeps the counter self-healing when pinSequence is missing or stale.
-	return Math.max(data.pinSequence ?? 0, ...data.nodes.map((node) => node.lastPinnedSeq ?? 0)) + 1;
+	// Max over nodes keeps the counter self-healing when pinSequence is missing
+	// or stale. Looped rather than spread into Math.max: a spread of every node
+	// throws RangeError once the graph passes the argument-count limit.
+	let highest = data.pinSequence ?? 0;
+	for (const node of data.nodes) {
+		const seq = node.lastPinnedSeq ?? 0;
+		if (seq > highest) highest = seq;
+	}
+
+	return highest + 1;
 }
 
 function isAssetReferenced(data: MultigraphData, assetId: string): boolean {
