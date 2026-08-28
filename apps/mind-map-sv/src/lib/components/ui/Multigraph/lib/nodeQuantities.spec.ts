@@ -54,6 +54,17 @@ describe('nodeQuantities definitions', () => {
 	it('ignores an equality nested under summation limits', () => {
 		expect(defines('$$S = \\sum_{i=1}^{n} x_i$$')).toEqual(['S']);
 	});
+
+	it('does not define from a multi-letter left side, which math mode reads as a product', () => {
+		// `acc` is a·c·c in math mode, not one identifier. Quantity names are
+		// therefore single letters, optionally subscripted; `\mathrm{acc}` is the
+		// way to write a multi-letter name.
+		expect(defines('$$acc = 9.8$$')).toEqual([]);
+	});
+
+	it('defines a multi-letter name written as an upright identifier', () => {
+		expect(defines('$$\\mathrm{acc} = 9.8$$')).toEqual(['acc']);
+	});
 });
 
 describe('nodeQuantities inline math', () => {
