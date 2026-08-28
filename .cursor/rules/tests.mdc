@@ -82,6 +82,33 @@ extend the fixtures helper instead.
 - Don't snapshot whole DOM trees (Chromatic handles visual regression).
 - Do assert on the user-visible outcome and on the public callback contract.
 
+## Watch a new regression test fail
+
+A test earns its keep by failing. Before treating one as a guard, revert the
+fix, run just that test, confirm it fails for the reason you expect, then
+restore. A temporary edit is enough; no need to stash.
+
+Worth the thirty seconds whenever something other than your change could
+produce the same observable. Story `play` functions are the usual case — font
+loading, `$effect` re-runs, async settling, and physics can all move the same
+pixel, so "the thing moved" does not by itself implicate your code. Skip it
+when the test could not run at all without the code under test, such as the
+first spec for a newly exported pure function; there the check is theater.
+
+Two cases from this repo:
+
+- `SquareText`'s `Test:RefitsWhenTheTextChanges` passed with its fix reverted.
+  It switched the title between plain text and math, and crossing that boundary
+  also tripped the `document.fonts.ready` refit, which hid the missing `text`
+  dependency it was meant to pin. Switching between two plain strings made it
+  fail correctly.
+- A `nodeQuantities` spec asserted that `$$x = 1$$` and `$$x = 2$$` in one node
+  collapse to a single definition. It passed for a whole milestone while
+  holding a bug in place, and stopped anyone from looking at it.
+
+The second is the failure worth fearing. A test that passes for the wrong
+reason turns a bug into documented intent.
+
 ## Always run tests before claiming done
 
 ```bash
