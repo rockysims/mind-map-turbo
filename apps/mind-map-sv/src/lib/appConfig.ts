@@ -90,7 +90,9 @@ export const APP_CONFIG = {
 		dataflow: {
 			labelMinStageScale: 0.8, // zoom below which quantity labels stay hidden
 			labelMinOnScreenLengthPx: 90, // shortest on-screen edge worth labelling
-			labelMaxVisibleQuantities: 3 // quantities named before collapsing to a count
+			labelMaxVisibleQuantities: 3, // quantities named before collapsing to a count
+			chipMinOnScreenDiameterPx: 180, // on-screen node size below which chips are hidden
+			chipMaxVisibleQuantities: 3 // quantities a compact node names before a count
 		}
 	}
 } as const;

@@ -23,12 +23,17 @@
 		isTitleEditing = false,
 		borderSegments = [],
 		spotlightColor,
+		quantityLabels = [],
+		quantityOverflowCount = 0,
 		onTitleCommit
 	} = $props<{
 		nodeData: NodeData;
 		isTitleEditing?: boolean;
 		borderSegments?: TagColorSegment[];
 		spotlightColor?: string;
+		/** Quantities this node defines. The caller decides whether there is room. */
+		quantityLabels?: string[];
+		quantityOverflowCount?: number;
 		onTitleCommit?: (title: string) => void;
 	}>();
 
@@ -59,6 +64,8 @@
 			{isTitleEditing}
 			diameterPx={NODE_RADIUS * 2}
 			fontSizePx={NODE_TEXT_FONT_SIZE}
+			{quantityLabels}
+			{quantityOverflowCount}
 			{onTitleCommit}
 		/>
 	</NodeChrome>

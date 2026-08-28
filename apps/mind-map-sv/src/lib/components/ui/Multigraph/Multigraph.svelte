@@ -73,6 +73,11 @@
 	import { composeEdgesForRender, createDataflowModel } from './lib/dataflowLayer.js';
 	import { isDerivedEdgeId } from './lib/derivedEdges.js';
 	import {
+		quantityChips,
+		shouldShowQuantityChips,
+		type QuantityChips
+	} from '../Node/lib/quantityChips.js';
+	import {
 		edgeAngleDegrees,
 		formatQuantityLabel,
 		shouldRevealQuantityLabel
@@ -348,6 +353,20 @@
 	 * radius of the dataflow layer to drawing.
 	 */
 	const adjacencyGraph = $derived(dataflowInLayout ? renderGraph : graph);
+	/** Shared so a node below the size threshold allocates nothing per frame. */
+	const EMPTY_QUANTITY_CHIPS: QuantityChips = { labels: [], overflowCount: 0 };
+	/**
+	 * Quantities each node defines, for the compact-node chips. Keyed by node so
+	 * the render loop does no work per node beyond a lookup.
+	 */
+	const definedQuantityLabelsByNodeId = $derived(
+		new Map(
+			[...dataflow.index.byNodeId].map(([nodeId, quantities]) => [
+				nodeId,
+				quantities.defines.map((quantity) => quantity.label)
+			])
+		)
+	);
 	const quantityLabelByEdgeId = $derived(
 		new Map(
 			dataflow.edges.map((edge) => [
@@ -1393,6 +1412,13 @@
 					baseNodeOpacity *
 					(revealWaveNodeOpacityByNodeId[node.id] ?? 1) *
 					queryOpacity(queryNodeState)}
+				{@const nodeChips = shouldShowQuantityChips(NODE_RADIUS * 2, nodeScale, stageScale, {
+					minOnScreenDiameterPx: APP_CONFIG.multigraph.dataflow.chipMinOnScreenDiameterPx
+				})
+					? quantityChips(definedQuantityLabelsByNodeId.get(node.id) ?? [], {
+							maxVisible: APP_CONFIG.multigraph.dataflow.chipMaxVisibleQuantities
+						})
+					: EMPTY_QUANTITY_CHIPS}
 				<div
 					class="node-wrapper"
 					class:primary={primaryNodeId === node.id}
@@ -1408,6 +1434,8 @@
 					<Node
 						nodeData={node}
 						isTitleEditing={titleEditContext?.nodeId === node.id}
+						quantityLabels={nodeChips.labels}
+						quantityOverflowCount={nodeChips.overflowCount}
 						borderSegments={nodeBorderSegments(node, graph.tagColorConfig.nodeTags)}
 						spotlightColor={queryNodeState?.role === 'spotlight'
 							? queryNodeState.spotlightColor

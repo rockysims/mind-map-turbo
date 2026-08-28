@@ -9,6 +9,8 @@
 		diameterPx,
 		fontSizePx,
 		detailsMode = false,
+		quantityLabels = [],
+		quantityOverflowCount = 0,
 		onTitleCommit
 	} = $props<{
 		title: string;
@@ -16,6 +18,10 @@
 		diameterPx: number;
 		fontSizePx: number;
 		detailsMode?: boolean;
+		/** Quantities this node defines. Empty unless the node is large enough to read. */
+		quantityLabels?: string[];
+		/** Quantities beyond those named, or zero when they all fit. */
+		quantityOverflowCount?: number;
 		onTitleCommit?: (title: string) => void;
 	}>();
 
@@ -56,12 +62,60 @@
 			<SquareText classList={['title']} text={title} />
 		{/if}
 	</div>
+	{#if quantityLabels.length > 0 || quantityOverflowCount > 0}
+		<!--
+			Sits in the circular band below the inscribed square, which is otherwise
+			unclaimed, so the auto-fitting title keeps all of its space.
+		-->
+		<div class="quantities" data-node-quantities>
+			{#each quantityLabels as label (label)}
+				<span class="quantity-chip">{label}</span>
+			{/each}
+			{#if quantityOverflowCount > 0}
+				<span class="quantity-chip overflow">+{quantityOverflowCount}</span>
+			{/if}
+		</div>
+	{/if}
 </div>
 
 <style>
 	.compact-layer {
 		grid-area: 1 / 1;
+		position: relative;
 		will-change: opacity;
+	}
+
+	.quantities {
+		position: absolute;
+		top: 100%;
+		left: 50%;
+		display: flex;
+		gap: 0.25em;
+		justify-content: center;
+		/* The chord this far down the circle is narrower than the square above it. */
+		max-width: calc(var(--node-diameter) * 0.55);
+		transform: translateX(-50%);
+		overflow: hidden;
+		/*
+		 * Hit testing is geometric against the node circle, so a chip that swallowed
+		 * pointer events would look like a dead zone that refuses to start a drag.
+		 */
+		pointer-events: none;
+	}
+
+	.quantity-chip {
+		padding: 0 0.3em;
+		border-radius: 0.25em;
+		background: rgba(15, 23, 42, 0.08);
+		font-size: calc(var(--node-text-font-size) * 0.75);
+		font-style: italic;
+		line-height: 1.4;
+		white-space: nowrap;
+	}
+
+	.quantity-chip.overflow {
+		font-style: normal;
+		opacity: 0.7;
 	}
 
 	.compact-layer[data-details-mode='true'] {

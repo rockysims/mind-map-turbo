@@ -253,3 +253,91 @@
 		).toHaveTextContent('g, m');
 	}}
 />
+
+<Story
+	name="DefinedQuantitiesShowOnALargeCompactNode"
+	args={{
+		baseGraph: CHAIN,
+		editNodeId: 'c',
+		equation: CONSUMES_G,
+		startWithEquation: true,
+		initialViewState: { panX: 0, panY: 0, scale: 1 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitFor(() => expect(canvasElement.querySelector('.node')).toBeInTheDocument());
+
+		const chips = () =>
+			canvasElement.querySelector(
+				'[data-node-id="a"] [data-node-quantities]'
+			) as HTMLElement | null;
+		await waitFor(() => expect(chips()).toBeInTheDocument());
+		expect(chips()).toHaveTextContent('g');
+
+		// The definer shows its chip; a node that defines nothing shows no row at all.
+		expect(
+			canvasElement.querySelector('[data-node-id="b"] [data-node-quantities]')
+		).not.toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="QuantityChipsStayHiddenWhenNodesAreSmall"
+	args={{
+		baseGraph: CHAIN,
+		editNodeId: 'c',
+		equation: CONSUMES_G,
+		startWithEquation: true,
+		initialViewState: { panX: 0, panY: 0, scale: 0.25 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitFor(() => expect(canvasElement.querySelector('.node')).toBeInTheDocument());
+		expect(
+			canvasElement.querySelector('[data-node-id="a"] [data-node-quantities]')
+		).not.toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="ChipsDoNotSwallowPointerEventsFromTheNode"
+	args={{
+		baseGraph: CHAIN,
+		editNodeId: 'c',
+		equation: CONSUMES_G,
+		startWithEquation: true,
+		initialViewState: { panX: 0, panY: 0, scale: 1 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitFor(() =>
+			expect(
+				canvasElement.querySelector('[data-node-id="a"] [data-node-quantities]')
+			).toBeInTheDocument()
+		);
+
+		// Hit testing is geometric against the node circle, so a chip that captured
+		// pointer events would read as a dead zone that refuses to start a drag.
+		const chipRow = canvasElement.querySelector(
+			'[data-node-id="a"] [data-node-quantities]'
+		) as HTMLElement;
+		expect(getComputedStyle(chipRow).pointerEvents).toBe('none');
+	}}
+/>
+
+<Story
+	name="TitleLayoutIsUnchangedForANodeDefiningNothing"
+	args={{ baseGraph: CHAIN, editNodeId: 'c', equation: CONSUMES_G }}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitFor(() => expect(canvasElement.querySelector('.node')).toBeInTheDocument());
+		const titleBox = () =>
+			JSON.stringify(
+				(
+					canvasElement.querySelector('[data-node-id="b"] .square') as HTMLElement
+				).getBoundingClientRect()
+			);
+		const before = titleBox();
+
+		await click(canvasElement, '[data-add-equation]');
+		await waitFor(() => expect(derivedEdge(canvasElement)).toBeInTheDocument());
+
+		expect(titleBox()).toEqual(before);
+	}}
+/>
