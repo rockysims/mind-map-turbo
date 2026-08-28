@@ -77,6 +77,32 @@ describe('reference states', () => {
 		expect(stateOf(diagnose(chain), 'use', 'g')).toBe('resolved');
 	});
 
+	// The affordance the render rule leans on: a derived edge is drawn only
+	// between two visible endpoints, so when the definer is off screen there is no
+	// arrow left and this is the only thing saying where the quantity comes from.
+	// It reads the visible set and never edge visibility, so the rule cannot
+	// quietly take it away too.
+	it('still names a hidden definer that no arrow can point at', () => {
+		// The chained-equation shape from the dataflow stories: `h1` and `h4` are on
+		// screen a derived step out from `v`, and the `h3` between them is a second
+		// step the budget did not pay for.
+		const nodes = [
+			node('v', '$$x = 3$$'),
+			node('h1', '$$y = x$$'),
+			node('h3', '$$z = y$$'),
+			node('h4', '$$w = x + z$$')
+		];
+		const diagnostics = diagnose(nodes, { visibleNodeIds: new Set(['v', 'h1', 'h4']) });
+
+		expect(stateOf(diagnostics, 'h4', 'z')).toBe('out-of-view');
+		expect(
+			referencesForNode(diagnostics, 'h4').find((reference) => reference.symbol.label === 'z')
+				?.definerNodeIds
+		).toEqual(['h3']);
+		// The one it can follow on screen reads as it always did.
+		expect(stateOf(diagnostics, 'h4', 'x')).toBe('resolved');
+	});
+
 	it('reports nothing for a graph with no math', () => {
 		expect(diagnose([node('a', 'prose')])).toEqual({
 			references: [],

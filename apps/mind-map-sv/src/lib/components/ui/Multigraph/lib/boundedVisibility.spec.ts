@@ -5,10 +5,12 @@ import { BEACON_HOP, beaconNodeIds, withBeaconHops } from './beacons';
 import {
 	composeVisibleLayoutGraph,
 	computeBoundedHops,
+	type EdgeVisibility,
 	edgeVisibilityForPinnedNeighborhood,
 	graphWithVisibleNodes,
 	pinnedNodeIds,
 	visibleNodeIdsForPinnedNeighborhood,
+	withDerivedBoundaryEdgesHidden,
 	withDerivedHops
 } from './boundedVisibility';
 import { makeGraph } from './testFixtures';
@@ -499,5 +501,68 @@ describe('boundedVisibility', () => {
 			fadeRatio: 0.25
 		});
 		expect(edgeVisibility[2]).toMatchObject({ kind: 'hidden' });
+	});
+
+	describe('withDerivedBoundaryEdgesHidden', () => {
+		const isDerivedEdge = (edgeId: string) => edgeId.startsWith('dataflow:');
+
+		const edgeData = (id: string): EdgeData => ({
+			id,
+			sourceNodeId: 'n0',
+			targetNodeId: 'n1',
+			tags: []
+		});
+
+		const boundary = (id: string): EdgeVisibility => ({
+			kind: 'boundary',
+			edge: edgeData(id),
+			visibleNodeId: 'n0',
+			hiddenNodeId: 'n1',
+			visibleEndpoint: 'source',
+			hiddenEndpoint: 'target',
+			fadeRatio: 0.5
+		});
+
+		it('hides a derived edge whose far endpoint is off screen', () => {
+			const visibilities = [boundary('dataflow:n0->n1')];
+
+			expect(withDerivedBoundaryEdgesHidden(visibilities, isDerivedEdge)).toEqual([
+				{ kind: 'hidden', edge: visibilities[0].edge }
+			]);
+		});
+
+		it('leaves an authored boundary edge fading', () => {
+			const visibilities = [boundary('e0')];
+
+			expect(withDerivedBoundaryEdgesHidden(visibilities, isDerivedEdge)).toBe(visibilities);
+		});
+
+		it('touches only the boundary entries, and only the derived ones', () => {
+			const authoredFade = boundary('e0');
+			const visibilities: EdgeVisibility[] = [
+				{ kind: 'visible', edge: edgeData('dataflow:n0->n1') },
+				authoredFade,
+				boundary('dataflow:n1->n2'),
+				{ kind: 'hidden', edge: edgeData('dataflow:n2->n3') }
+			];
+
+			expect(
+				withDerivedBoundaryEdgesHidden(visibilities, isDerivedEdge).map(
+					(visibility) => visibility.kind
+				)
+			).toEqual(['visible', 'boundary', 'hidden', 'hidden']);
+			expect(withDerivedBoundaryEdgesHidden(visibilities, isDerivedEdge)[1]).toBe(authoredFade);
+		});
+
+		it('returns the same array when no derived edge is at the boundary', () => {
+			// It feeds a $derived chain that re-runs every frame, so an untouched
+			// result has to stay the same object.
+			const visibilities: EdgeVisibility[] = [
+				{ kind: 'visible', edge: edgeData('dataflow:n0->n1') },
+				boundary('e0')
+			];
+
+			expect(withDerivedBoundaryEdgesHidden(visibilities, isDerivedEdge)).toBe(visibilities);
+		});
 	});
 });

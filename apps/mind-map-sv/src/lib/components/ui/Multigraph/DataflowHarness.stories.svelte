@@ -196,6 +196,59 @@
 		(canvasElement.querySelector(selector) as HTMLElement).click();
 		await waitFor(() => expect(canvasElement.querySelector('.node')).toBeInTheDocument());
 	};
+
+	const edgeOnCanvas = (canvasElement: HTMLElement, edgeId: string) =>
+		canvasElement.querySelector(`[data-edge-id="${edgeId}"]`);
+
+	/**
+	 * A chain of equations reaching past the derived budget.
+	 *
+	 * Authored, everything hangs off `p2`, which is already two hops from the
+	 * pinned `v` with one layer on show — so `h1`, `h3` and `h4` are all out of
+	 * view until an equation says otherwise, and one pinned component means no
+	 * beacon gets a say.
+	 *
+	 * `v` defines x. `h1` and `h4` consume it, so a single derived step brings
+	 * both into view. `h3` sits a second derived step out — `h1` defines the y it
+	 * consumes — and the budget of one does not pay for it, which is the shape
+	 * that used to leave a stub trailing off `h1`. `h4` also consumes the z that
+	 * only the still-hidden `h3` defines: the arrow for that one cannot be drawn
+	 * either, and the out-of-view diagnostic is what tells the reader where z
+	 * comes from.
+	 */
+	const CHAINED_EQUATIONS = makeGraph({
+		nodes: [
+			{ id: 'v', title: 'Source', description: '$$x = 3$$' },
+			{ id: 'p1', title: 'Drawn neighbor', description: '' },
+			{ id: 'p2', title: 'Past the layer', description: '' },
+			{ id: 'h1', title: 'First consumer', description: '$$y = x$$' },
+			{ id: 'h3', title: 'Second consumer', description: '' },
+			{ id: 'h4', title: 'Other consumer', description: '$$w = x + z$$' }
+		],
+		pinned: ['v'],
+		edges: [
+			['v', 'p1'],
+			['p1', 'p2'],
+			['p2', 'h1'],
+			['p2', 'h3'],
+			['p2', 'h4']
+		],
+		posByNodeId: {
+			v: { x: -400, y: 0 },
+			p1: { x: -200, y: 0 },
+			p2: { x: 0, y: 0 },
+			h1: { x: 200, y: -200 },
+			h3: { x: 400, y: -200 },
+			h4: { x: 200, y: 200 }
+		}
+	});
+
+	/** The authored half-edge that has to keep fading: `p1` visible, `p2` not. */
+	const AUTHORED_FADE_EDGE_ID =
+		CHAINED_EQUATIONS.edges.find((edge) => edge.sourceNodeId === 'p1' && edge.targetNodeId === 'p2')
+			?.id ?? '';
+
+	const ONE_LAYER = { displayedLayers: 1, relaxIterations: 0 };
 </script>
 
 <Story
@@ -639,5 +692,40 @@
 		await waitFor(() => expect(derivedEdge(canvasElement)).toBeInTheDocument());
 
 		expect(titleSize()).toEqual(before);
+	}}
+/>
+
+<Story
+	name="ADerivedEdgeToAHiddenNodeIsNotDrawn"
+	args={{
+		baseGraph: CHAINED_EQUATIONS,
+		editNodeId: 'h3',
+		equation: '$$z = y$$',
+		startWithEquation: true,
+		layoutSettings: ONE_LAYER
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitFor(() => expect(nodeOnCanvas(canvasElement, 'h1')).toBeInTheDocument());
+
+		// One derived step is paid for, the second is not.
+		expect(nodeOnCanvas(canvasElement, 'h4')).toBeInTheDocument();
+		expect(nodeOnCanvas(canvasElement, 'h3')).not.toBeInTheDocument();
+
+		// Between two nodes on screen, the equation still draws its arrow.
+		expect(edgeOnCanvas(canvasElement, 'dataflow:v->h1')).toBeInTheDocument();
+		expect(edgeOnCanvas(canvasElement, 'dataflow:v->h4')).toBeInTheDocument();
+
+		// Reaching off screen, it draws nothing. A half-edge fading toward a node
+		// the reader cannot reach — and a chained equation always leaves one — reads
+		// as a link to somewhere, and there is nowhere to go.
+		expect(edgeOnCanvas(canvasElement, 'dataflow:h1->h3')).not.toBeInTheDocument();
+		expect(edgeOnCanvas(canvasElement, 'dataflow:h3->h4')).not.toBeInTheDocument();
+
+		// Authored edges keep their boundary fade, and are the only ones that have it.
+		const boundaryEdgeIds = Array.from(
+			canvasElement.querySelectorAll('[data-edge-visibility="boundary"]')
+		).map((edge) => (edge as HTMLElement).dataset.edgeId ?? '');
+		expect(boundaryEdgeIds).toContain(AUTHORED_FADE_EDGE_ID);
+		expect(boundaryEdgeIds.filter((id) => id.startsWith('dataflow:'))).toEqual([]);
 	}}
 />

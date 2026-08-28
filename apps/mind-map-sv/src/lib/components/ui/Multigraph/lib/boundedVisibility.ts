@@ -76,6 +76,41 @@ export function edgeVisibilityForPinnedNeighborhood(
 	});
 }
 
+/**
+ * Downgrade every derived edge sitting at the visibility boundary to hidden, so
+ * a derived edge is drawn only when both of its endpoints are on screen.
+ *
+ * An authored half-edge fading off the boundary is an invitation: the reader can
+ * follow it by pinning what it hangs off. A derived one is not. The node it
+ * points at is out there because the derived budget stopped short, and no amount
+ * of revealing fixes it — a chained equation (`v → h1 → h3` with one layer of
+ * derived budget) reveals `h1` and leaves `h3` exactly as far out of reach as it
+ * was. An arrow toward somewhere the reader cannot go is worse than no arrow, so
+ * this draws none. The out-of-view diagnostic stays the affordance for finding a
+ * definer that is off screen.
+ *
+ * Takes a predicate rather than importing the dataflow layer: this module
+ * answers "who is on screen", and which edges an equation implied is not its
+ * question.
+ */
+export function withDerivedBoundaryEdgesHidden(
+	visibilities: EdgeVisibility[],
+	isDerivedEdge: (edgeId: string) => boolean
+): EdgeVisibility[] {
+	let next: EdgeVisibility[] | null = null;
+
+	for (let index = 0; index < visibilities.length; index += 1) {
+		const visibility = visibilities[index];
+		if (visibility.kind !== 'boundary' || !isDerivedEdge(visibility.edge.id)) continue;
+		next ??= [...visibilities];
+		next[index] = { kind: 'hidden', edge: visibility.edge };
+	}
+
+	// Identity when no derived edge is at the boundary, which is the common case:
+	// this feeds a derived chain that re-runs on every frame of a drag.
+	return next ?? visibilities;
+}
+
 export interface BoundedHopsOptions {
 	/** Authored-step budget: how many layers of drawn edges a path may spend. */
 	displayedLayers?: number;

@@ -70,7 +70,8 @@
 		composeVisibleLayoutGraph,
 		computeBoundedHops,
 		edgeVisibilityForPinnedNeighborhood,
-		visibleNodeIdsForPinnedNeighborhood
+		visibleNodeIdsForPinnedNeighborhood,
+		withDerivedBoundaryEdgesHidden
 	} from './lib/boundedVisibility.js';
 	import { composeEdgesForRender, createDataflowModel } from './lib/dataflowLayer.js';
 	import { isDerivedEdgeId, type DerivedEdge } from './lib/derivedEdges.js';
@@ -419,11 +420,18 @@
 	const dataflowDiagnostics = $derived(
 		computeDataflowDiagnostics(dataflow.index, dataflow.edges, { visibleNodeIds })
 	);
-	/** Reads the render graph so derived edges get visibility, trimming, and fade. */
+	/**
+	 * Reads the render graph so derived edges get visibility, trimming, and fade —
+	 * then takes the fade back off the derived ones, which draw only between two
+	 * visible endpoints.
+	 */
 	const edgeVisibility = $derived(
-		edgeVisibilityForPinnedNeighborhood(renderGraph, hopsByNodeId, {
-			displayedLayers: resolvedLayoutSettings.displayedLayers
-		})
+		withDerivedBoundaryEdgesHidden(
+			edgeVisibilityForPinnedNeighborhood(renderGraph, hopsByNodeId, {
+				displayedLayers: resolvedLayoutSettings.displayedLayers
+			}),
+			isDerivedEdgeId
+		)
 	);
 	const renderableEdgeVisibility = $derived(
 		edgeVisibility.filter(
