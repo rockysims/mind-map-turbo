@@ -1,6 +1,7 @@
 {
   "name": "mind-map-turbo",
   "private": true,
+  "license": "MIT",
   "scripts": {
     "build": "turbo run build",
     "check:offline-shell": "node apps/mind-map-sv/scripts/check-offline-shell-fresh.mjs",
