@@ -71,6 +71,12 @@
 		visibleNodeIdsForPinnedNeighborhood
 	} from './lib/boundedVisibility.js';
 	import { composeEdgesForRender, createDataflowModel } from './lib/dataflowLayer.js';
+	import { isDerivedEdgeId } from './lib/derivedEdges.js';
+	import {
+		edgeAngleDegrees,
+		formatQuantityLabel,
+		shouldRevealQuantityLabel
+	} from './lib/quantityLabels.js';
 	import { LayoutRuntime } from './lib/layoutRuntime.svelte.js';
 	import { externalGraphSyncToken } from './lib/graphSync.js';
 	import type { EntryGestureDirection } from './lib/entryGestureGate.js';
@@ -342,6 +348,17 @@
 	 * radius of the dataflow layer to drawing.
 	 */
 	const adjacencyGraph = $derived(dataflowInLayout ? renderGraph : graph);
+	const quantityLabelByEdgeId = $derived(
+		new Map(
+			dataflow.edges.map((edge) => [
+				edge.id,
+				formatQuantityLabel(
+					edge.quantities.map((quantity) => quantity.label),
+					APP_CONFIG.multigraph.dataflow.labelMaxVisibleQuantities
+				)
+			])
+		)
+	);
 	const beaconIds = $derived(
 		beaconNodeIds(adjacencyGraph, { preferredNodeIds: severedBeaconPreference })
 	);
@@ -1195,12 +1212,22 @@
 						baseEdgeOpacity *
 						(revealWaveEdgeOpacityByEdgeId[edge.id] ?? 1) *
 						queryOpacity(queryEdgeState)}
+					{@const derivedQuantityLabel = quantityLabelByEdgeId.get(edge.id) ?? ''}
+					{@const showQuantityLabel =
+						derivedQuantityLabel !== '' &&
+						visibility.kind === 'visible' &&
+						shouldRevealQuantityLabel(edgeLengthPx, stageScale, {
+							minStageScale: APP_CONFIG.multigraph.dataflow.labelMinStageScale,
+							minOnScreenLengthPx: APP_CONFIG.multigraph.dataflow.labelMinOnScreenLengthPx
+						})}
 					<div
 						class="edge"
 						class:directed={edge.directed === true && visibility.kind === 'visible'}
 						class:boundary={visibility.kind === 'boundary'}
+						class:derived={isDerivedEdgeId(edge.id)}
 						class:query-spotlight={queryEdgeState?.role === 'spotlight'}
 						data-edge-id={edge.id}
+						data-edge-derived={isDerivedEdgeId(edge.id) ? 'true' : undefined}
 						data-query-role={queryEdgeState?.role}
 						data-source-node-id={edge.sourceNodeId}
 						data-target-node-id={edge.targetNodeId}
@@ -1251,7 +1278,17 @@
 								boundaryFadeRadiusPx
 							}
 						)}; color: ${edgeColor}; --edge-spotlight-color: ${queryEdgeState?.spotlightColor ?? 'transparent'}; --edge-arrow-length: ${EDGE_ARROW_LENGTH * arrowScale}px; --edge-arrow-half-height: ${EDGE_ARROW_HALF_HEIGHT * arrowScale}px; --edge-stroke-width: ${EDGE_STROKE_WIDTH * strokeScale}px; opacity: ${edgeOpacity};`}
-					></div>
+					>
+						{#if showQuantityLabel}
+							<!-- Counter-rotated so the text stays upright on an edge at any angle. -->
+							<span
+								class="edge-quantity-label"
+								data-edge-quantity-label={edge.id}
+								style={`transform: translate(-50%, -50%) rotate(${-edgeAngleDegrees(edgePoints.source, edgePoints.target)}deg);`}
+								>{derivedQuantityLabel}</span
+							>
+						{/if}
+					</div>
 				{/if}
 			{/each}
 			{#each layoutRuntime.revealWavePreviousOnlyEdgeVisibility as visibility (visibility.edge.id)}
@@ -1849,6 +1886,36 @@
 			#000 0 var(--edge-dash-length),
 			transparent var(--edge-dash-length) calc(var(--edge-dash-length) + var(--edge-dash-gap))
 		);
+	}
+
+	/*
+	 * Derived edges read as inferred rather than drawn: a fine dotted stroke,
+	 * tighter than the boundary dash so the two never look alike, and no tag
+	 * colour of their own since they carry no tags.
+	 */
+	.edge.derived::before {
+		--edge-dash-length: 2px;
+		--edge-dash-gap: 4px;
+
+		mask-image: repeating-linear-gradient(
+			to right,
+			#000 0 var(--edge-dash-length),
+			transparent var(--edge-dash-length) calc(var(--edge-dash-length) + var(--edge-dash-gap))
+		);
+	}
+
+	.edge-quantity-label {
+		position: absolute;
+		left: 50%;
+		top: 50%;
+		padding: 0 0.25em;
+		border-radius: 0.25em;
+		background: var(--color-surface, #fff);
+		color: currentColor;
+		font-size: 0.75rem;
+		font-style: italic;
+		line-height: 1.2;
+		white-space: nowrap;
 	}
 
 	.edge.directed::after {

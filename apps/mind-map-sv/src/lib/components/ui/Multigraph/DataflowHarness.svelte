@@ -6,23 +6,30 @@
 	 * Editing through the node sheet would exercise more of the app but would make
 	 * the assertion about the sheet rather than about the dataflow layer.
 	 */
+	import { untrack } from 'svelte';
 	import Multigraph from './Multigraph.svelte';
 	import type { MultigraphData } from '../types/multigraph';
+	import type { ViewState } from '$lib/migrations';
 
 	let {
 		baseGraph,
 		editNodeId,
 		equation,
-		dataflowInLayout = false
+		dataflowInLayout = false,
+		startWithEquation = false,
+		initialViewState
 	}: {
 		baseGraph: MultigraphData;
 		editNodeId: string;
 		/** Description applied to `editNodeId` when the equation is present. */
 		equation: string;
 		dataflowInLayout?: boolean;
+		startWithEquation?: boolean;
+		initialViewState?: ViewState;
 	} = $props();
 
-	let hasEquation = $state(false);
+	// Read once on purpose: the story sets the starting state, the buttons own it after.
+	let hasEquation = $state(untrack(() => startWithEquation));
 	let generation = $state(0);
 
 	const graph = $derived<MultigraphData>({
@@ -52,6 +59,7 @@
 			defaultPrimaryNodeId={baseGraph.nodes[0]?.id ?? ''}
 			layoutSettings={{ relaxIterations: 0 }}
 			{dataflowInLayout}
+			{initialViewState}
 		/>
 	</div>
 </div>

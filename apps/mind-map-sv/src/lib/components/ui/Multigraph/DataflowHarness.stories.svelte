@@ -149,3 +149,107 @@
 		expect(edgeIds.some((id) => id?.startsWith('dataflow:'))).toBe(false);
 	}}
 />
+
+<Story
+	name="DerivedEdgesAreDistinguishableFromAuthoredOnes"
+	args={{ baseGraph: CHAIN, editNodeId: 'c', equation: CONSUMES_G, startWithEquation: true }}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitFor(() => expect(derivedEdge(canvasElement)).toBeInTheDocument());
+
+		expect(derivedEdge(canvasElement)).toHaveAttribute('data-edge-derived', 'true');
+		expect(derivedEdge(canvasElement)).toHaveClass('derived');
+
+		// The authored edges alongside it carry neither.
+		for (const edge of Array.from(canvasElement.querySelectorAll('.edge'))) {
+			const element = edge as HTMLElement;
+			if (element.dataset.edgeId?.startsWith('dataflow:')) continue;
+			expect(element).not.toHaveClass('derived');
+			expect(element.dataset.edgeDerived).toBeUndefined();
+		}
+	}}
+/>
+
+<Story
+	name="QuantityLabelRevealsWhenZoomedIn"
+	args={{
+		baseGraph: CHAIN,
+		editNodeId: 'c',
+		equation: CONSUMES_G,
+		startWithEquation: true,
+		initialViewState: { panX: 0, panY: 0, scale: 1.4 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitFor(() => expect(derivedEdge(canvasElement)).toBeInTheDocument());
+		await waitFor(() =>
+			expect(
+				canvasElement.querySelector('[data-edge-quantity-label="dataflow:a->c"]')
+			).toBeInTheDocument()
+		);
+		expect(
+			canvasElement.querySelector('[data-edge-quantity-label="dataflow:a->c"]')
+		).toHaveTextContent('g');
+	}}
+/>
+
+<Story
+	name="QuantityLabelStaysHiddenWhenZoomedOut"
+	args={{
+		baseGraph: CHAIN,
+		editNodeId: 'c',
+		equation: CONSUMES_G,
+		startWithEquation: true,
+		initialViewState: { panX: 0, panY: 0, scale: 0.35 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitFor(() => expect(derivedEdge(canvasElement)).toBeInTheDocument());
+		// The arrow still reads at graph scale; the text would only be clutter.
+		expect(
+			canvasElement.querySelector('[data-edge-quantity-label="dataflow:a->c"]')
+		).not.toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="BundledQuantitiesShareOneLabelledEdge"
+	args={{
+		baseGraph: makeGraph({
+			nodes: [
+				{ id: 'a', title: 'Constants', description: '$$g = 9.8$$ and $$m = 5$$' },
+				{ id: 'b', title: 'Middle', description: 'No math here.' },
+				{ id: 'c', title: 'Weight', description: '' }
+			],
+			pinned: ['a'],
+			edges: [
+				['a', 'b'],
+				['b', 'c']
+			],
+			posByNodeId: {
+				a: { x: -260, y: 0 },
+				b: { x: 0, y: 0 },
+				c: { x: 260, y: 0 }
+			}
+		}),
+		editNodeId: 'c',
+		equation: '$$w = m g$$',
+		startWithEquation: true,
+		initialViewState: { panX: 0, panY: 0, scale: 1.4 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitFor(() => expect(derivedEdge(canvasElement)).toBeInTheDocument());
+
+		// Two quantities flow along the pair, but they read as one arrow.
+		const derivedEdges = Array.from(canvasElement.querySelectorAll('.edge')).filter((edge) =>
+			(edge as HTMLElement).dataset.edgeId?.startsWith('dataflow:')
+		);
+		expect(derivedEdges).toHaveLength(1);
+
+		await waitFor(() =>
+			expect(
+				canvasElement.querySelector('[data-edge-quantity-label="dataflow:a->c"]')
+			).toBeInTheDocument()
+		);
+		expect(
+			canvasElement.querySelector('[data-edge-quantity-label="dataflow:a->c"]')
+		).toHaveTextContent('g, m');
+	}}
+/>

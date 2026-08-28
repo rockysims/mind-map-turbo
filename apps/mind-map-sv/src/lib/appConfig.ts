@@ -86,6 +86,11 @@ export const APP_CONFIG = {
 			edgeOcclusionFadeWidthPx: 25, // width of the soft fade on each side of an occlusion
 			edgeOcclusionZoomScaleExponent: 0.4, // lower values make occlusion scale more gently with zoom
 			edgeOcclusionMinOpacity: 0.16 // minimum edge opacity where a node crosses over it
+		},
+		dataflow: {
+			labelMinStageScale: 0.8, // zoom below which quantity labels stay hidden
+			labelMinOnScreenLengthPx: 90, // shortest on-screen edge worth labelling
+			labelMaxVisibleQuantities: 3 // quantities named before collapsing to a count
 		}
 	}
 } as const;
