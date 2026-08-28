@@ -3937,3 +3937,52 @@
 		expect(lastChangedGraph(args).edges.map((edge) => edge.id)).toEqual(['e1']);
 	}}
 />
+
+<Story
+	name="DerivedEdgeDoesNotBlockAuthoringOverTheSamePair"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'n0', title: 'Gravity', description: '$$g = 9.8$$' },
+				{ id: 'n1', title: 'Weight', description: '$$w = m g$$' }
+			],
+			pinned: [0],
+			posByNodeId: {
+				n0: { x: -200, y: 0 },
+				n1: { x: 200, y: 0 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { relaxIterations: 0 },
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		// The pair already carries an inferred dataflow edge.
+		expect(canvasElement.querySelector('[data-edge-id="dataflow:n0->n1"]')).toBeInTheDocument();
+
+		const stage = getStage(canvasElement);
+		const sourceCircle = getCircle(canvasElement, 'n0');
+		const targetCircle = getCircle(canvasElement, 'n1');
+		const sourceCenter = getCenter(sourceCircle);
+		const targetCenter = getCenter(targetCircle);
+
+		await dispatchDoubleClickDrag(
+			sourceCircle,
+			sourceCenter.x,
+			sourceCenter.y,
+			stage,
+			targetCenter.x,
+			targetCenter.y
+		);
+		await sleep();
+
+		// Duplicate detection runs against authored data, so the derived edge must
+		// not be mistaken for an existing one.
+		expect(canvasElement.querySelector('.duplicate-edge-dialog-confirm')).not.toBeInTheDocument();
+
+		const persistedEdgeIds = lastChangedGraph(args).edges.map((edge) => edge.id);
+		expect(persistedEdgeIds).toHaveLength(1);
+		expect(persistedEdgeIds.some((id) => id.startsWith('dataflow:'))).toBe(false);
+	}}
+/>

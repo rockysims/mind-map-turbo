@@ -68,6 +68,16 @@ export interface LayoutRuntimeOptions {
 	/** Session-transient beacon hints (e.g. endpoints of a just-removed edge). */
 	getPreferredBeaconNodeIds: () => readonly string[];
 	applyGraph: (data: MultigraphData) => void;
+	/**
+	 * Adds edges that should influence hop distance and physics but must never be
+	 * persisted, currently the dataflow layer. Applied only where a graph is read
+	 * for topology; the value that flows back through `applyGraph` is always the
+	 * authored graph with merged positions, so composed edges cannot leak into
+	 * saved data.
+	 *
+	 * Defaults to identity, which leaves every existing behavior untouched.
+	 */
+	composeAdjacency?: (data: MultigraphData) => MultigraphData;
 	scheduler?: LayoutRuntimeScheduler;
 	/** Returns true while enter/exit animations are active; keeps the frame loop running. */
 	getHasActiveTransitions?: () => boolean;
@@ -369,25 +379,31 @@ export class LayoutRuntime {
 		}
 	}
 
+	#adjacency(graph: MultigraphData): MultigraphData {
+		return this.#options.composeAdjacency?.(graph) ?? graph;
+	}
+
 	#beaconIdsFor(graph: MultigraphData): Set<string> {
-		return beaconNodeIds(graph, {
+		return beaconNodeIds(this.#adjacency(graph), {
 			preferredNodeIds: this.#options.getPreferredBeaconNodeIds()
 		});
 	}
 
 	#effectiveHopsFor(graph: MultigraphData): Record<string, number> {
-		return withBeaconHops(hopsFromPinned(graph), this.#beaconIdsFor(graph));
+		const adjacency = this.#adjacency(graph);
+		return withBeaconHops(hopsFromPinned(adjacency), this.#beaconIdsFor(adjacency));
 	}
 
 	#visibleGraphFor(graph: MultigraphData): MultigraphData {
+		const adjacency = this.#adjacency(graph);
 		const visibleNodeIds = visibleNodeIdsForPinnedNeighborhood(
-			graph,
-			this.#effectiveHopsFor(graph),
+			adjacency,
+			this.#effectiveHopsFor(adjacency),
 			{
 				displayedLayers: this.#resolvedSettings().displayedLayers
 			}
 		);
-		return graphWithVisibleNodes(graph, visibleNodeIds);
+		return graphWithVisibleNodes(adjacency, visibleNodeIds);
 	}
 
 	get revealWaveProgress(): number {
@@ -530,28 +546,35 @@ export class LayoutRuntime {
 		nextGraph: MultigraphData
 	): ScaleChangeRevealState {
 		const settings = this.#resolvedSettings();
-		const previousHopsByNodeId = this.#effectiveHopsFor(currentGraph);
-		const nextHopsByNodeId = this.#effectiveHopsFor(nextGraph);
+		// The wave cross-fades what is drawn, so it reasons over composed edges.
+		const currentAdjacency = this.#adjacency(currentGraph);
+		const nextAdjacency = this.#adjacency(nextGraph);
+		const previousHopsByNodeId = this.#effectiveHopsFor(currentAdjacency);
+		const nextHopsByNodeId = this.#effectiveHopsFor(nextAdjacency);
 		const previousVisibleNodeIds = Array.from(
-			visibleNodeIdsForPinnedNeighborhood(currentGraph, previousHopsByNodeId, {
+			visibleNodeIdsForPinnedNeighborhood(currentAdjacency, previousHopsByNodeId, {
 				displayedLayers: settings.displayedLayers
 			})
 		);
 		const nextVisibleNodeIds = Array.from(
-			visibleNodeIdsForPinnedNeighborhood(nextGraph, nextHopsByNodeId, {
+			visibleNodeIdsForPinnedNeighborhood(nextAdjacency, nextHopsByNodeId, {
 				displayedLayers: settings.displayedLayers
 			})
 		);
 		const previousRenderableEdges = edgeVisibilityForPinnedNeighborhood(
-			currentGraph,
+			currentAdjacency,
 			previousHopsByNodeId,
 			{
 				displayedLayers: settings.displayedLayers
 			}
 		).filter((visibility): visibility is RenderableEdgeVisibility => visibility.kind !== 'hidden');
-		const nextRenderableEdges = edgeVisibilityForPinnedNeighborhood(nextGraph, nextHopsByNodeId, {
-			displayedLayers: settings.displayedLayers
-		}).filter((visibility): visibility is RenderableEdgeVisibility => visibility.kind !== 'hidden');
+		const nextRenderableEdges = edgeVisibilityForPinnedNeighborhood(
+			nextAdjacency,
+			nextHopsByNodeId,
+			{
+				displayedLayers: settings.displayedLayers
+			}
+		).filter((visibility): visibility is RenderableEdgeVisibility => visibility.kind !== 'hidden');
 		const nextRenderableEdgeIds = nextRenderableEdges.map((visibility) => visibility.edge.id);
 
 		return {

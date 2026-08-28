@@ -70,6 +70,7 @@
 		graphWithVisibleNodes,
 		visibleNodeIdsForPinnedNeighborhood
 	} from './lib/boundedVisibility.js';
+	import { composeEdgesForRender, createDataflowModel } from './lib/dataflowLayer.js';
 	import { LayoutRuntime } from './lib/layoutRuntime.svelte.js';
 	import { externalGraphSyncToken } from './lib/graphSync.js';
 	import type { EntryGestureDirection } from './lib/entryGestureGate.js';
@@ -183,7 +184,9 @@
 		edgeRenderOverrides,
 		exitingBuffer,
 		assetStore = null,
-		assetScope = ''
+		assetScope = '',
+		dataflowEnabled = true,
+		dataflowInLayout = false
 	}: {
 		multigraphData: MultigraphData;
 		graphGeneration?: number;
@@ -201,6 +204,14 @@
 		exitingBuffer?: ExitingBuffer;
 		assetStore?: GraphAssetStore | null;
 		assetScope?: string;
+		/** Draw dataflow edges inferred from the math in node descriptions. */
+		dataflowEnabled?: boolean;
+		/**
+		 * Let derived edges influence hop distance, node scaling, and which nodes
+		 * are visible. Off by default: adjacency drives all three, so turning this
+		 * on rearranges any graph the moment a description contains an equation.
+		 */
+		dataflowInLayout?: boolean;
 	} = $props();
 
 	let graph = $state<MultigraphData>({
@@ -281,8 +292,18 @@
 	/** Render-only buffer for elements removed by the user that are still animating out. */
 	let internalExitingBuffer = $state<ExitingBuffer>(EMPTY_EXITING_BUFFER);
 
+	/**
+	 * Memoizes symbol extraction per node, so it must outlive a render rather
+	 * than being rebuilt inside the derived chain below.
+	 */
+	const dataflowModel = createDataflowModel();
+
 	const layoutRuntime: LayoutRuntime = new LayoutRuntime({
 		getGraph: () => graph,
+		composeAdjacency: (data) =>
+			dataflowInLayout
+				? composeEdgesForRender(data, dataflowModel(data, dataflowEnabled).edges)
+				: data,
 		getLayoutSettings: () => layoutSettings,
 		getActiveDragNodeId: () => activeDragNodeId,
 		getPreferredBeaconNodeIds: () => severedBeaconPreference,
@@ -309,16 +330,31 @@
 	});
 
 	const resolvedLayoutSettings = $derived(withDefaultLayoutSettings(layoutSettings));
-	const beaconIds = $derived(beaconNodeIds(graph, { preferredNodeIds: severedBeaconPreference }));
-	const hopsByNodeId = $derived(withBeaconHops(hopsFromPinned(graph), beaconIds));
+	const dataflow = $derived(dataflowModel(graph, dataflowEnabled));
+	/**
+	 * What the renderer draws. Always composed, so dataflow edges appear whether
+	 * or not they are allowed to influence layout.
+	 */
+	const renderGraph = $derived(composeEdgesForRender(graph, dataflow.edges));
+	/**
+	 * What determines hop distance, scaling, and bounded visibility. Authored-only
+	 * unless the user opts in — this single choice is what confines the blast
+	 * radius of the dataflow layer to drawing.
+	 */
+	const adjacencyGraph = $derived(dataflowInLayout ? renderGraph : graph);
+	const beaconIds = $derived(
+		beaconNodeIds(adjacencyGraph, { preferredNodeIds: severedBeaconPreference })
+	);
+	const hopsByNodeId = $derived(withBeaconHops(hopsFromPinned(adjacencyGraph), beaconIds));
 	const visibleNodeIds = $derived(
-		visibleNodeIdsForPinnedNeighborhood(graph, hopsByNodeId, {
+		visibleNodeIdsForPinnedNeighborhood(adjacencyGraph, hopsByNodeId, {
 			displayedLayers: resolvedLayoutSettings.displayedLayers
 		})
 	);
-	const visibleGraph = $derived(graphWithVisibleNodes(graph, visibleNodeIds));
+	const visibleGraph = $derived(graphWithVisibleNodes(adjacencyGraph, visibleNodeIds));
+	/** Reads the render graph so derived edges get visibility, trimming, and fade. */
 	const edgeVisibility = $derived(
-		edgeVisibilityForPinnedNeighborhood(graph, hopsByNodeId, {
+		edgeVisibilityForPinnedNeighborhood(renderGraph, hopsByNodeId, {
 			displayedLayers: resolvedLayoutSettings.displayedLayers
 		})
 	);
