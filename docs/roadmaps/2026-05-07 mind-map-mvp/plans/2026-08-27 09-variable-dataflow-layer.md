@@ -3,7 +3,7 @@
 **Created:** 2026-08-27
 **Author:** Cursor agent
 **Milestone:** [milestones/09-variable-dataflow-layer.md](../milestones/09-variable-dataflow-layer.md)
-**Status:** draft — three decisions still open, see `ASK USER` below
+**Status:** executing — all open questions resolved 2026-08-27
 **Total estimated effort:** L
 
 ## Summary
@@ -14,8 +14,9 @@ existing render pipeline without disturbing authored edges.
 
 ## Open questions resolved
 
-Carried over from the milestone. Three are genuinely the user's call and are
-marked `ASK USER`; the rest are resolved here.
+Carried over from the milestone. The three product decisions were made by the
+user on 2026-08-27 and are marked as such; the rest are engineering calls
+resolved here.
 
 - **Escape hatches inside math.** **Ship the text-span rule, the constant
   stoplist, and the per-node opt-out. No graph-level ignore list at launch.**
@@ -31,14 +32,14 @@ marked `ASK USER`; the rest are resolved here.
   references to `m` and `c`. This is what keeps the feature quiet on graphs that
   merely happen to contain math.
 
-- **ASK USER — how aggressively to surface a symbol defined by two nodes.**
-  Recommendation: mark the competing nodes and record the conflict for the
-  milestone 10 panel, but do not interrupt with a toast or modal, and still draw
-  the dataflow edges. Collisions on a large graph will be common and often
+- **How aggressively to surface a symbol defined by two nodes.** _(User
+  decision.)_ **Mark the competing nodes and record the conflict for the
+  milestone 10 panel; do not interrupt with a toast or modal, and still draw the
+  dataflow edges.** Collisions on a large graph will be common and often
   intentional, so a blocking treatment would train people to ignore it.
 
-- **ASK USER — whether derived edges feed layout and bounded visibility.**
-  Recommendation: **off by default**, exposed as a toggle. Adjacency currently
+- **Whether derived edges feed layout and bounded visibility.** _(User
+  decision.)_ **Off by default**, exposed as a toggle. Adjacency currently
   drives hop distance, node scaling, and which nodes are visible at all, so
   including derived edges would silently rearrange every existing graph the
   moment a description contains an equation. Off by default keeps this milestone
@@ -79,9 +80,9 @@ marked `ASK USER`; the rest are resolved here.
   render time, which needs no extra structure. Bundling is also what keeps a pair
   carrying five variables from drawing as five near-identical lines.
 
-- **ASK USER — where defined quantities sit on a compact node.**
-  Recommendation: **a chip row in the circular segment below the inscribed
-  square, hidden below a screen-size threshold.** The exploration found the node
+- **Where defined quantities sit on a compact node.** _(User decision.)_ **A
+  chip row in the circular segment below the inscribed square, hidden below a
+  screen-size threshold.** The exploration found the node
   is a 400 px circle whose inscribed square (side `d/√2`) is entirely spent on
   the auto-fit title, and whose border ring is already carrying three meanings —
   tag colors as a conic gradient, pinned as border weight plus a white halo, and
