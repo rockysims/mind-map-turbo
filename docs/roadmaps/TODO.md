@@ -96,3 +96,27 @@ folded into the 08/09/10 math and dataflow milestones:
   - `10-dataflow-tracing-and-navigation.md`: tracing a quantity across the graph, upstream/downstream chain walking, jump-to-definition, the quantities panel, and query integration.
 
 - Consider allowing deep zoom to show iframe (with url configured by node) so third party websites can be accessed smoothly via deep zoom
+
+TODO: make long press work too even if its not a mobile device
+TODO: allow nodes from disconnected graph components to be as close as r1+r2 where r1 and r2 are the radii of the nodes. Currently they are forced relatively far apart.
+
+- Scrape from website after (establishing the pattern)
+  Maybe we need a built in AI assistant that can be given a url to scrape from?
+  Or a document?
+  Need to be able to chat with it a little to tell it what you want and modify the resulting graph until its right
+
+- Add container nodes (basically a group of nodes that sits within a cirlce)
+  need to be able to attach to container node
+  container node should be a full fledged node in terms of being taggable, having edges, etc.
+- Add scale factor to nodes (on top of existing scaling)
+
+- Input notes (repeatedly over time so mind map grows/changes as more input notes/data is added) and visualize the notes in a mind map (via AI) and also have the AI notice and add connections. Should be able to start with a template graph where the super structure (non placeholder nodes) is set and there are specific placeholder nodes for the AI to replace. For example, there might be a structural node for the people involved (with a placeholder node to indicate where/how to add more people and how to shape that info) and another structural node for goals (also with placeholder to establish the pattern/shape).
+
+Later:
+
+- Show image as node background with title over it
+- Mark done (checkbox?) feature (maybe via special !task tag?)
+- Allow # prefix even within edit for consistency? currently seems to fail to add tag
+- Need an easier way to add/remove tags (at least for nodes)?
+- Import another graph into current graph (as a disconnected beacon node)
+  Maybe need a way to merge nodes?
