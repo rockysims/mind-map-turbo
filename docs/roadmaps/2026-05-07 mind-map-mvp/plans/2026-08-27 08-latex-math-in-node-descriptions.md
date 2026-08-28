@@ -56,13 +56,18 @@ will read MathML from.
   LaTeX source, bounded at 500 entries.** Rendering is driven from a `$derived`
   on the description, so it only runs when text changes, and identical
   expressions repeated across nodes cost nothing after the first.
-- **Size budget.** **Fail T07 if the shell exceeds 600 KB.** Measured baseline
-  is 278,791 bytes and the spike measured the real addition at 226,790 bytes
-  (~221 KB) for a 505,581-byte shell, leaving ~106 KB of headroom. The addition
-  exceeds the ~185 KB predicted from published file sizes because Vite bundles
-  and minifies `temml.mjs` itself rather than consuming Temml's pre-minified
-  `temml.min.js`. The budget still holds, and it keeps a silent regression to
-  KaTeX-with-all-fonts scale from slipping through.
+- **Size budget.** **Report the shell's size change in every PR that rebuilds
+  it; do not fail on a threshold.** Measured baseline is 278,791 bytes and the
+  spike measured the real addition at 226,790 bytes (~221 KB) for a
+  505,581-byte shell. The addition exceeds the ~185 KB predicted from published
+  file sizes because Vite bundles and minifies `temml.mjs` itself rather than
+  consuming Temml's pre-minified `temml.min.js`. An earlier draft of this plan
+  set a hard 600 KB gate, which was dropped once milestones 09 and 10 came into
+  view: all three inline into the same tracked file, a fixed ceiling would have
+  left them roughly 106 KB between them, and the gate would have failed at the
+  very end of milestone 10 rather than where the cost was incurred. Visibility
+  on each change is what actually prevents a silent regression to
+  KaTeX-with-all-fonts scale.
 
 ## Out of scope (for this plan)
 
@@ -310,8 +315,9 @@ description contains math renders a `math` element when opened from disk.
   sources.
 - The offline e2e test asserts a `math` element renders from `file://`, within
   Playwright's configured 30 second timeout.
-- Final `build/index.html` is under the 600 KB budget; record the measured size
-  in this plan's Notes.
+- The PR body states the shell's before and after byte size and the delta, and
+  the measured size is recorded in this plan's Notes. There is no pass/fail
+  threshold — the point is that the cost is visible at the moment it is paid.
 - Full Definition of Done from `core.mdc`: lint, check, and
   `test:unit -- --run` all pass.
 
@@ -346,8 +352,9 @@ has all its `Depends on` items already merged to `main`.
   270 KB more in the shell. Do not scatter Temml imports across components, or
   this escape hatch disappears.
 - **Shell growth is permanent git history.** Every build rewrites a tracked
-  file, so a bad size decision compounds. The 600 KB gate in T07 exists to catch
-  this before it is committed repeatedly.
+  file, so a bad size decision compounds. Mitigated by reporting the size delta
+  in T07's PR and by rebuilding the shell once at the end of the milestone
+  rather than once per task.
 - **First `{@html}` in the codebase.** The spike found no escaping gap, but if
   T03's safety spec finds one, switch that module to render into a detached
   element and hand `MathText` a cloned node instead of a string, which removes
@@ -399,7 +406,7 @@ entries when you add them.
   post-T07 sizes here.
 - 2026-08-27: Throwaway spike run to de-risk T01, then fully reverted. Results:
   shell went 278,791 B to 505,581 B, so **+226,790 B (~221 KB)** against a
-  600 KB budget, leaving ~106 KB headroom. `build/` contained only `index.html`;
+  then-current 600 KB budget. `build/` contained only `index.html`;
   the file held exactly one base64 asset, `data:font/woff2`, and no residual
   `Temml.woff2` reference. Opened from `file://` in Chromium: four `<math>`
   elements rendered, `document.fonts.check('16px Temml')` was true, and there
