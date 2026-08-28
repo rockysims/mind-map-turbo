@@ -225,6 +225,27 @@
 		return event;
 	}
 
+	/**
+	 * Right-click whatever is actually topmost at a point — with the action menu
+	 * open that is its full-viewport overlay, not the node underneath.
+	 */
+	function dispatchContextMenuAt(clientX: number, clientY: number): MouseEvent {
+		const target = document.elementFromPoint(clientX, clientY);
+		if (!target) throw new Error(`No element at (${clientX}, ${clientY})`);
+		return dispatchContextMenu(target as HTMLElement, clientX, clientY);
+	}
+
+	function dispatchKeydown(target: Element | null, key: string): KeyboardEvent {
+		if (!target) throw new Error(`No target to receive ${key}`);
+		const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+		target.dispatchEvent(event);
+		return event;
+	}
+
+	function activeElementText(): string {
+		return document.activeElement?.textContent?.trim() ?? '';
+	}
+
 	function dispatchWheel(target: HTMLElement, deltaY: number, clientX?: number, clientY?: number) {
 		const center = getCenter(target);
 		target.dispatchEvent(
@@ -1659,6 +1680,80 @@
 />
 
 <Story
+	name="UserDeletesNodeOrphaningAComponent"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 5,
+			pinned: [0],
+			// Deleting n1 cuts n2..n4 off from the only pinned node, exactly as a
+			// severing edge removal does, so the orphaned side must fade with the
+			// reveal wave instead of popping. n4 sits outside the default three
+			// displayed layers; it is here so edge e3 has two newly hidden ends.
+			edges: [
+				[0, 1],
+				[1, 2],
+				[2, 3],
+				[3, 4]
+			],
+			posByNodeId: {
+				n0: { x: -400, y: 0 },
+				n1: { x: -200, y: 0 },
+				n2: { x: 0, y: 0 },
+				n3: { x: 200, y: 0 },
+				n4: { x: 400, y: 0 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: {
+			relaxIterations: 0,
+			enterExitDurationMs: 120,
+			scaleAnimationDurationMs: 200,
+			postScaleChangeSettleMaxFrames: 0
+		},
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const circle = getCircle(canvasElement, 'n1');
+		const center = getCenter(circle);
+
+		await dispatchLongPress(circle, center.x, center.y);
+		within(canvasElement).getByRole('menuitem', { name: 'Delete' }).click();
+		await waitForFrames(2);
+
+		expect(lastChangedGraph(args).nodes.map((node) => node.id)).toEqual(['n0', 'n2', 'n3', 'n4']);
+
+		// n3 drops out of the visible set and fades with the wave, as does the edge
+		// between the two newly hidden nodes.
+		expect(getNodeWrapper(canvasElement, 'n3').dataset.nodeRevealBuffer).toBe('true');
+		const wavingEdges = canvasElement.querySelectorAll('[data-edge-id="e3"]');
+		expect(wavingEdges).toHaveLength(1);
+		expect((wavingEdges[0] as HTMLElement).dataset.edgeRevealBuffer).toBe('true');
+
+		// The deleted node keeps the exiting-buffer fade (the wave has no geometry
+		// for it), and is drawn exactly once.
+		const deletedNodes = canvasElement.querySelectorAll('[data-node-id="n1"].node-wrapper');
+		expect(deletedNodes).toHaveLength(1);
+		expect((deletedNodes[0] as HTMLElement).dataset.nodeExiting).toBe('true');
+		expect((deletedNodes[0] as HTMLElement).dataset.nodeRevealBuffer).toBeUndefined();
+
+		// After the wave, only the pinned node and the orphaned component's beacon
+		// remain on screen.
+		await waitFor(() => {
+			expect(
+				canvasElement.querySelector('[data-node-id="n3"].node-wrapper')
+			).not.toBeInTheDocument();
+		});
+		expect(canvasElement.querySelector('[data-node-id="n1"].node-wrapper')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-edge-id="e3"]')).not.toBeInTheDocument();
+		expect(getNodeWrapper(canvasElement, 'n2')).toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-node-id="n2"] .node')).not.toHaveAttribute(
+			'data-pinned'
+		);
+	}}
+/>
+
+<Story
 	name="UserLongPressesTinyDistantNode"
 	args={{
 		multigraphData: makeGraph({
@@ -1710,6 +1805,171 @@
 		expect(canvas.getByRole('menuitem', { name: 'Focus' })).toBeInTheDocument();
 		expect(canvas.getByRole('menuitem', { name: 'Edit' })).toBeInTheDocument();
 		expect(canvas.getByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="UserGetsFocusOnFirstActionMenuItem"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1 }),
+		defaultPrimaryNodeId: 'n0'
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+
+		dispatchContextMenu(circle, center.x, center.y);
+		await tick();
+
+		const firstItem = within(canvasElement).getByRole('menuitem', { name: 'Add node/edge' });
+		expect(document.activeElement).toBe(firstItem);
+		// Roving tabindex: only the active item is a tab stop.
+		expect(firstItem).toHaveAttribute('tabindex', '0');
+		expect(within(canvasElement).getByRole('menuitem', { name: 'Delete' })).toHaveAttribute(
+			'tabindex',
+			'-1'
+		);
+	}}
+/>
+
+<Story
+	name="UserClosesActionMenuWithEscape"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1 }),
+		defaultPrimaryNodeId: 'n0'
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+
+		dispatchContextMenu(circle, center.x, center.y);
+		await tick();
+		expect(within(canvasElement).getByRole('menu')).toBeInTheDocument();
+
+		// Dispatched on whatever has focus, which is why the menu must have taken it.
+		dispatchKeydown(document.activeElement, 'Escape');
+		await tick();
+
+		expect(within(canvasElement).queryByRole('menu')).not.toBeInTheDocument();
+		expect(within(canvasElement).queryByRole('menuitem')).not.toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="UserMovesActionMenuFocusWithArrowKeys"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1 }),
+		defaultPrimaryNodeId: 'n0'
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+
+		dispatchContextMenu(circle, center.x, center.y);
+		await tick();
+		expect(activeElementText()).toBe('Add node/edge');
+
+		dispatchKeydown(document.activeElement, 'ArrowRight');
+		expect(activeElementText()).toBe('Pin');
+		dispatchKeydown(document.activeElement, 'ArrowDown');
+		expect(activeElementText()).toBe('Focus');
+		dispatchKeydown(document.activeElement, 'ArrowLeft');
+		expect(activeElementText()).toBe('Pin');
+		dispatchKeydown(document.activeElement, 'ArrowUp');
+		expect(activeElementText()).toBe('Add node/edge');
+
+		// Wraps backwards off the first item onto the last, and forwards back round.
+		dispatchKeydown(document.activeElement, 'ArrowLeft');
+		expect(activeElementText()).toBe('Delete');
+		dispatchKeydown(document.activeElement, 'ArrowRight');
+		expect(activeElementText()).toBe('Add node/edge');
+
+		dispatchKeydown(document.activeElement, 'End');
+		expect(activeElementText()).toBe('Delete');
+		dispatchKeydown(document.activeElement, 'Home');
+		expect(activeElementText()).toBe('Add node/edge');
+
+		await tick();
+		expect(within(canvasElement).getByRole('menuitem', { name: 'Delete' })).toHaveAttribute(
+			'tabindex',
+			'-1'
+		);
+	}}
+/>
+
+<Story
+	name="UserRestoresFocusWhenActionMenuCloses"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1 }),
+		defaultPrimaryNodeId: 'n0'
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const toolbarButton = within(canvasElement).getByRole('button', { name: 'Tag colors' });
+		toolbarButton.focus();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+
+		dispatchContextMenu(circle, center.x, center.y);
+		await tick();
+		expect(document.activeElement).not.toBe(toolbarButton);
+
+		dispatchKeydown(document.activeElement, 'Escape');
+		await tick();
+
+		expect(document.activeElement).toBe(toolbarButton);
+	}}
+/>
+
+<Story
+	name="UserRightClicksElsewhereWhileActionMenuIsOpen"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 2,
+			pinned: [0, 1],
+			edges: [[0, 1]],
+			// Stacked vertically so n0's pill (which floats above n0) never covers n1.
+			posByNodeId: {
+				n0: { x: 0, y: 140 },
+				n1: { x: 0, y: -140 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const stageRect = stage.getBoundingClientRect();
+		const sourceCenter = getCenter(getCircle(canvasElement, 'n0'));
+		const targetCenter = getCenter(getCircle(canvasElement, 'n1'));
+
+		dispatchContextMenu(getCircle(canvasElement, 'n0'), sourceCenter.x, sourceCenter.y);
+		await tick();
+		expect(within(canvasElement).getByRole('menu')).toHaveAttribute(
+			'aria-label',
+			'Actions for Node 0'
+		);
+
+		// The menu overlay swallows this right-click: it must not leak the native
+		// menu, and must not leave the menu stranded on n0 either.
+		const overNode = dispatchContextMenuAt(targetCenter.x, targetCenter.y);
+		await tick();
+		expect(overNode.defaultPrevented).toBe(true);
+		expect(within(canvasElement).getByRole('menu')).toHaveAttribute(
+			'aria-label',
+			'Actions for Node 1'
+		);
+		expect(activeElementText()).toBe('Add node/edge');
+
+		// Right-clicking empty background closes instead of re-targeting.
+		const overBackground = dispatchContextMenuAt(stageRect.right - 8, stageRect.bottom - 8);
+		await tick();
+		expect(overBackground.defaultPrevented).toBe(true);
+		expect(within(canvasElement).queryByRole('menu')).not.toBeInTheDocument();
 	}}
 />
 
@@ -1827,6 +2087,111 @@
 		expect(changedGraph.nodes).toHaveLength(3);
 		expect(changedGraph.edges).toHaveLength(3);
 		expect(changedGraph.edges[2]).toMatchObject({ sourceNodeId: 'n0', targetNodeId: 'n2' });
+	}}
+/>
+
+<Story
+	name="UserClicksChromeWhileMenuGestureArmed"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1, pinned: [0] }),
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: { panX: 0, panY: 0, scale: 0.5 },
+		layoutSettings: { enterExitDurationMs: 0, relaxIterations: 1 },
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const stageRect = stage.getBoundingClientRect();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+		const bgX = stageRect.right - 20;
+		const bgY = stageRect.top + stageRect.height / 2;
+
+		dispatchContextMenu(circle, center.x, center.y);
+		await sleep();
+		within(canvasElement).getByRole('menuitem', { name: 'Add node/edge' }).click();
+		await sleep();
+		dispatchPointer(stage, 'pointermove', bgX, bgY);
+		await sleep();
+		expect(canvasElement.querySelector('[data-creation-preview-node]')).toBeInTheDocument();
+
+		// Pressing app chrome outside the stage disarms the gesture and drops the preview.
+		const toolbarButton = canvasElement.querySelector('.tag-color-button') as HTMLElement;
+		const toolbarCenter = getCenter(toolbarButton);
+		dispatchPointer(toolbarButton, 'pointerdown', toolbarCenter.x, toolbarCenter.y);
+		dispatchPointer(toolbarButton, 'pointerup', toolbarCenter.x, toolbarCenter.y);
+		toolbarButton.click();
+		await sleep();
+		await waitForLayout();
+		expect(canvasElement.querySelector('[data-creation-preview-node]')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-creation-preview-edge]')).not.toBeInTheDocument();
+
+		// The next canvas click pans instead of silently creating a node.
+		dispatchPointer(stage, 'pointerdown', bgX, bgY);
+		dispatchPointer(stage, 'pointerup', bgX, bgY);
+		await sleep();
+		expect(canvasElement.querySelector('[data-node-id="n1"]')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('.title-input')).not.toBeInTheDocument();
+		const changeSpy = args.onMultigraphChange as ChangeSpy | undefined;
+		expect(changeSpy?.mock.calls).toHaveLength(0);
+	}}
+/>
+
+<Story
+	name="UserSeesNoEdgeSnapOnCreationHandoff"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1, pinned: [0] }),
+		defaultPrimaryNodeId: 'n0',
+		// Zoomed out far enough that the drop point clears both node radii, so the
+		// trimmed edge has real length to compare.
+		initialViewState: { panX: 0, panY: 0, scale: 0.25 },
+		layoutSettings: { enterExitDurationMs: 0, relaxIterations: 1 },
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const stageRect = stage.getBoundingClientRect();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+		const bgX = stageRect.right - 20;
+		const bgY = stageRect.top + stageRect.height / 2;
+
+		dispatchContextMenu(circle, center.x, center.y);
+		await sleep();
+		within(canvasElement).getByRole('menuitem', { name: 'Add node/edge' }).click();
+		await sleep();
+		dispatchPointer(stage, 'pointermove', bgX, bgY);
+		await sleep();
+
+		const previewEdge = canvasElement.querySelector(
+			'[data-creation-preview-edge]'
+		) as HTMLElement | null;
+		expect(previewEdge).toBeInTheDocument();
+		const previewEdgeWidth = Number.parseFloat(previewEdge!.style.width);
+		const previewNode = canvasElement.querySelector(
+			'[data-creation-preview-node]'
+		) as HTMLElement | null;
+		const centerToCenter = distanceBetween(nodePosition(canvasElement, 'n0'), {
+			x: Number(previewNode!.dataset.x),
+			y: Number(previewNode!.dataset.y)
+		});
+		// The preview edge is trimmed to both node borders, not drawn center to center.
+		expect(previewEdgeWidth).toBeCloseTo(centerToCenter - 2 * NODE_RADIUS, 1);
+
+		dispatchPointer(stage, 'pointerdown', bgX, bgY);
+		dispatchPointer(stage, 'pointerup', bgX, bgY);
+		await sleep();
+		await waitForLayout();
+
+		const realEdge = canvasElement.querySelector(
+			'[data-source-node-id="n0"][data-target-node-id="n1"]'
+		) as HTMLElement | null;
+		expect(realEdge).toBeInTheDocument();
+		// Handoff happens at the preview's settled scale, so the committed edge has
+		// the same geometry: no visible snap.
+		expect(Number.parseFloat(realEdge!.style.width)).toBeCloseTo(previewEdgeWidth, 1);
 	}}
 />
 

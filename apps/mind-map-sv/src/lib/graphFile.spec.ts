@@ -19,7 +19,9 @@ const NEUTRAL = NEUTRAL_VIEW_STATE;
 
 function makeDoc(overrides: Partial<GraphFileDocument> = {}): GraphFileDocument {
 	return {
-		data: makeGraph({ nodeCount: 2, edges: [[0, 1]] }),
+		// Pinned so round-trip assertions compare like with like: loading a graph
+		// with zero pins seeds a pin per component (see withSeededComponentPins).
+		data: makeGraph({ nodeCount: 2, edges: [[0, 1]], pinned: [0] }),
 		viewState: { panX: 100, panY: -50, scale: 1.5 },
 		...overrides
 	};

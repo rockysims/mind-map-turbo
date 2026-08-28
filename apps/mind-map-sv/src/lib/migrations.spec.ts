@@ -26,12 +26,13 @@ describe('persisted graph migrations', () => {
 		};
 
 		expect(unwrapPersistedGraph({ schemaVersion: 1, data: graph })).toEqual({
-			nodes: [{ ...graph.nodes[0], tags: [], content: [] }],
+			// Pre-v5 files carry no pins, so load-time seeding pins the component hub.
+			nodes: [{ ...graph.nodes[0], tags: [], content: [], pinned: true, lastPinnedSeq: 1 }],
 			edges: [],
 			posByNodeId: graph.posByNodeId,
 			tagColorConfig: { nodeTags: {}, edgeTags: {} },
 			assets: {},
-			pinSequence: 0
+			pinSequence: 1
 		});
 	});
 
@@ -71,7 +72,12 @@ describe('persisted graph migrations', () => {
 		};
 
 		expect(unwrapPersistedGraph({ schemaVersion: 2, data: graph })).toEqual({
-			nodes: graph.nodes.map((node) => ({ ...node, content: [] })),
+			nodes: graph.nodes.map((node) => ({
+				...node,
+				content: [],
+				pinned: true,
+				lastPinnedSeq: 1
+			})),
 			edges: [
 				{
 					id: 'e0',
@@ -84,7 +90,7 @@ describe('persisted graph migrations', () => {
 			posByNodeId: graph.posByNodeId,
 			tagColorConfig: { nodeTags: {}, edgeTags: {} },
 			assets: {},
-			pinSequence: 0
+			pinSequence: 1
 		});
 	});
 
@@ -130,9 +136,71 @@ describe('persisted graph migrations', () => {
 	});
 
 	it('parses serialized version 1 payloads', () => {
-		const graph = makeGraph({ nodeCount: 1 });
+		const graph = makeGraph({ nodeCount: 1, pinned: [0] });
 
 		expect(parsePersistedGraph(JSON.stringify(wrapPersistedGraph(graph)))).toEqual(graph);
+	});
+
+	it('pins each pinless component hub when a loaded graph has no pins at all', () => {
+		// n1 is the hub of the first component (degree 2); n3/n4 tie at degree 1,
+		// so the lowest id wins; n5 is isolated and is its own component.
+		const graph = makeGraph({
+			nodeCount: 6,
+			edges: [
+				[0, 1],
+				[1, 2],
+				[3, 4]
+			]
+		});
+
+		const loaded = unwrapPersistedGraph({ schemaVersion: 4, data: graph });
+
+		expect(loaded.nodes.filter((node) => node.pinned).map((node) => node.id)).toEqual([
+			'n1',
+			'n3',
+			'n5'
+		]);
+		expect(loaded.pinSequence).toBe(3);
+	});
+
+	it('leaves a loaded graph untouched when any node is already pinned', () => {
+		const graph = makeGraph({
+			nodeCount: 4,
+			pinned: [0],
+			edges: [
+				[0, 1],
+				[2, 3]
+			],
+			pinHistory: { 0: 1 }
+		});
+
+		const loaded = unwrapPersistedGraph({
+			schemaVersion: CURRENT_SCHEMA_VERSION,
+			data: { ...graph, pinSequence: 1 }
+		});
+
+		expect(loaded.nodes.filter((node) => node.pinned).map((node) => node.id)).toEqual(['n0']);
+		expect(loaded.pinSequence).toBe(1);
+	});
+
+	it('loads a graph containing a self-loop written by another program', () => {
+		// Self-loops cannot be created in the UI, but externally written JSON may
+		// contain them; loading must tolerate (not reject) them.
+		const graph = makeGraph({
+			nodeCount: 2,
+			pinned: [0],
+			edges: [
+				[0, 1],
+				[1, 1]
+			]
+		});
+
+		const loaded = unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data: graph });
+
+		expect(loaded.edges.map((edge) => [edge.sourceNodeId, edge.targetNodeId])).toEqual([
+			['n0', 'n1'],
+			['n1', 'n1']
+		]);
 	});
 
 	it('rejects malformed graph payloads with a typed error', () => {

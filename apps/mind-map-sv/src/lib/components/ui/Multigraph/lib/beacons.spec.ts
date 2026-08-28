@@ -108,6 +108,36 @@ describe('beaconNodeIds', () => {
 		expect(beaconNodeIds(pair)).toEqual(new Set(['n0']));
 	});
 
+	it('makes an edge-less unpinned node its own beacon', () => {
+		// Intended behaviour, not an accident: an isolated node is its own
+		// component, so it always elects itself and is always visible. Nodes
+		// never silently disappear just because nothing links to them.
+		const graph = makeGraph({ nodeCount: 3, edges: [[0, 1]], pinned: [0] });
+
+		expect(beaconNodeIds(graph)).toEqual(new Set(['n2']));
+	});
+
+	it('counts a self-loop as one degree, so it can decide the election', () => {
+		// Self-loops cannot be created through the UI but can arrive in JSON
+		// written by other programs, so selection must stay well-defined.
+		// buildAdjacency lists the node as its own neighbor, so a self-loop adds
+		// exactly 1 to the distinct-neighbor degree.
+		const selfLoop = makeGraph({
+			nodeCount: 2,
+			edges: [
+				[0, 1],
+				[1, 1]
+			]
+		});
+		// n1: {n0, n1} = degree 2, n0: {n1} = degree 1 (without the self-loop the
+		// degrees would tie and lowest-id n0 would win).
+		expect(beaconNodeIds(selfLoop)).toEqual(new Set(['n1']));
+
+		// A lone node with only a self-loop is still its own component/beacon.
+		const lonely = makeGraph({ nodeCount: 1, edges: [[0, 0]] });
+		expect(beaconNodeIds(lonely)).toEqual(new Set(['n0']));
+	});
+
 	it('is idempotent when re-applied to the visible subgraph', () => {
 		const graph = makeGraph({
 			nodeCount: 6,
@@ -130,6 +160,16 @@ describe('beaconNodeIds', () => {
 
 	it('handles an empty graph', () => {
 		expect(beaconNodeIds(makeGraph())).toEqual(new Set());
+	});
+
+	it('reuses memoized results only while nodes and edges are unchanged', () => {
+		const graph = makeGraph({ nodeCount: 2, edges: [[0, 1]] });
+
+		expect(beaconNodeIds(graph)).toBe(beaconNodeIds(graph));
+
+		// Mutations rebuild the nodes array, so the memo cannot go stale.
+		const pinnedGraph = { ...graph, nodes: graph.nodes.map((node) => ({ ...node, pinned: true })) };
+		expect(beaconNodeIds(pinnedGraph)).toEqual(new Set());
 	});
 });
 

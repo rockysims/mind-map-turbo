@@ -295,6 +295,23 @@
 		return () => window.removeEventListener('keydown', onKeyDown);
 	});
 
+	/**
+	 * A menu-armed session holds no button, so a press on app chrome (toolbar,
+	 * panels, dialogs) never reaches the stage. Without this the session would
+	 * stay armed: the preview stays painted, panning is dead, and the next
+	 * canvas click silently creates a node.
+	 */
+	$effect(() => {
+		if (typeof window === 'undefined' || creationSession?.via !== 'menu') return;
+		const onWindowPointerDown = (e: PointerEvent) => {
+			const target = e.target;
+			if (stageRef && target instanceof Node && stageRef.contains(target)) return;
+			cancelCreationSession();
+		};
+		window.addEventListener('pointerdown', onWindowPointerDown, true);
+		return () => window.removeEventListener('pointerdown', onWindowPointerDown, true);
+	});
+
 	function cancelCreationSession() {
 		const session = creationSession;
 		if (!session) return;
@@ -632,6 +649,11 @@
 	}
 
 	function onPointerUpStage(e: PointerEvent) {
+		// A mouse reuses one pointerId for every button, so a non-primary release
+		// must neither complete/cancel a creation session nor tear down the pan or
+		// drag the primary button is still holding. Touch/pen report button 0, and
+		// pointercancel (button -1) always has to run its teardown.
+		if (e.type !== 'pointercancel' && e.button > 0) return;
 		activePointers.delete(e.pointerId);
 		const pinchWasActive = pinchStart !== null;
 		if (activePointers.size < 2) pinchStart = null;

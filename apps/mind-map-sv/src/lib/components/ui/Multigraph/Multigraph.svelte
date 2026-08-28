@@ -33,6 +33,7 @@
 		edgeStyle,
 		type RenderableEdgeVisibility
 	} from './lib/edgeStyle.js';
+	import { trimSegmentToNodeBorders } from './lib/edgeRender.js';
 	import {
 		computeEdgeOcclusionWindows,
 		edgeOcclusionParametersForZoom,
@@ -503,6 +504,28 @@
 		posByNodeId: graphLayout.posByNodeId,
 		radiusByNodeId: combinedRadiusByNodeId
 	});
+	/** Live layout position of the preview's source node; null while it has no layout slot. */
+	const creationPreviewSourcePos = $derived(
+		creationPreview ? (graphLayout.posByNodeId[creationPreview.sourceNodeId] ?? null) : null
+	);
+	const creationPreviewScale = $derived(
+		creationPreview ? creationPreviewScaleAt(creationPreview, layoutRuntime.animationNowMs) : 0
+	);
+	/**
+	 * Preview edge trimmed to the node borders exactly like a real edge (source by
+	 * its layout radius, target by the preview node's animated radius) so the
+	 * handoff to the committed edge does not snap shorter.
+	 */
+	const creationPreviewEdgePoints = $derived.by(() => {
+		const preview = creationPreview;
+		if (!preview || preview.ending || !creationPreviewSourcePos) return null;
+		return trimSegmentToNodeBorders(
+			creationPreviewSourcePos,
+			preview.point,
+			graphLayout.radiusByNodeId[preview.sourceNodeId] ?? 0,
+			resolvedLayoutSettings.baseRadius * creationPreviewScale
+		);
+	});
 	const editNode = $derived(graph.nodes.find((node) => node.id === editNodeId) ?? null);
 	const actionMenuNode = $derived.by(() => {
 		const menu = actionMenu;
@@ -528,6 +551,17 @@
 		const renderableIds = new Set(renderableEdgeVisibility.map((v) => v.edge.id));
 		return Object.entries(effectiveExitingBuffer.edges).filter(([id]) => !renderableIds.has(id));
 	});
+
+	/**
+	 * Reveal-wave leftovers minus anything the exiting buffer is already fading:
+	 * a deleted node's edges appear in both, and only the buffer still holds the
+	 * geometry to place them (the live layout dropped the node).
+	 */
+	const revealWaveOnlyEdgeVisibility = $derived(
+		layoutRuntime.revealWavePreviousOnlyEdgeVisibility.filter(
+			(visibility) => !(visibility.edge.id in effectiveExitingBuffer.edges)
+		)
+	);
 
 	$effect(() => {
 		const generation = externalGraphSyncToken(graphGeneration);
@@ -685,9 +719,9 @@
 	}
 
 	function handleNodeDoubleClickDropOntoNode(sourceNode: NodeData, targetNode: NodeData) {
-		closeOverlays();
 		const hadPreviewEdge = creationPreview !== null && !creationPreview.ending;
-		creationPreview = null;
+		// closeOverlays() drops the preview, so read it first.
+		closeOverlays();
 		const existing = findExistingEdge(graph, sourceNode.id, targetNode.id);
 		if (existing) {
 			duplicateEdgeConfirm = { edgeId: existing.id };
@@ -712,12 +746,12 @@
 	}
 
 	function handleNodeDoubleClickDropOntoBackground(sourceNode: NodeData, point: Point) {
-		closeOverlays();
 		const handoffScale = creationPreview
 			? creationPreviewScaleAt(creationPreview, layoutRuntime.now())
 			: 0;
 		const hadPreviewEdge = creationPreview !== null && !creationPreview.ending;
-		creationPreview = null;
+		// closeOverlays() drops the preview, so read it first.
+		closeOverlays();
 		const graphWithNode = addNode(graph, { pinned: true, position: point });
 		const newNode = graphWithNode.nodes[graphWithNode.nodes.length - 1] ?? null;
 		const graphWithEdge = newNode
@@ -765,6 +799,20 @@
 		actionMenu = { nodeId: node.id, position: point };
 	}
 
+	/**
+	 * The open menu's overlay swallows right-clicks that would otherwise reach the
+	 * stage, so it hands the point back here for the same hit test the stage uses:
+	 * move the menu onto the node under the cursor, or close over background.
+	 */
+	function retargetNodeActionMenu(point: Point) {
+		const node = getNodeAt(point.x, point.y);
+		if (!node) {
+			actionMenu = null;
+			return;
+		}
+		openNodeActionMenu(node, point);
+	}
+
 	const previewDurationMs = $derived(reduceMotion ? 0 : resolvedLayoutSettings.enterExitDurationMs);
 
 	function handleCreationDragUpdate(
@@ -786,8 +834,8 @@
 		layoutRuntime.start();
 	}
 
-	function handleCreationCancel() {
-		if (!creationPreview) return;
+	function handleCreationCancel(sourceNode: NodeData) {
+		if (!creationPreview || creationPreview.sourceNodeId !== sourceNode.id) return;
 		const nowMs = layoutRuntime.now();
 		const ended = endCreationPreview(creationPreview, nowMs, previewDurationMs);
 		creationPreview = ended && !isCreationPreviewSettled(ended, nowMs) ? ended : null;
@@ -823,6 +871,7 @@
 	function closeOverlays() {
 		actionMenu = null;
 		editNodeId = null;
+		creationPreview = null;
 		duplicateEdgeConfirm = null;
 		titleEditContext = null;
 		tagColorLegendOpen = false;
@@ -1001,8 +1050,26 @@
 			.filter((v) => v.edge.sourceNodeId === nodeId || v.edge.targetNodeId === nodeId)
 			.map((v) => v.edge);
 
-		severedBeaconPreference = neighborsOf(graph, nodeId).map((neighbor) => neighbor.id);
-		commitUserGraph(layoutRuntime.relaxAfterMutation(removeNode(graph, nodeId)));
+		const neighborIds = neighborsOf(graph, nodeId).map((neighbor) => neighbor.id);
+		const nextGraph = removeNode(graph, nodeId);
+		const nextHops = hopsFromPinned(nextGraph);
+		const survivorId = neighborIds.find((id) => Number.isFinite(nextHops[id]));
+		const seversComponent =
+			survivorId !== undefined && neighborIds.some((id) => !Number.isFinite(nextHops[id]));
+		// Only a severing deletion creates a pinless component to hint about.
+		severedBeaconPreference = seversComponent ? neighborIds : [];
+
+		if (seversComponent && survivorId !== undefined) {
+			// The deletion cut a component off from every pinned node. Play the reveal
+			// wave (as a severing edge removal does) so the orphaned side fades down to
+			// its beacon instead of popping. The deleted node and its edges keep using
+			// the exiting-buffer fade below: their live geometry is gone, so only the
+			// buffer can still place them (the wave's leftovers skip them, see
+			// revealWaveOnlyEdgeVisibility).
+			commitUserGraph(layoutRuntime.beginScaleChange(nextGraph, survivorId));
+		} else {
+			commitUserGraph(layoutRuntime.relaxAfterMutation(nextGraph));
+		}
 
 		if (durationMs > 0) {
 			let nextBuffer = internalExitingBuffer;
@@ -1044,14 +1111,19 @@
 			}
 		}
 
-		if (primaryNodeId === nodeId) {
-			primaryNodeId =
-				graph.nodes.find((candidate) => candidate.pinned)?.id ??
-				graph.nodes.find((candidate) => candidate.id === defaultPrimaryNodeId)?.id ??
-				graph.nodes[0]?.id ??
-				'';
-		}
+		restorePrimaryNodeAfterDelete(nodeId);
 		closeOverlays();
+	}
+
+	/** Re-points the primary node after `nodeId` was deleted (no-op otherwise). */
+	function restorePrimaryNodeAfterDelete(nodeId: string) {
+		if (primaryNodeId !== nodeId) return;
+
+		primaryNodeId =
+			graph.nodes.find((candidate) => candidate.pinned)?.id ??
+			graph.nodes.find((candidate) => candidate.id === defaultPrimaryNodeId)?.id ??
+			graph.nodes[0]?.id ??
+			'';
 	}
 
 	function saveNodeContent(
@@ -1426,7 +1498,7 @@
 					</div>
 				{/if}
 			{/each}
-			{#each layoutRuntime.revealWavePreviousOnlyEdgeVisibility as visibility (visibility.edge.id)}
+			{#each revealWaveOnlyEdgeVisibility as visibility (visibility.edge.id)}
 				{@const edge = visibility.edge}
 				{@const edgePoints = edgeRenderPoints(visibility, combinedEdgeLayout, graph.posByNodeId)}
 				{@const edgeLengthPx = Math.hypot(
@@ -1498,19 +1570,16 @@
 					></div>
 				{/if}
 			{/each}
-			{#if creationPreview && !creationPreview.ending}
-				{@const previewSourcePos = graphLayout.posByNodeId[creationPreview.sourceNodeId]}
-				{#if previewSourcePos}
-					{@const previewEdgeColor = edgeStrokeColor(
-						CREATION_PREVIEW_EDGE,
-						graph.tagColorConfig.edgeTags
-					)}
-					<div
-						class="edge"
-						data-creation-preview-edge="true"
-						style={`${edgeStyle(previewSourcePos, creationPreview.point)} --edge-background: ${previewEdgeColor}; color: ${previewEdgeColor}; --edge-stroke-width: ${EDGE_STROKE_WIDTH}px; pointer-events: none;`}
-					></div>
-				{/if}
+			{#if creationPreviewEdgePoints}
+				{@const previewEdgeColor = edgeStrokeColor(
+					CREATION_PREVIEW_EDGE,
+					graph.tagColorConfig.edgeTags
+				)}
+				<div
+					class="edge"
+					data-creation-preview-edge="true"
+					style={`${edgeStyle(creationPreviewEdgePoints.source, creationPreviewEdgePoints.target)} --edge-background: ${previewEdgeColor}; color: ${previewEdgeColor}; --edge-stroke-width: ${EDGE_STROKE_WIDTH}px; pointer-events: none;`}
+				></div>
 			{/if}
 		</div>
 
@@ -1623,27 +1692,21 @@
 				/>
 			</div>
 		{/each}
-		{#if creationPreview}
-			{@const previewScale = creationPreviewScaleAt(creationPreview, layoutRuntime.animationNowMs)}
-			{#if previewScale > 0}
-				<div
-					class="node-wrapper"
-					data-creation-preview-node="true"
-					data-scale={previewScale}
-					data-x={creationPreview.point.x}
-					data-y={creationPreview.point.y}
-					style={`left: calc(50% + ${creationPreview.point.x}px); top: calc(50% + ${creationPreview.point.y}px); transform: translate(-50%, -50%) scale(${previewScale}); pointer-events: none;`}
-				>
-					<Node
-						nodeData={CREATION_PREVIEW_NODE}
-						isTitleEditing={false}
-						borderSegments={nodeBorderSegments(
-							CREATION_PREVIEW_NODE,
-							graph.tagColorConfig.nodeTags
-						)}
-					/>
-				</div>
-			{/if}
+		{#if creationPreview && creationPreviewSourcePos && creationPreviewScale > 0}
+			<div
+				class="node-wrapper"
+				data-creation-preview-node="true"
+				data-scale={creationPreviewScale}
+				data-x={creationPreview.point.x}
+				data-y={creationPreview.point.y}
+				style={`left: calc(50% + ${creationPreview.point.x}px); top: calc(50% + ${creationPreview.point.y}px); transform: translate(-50%, -50%) scale(${creationPreviewScale}); pointer-events: none;`}
+			>
+				<Node
+					nodeData={CREATION_PREVIEW_NODE}
+					isTitleEditing={false}
+					borderSegments={nodeBorderSegments(CREATION_PREVIEW_NODE, graph.tagColorConfig.nodeTags)}
+				/>
+			</div>
 		{/if}
 	</Stage>
 
@@ -1660,6 +1723,7 @@
 			onFocus={() => focus.openFocus(actionMenuNode)}
 			onDelete={() => deleteNode(actionMenuNode.id)}
 			onClose={() => (actionMenu = null)}
+			onRetarget={retargetNodeActionMenu}
 		/>
 	{/if}
 
@@ -1809,15 +1873,16 @@
 			onCancel={() => (duplicateEdgeConfirm = null)}
 			onConfirm={() => {
 				const removedEdge = graph.edges.find((e) => e.id === confirmEdgeId) ?? null;
-				if (removedEdge) {
-					severedBeaconPreference = [removedEdge.sourceNodeId, removedEdge.targetNodeId];
-				}
 				const nextGraph = removeEdge(graph, confirmEdgeId);
 				const nextHops = hopsFromPinned(nextGraph);
 				const endpointIds = removedEdge ? [removedEdge.sourceNodeId, removedEdge.targetNodeId] : [];
 				const survivorId = endpointIds.find((id) => Number.isFinite(nextHops[id]));
 				const seversComponent =
 					survivorId !== undefined && endpointIds.some((id) => !Number.isFinite(nextHops[id]));
+				// Only a severing removal creates a pinless component to hint about;
+				// keeping a stale hint would steer a later beacon election (e.g. after
+				// removing one of two parallel edges, which severs nothing).
+				severedBeaconPreference = seversComponent ? endpointIds : [];
 
 				if (seversComponent && survivorId !== undefined) {
 					// The removal cut a component off from every pinned node. Play the
@@ -1828,6 +1893,7 @@
 					edgeEnterAnimations = Object.fromEntries(
 						Object.entries(edgeEnterAnimations).filter(([k]) => k !== confirmEdgeId)
 					);
+					internalExitingBuffer = cancelExitingEdge(internalExitingBuffer, confirmEdgeId);
 					commitUserGraph(layoutRuntime.beginScaleChange(nextGraph, survivorId));
 					duplicateEdgeConfirm = null;
 					return;

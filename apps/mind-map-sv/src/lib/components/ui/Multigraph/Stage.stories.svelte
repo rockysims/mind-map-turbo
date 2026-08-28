@@ -55,7 +55,8 @@
 		clientX: number,
 		clientY: number,
 		pointerId = 1,
-		pointerType = ''
+		pointerType = '',
+		button = 0
 	) {
 		target.dispatchEvent(
 			new PointerEvent(type, {
@@ -63,11 +64,15 @@
 				clientY,
 				pointerId,
 				pointerType,
+				button,
 				bubbles: true,
 				cancelable: true
 			})
 		);
 	}
+
+	/** Right mouse button, which shares its pointerId with the primary button. */
+	const SECONDARY_BUTTON = 2;
 
 	function dispatchContextMenu(target: HTMLElement, clientX: number, clientY: number): MouseEvent {
 		const event = new MouseEvent('contextmenu', {
@@ -687,6 +692,159 @@
 		await sleep();
 		expect(wrapper.dataset.lastDoubleClickDropBg).toBe('');
 		expect(wrapper.dataset.lastDoubleClickDropNode).toBe('');
+	}}
+/>
+
+<Story
+	name="ArmedCreationIgnoresSecondaryButtonRelease"
+	args={{ nodes: [NODES[0]] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = canvasElement.querySelector('[data-testid="stage-callbacks"]') as HTMLElement;
+		const stage = getStage(canvasElement);
+		const circle = canvasElement.querySelector('.circle') as HTMLElement;
+
+		await waitForLayout();
+
+		const nodeCenter = getCenter(circle);
+		const bgX = nodeCenter.x + NODE_RADIUS * 3;
+		const bgY = nodeCenter.y;
+		const armButton = canvasElement.querySelector(
+			`[data-testid="arm-creation-${NODES[0].id}"]`
+		) as HTMLElement;
+		armButton.click();
+		await sleep();
+
+		dispatchPointer(stage, 'pointermove', bgX, bgY);
+		await sleep();
+
+		// A right-click release must neither create nor cancel; the session stays armed.
+		dispatchPointer(stage, 'pointerdown', bgX, bgY, 1, 'mouse', SECONDARY_BUTTON);
+		dispatchPointer(stage, 'pointerup', bgX, bgY, 1, 'mouse', SECONDARY_BUTTON);
+		await sleep();
+		expect(wrapper.dataset.lastDoubleClickDropBg).toBe('');
+		expect(wrapper.dataset.lastDoubleClickDropNode).toBe('');
+		expect(wrapper.dataset.lastCreationCancel).toBe('');
+
+		dispatchPointer(stage, 'pointerdown', bgX, bgY);
+		dispatchPointer(stage, 'pointerup', bgX, bgY);
+		await sleep();
+		expect(parsePointCallback(wrapper.dataset.lastDoubleClickDropBg ?? '').nodeId).toBe(
+			NODES[0].id
+		);
+	}}
+/>
+
+<Story
+	name="ArmedCreationCancelsOnPointerDownOutsideStage"
+	args={{ nodes: [NODES[0]] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = canvasElement.querySelector('[data-testid="stage-callbacks"]') as HTMLElement;
+		const stage = getStage(canvasElement);
+		const circle = canvasElement.querySelector('.circle') as HTMLElement;
+
+		await waitForLayout();
+
+		const nodeCenter = getCenter(circle);
+		const bgX = nodeCenter.x + NODE_RADIUS * 3;
+		const bgY = nodeCenter.y;
+		const armButton = canvasElement.querySelector(
+			`[data-testid="arm-creation-${NODES[0].id}"]`
+		) as HTMLElement;
+		armButton.click();
+		await sleep();
+
+		dispatchPointer(stage, 'pointermove', bgX, bgY);
+		await sleep();
+
+		// Pressing app chrome outside the stage disarms the session.
+		const outside = getCenter(armButton);
+		dispatchPointer(armButton, 'pointerdown', outside.x, outside.y);
+		dispatchPointer(armButton, 'pointerup', outside.x, outside.y);
+		await sleep();
+		expect(wrapper.dataset.lastCreationCancel).toBe(NODES[0].id);
+
+		dispatchPointer(stage, 'pointerdown', bgX, bgY);
+		dispatchPointer(stage, 'pointerup', bgX, bgY);
+		await sleep();
+		expect(wrapper.dataset.lastDoubleClickDropBg).toBe('');
+		expect(wrapper.dataset.lastDoubleClickDropNode).toBe('');
+
+		// Re-arming after a cancel works.
+		armButton.click();
+		await sleep();
+		dispatchPointer(stage, 'pointermove', bgX, bgY);
+		dispatchPointer(stage, 'pointerdown', bgX, bgY);
+		dispatchPointer(stage, 'pointerup', bgX, bgY);
+		await sleep();
+		const backgroundDrop = parsePointCallback(wrapper.dataset.lastDoubleClickDropBg ?? '');
+		const expectedPoint = getGraphPoint(stage, bgX, bgY);
+		expect(backgroundDrop.nodeId).toBe(NODES[0].id);
+		expect(backgroundDrop.x).toBeCloseTo(expectedPoint.x);
+		expect(backgroundDrop.y).toBeCloseTo(expectedPoint.y);
+	}}
+/>
+
+<Story
+	name="ArmedCreationPointerCancelCancels"
+	args={{ nodes: [NODES[0]] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = canvasElement.querySelector('[data-testid="stage-callbacks"]') as HTMLElement;
+		const stage = getStage(canvasElement);
+		const circle = canvasElement.querySelector('.circle') as HTMLElement;
+
+		await waitForLayout();
+
+		const nodeCenter = getCenter(circle);
+		const bgX = nodeCenter.x + NODE_RADIUS * 3;
+		const bgY = nodeCenter.y;
+		const armButton = canvasElement.querySelector(
+			`[data-testid="arm-creation-${NODES[0].id}"]`
+		) as HTMLElement;
+		armButton.click();
+		await sleep();
+
+		dispatchPointer(stage, 'pointermove', bgX, bgY);
+		dispatchPointer(stage, 'pointerdown', bgX, bgY);
+		dispatchPointer(stage, 'pointercancel', bgX, bgY);
+		await sleep();
+		expect(wrapper.dataset.lastCreationCancel).toBe(NODES[0].id);
+		expect(wrapper.dataset.lastDoubleClickDropBg).toBe('');
+
+		// The session is over: a later click no longer creates anything.
+		dispatchPointer(stage, 'pointerdown', bgX, bgY);
+		dispatchPointer(stage, 'pointerup', bgX, bgY);
+		await sleep();
+		expect(wrapper.dataset.lastDoubleClickDropBg).toBe('');
+		expect(wrapper.dataset.lastDoubleClickDropNode).toBe('');
+	}}
+/>
+
+<Story
+	name="SecondaryButtonReleaseKeepsPanAlive"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = canvasElement.querySelector('[data-testid="stage-callbacks"]') as HTMLElement;
+		const stage = getStage(canvasElement);
+
+		await waitForLayout();
+
+		const center = getCenter(stage);
+
+		// A mouse shares one pointerId across buttons: releasing the right button
+		// mid-pan must not end the pan the left button is still holding.
+		dispatchPointer(stage, 'pointerdown', center.x, center.y, 1, 'mouse');
+		dispatchPointer(stage, 'pointermove', center.x + 20, center.y + 20, 1, 'mouse');
+		dispatchPointer(stage, 'pointerup', center.x + 20, center.y + 20, 1, 'mouse', SECONDARY_BUTTON);
+		await sleep();
+		expect(wrapper.dataset.lastViewState).toBe('');
+
+		dispatchPointer(stage, 'pointermove', center.x + 40, center.y + 40, 1, 'mouse');
+		dispatchPointer(stage, 'pointerup', center.x + 40, center.y + 40, 1, 'mouse');
+		await sleep();
+		expect(getStageTransform(canvasElement)).toContain('translate(40px, 40px)');
+		const viewState = parseViewStateCallback(wrapper.dataset.lastViewState ?? '');
+		expect(viewState.panX).toBe(40);
+		expect(viewState.panY).toBe(40);
 	}}
 />
 
