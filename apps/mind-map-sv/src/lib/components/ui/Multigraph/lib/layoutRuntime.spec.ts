@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { MultigraphData } from '../../types/multigraph';
+import { graphWithVisibleNodes } from './boundedVisibility';
 import { togglePinned } from './graph';
+import { deriveGraphLayout } from './graphLayout';
 import type { LayoutRuntimeScheduler } from './layoutRuntime.svelte';
 import { LayoutRuntime } from './layoutRuntime.svelte';
 import type { LayoutSettings } from './layoutSettings';
@@ -391,6 +393,41 @@ describe('LayoutRuntime', () => {
 			expect(relaxedN4(() => [{ sourceNodeId: 'n0', targetNodeId: 'n4' }])).not.toEqual(
 				graph.posByNodeId.n4
 			);
+		});
+
+		it('scales a revealed node like an authored neighbor of the same anchor', () => {
+			// n2 and n3 both hang off the pin by a dataflow edge and are joined to
+			// each other, so inside the visible graph they form one pinless component
+			// and the beacon rule rescues only n2. Unless the reveal hops reach the
+			// scale computation, n3 drops to the minimum scale while n1 — the same
+			// one step from the pin — sits a good deal larger.
+			const paired = makeGraph({
+				nodeCount: 4,
+				pinned: [0],
+				edges: [
+					[0, 1],
+					[2, 3]
+				]
+			});
+			const runtime = new LayoutRuntime({
+				getGraph: () => paired,
+				getLayoutSettings: () => ({ displayedLayers: 2 }),
+				getActiveDragNodeId: () => null,
+				getPreferredBeaconNodeIds: () => [],
+				applyGraph: () => {},
+				composeRevealEdges: () => [
+					{ sourceNodeId: 'n0', targetNodeId: 'n2' },
+					{ sourceNodeId: 'n0', targetNodeId: 'n3' }
+				],
+				scheduler: new TestScheduler()
+			});
+			const visible = graphWithVisibleNodes(paired, new Set(['n0', 'n1', 'n2', 'n3']));
+			const layout = deriveGraphLayout(
+				visible,
+				runtime.layoutOptions(visible, { relaxIterations: 0 })
+			);
+
+			expect(layout.scaleByNodeId.n3).toBe(layout.scaleByNodeId.n1);
 		});
 
 		it('does not reveal a node whose partner is hidden too', () => {

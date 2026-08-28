@@ -81,6 +81,32 @@
 		canvasElement.querySelector(`[data-node-id="${nodeId}"]`);
 
 	/**
+	 * `a` defines two quantities and the pair d–e consumes one each, so both are
+	 * pulled in by a dataflow edge. Joined to each other, they land in the same
+	 * component once on screen, where only one of them can be the beacon — the
+	 * shape that had the other rendering at the minimum scale.
+	 */
+	const TWO_CONSUMERS = makeGraph({
+		nodes: [
+			{ id: 'a', title: 'Constants', description: '$$g = 9.8$$ and $$m = 5$$' },
+			{ id: 'b', title: 'Neighbor', description: '' },
+			{ id: 'd', title: 'Momentum', description: '$$p = m$$' },
+			{ id: 'e', title: 'Weight', description: '' }
+		],
+		pinned: ['a'],
+		edges: [
+			['a', 'b'],
+			['d', 'e']
+		],
+		posByNodeId: {
+			a: { x: -300, y: 0 },
+			b: { x: -100, y: 0 },
+			d: { x: 100, y: 0 },
+			e: { x: 300, y: 0 }
+		}
+	});
+
+	/**
 	 * `a` defines g and `c` consumes it, with no authored edge anywhere. Any
 	 * movement between them has to come from the derived edge.
 	 */
@@ -221,6 +247,24 @@
 		// Consuming g puts `e` beside the node that defines it, rather than leaving
 		// an arrow pointing at somewhere the reader cannot go.
 		await waitFor(() => expect(nodeOnCanvas(canvasElement, 'e')).toBeInTheDocument());
+	}}
+/>
+
+<Story
+	name="ARevealedNodeIsTheSameSizeAsAnAuthoredNeighbor"
+	args={{
+		baseGraph: TWO_CONSUMERS,
+		editNodeId: 'e',
+		equation: CONSUMES_G,
+		startWithEquation: true,
+		layoutSettings: TWO_LAYERS
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitFor(() => expect(nodeOnCanvas(canvasElement, 'e')).toBeInTheDocument());
+
+		// `b` is one authored edge from the pinned node and `e` is one dataflow edge
+		// from it. Both are one step away, so both read as the same size.
+		expect(scaleOf(canvasElement, 'e')).toBe(scaleOf(canvasElement, 'b'));
 	}}
 />
 

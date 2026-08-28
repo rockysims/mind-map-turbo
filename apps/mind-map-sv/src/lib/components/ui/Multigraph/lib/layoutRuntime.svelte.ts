@@ -1,5 +1,5 @@
 import type { MultigraphData } from '../../types/multigraph';
-import { beaconHopOverrides, beaconNodeIds, withBeaconHops } from './beacons';
+import { beaconNodeIds, withBeaconHops } from './beacons';
 import {
 	edgeVisibilityForPinnedNeighborhood,
 	graphWithVisibleNodes,
@@ -309,14 +309,19 @@ export class LayoutRuntime {
 		// idempotent: each beacon is the sole member of its pinless component.
 		// Beacons stay unanchored: overlap resolution and (bounded) hop
 		// repulsion must be able to move them off other clusters.
-		const beaconIds = this.#beaconIdsFor(layoutGraph);
+		//
+		// The layout recomputes hops from the visible graph alone, where a beacon
+		// or a revealed node has no edges at all and would fall to the minimum
+		// scale. Handing it the effective hops instead is what makes a node one
+		// dataflow edge from your pin the same size as one authored edge away.
+		const hopOverridesByNodeId = this.#effectiveHopsFor(layoutGraph);
 
 		return {
 			settings: this.#options.getLayoutSettings(),
 			springEdges: this.#springEdgesFor(layoutGraph),
 			activeDragNodeId: overrides.activeDragNodeId ?? this.#options.getActiveDragNodeId(),
 			scaleAnchoredNodeIds: overrides.scaleAnchoredNodeIds ?? this.scaleAnchoredNodeIds,
-			hopOverridesByNodeId: beaconHopOverrides(beaconIds),
+			hopOverridesByNodeId,
 			relaxIterations: overrides.relaxIterations,
 			scaleByNodeId: overrides.scaleByNodeId ?? this.animatedScaleByNodeId,
 			participatingNodeIds: relayoutParticipating,
