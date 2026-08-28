@@ -12,9 +12,9 @@ concurrency:
 
 jobs:
   verify:
-    name: lint · check · test
+    name: lint · check · test · e2e
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -49,6 +49,10 @@ jobs:
         if: steps.playwright-cache.outputs.cache-hit == 'true'
         run: pnpm --filter mind-map-sv exec playwright install-deps chromium
 
+      # Cheap guard: the committed offline app shell must match the sources.
+      - name: Check offline app shell freshness
+        run: pnpm run check:offline-shell
+
       # The three Definition of Done gates from .cursor/rules/core.mdc.
       - name: Lint (prettier + eslint)
         run: pnpm --filter mind-map-sv lint
@@ -56,5 +60,10 @@ jobs:
       - name: Type check (svelte-check)
         run: pnpm --filter mind-map-sv check
 
-      - name: Tests (vitest: server + client + storybook)
+      - name: "Tests (vitest: server + client + storybook)"
         run: pnpm --filter mind-map-sv test:unit -- --run
+
+      # Last: the e2e suite builds the app and serves it on port 4173, so it is
+      # the slowest gate and runs only once the faster ones are green.
+      - name: End-to-end tests (playwright)
+        run: pnpm --filter mind-map-sv run test:e2e
