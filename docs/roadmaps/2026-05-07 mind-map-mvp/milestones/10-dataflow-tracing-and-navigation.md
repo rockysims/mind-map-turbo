@@ -3,7 +3,7 @@
 **Status:** not started
 **Depends on:** milestone 09 (variable dataflow layer), milestone 05
 (filter/find/search query roles), and milestone 06d (focus controller).
-**Plan:** _none yet._
+**Plan:** [plans/2026-08-27 10-dataflow-tracing-and-navigation.md](../plans/2026-08-27%2010-dataflow-tracing-and-navigation.md)
 
 ## Goal
 

@@ -63,7 +63,7 @@ individual PR-sized tasks.
 | 07  | Multiplayer                                        | not started | [milestones/07-multiplayer.md](milestones/07-multiplayer.md)                                                                                          |
 | 08  | LaTeX math in node descriptions                    | complete    | [milestone](milestones/08-latex-math-in-node-descriptions.md), [plan](plans/2026-08-27%2008-latex-math-in-node-descriptions.md)                       |
 | 09  | Variable dataflow layer                            | complete    | [milestone](milestones/09-variable-dataflow-layer.md), [plan](plans/2026-08-27%2009-variable-dataflow-layer.md)                                       |
-| 10  | Dataflow tracing and navigation                    | not started | [milestones/10-dataflow-tracing-and-navigation.md](milestones/10-dataflow-tracing-and-navigation.md)                                                  |
+| 10  | Dataflow tracing and navigation                    | planned     | [milestone](milestones/10-dataflow-tracing-and-navigation.md), [plan](plans/2026-08-27%2010-dataflow-tracing-and-navigation.md)                       |
 
 Milestones 04a-04m deepen the local-first graph experience before multiplayer.
 Milestone 04b intentionally supersedes 04a's Fibonacci reveal and dimming
