@@ -54,7 +54,7 @@ describe('buildQuantityIndex', () => {
 
 	it('exposes what each node defines and references', () => {
 		const index = buildQuantityIndex(chain);
-		expect(index.byNodeId.get('c')?.defines.map((symbol) => symbol.label)).toEqual(['v']);
+		expect(index.byNodeId.get('c')?.defines.map((each) => each.symbol.label)).toEqual(['v']);
 		expect(index.byNodeId.get('c')?.references.map((symbol) => symbol.label)).toEqual([
 			'v_0',
 			'a',

@@ -9,7 +9,7 @@
 
 import type { QuantitySymbol } from '../../MathText/lib/mathSymbols';
 import type { DerivedEdge } from './derivedEdges';
-import type { QuantityIndex } from './quantityIndex';
+import type { QuantityDefinitionRecord, QuantityIndex } from './quantityIndex';
 
 export type ReferenceState =
 	/** Defined by a node that is currently on screen. */
@@ -29,8 +29,18 @@ export interface ReferenceDiagnostic {
 
 export interface ConflictDiagnostic {
 	symbol: QuantitySymbol;
-	/** The competing definers, always two or more. */
+	/**
+	 * The nodes defining this quantity. Usually two or more, but exactly one when
+	 * a single node defines the same quantity two different ways — it contradicts
+	 * itself, with no second node involved.
+	 */
 	definerNodeIds: string[];
+	/**
+	 * Nodes that alone define this quantity more than one way, sorted. Separated
+	 * out because it is a different repair: there is no other node to reconcile
+	 * with and nowhere to navigate to, so the panel has to say something else.
+	 */
+	selfContradictingNodeIds: string[];
 }
 
 export interface CycleDiagnostic {
@@ -174,6 +184,23 @@ function cyclesFrom(edges: readonly DerivedEdge[]): CycleDiagnostic[] {
 		.sort((left, right) => left.nodeIds[0].localeCompare(right.nodeIds[0]));
 }
 
+function selfContradictingNodeIdsOf(definitions: readonly QuantityDefinitionRecord[]): string[] {
+	const bodiesByNodeId = new Map<string, Set<string>>();
+	for (const definition of definitions) {
+		const bodies = bodiesByNodeId.get(definition.nodeId);
+		if (bodies === undefined) {
+			bodiesByNodeId.set(definition.nodeId, new Set([definition.bodyKey]));
+		} else {
+			bodies.add(definition.bodyKey);
+		}
+	}
+
+	return [...bodiesByNodeId]
+		.filter(([, bodies]) => bodies.size > 1)
+		.map(([nodeId]) => nodeId)
+		.sort();
+}
+
 export function computeDataflowDiagnostics(
 	index: QuantityIndex,
 	edges: readonly DerivedEdge[],
@@ -193,9 +220,18 @@ export function computeDataflowDiagnostics(
 		}
 	}
 
+	// A conflict is disagreement, not duplication. Two nodes that both state
+	// `x = 1` are saying one thing in two places, which is how a graph gets
+	// written; warning about it would fire on ordinary authoring and teach people
+	// to ignore the warning. Two nodes — or one node twice — that say `x = 1` and
+	// `x = 2` have stated something the graph cannot satisfy.
 	const conflicts: ConflictDiagnostic[] = [...index.entries.values()]
-		.filter((entry) => entry.definerNodeIds.length > 1)
-		.map((entry) => ({ symbol: entry.symbol, definerNodeIds: [...entry.definerNodeIds] }))
+		.filter((entry) => new Set(entry.definitions.map((each) => each.bodyKey)).size > 1)
+		.map((entry) => ({
+			symbol: entry.symbol,
+			definerNodeIds: [...entry.definerNodeIds],
+			selfContradictingNodeIds: selfContradictingNodeIdsOf(entry.definitions)
+		}))
 		.sort((left, right) => left.symbol.key.localeCompare(right.symbol.key));
 
 	return { references, conflicts, cycles: cyclesFrom(edges) };

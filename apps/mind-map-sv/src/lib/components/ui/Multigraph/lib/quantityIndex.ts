@@ -20,10 +20,24 @@ export interface IndexableNode extends QuantityBearingNode {
 	id: string;
 }
 
+export interface QuantityDefinitionRecord {
+	nodeId: string;
+	bodyKey: string;
+}
+
 export interface QuantityIndexEntry {
 	symbol: QuantitySymbol;
-	/** Nodes defining this quantity, sorted. More than one is a conflict. */
+	/**
+	 * Nodes defining this quantity, sorted and distinct. A node appears once here
+	 * however many times it states the definition, because this drives edges and
+	 * labels, where a repeat would draw a duplicate.
+	 */
 	definerNodeIds: string[];
+	/**
+	 * Every distinct statement of this quantity, sorted. Disagreement among these
+	 * is what a conflict is; use `definerNodeIds` for anything that draws.
+	 */
+	definitions: QuantityDefinitionRecord[];
 	/** Nodes referencing this quantity without defining it, sorted. */
 	consumerNodeIds: string[];
 }
@@ -60,7 +74,12 @@ function entryFor(entries: Map<string, QuantityIndexEntry>, symbol: QuantitySymb
 	if (existing !== undefined) {
 		return existing;
 	}
-	const created: QuantityIndexEntry = { symbol, definerNodeIds: [], consumerNodeIds: [] };
+	const created: QuantityIndexEntry = {
+		symbol,
+		definerNodeIds: [],
+		definitions: [],
+		consumerNodeIds: []
+	};
 	entries.set(symbol.key, created);
 	return created;
 }
@@ -100,8 +119,14 @@ export function createQuantityIndexer(options: QuantityIndexerOptions = {}) {
 			cache.set(node.id, { signature, quantities });
 			byNodeId.set(node.id, quantities);
 
-			for (const symbol of quantities.defines) {
-				entryFor(entries, symbol).definerNodeIds.push(node.id);
+			for (const definition of quantities.defines) {
+				const entry = entryFor(entries, definition.symbol);
+				entry.definitions.push({ nodeId: node.id, bodyKey: definition.bodyKey });
+				// A node that states one definition twice over is still one definer.
+				// Pushing it twice would draw a duplicate edge and a duplicate label.
+				if (!entry.definerNodeIds.includes(node.id)) {
+					entry.definerNodeIds.push(node.id);
+				}
 			}
 			for (const symbol of quantities.references) {
 				entryFor(entries, symbol).consumerNodeIds.push(node.id);
@@ -119,6 +144,10 @@ export function createQuantityIndexer(options: QuantityIndexerOptions = {}) {
 		for (const entry of entries.values()) {
 			entry.definerNodeIds.sort();
 			entry.consumerNodeIds.sort();
+			entry.definitions.sort(
+				(left, right) =>
+					left.nodeId.localeCompare(right.nodeId) || left.bodyKey.localeCompare(right.bodyKey)
+			);
 		}
 
 		return { entries, byNodeId };

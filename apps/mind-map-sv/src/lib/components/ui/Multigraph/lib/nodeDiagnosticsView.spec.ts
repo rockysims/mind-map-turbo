@@ -63,6 +63,66 @@ describe('nodeDiagnosticsView', () => {
 		expect(view.items.map((item) => item.state)).toEqual(['conflict']);
 	});
 
+	it('names the other definer but not the node being read', () => {
+		// A button offering to reveal the node you are already looking at is a dead
+		// control that looks like a working one.
+		const view = viewFor([node('one', '$$g = 9.8$$'), node('two', '$$g = 10$$')], 'one');
+		expect(view.items[0].nodeIds).toEqual(['two']);
+	});
+
+	describe('a node that contradicts itself', () => {
+		const selfContradicting = [
+			{ id: 'a', title: '$x = 1$', description: 'But also $x = 2$.', tags: [] }
+		];
+
+		it('reports it as its own state rather than as a conflict with someone', () => {
+			expect(viewFor(selfContradicting, 'a').items.map((item) => item.state)).toEqual([
+				'self-conflict'
+			]);
+		});
+
+		it('offers nowhere to navigate, since the contradiction is here', () => {
+			expect(viewFor(selfContradicting, 'a').items[0].nodeIds).toEqual([]);
+		});
+
+		// Reconciling with another node is meaningless until this node states one
+		// thing, and it is the half the reader can fix without leaving.
+		it('takes precedence when another node also disagrees', () => {
+			const view = viewFor(
+				[
+					{ id: 'a', title: '$x = 1$', description: 'But also $x = 2$.', tags: [] },
+					node('b', '$$x = 3$$')
+				],
+				'a'
+			);
+			expect(view.items.map((item) => item.state)).toEqual(['self-conflict']);
+		});
+
+		it('still reads as an ordinary conflict from the other node', () => {
+			const view = viewFor(
+				[
+					{ id: 'a', title: '$x = 1$', description: 'But also $x = 2$.', tags: [] },
+					node('b', '$$x = 3$$')
+				],
+				'b'
+			);
+			expect(view.items.map((item) => item.state)).toEqual(['conflict']);
+			expect(view.items[0].nodeIds).toEqual(['a']);
+		});
+
+		it('sorts before a conflict with another node', () => {
+			const view = viewFor(
+				[
+					{ id: 'a', title: '$x = 1$', description: 'Also $x = 2$, and $w = y$.', tags: [] },
+					node('b', '$$y = 1$$'),
+					node('c', '$$y = 2$$')
+				],
+				'a'
+			);
+			expect(view.items.map((item) => item.state)).toEqual(['self-conflict', 'conflict']);
+		});
+	});
+
 	it('does not report a conflict to an uninvolved node', () => {
 		const view = viewFor(
 			[node('one', '$$g = 9.8$$'), node('two', '$$g = 10$$'), node('other', '$$z = 1$$')],

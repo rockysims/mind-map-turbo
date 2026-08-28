@@ -366,7 +366,9 @@
 		new Map(
 			[...dataflow.index.byNodeId].map(([nodeId, quantities]) => [
 				nodeId,
-				quantities.defines.map((quantity) => quantity.label)
+				// Distinct labels: a node that states one definition two different ways
+				// still owns one quantity, and would otherwise show the chip twice.
+				[...new Set(quantities.defines.map((definition) => definition.symbol.label))]
 			])
 		)
 	);

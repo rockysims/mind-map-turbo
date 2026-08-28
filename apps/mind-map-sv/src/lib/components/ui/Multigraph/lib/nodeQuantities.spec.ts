@@ -11,7 +11,9 @@ function node(description: string, tags: string[] = []): QuantityBearingNode {
 }
 
 function defines(description: string, options?: NodeQuantitiesOptions): string[] {
-	return nodeQuantities(node(description), options).defines.map((symbol) => symbol.label);
+	return nodeQuantities(node(description), options).defines.map(
+		(definition) => definition.symbol.label
+	);
 }
 
 function references(description: string, options?: NodeQuantitiesOptions): string[] {
@@ -165,7 +167,7 @@ describe('nodeQuantities opt-out', () => {
 		expect(
 			nodeQuantities(node('$$F = ma$$', [DEFAULT_DATAFLOW_OPT_OUT_TAG]), {
 				optOutTag: 'scratch'
-			}).defines.map((symbol) => symbol.label)
+			}).defines.map((definition) => definition.symbol.label)
 		).toEqual(['F']);
 	});
 });
@@ -175,8 +177,26 @@ describe('nodeQuantities deduplication', () => {
 		expect(references('$$y = a x + a z$$')).toEqual(['a', 'x', 'z']);
 	});
 
-	it('lists a symbol defined twice once', () => {
-		expect(defines('$$v = 1$$ and again $$v = 2$$')).toEqual(['v']);
+	it('lists a definition restated identically once', () => {
+		expect(defines('$$v = 1$$ and again $$v = 1$$')).toEqual(['v']);
+	});
+
+	// Both survive so the contradiction is visible downstream. Collapsing them
+	// silently discarded the second statement, which is how `$x = 1$` and
+	// `$x = 2$` in one node used to report no conflict at all.
+	it('keeps both statements when a node defines a symbol two different ways', () => {
+		expect(defines('$$v = 1$$ and again $$v = 2$$')).toEqual(['v', 'v']);
+	});
+
+	it('distinguishes the two statements by their bodies', () => {
+		const bodies = nodeQuantities(node('$$v = 1$$ and again $$v = 2$$')).defines.map(
+			(definition) => definition.bodyKey
+		);
+		expect(new Set(bodies).size).toBe(2);
+	});
+
+	it('treats spacing differences as one statement rather than a contradiction', () => {
+		expect(defines('$$v = a+b$$ and again $$v = a + b$$')).toEqual(['v']);
 	});
 });
 
@@ -185,8 +205,8 @@ describe('nodeQuantities titles', () => {
 		return nodeQuantities({ title, description, tags: [] });
 	}
 
-	function labels(symbols: { label: string }[]): string[] {
-		return symbols.map((symbol) => symbol.label);
+	function labels(entries: ({ label: string } | { symbol: { label: string } })[]): string[] {
+		return entries.map((entry) => ('symbol' in entry ? entry.symbol.label : entry.label));
 	}
 
 	// A title is read on the same terms as a description. Giving titles their own

@@ -10,7 +10,10 @@
 	const DIAGNOSTIC_TEXT = {
 		unresolved: 'is not defined anywhere',
 		'out-of-view': 'is defined outside the visible area',
-		conflict: 'is defined by more than one node'
+		// Both say "differently" rather than "more than once", because agreeing
+		// definitions are not reported at all and the copy should not imply they are.
+		conflict: 'is defined differently by',
+		'self-conflict': 'is defined more than one way in this node'
 	} as const;
 
 	let {

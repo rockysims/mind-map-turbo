@@ -18,6 +18,7 @@
 import { renderMath, type MathNode } from '../../MathText/lib/mathRender';
 import { splitMathSegments } from '../../MathText/lib/mathSegments';
 import {
+	canonicalExpressionKey,
 	collectSymbolsFromNodes,
 	singleSymbolOf,
 	topLevelChildren,
@@ -28,9 +29,24 @@ import {
 /** Tag that excludes a node from the dataflow layer entirely. */
 export const DEFAULT_DATAFLOW_OPT_OUT_TAG = 'no-dataflow';
 
+export interface QuantityDefinition {
+	symbol: QuantitySymbol;
+	/**
+	 * Identifies what this definition says, so two statements about one quantity
+	 * can be told apart. Restating a definition is ordinary writing; stating it
+	 * two different ways is a contradiction, and only the body distinguishes them.
+	 */
+	bodyKey: string;
+}
+
 export interface NodeQuantities {
-	/** Quantities this node introduces, in document order. */
-	defines: QuantitySymbol[];
+	/**
+	 * Quantities this node introduces, in document order.
+	 *
+	 * A quantity appears more than once only when the node defines it in more than
+	 * one way, which is the node contradicting itself.
+	 */
+	defines: QuantityDefinition[];
 	/** Quantities this node consumes but does not define. */
 	references: QuantitySymbol[];
 }
@@ -71,13 +87,32 @@ function dedupe(symbols: readonly QuantitySymbol[]): QuantitySymbol[] {
 }
 
 /**
+ * Collapse restatements, keep contradictions.
+ *
+ * Writing `$x = 1$` in the title and again in the description is one claim made
+ * twice, so it collapses. Writing `$x = 1$` and `$x = 2$` is two claims, and both
+ * survive so the conflict is visible downstream.
+ */
+function dedupeDefinitions(definitions: readonly QuantityDefinition[]): QuantityDefinition[] {
+	const seen = new Set<string>();
+	return definitions.filter((definition) => {
+		const identity = `${definition.symbol.key}\u0000${definition.bodyKey}`;
+		if (seen.has(identity)) {
+			return false;
+		}
+		seen.add(identity);
+		return true;
+	});
+}
+
+/**
  * Split an expression into the symbol it defines and the symbols it consumes,
  * or null when it defines nothing.
  */
 function definitionOf(
 	children: readonly MathNode[],
 	options: SymbolExtractionOptions
-): { defined: QuantitySymbol; consumed: QuantitySymbol[] } | null {
+): { defined: QuantitySymbol; bodyKey: string; consumed: QuantitySymbol[] } | null {
 	const equalityIndices = children.reduce<number[]>((indices, node, index) => {
 		if (isEquality(node)) {
 			indices.push(index);
@@ -97,7 +132,12 @@ function definitionOf(
 		return null;
 	}
 
-	return { defined, consumed: collectSymbolsFromNodes(children.slice(splitAt + 1), options) };
+	const body = children.slice(splitAt + 1);
+	return {
+		defined,
+		bodyKey: canonicalExpressionKey(body),
+		consumed: collectSymbolsFromNodes(body, options)
+	};
 }
 
 /**
@@ -117,7 +157,7 @@ export function nodeQuantities(
 		return EMPTY;
 	}
 
-	const defines: QuantitySymbol[] = [];
+	const defines: QuantityDefinition[] = [];
 	const references: QuantitySymbol[] = [];
 
 	// Title first, so a node that defines a quantity in its title and elaborates
@@ -142,7 +182,7 @@ export function nodeQuantities(
 
 		const definition = definitionOf(children, symbolOptions);
 		if (definition !== null) {
-			defines.push(definition.defined);
+			defines.push({ symbol: definition.defined, bodyKey: definition.bodyKey });
 			references.push(...definition.consumed);
 			continue;
 		}
@@ -150,9 +190,9 @@ export function nodeQuantities(
 		references.push(...collectSymbolsFromNodes(children, symbolOptions));
 	}
 
-	const definedKeys = new Set(defines.map((symbol) => symbol.key));
+	const definedKeys = new Set(defines.map((definition) => definition.symbol.key));
 	return {
-		defines: dedupe(defines),
+		defines: dedupeDefinitions(defines),
 		references: dedupe(references).filter((symbol) => !definedKeys.has(symbol.key))
 	};
 }

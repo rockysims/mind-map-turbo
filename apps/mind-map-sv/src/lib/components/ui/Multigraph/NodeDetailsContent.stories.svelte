@@ -163,6 +163,30 @@
 />
 
 <Story
+	name="TellsANodeWhenItContradictsItself"
+	args={{
+		node: makeNode('Speed is $$v = 1$$, but also $$v = 2$$.'),
+		diagnostics: {
+			items: [{ key: 'v', label: 'v', state: 'self-conflict', nodeIds: [] }],
+			cycleNodeIds: []
+		},
+		titleForNodeId: (nodeId) => nodeId,
+		onRevealNode: () => {}
+	}}
+	play={async ({ canvasElement }) => {
+		const content = focusContent(canvasElement);
+		const item = content.querySelector('[data-diagnostic-quantity="v"]');
+		expect(item).toHaveAttribute('data-diagnostic-state', 'self-conflict');
+
+		// The contradiction is in this node, so there is no other node to name and
+		// nothing to navigate to. A reveal button here would point at the node the
+		// reader is already looking at.
+		expect(item?.querySelector('[data-reveal-node]')).toBeNull();
+		expect(content).toHaveTextContent('is defined more than one way in this node');
+	}}
+/>
+
+<Story
 	name="SurfacesACycleAndNamesTheOtherNodesInIt"
 	args={{
 		node: makeNode('Circular: $$x = y$$.'),

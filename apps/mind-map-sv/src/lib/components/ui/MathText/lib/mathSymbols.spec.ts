@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderMath, type MathNode } from './mathRender';
 import {
+	canonicalExpressionKey,
 	collectSymbols,
 	singleSymbolOf,
 	topLevelChildren,
@@ -197,5 +198,50 @@ describe('singleSymbolOf', () => {
 
 	it('rejects an empty left side', () => {
 		expect(singleSymbolOf([])).toBeNull();
+	});
+});
+
+describe('canonicalExpressionKey', () => {
+	function keyFor(expression: string): string {
+		return canonicalExpressionKey(topLevelChildren(treeOf(expression)));
+	}
+
+	it('gives the same key to the same expression', () => {
+		expect(keyFor('a + b')).toBe(keyFor('a + b'));
+	});
+
+	it('ignores spacing, which is typography rather than content', () => {
+		expect(keyFor('a+b')).toBe(keyFor('a + b'));
+	});
+
+	it('ignores subscript spelling, since the tree is already normalized', () => {
+		expect(keyFor('v_0 + 1')).toBe(keyFor('v_{0} + 1'));
+	});
+
+	it('resolves a command to the character it renders as', () => {
+		expect(keyFor('\\alpha')).toBe(keyFor('α'));
+	});
+
+	it('separates different numbers', () => {
+		expect(keyFor('1')).not.toBe(keyFor('2'));
+	});
+
+	it('separates different expressions', () => {
+		expect(keyFor('m a')).not.toBe(keyFor('m g'));
+	});
+
+	// Structural, not algebraic. Deciding these agree would mean implementing
+	// algebra, and being quietly wrong about it is worse than asking an author to
+	// restate consistently.
+	it('separates a reordered sum', () => {
+		expect(keyFor('a + b')).not.toBe(keyFor('b + a'));
+	});
+
+	it('separates a number from its decimal spelling', () => {
+		expect(keyFor('1')).not.toBe(keyFor('1.0'));
+	});
+
+	it('gives an empty expression an empty key', () => {
+		expect(canonicalExpressionKey([])).toBe('');
 	});
 });

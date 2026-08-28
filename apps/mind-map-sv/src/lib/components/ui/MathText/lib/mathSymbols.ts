@@ -196,3 +196,43 @@ export function singleSymbolOf(
 	const symbols = collectSymbolsFromNodes(nodes, options);
 	return symbols.length === 1 ? symbols[0] : null;
 }
+
+/**
+ * A stable string identifying what an expression says, for comparing two
+ * statements about the same quantity.
+ *
+ * This answers "are these the same definition?", not "are these equal?". It is a
+ * structural comparison and deliberately not an evaluation: `1` and `1.0` differ
+ * here, as do `a + b` and `b + a`. Deciding those are the same would mean
+ * implementing algebra, which this milestone explicitly does not do, and being
+ * wrong about it quietly is worse than asking the author to restate consistently.
+ *
+ * Reading the MathML rather than the source is what makes `v_0` and `v_{0}` agree
+ * without any special handling — Temml has already normalized the two spellings
+ * into the same tree.
+ */
+export function canonicalExpressionKey(nodes: readonly MathNode[]): string {
+	const text: string[] = [];
+
+	function walk(node: MathNode) {
+		if (typeof node.text === 'string') {
+			text.push(node.text);
+			return;
+		}
+		for (const child of node.children ?? []) {
+			walk(child);
+		}
+	}
+
+	for (const node of nodes) {
+		walk(node);
+	}
+
+	// Whitespace and invisible operators are typography, not content: `a+b` and
+	// `a + b` are one statement written twice, and flagging them would make the
+	// warning fire on formatting.
+	return text
+		.join('')
+		.replace(/[\s\u2061\u2062\u2063\u2064]/g, '')
+		.normalize('NFC');
+}

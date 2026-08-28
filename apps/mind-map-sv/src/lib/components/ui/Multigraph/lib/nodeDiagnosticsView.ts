@@ -13,15 +13,19 @@ import {
 	type ReferenceState
 } from './dataflowDiagnostics';
 
-export type QuantityDiagnosticState = Exclude<ReferenceState, 'resolved'> | 'conflict';
+export type QuantityDiagnosticState =
+	| Exclude<ReferenceState, 'resolved'>
+	| 'conflict'
+	| 'self-conflict';
 
 export interface QuantityDiagnosticItem {
 	key: string;
 	label: string;
 	state: QuantityDiagnosticState;
 	/**
-	 * Nodes to reach for `out-of-view`, or the competing definers for `conflict`.
-	 * Empty for `unresolved`, which is the state's defining property.
+	 * Nodes to reach: the definers for `out-of-view`, the *other* definers for
+	 * `conflict`. Empty for `unresolved` and for `self-conflict`, where in both
+	 * cases there is nowhere else to go — which is the point of each state.
 	 */
 	nodeIds: string[];
 }
@@ -35,7 +39,10 @@ export interface NodeDiagnosticsView {
 const STATE_ORDER: Record<QuantityDiagnosticState, number> = {
 	unresolved: 0,
 	'out-of-view': 1,
-	conflict: 2
+	// Before a cross-node conflict: this one is repairable without leaving the
+	// node, whereas reconciling with another node is a judgement about both.
+	'self-conflict': 2,
+	conflict: 3
 };
 
 export function nodeDiagnosticsView(
@@ -70,11 +77,19 @@ export function nodeDiagnosticsView(
 		if (!involved) {
 			continue;
 		}
+		// When this node contradicts itself, that is the report — even if another
+		// node also disagrees. Reconciling with anyone else is meaningless until
+		// the node states one thing, and it is the half the reader can fix here.
+		const contradictsItself = conflict.selfContradictingNodeIds.includes(nodeId);
+
 		items.set(conflict.symbol.key, {
 			key: conflict.symbol.key,
 			label: conflict.symbol.label,
-			state: 'conflict',
-			nodeIds: [...conflict.definerNodeIds]
+			state: contradictsItself ? 'self-conflict' : 'conflict',
+			// Never offer to navigate to the node already being read.
+			nodeIds: contradictsItself
+				? []
+				: conflict.definerNodeIds.filter((definerId) => definerId !== nodeId)
 		});
 	}
 

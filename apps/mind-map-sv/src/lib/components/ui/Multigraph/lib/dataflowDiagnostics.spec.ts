@@ -87,9 +87,41 @@ describe('reference states', () => {
 });
 
 describe('conflicts', () => {
-	it('flags a quantity defined by two nodes', () => {
+	it('flags a quantity two nodes define differently', () => {
 		const diagnostics = diagnose([node('one', '$$g = 9.8$$'), node('two', '$$g = 10$$')]);
 		expect(diagnostics.conflicts.map((conflict) => conflict.symbol.label)).toEqual(['g']);
+	});
+
+	// A conflict is disagreement, not duplication. Warning when two nodes say the
+	// same thing would fire on ordinary authoring and teach people to ignore it.
+	it('does not flag two nodes that state the same definition', () => {
+		expect(diagnose([node('one', '$$g = 9.8$$'), node('two', '$$g = 9.8$$')]).conflicts).toEqual(
+			[]
+		);
+	});
+
+	it('does not flag two nodes whose definitions differ only in spacing', () => {
+		expect(diagnose([node('one', '$$w = m g$$'), node('two', '$$w = mg$$')]).conflicts).toEqual([]);
+	});
+
+	it('flags a node that defines the same quantity two different ways', () => {
+		const diagnostics = diagnose([
+			{ id: 'a', title: '$x = 1$', description: 'But also $x = 2$.', tags: [] }
+		]);
+		expect(diagnostics.conflicts.map((conflict) => conflict.symbol.label)).toEqual(['x']);
+	});
+
+	// There is no second node to name, so the panel has to be able to describe a
+	// conflict whose only participant is the node reading it.
+	it('names only the one node when it contradicts itself', () => {
+		const diagnostics = diagnose([
+			{ id: 'a', title: '$x = 1$', description: 'But also $x = 2$.', tags: [] }
+		]);
+		expect(diagnostics.conflicts[0].definerNodeIds).toEqual(['a']);
+	});
+
+	it('flags a contradiction stated entirely within one description', () => {
+		expect(diagnose([node('a', '$$x = 1$$ and $$x = 2$$')]).conflicts).toHaveLength(1);
 	});
 
 	it('names every competing node, not just the first', () => {
