@@ -4,6 +4,8 @@
 	import type { GraphAssetMetadata } from '../types/multigraph';
 	import type { NodeData, NodeImageContent } from '../types/node';
 	import { prefersReducedMotion } from '$lib/reducedMotion';
+	import MathText from '../MathText/MathText.svelte';
+	import { hasMath } from '../MathText/lib/mathSegments';
 	import { normalizeNodeTitle, type EdgePatch } from './lib/graph';
 	import { normalizeTagList } from './lib/titleSyntax';
 
@@ -53,6 +55,9 @@
 	let titleInput = $state<HTMLInputElement | null>(null);
 	let imageInput = $state<HTMLInputElement | null>(null);
 	let reduceMotion = $derived(prefersReducedMotion());
+	// Only surface the preview once the draft actually contains math, so nodes
+	// without any keep the compact form the sheet has today.
+	const descriptionHasMath = $derived(hasMath(description));
 
 	const incidentEdges = $derived(
 		edges.filter((edge) => edge.sourceNodeId === node.id || edge.targetNodeId === node.id)
@@ -241,6 +246,13 @@
 					Description
 					<textarea bind:value={description} name="description" rows="6"></textarea>
 				</label>
+
+				{#if descriptionHasMath}
+					<section class="math-preview" aria-label="Math preview" data-math-preview>
+						<h3>Preview</h3>
+						<div class="math-preview-body"><MathText text={description} /></div>
+					</section>
+				{/if}
 
 				<label>
 					Node tags
@@ -547,6 +559,29 @@
 	.actions {
 		justify-content: flex-end;
 		flex-wrap: wrap;
+	}
+
+	.math-preview {
+		display: grid;
+		gap: 0.5rem;
+		border: 1px solid #e2e8f0;
+		border-radius: 0.875rem;
+		padding: 0.875rem;
+		background: #f8fafc;
+	}
+
+	.math-preview h3 {
+		margin: 0;
+		color: #475569;
+		font-size: 0.8125rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+
+	.math-preview-body {
+		color: #0f172a;
+		line-height: 1.65;
 	}
 
 	.edges-tab {
