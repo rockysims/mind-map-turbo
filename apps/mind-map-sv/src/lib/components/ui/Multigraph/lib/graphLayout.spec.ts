@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import type { EdgeData } from '../../types/edge';
+import type { MultigraphData } from '../../types/multigraph';
+import { composeVisibleLayoutGraph } from './boundedVisibility';
 import {
 	deriveGraphLayout,
 	relaxGraphPositionsStep,
@@ -6,9 +9,8 @@ import {
 	withRelaxedGraphPositions,
 	withSettledGraphPositions
 } from './graphLayout';
-import { hopsFromPinned } from './layout';
+import { hopsFromPinned, shortestPathHopsByNodeId } from './layout';
 import { makeGraph } from './testFixtures';
-import type { EdgeEndpointIds } from './physics';
 
 function maxOverlapAmount(
 	positions: Record<string, { x: number; y: number }>,
@@ -56,65 +58,85 @@ describe('graphLayout', () => {
 		expect(layout.radiusByNodeId).toEqual({ n0: 100, n1: 50, n2: 25 });
 	});
 
-	describe('springEdges', () => {
-		// Two nodes with no authored edge between them, far enough apart that any
-		// spring between them has to pull.
-		const graph = {
-			...makeGraph({ nodeCount: 2, pinned: [0], edges: [] }),
-			posByNodeId: { n0: { x: 0, y: 0 }, n1: { x: 600, y: 0 } }
-		};
-		const settings = { baseRadius: 40, minScale: 0.2, hopRepulsionStrength: 0 };
+	describe('a derived edge that joined the layout graph', () => {
+		// Two nodes at the same reading distance, starting far enough apart that
+		// whatever connects them has to pull. Everything here runs at the app's own
+		// settings — the standoff this covers is a property of those numbers.
+		const HOPS = { n0: 0, n1: 0 };
+		const SETTLE_ITERATIONS = 400;
 
-		function separationWith(springEdges?: EdgeEndpointIds[]) {
-			const positions = relaxGraphPositions(graph, {
-				hopsByNodeId: hopsFromPinned(graph),
-				settings,
-				relaxIterations: 1,
-				springEdges
-			});
-			return positions.n1.x - positions.n0.x;
+		function spreadPair(edges: [number, number][]): MultigraphData {
+			return {
+				...makeGraph({ nodeCount: 2, edges }),
+				posByNodeId: { n0: { x: 0, y: 0 }, n1: { x: 1200, y: 0 } }
+			};
 		}
 
-		it('pulls two nodes together that no authored edge connects', () => {
-			expect(separationWith([{ sourceNodeId: 'n0', targetNodeId: 'n1' }])).toBeLessThan(
-				separationWith()
-			);
+		function derivedEdge(springFactor: number): EdgeData {
+			return {
+				id: 'dataflow:n0->n1',
+				sourceNodeId: 'n0',
+				targetNodeId: 'n1',
+				tags: [],
+				directed: true,
+				springFactor
+			};
+		}
+
+		function pairJoinedOnlyByDataflow(springFactor = 1): MultigraphData {
+			return composeVisibleLayoutGraph(spreadPair([]), new Set(['n0', 'n1']), [
+				derivedEdge(springFactor)
+			]);
+		}
+
+		function settledDistance(graph: MultigraphData): number {
+			const settled = withSettledGraphPositions(graph, {
+				hopsByNodeId: HOPS,
+				relaxIterations: SETTLE_ITERATIONS
+			});
+			const source = settled.posByNodeId.n0;
+			const target = settled.posByNodeId.n1;
+			return Math.hypot(target.x - source.x, target.y - source.y);
+		}
+
+		it('settles a derived-only pair where an authored pair settles', () => {
+			// The reason the side channel had to go. A spring-only edge left the pair
+			// unreachable in `data.edges`, so hop repulsion — which maps unreachable
+			// to its maximum push — shoved at full strength against the very spring
+			// pulling them together: 950px of standoff against an authored 736px, and
+			// a tug-of-war that burned settle frames getting there.
+			const authored = settledDistance(spreadPair([[0, 1]]));
+			const derived = settledDistance(pairJoinedOnlyByDataflow());
+
+			expect(derived).toBeGreaterThan(authored * 0.97);
+			expect(derived).toBeLessThan(authored * 1.03);
 		});
 
-		it('leaves hop distance and scale to the authored edges', () => {
-			// The whole point of the separate list: a spring edge moves nodes without
-			// making them neighbors, so n1 stays unreachable from the pinned n0 and
-			// keeps the disconnected node's minimum scale.
-			const layout = deriveGraphLayout(graph, {
-				hopsByNodeId: hopsFromPinned(graph),
-				settings,
-				relaxIterations: 1,
-				springEdges: [{ sourceNodeId: 'n0', targetNodeId: 'n1' }]
+		it('makes the pair neighbors for hop repulsion instead of unreachable', () => {
+			expect(shortestPathHopsByNodeId(pairJoinedOnlyByDataflow()).n0.n1).toBe(1);
+			// Without the composition this is the number repulsion was reading.
+			expect(shortestPathHopsByNodeId(spreadPair([])).n0.n1).toBe(Infinity);
+		});
+
+		it('scales the pull by the edge factor', () => {
+			const full = settledDistance(pairJoinedOnlyByDataflow(1));
+			const half = settledDistance(pairJoinedOnlyByDataflow(0.5));
+
+			// Weaker spring, same repulsion: the pair comes to rest further apart.
+			expect(half).toBeGreaterThan(full);
+		});
+
+		it('leaves distance and scale to the hop map it was handed', () => {
+			// A derived edge connects the pair for force, but how big a node is drawn
+			// is still the one bounded hop map's answer, never a fresh measure here.
+			const layout = deriveGraphLayout(pairJoinedOnlyByDataflow(), {
+				hopsByNodeId: { n0: 0 },
+				settings: { minScale: 0.2 },
+				relaxIterations: 0
 			});
 
 			expect(layout.hopsByNodeId.n1).toBe(Infinity);
 			expect(layout.scaleByNodeId.n1).toBe(0.2);
-		});
-
-		it('scales the pull by the edge factor', () => {
-			const full = separationWith([{ sourceNodeId: 'n0', targetNodeId: 'n1' }]);
-			const half = separationWith([{ sourceNodeId: 'n0', targetNodeId: 'n1', springFactor: 0.5 }]);
-
-			expect(half).toBeGreaterThan(full);
-			expect(half).toBeLessThan(separationWith());
-		});
-
-		it('falls back to the graph edges when not given', () => {
-			const connected = makeGraph({ nodeCount: 2, pinned: [0], edges: [[0, 1]] });
-			const spread = { ...connected, posByNodeId: graph.posByNodeId };
-
-			expect(
-				relaxGraphPositions(spread, {
-					hopsByNodeId: hopsFromPinned(spread),
-					settings,
-					relaxIterations: 1
-				}).n1.x
-			).toBeLessThan(spread.posByNodeId.n1.x);
 		});
 	});
 

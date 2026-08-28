@@ -2,7 +2,7 @@ import type { MultigraphData, Point } from '../../types/multigraph';
 import { radiusOf, scaleByHops, shortestPathHopsByNodeId } from './layout';
 import type { LayoutSettings } from './layoutSettings';
 import { withDefaultLayoutSettings } from './layoutSettings';
-import { relaxGraphPhysics, type EdgeEndpointIds } from './physics';
+import { relaxGraphPhysics } from './physics';
 import { normalizeRigidMotion } from './rigidMotion';
 
 const CENTERED_POSITION: Point = { x: 0, y: 0 };
@@ -45,15 +45,6 @@ export interface GraphLayoutOptions {
 	scaleByNodeId?: Record<string, number>;
 	participatingNodeIds?: ReadonlySet<string>;
 	mobilityByNodeId?: Record<string, number>;
-	/**
-	 * Edges that exert spring force, when that is not the same set that defines
-	 * the graph's shape. Defaults to `data.edges`.
-	 *
-	 * The last remnant of the era when derived edges could pull but not connect:
-	 * distance now comes from `hopsByNodeId`, which counts them, so the only thing
-	 * left on this channel is the pull itself.
-	 */
-	springEdges?: readonly EdgeEndpointIds[];
 }
 
 export interface GraphRelaxationStep {
@@ -77,15 +68,18 @@ export function deriveGraphLayout(data: MultigraphData, options: GraphLayoutOpti
 	const iterations = options.relaxIterations ?? settings.relaxIterations;
 	// Pairwise node-to-node hops for repulsion, a different question from the hop
 	// map above: that one says how far each node is from where reading starts,
-	// this one how far every node is from every other. Stays on `data.edges`, so
-	// spring-only edges cannot change how hard two nodes push apart.
+	// this one how far every node is from every other. Reads `data.edges`, which
+	// is every edge of the composed layout graph — a derived edge makes its
+	// endpoints neighbors here exactly as it does for the spring, instead of
+	// leaving them infinitely far apart and pushing at full strength against
+	// their own pull.
 	const shortestPathHops = shortestPathHopsByNodeId(data);
 	const posByNodeId =
 		iterations > 0
 			? relaxGraphPhysics(
 					basePositions,
 					radiusByNodeId,
-					[...(options.springEdges ?? data.edges)],
+					[...data.edges],
 					settings,
 					iterations,
 					anchoredIds,

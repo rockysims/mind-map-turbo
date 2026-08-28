@@ -219,6 +219,40 @@ export function graphWithVisibleNodes(
 	};
 }
 
+/**
+ * The one graph the layout runs over: the visible nodes, the authored edges
+ * between them, and the derived edges between them.
+ *
+ * There is exactly one of these calls per consumer for a reason. A derived edge
+ * that pulled through a side channel while the graph's shape said the pair was
+ * unreachable had the hop repulsion pushing at full strength against its own
+ * spring — the pair standing off at a distance neither force asked for. Joining
+ * the layout graph makes one edge one answer: spring force, degree counting,
+ * edge-gap constraints, and the pairwise shortest paths repulsion reads all see
+ * the same set.
+ *
+ * Derived edges reaching off screen are dropped: an off-screen node has no
+ * position or radius for physics to use, and an edge to it would still count
+ * toward its neighbor's degree, weakening every pull that node does feel.
+ *
+ * This graph is for placing nodes and never for keeping. Callers merge the
+ * positions back into the authored graph, so a derived edge cannot reach
+ * mutations, duplicate detection, or persistence.
+ */
+export function composeVisibleLayoutGraph(
+	data: MultigraphData,
+	nodeIds: ReadonlySet<string>,
+	derivedEdges: readonly EdgeData[] = []
+): MultigraphData {
+	const visible = graphWithVisibleNodes(data, nodeIds);
+	const visibleDerivedEdges = derivedEdges.filter(
+		(edge) => nodeIds.has(edge.sourceNodeId) && nodeIds.has(edge.targetNodeId)
+	);
+	if (visibleDerivedEdges.length === 0) return visible;
+
+	return { ...visible, edges: [...visible.edges, ...visibleDerivedEdges] };
+}
+
 export function pinnedNodeIds(data: MultigraphData): Set<string> {
 	return new Set(data.nodes.filter((node) => node.pinned).map((node) => node.id));
 }

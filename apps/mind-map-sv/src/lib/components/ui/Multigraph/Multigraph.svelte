@@ -67,9 +67,9 @@
 	import type { LayoutSettings } from './lib/layoutSettings.js';
 	import { withDefaultLayoutSettings } from './lib/layoutSettings.js';
 	import {
+		composeVisibleLayoutGraph,
 		computeBoundedHops,
 		edgeVisibilityForPinnedNeighborhood,
-		graphWithVisibleNodes,
 		visibleNodeIdsForPinnedNeighborhood
 	} from './lib/boundedVisibility.js';
 	import { composeEdgesForRender, createDataflowModel } from './lib/dataflowLayer.js';
@@ -309,17 +309,7 @@
 	const layoutRuntime: LayoutRuntime = new LayoutRuntime({
 		getGraph: () => graph,
 		computeHops: (data) => hopsFor(data),
-		composeSpringEdges: (visibleGraph) => {
-			const visibleNodeIds = new Set(visibleGraph.nodes.map((node) => node.id));
-			// A node off screen has no position or radius for physics to use, and an
-			// edge to it would still count toward its neighbor's degree, weakening
-			// every pull that node does feel.
-			return withSpringFactor(
-				dataflow.edges.filter(
-					(edge) => visibleNodeIds.has(edge.sourceNodeId) && visibleNodeIds.has(edge.targetNodeId)
-				)
-			);
-		},
+		composeDerivedEdges: (data) => withSpringFactor(dataflowModel(data, dataflowEnabled).edges),
 		getLayoutSettings: () => layoutSettings,
 		getActiveDragNodeId: () => activeDragNodeId,
 		getPreferredBeaconNodeIds: () => severedBeaconPreference,
@@ -380,6 +370,8 @@
 	const dataflow = $derived(dataflowModel(graph, dataflowEnabled));
 	/** What the renderer draws: authored edges plus the derived ones. */
 	const renderGraph = $derived(composeEdgesForRender(graph, dataflow.edges));
+	/** The same derived edges the runtime composes, weighted for the spring. */
+	const layoutDerivedEdges = $derived(withSpringFactor(dataflow.edges));
 	/** Shared so a node below the size threshold allocates nothing per frame. */
 	const EMPTY_QUANTITY_CHIPS: QuantityChips = { labels: [], overflowCount: 0 };
 	/**
@@ -413,7 +405,16 @@
 			displayedLayers: resolvedLayoutSettings.displayedLayers
 		})
 	);
-	const visibleGraph = $derived(graphWithVisibleNodes(graph, visibleNodeIds));
+	/**
+	 * The graph the layout runs over — the same composition `LayoutRuntime` makes
+	 * for the frames it relaxes, through the same function, so what is drawn and
+	 * what is placed can never be two different graphs. Consumers that only read
+	 * `.nodes` (occlusion, hit testing, focus, the node loop) are untouched by the
+	 * derived edges riding along in `.edges`.
+	 */
+	const visibleGraph = $derived(
+		composeVisibleLayoutGraph(graph, visibleNodeIds, layoutDerivedEdges)
+	);
 	/** Needs the visible set, so that out-of-view reads differently from undefined. */
 	const dataflowDiagnostics = $derived(
 		computeDataflowDiagnostics(dataflow.index, dataflow.edges, { visibleNodeIds })
@@ -532,21 +533,28 @@
 		// Cleared before the settle measures anything: a preference left over from
 		// the graph being replaced must not pick a beacon in the one arriving.
 		severedBeaconPreference = [];
-		// Dataflow pulls during the ingest settle too. A graph arriving from storage
-		// should come to rest under the same forces it will feel from the first
-		// interaction onward, instead of shifting once the runtime takes over.
-		const springEdges = untrack(() => [
-			...incoming.edges,
-			...withSpringFactor(dataflowModel(incoming, dataflowEnabled).edges)
-		]);
+		// Dataflow shapes the ingest settle too. A graph arriving from storage should
+		// come to rest under the same forces it will feel from the first interaction
+		// onward, instead of shifting once the runtime takes over — so it settles
+		// over the same composition, through the same function. Nothing is hidden
+		// yet, so every node is in the visible set.
+		const layoutGraphForIngest = untrack(() =>
+			composeVisibleLayoutGraph(
+				incoming,
+				new Set(incoming.nodes.map((node) => node.id)),
+				withSpringFactor(dataflowModel(incoming, dataflowEnabled).edges)
+			)
+		);
 		// The same hop map the canvas will draw from, so the graph settles at the
 		// sizes it is about to appear at rather than at a first guess.
 		const hopsByNodeIdForIngest = untrack(() => hopsFor(incoming));
-		graph = withSettledGraphPositions(incoming, {
+		const settledLayoutGraph = withSettledGraphPositions(layoutGraphForIngest, {
 			settings,
-			springEdges,
 			hopsByNodeId: hopsByNodeIdForIngest
 		});
+		// Positions only: `settledLayoutGraph.edges` carries the derived edges, and
+		// the graph the app mutates and saves must never see one.
+		graph = { ...incoming, posByNodeId: settledLayoutGraph.posByNodeId };
 		primaryNodeId = primary;
 		internalExitingBuffer = EMPTY_EXITING_BUFFER;
 		nodeEnterAnimations = {};

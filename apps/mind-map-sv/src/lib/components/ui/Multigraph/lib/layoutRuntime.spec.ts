@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import type { EdgeData } from '../../types/edge';
 import type { MultigraphData } from '../../types/multigraph';
 import { beaconNodeIds } from './beacons';
+import { hasDerivedEdges } from './dataflowLayer';
 import {
 	computeBoundedHops,
 	visibleNodeIdsForPinnedNeighborhood,
@@ -318,50 +320,126 @@ describe('LayoutRuntime', () => {
 		expect(runtime.revealWaveNodeOpacityByNodeId.n5 ?? 1).toBeLessThan(1);
 	});
 
-	describe('composeSpringEdges', () => {
-		const graph = makeGraph({ nodeCount: 3, edges: [[0, 1]] });
+	describe('composeDerivedEdges', () => {
+		// n2 hangs off nothing, so with one layer shown it is off screen while n0
+		// and n1 are on it.
+		const graph = {
+			...makeGraph({ nodeCount: 3, pinned: [0], edges: [[0, 1]] }),
+			posByNodeId: {
+				n0: { x: 0, y: 0 },
+				n1: { x: 700, y: 0 },
+				n2: { x: 1400, y: 0 }
+			}
+		};
+
+		function derivedEdge(sourceNodeId: string, targetNodeId: string): EdgeData {
+			return {
+				id: `dataflow:${sourceNodeId}->${targetNodeId}`,
+				sourceNodeId,
+				targetNodeId,
+				tags: [],
+				directed: true,
+				springFactor: 1
+			};
+		}
+
+		const ALL_VISIBLE = { n0: 0, n1: 1, n2: 1 };
 
 		function runtimeWith(
-			composeSpringEdges?: (visibleGraph: MultigraphData) => readonly EdgeEndpointIds[]
+			composeDerivedEdges?: (graph: MultigraphData) => readonly EdgeData[],
+			hopsByNodeId: Record<string, number> = ALL_VISIBLE,
+			applyGraph: (nextGraph: MultigraphData) => void = () => {}
 		): LayoutRuntime {
 			return new LayoutRuntime({
 				getGraph: () => graph,
-				getLayoutSettings: () => ({ relaxIterations: 0 }),
+				getLayoutSettings: () => ({ relaxIterations: 0, displayedLayers: 3 }),
 				getActiveDragNodeId: () => null,
 				getPreferredBeaconNodeIds: () => [],
-				applyGraph: () => {},
-				composeSpringEdges,
+				applyGraph,
+				computeHops: () => hopsByNodeId,
+				composeDerivedEdges,
 				scheduler: new TestScheduler()
 			});
 		}
 
-		it('leaves the layout on the graph edges when no hook is given', () => {
-			expect(runtimeWith().layoutOptions(graph).springEdges).toBeUndefined();
+		it('leaves the layout graph on the authored edges when no hook is given', () => {
+			expect(runtimeWith().visibleGraphFor(graph).edges).toEqual(graph.edges);
 		});
 
-		it('leaves the layout on the graph edges when the hook adds nothing', () => {
-			// Not an empty array: the layout should keep reading data.edges directly
-			// rather than a copy of it, on every frame, for every graph.
-			expect(runtimeWith(() => []).layoutOptions(graph).springEdges).toBeUndefined();
-		});
+		it('joins a derived edge between two visible nodes as an ordinary edge', () => {
+			// One composition point: the same graph the relax step, the scale-change
+			// layouts, and the renderer's `graphLayout` all read.
+			const edge = derivedEdge('n0', 'n2');
 
-		it('appends the extra edges to the authored ones rather than replacing them', () => {
-			const runtime = runtimeWith(() => [{ sourceNodeId: 'n0', targetNodeId: 'n2' }]);
-
-			expect(runtime.layoutOptions(graph).springEdges).toEqual([
+			expect(runtimeWith(() => [edge]).visibleGraphFor(graph).edges).toEqual([
 				...graph.edges,
-				{ sourceNodeId: 'n0', targetNodeId: 'n2' }
+				edge
 			]);
 		});
 
-		it('offers the layout graph so the caller can drop off-screen endpoints', () => {
+		it('drops a derived edge whose far end is off screen', () => {
+			// An off-screen node has no position or radius for physics to use, and the
+			// edge would still count toward n1's degree, weakening every pull it feels.
+			const layoutGraph = runtimeWith(() => [derivedEdge('n1', 'n2')], {
+				n0: 0,
+				n1: 1,
+				n2: Infinity
+			}).visibleGraphFor(graph);
+
+			expect(layoutGraph.nodes.map((node) => node.id)).toEqual(['n0', 'n1']);
+			expect(layoutGraph.edges).toEqual(graph.edges);
+		});
+
+		it('asks about the whole graph, not the visible subgraph', () => {
+			// Same contract as `computeHops`: inside a visible subgraph the hidden half
+			// of a derived edge is simply not there to be filtered.
 			const seen: MultigraphData[] = [];
-			runtimeWith((visibleGraph) => {
-				seen.push(visibleGraph);
+			runtimeWith((asked) => {
+				seen.push(asked);
 				return [];
-			}).layoutOptions(graph);
+			}).visibleGraphFor(graph);
 
 			expect(seen).toEqual([graph]);
+		});
+
+		it('keeps derived edges out of the graph it hands back', () => {
+			// The layout graph is for placing nodes, never for keeping. Only positions
+			// come back, or a derived edge would reach mutations and persistence.
+			const applied: MultigraphData[] = [];
+			const runtime = runtimeWith(
+				() => [derivedEdge('n0', 'n2')],
+				ALL_VISIBLE,
+				(nextGraph) => applied.push(nextGraph)
+			);
+			runtime.settleFramesRemaining = 1;
+			runtime.step(0);
+
+			const kept = [
+				runtime.relaxAfterMutation(graph),
+				runtime.beginScaleChange(graph, 'n0'),
+				...applied
+			];
+
+			expect(kept).not.toHaveLength(0);
+			for (const nextGraph of kept) {
+				expect(hasDerivedEdges(nextGraph)).toBe(false);
+				expect(nextGraph.edges).toEqual(graph.edges);
+			}
+		});
+
+		it('pulls a derived pair together instead of standing it off', () => {
+			// The whole point of composing rather than side-channelling: with the pair
+			// unreachable in `data.edges`, hop repulsion pushed at full strength
+			// against the spring that was pulling them, and they came to rest much
+			// further apart than an authored pair would.
+			function settledGapToN2(composeDerivedEdges?: () => readonly EdgeData[]): number {
+				const relaxed = runtimeWith(composeDerivedEdges).relaxAfterMutation(graph, null, 400);
+				const source = relaxed.posByNodeId.n1;
+				const target = relaxed.posByNodeId.n2;
+				return Math.hypot(target.x - source.x, target.y - source.y);
+			}
+
+			expect(settledGapToN2(() => [derivedEdge('n1', 'n2')])).toBeLessThan(settledGapToN2());
 		});
 	});
 

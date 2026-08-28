@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import type { EdgeData } from '../../types/edge';
 import { hopsFromPinned } from './layout';
 import { BEACON_HOP, beaconNodeIds, withBeaconHops } from './beacons';
 import {
+	composeVisibleLayoutGraph,
 	computeBoundedHops,
 	edgeVisibilityForPinnedNeighborhood,
 	graphWithVisibleNodes,
@@ -394,6 +396,51 @@ describe('boundedVisibility', () => {
 
 		expect(visibleGraph.nodes.map((node) => node.id)).toEqual(['n0', 'n1', 'n3']);
 		expect(visibleGraph.edges.map((edge) => edge.id)).toEqual(['e0', 'e3']);
+	});
+
+	describe('composeVisibleLayoutGraph', () => {
+		const graph = makeGraph({
+			nodeCount: 4,
+			edges: [
+				[0, 1],
+				[2, 3]
+			]
+		});
+		const visibleIds = new Set(['n0', 'n1', 'n2']);
+
+		function derivedEdge(sourceNodeId: string, targetNodeId: string): EdgeData {
+			return {
+				id: `dataflow:${sourceNodeId}->${targetNodeId}`,
+				sourceNodeId,
+				targetNodeId,
+				tags: [],
+				directed: true,
+				springFactor: 1
+			};
+		}
+
+		it('joins derived edges between visible nodes as ordinary edges', () => {
+			// Ordinary is the whole point: spring force, degree counting, edge-gap
+			// constraints, and the pairwise hops repulsion reads are all one question
+			// about `edges` once the edge is in there.
+			const composed = composeVisibleLayoutGraph(graph, visibleIds, [derivedEdge('n1', 'n2')]);
+
+			expect(composed.nodes.map((node) => node.id)).toEqual(['n0', 'n1', 'n2']);
+			expect(composed.edges.map((edge) => edge.id)).toEqual(['e0', 'dataflow:n1->n2']);
+			expect(composed.edges[1].springFactor).toBe(1);
+		});
+
+		it('drops a derived edge reaching a hidden node', () => {
+			expect(composeVisibleLayoutGraph(graph, visibleIds, [derivedEdge('n1', 'n3')]).edges).toEqual(
+				[graph.edges[0]]
+			);
+		});
+
+		it('returns the plain visible subgraph when nothing derived survives', () => {
+			expect(composeVisibleLayoutGraph(graph, visibleIds, [])).toEqual(
+				graphWithVisibleNodes(graph, visibleIds)
+			);
+		});
 	});
 
 	it('returns pinned node ids', () => {

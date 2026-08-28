@@ -1,9 +1,10 @@
+import type { EdgeData } from '../../types/edge';
 import type { MultigraphData } from '../../types/multigraph';
 import { beaconNodeIds } from './beacons';
 import {
+	composeVisibleLayoutGraph,
 	computeBoundedHops,
 	edgeVisibilityForPinnedNeighborhood,
-	graphWithVisibleNodes,
 	pinnedNodeIds,
 	visibleNodeIdsForPinnedNeighborhood
 } from './boundedVisibility';
@@ -15,7 +16,6 @@ import {
 	type GraphLayoutOptions
 } from './graphLayout';
 import { scaleByHops } from './layout';
-import type { EdgeEndpointIds } from './physics';
 import {
 	advanceLayeredRelayout,
 	initialLayeredRelayoutState,
@@ -88,13 +88,14 @@ export interface LayoutRuntimeOptions {
 	 */
 	computeHops?: (graph: MultigraphData) => Record<string, number>;
 	/**
-	 * Extra edges that exert spring force without joining the graph's topology,
-	 * currently the dataflow layer. Called with the visible graph, so the caller
-	 * can drop edges whose endpoints are not on screen.
+	 * The derived edges of a graph — in the app, the dataflow layer — which
+	 * `visibleGraphFor` joins to the visible layout graph as ordinary edges.
+	 * Takes the whole graph, like `computeHops`, and returns every derived edge
+	 * it has; the composition drops the ones reaching off screen.
 	 *
-	 * Defaults to none, which leaves the force exactly as it was.
+	 * Defaults to none, which is every graph with no math in it.
 	 */
-	composeSpringEdges?: (visibleGraph: MultigraphData) => readonly EdgeEndpointIds[];
+	composeDerivedEdges?: (graph: MultigraphData) => readonly EdgeData[];
 	scheduler?: LayoutRuntimeScheduler;
 	/** Returns true while enter/exit animations are active; keeps the frame loop running. */
 	getHasActiveTransitions?: () => boolean;
@@ -296,7 +297,7 @@ export class LayoutRuntime {
 	}
 
 	/**
-	 * `layoutGraph` is the visible subgraph; `hopsByNodeId` must be the map for
+	 * `layoutGraph` is the composed visible graph; `hopsByNodeId` must be the map for
 	 * the whole graph it came out of, so a beacon or an equation-revealed node —
 	 * both edgeless once the hidden nodes are gone — keeps the distance it was
 	 * actually measured at. Beacons stay unanchored: overlap resolution and
@@ -320,7 +321,6 @@ export class LayoutRuntime {
 
 		return {
 			settings: this.#options.getLayoutSettings(),
-			springEdges: this.#springEdgesFor(layoutGraph),
 			activeDragNodeId: overrides.activeDragNodeId ?? this.#options.getActiveDragNodeId(),
 			scaleAnchoredNodeIds: overrides.scaleAnchoredNodeIds ?? this.scaleAnchoredNodeIds,
 			hopsByNodeId: overrides.hopsByNodeId ?? this.#hopsFor(layoutGraph),
@@ -436,24 +436,16 @@ export class LayoutRuntime {
 	}
 
 	/**
-	 * The authored edges always pull; extra edges are appended rather than
-	 * replacing them. Returns undefined when there are none so the layout keeps
-	 * using `data.edges` directly and allocates nothing.
-	 */
-	#springEdgesFor(layoutGraph: MultigraphData): readonly EdgeEndpointIds[] | undefined {
-		const extra = this.#options.composeSpringEdges?.(layoutGraph);
-		if (extra === undefined || extra.length === 0) {
-			return undefined;
-		}
-		return [...layoutGraph.edges, ...extra];
-	}
-
-	/**
 	 * The graph physics runs over: exactly the nodes the canvas draws, because
-	 * both sides filter the same hop map by the same budget. Public so a spec can
-	 * hold it against the renderer's visible set — a node drawn without taking
-	 * part in the physics that places it would sit stale while everything else
-	 * moves around and through it.
+	 * both sides filter the same hop map by the same budget, plus the derived
+	 * edges between them. Public so a spec can hold it against the renderer's
+	 * visible set — a node drawn without taking part in the physics that places
+	 * it would sit stale while everything else moves around and through it.
+	 *
+	 * Every consumer of the visible graph — the relax step, `deriveGraphLayout`
+	 * through `layoutOptions`, the scale-change layouts — reads the composition
+	 * from here, so there is one place where a derived edge becomes a layout edge
+	 * and no way for two of them to disagree.
 	 */
 	visibleGraphFor(
 		graph: MultigraphData,
@@ -462,7 +454,11 @@ export class LayoutRuntime {
 		const visibleNodeIds = visibleNodeIdsForPinnedNeighborhood(graph, hopsByNodeId, {
 			displayedLayers: this.#resolvedSettings().displayedLayers
 		});
-		return graphWithVisibleNodes(graph, visibleNodeIds);
+		return composeVisibleLayoutGraph(
+			graph,
+			visibleNodeIds,
+			this.#options.composeDerivedEdges?.(graph)
+		);
 	}
 
 	get revealWaveProgress(): number {
@@ -644,6 +640,12 @@ export class LayoutRuntime {
 	}
 }
 
+/**
+ * Positions and nothing else come back from the layout graph. That is what keeps
+ * the composed derived edges out of the authored graph the app mutates, checks
+ * for duplicates, and saves: the spread is over `graph`, so `visibleGraph`
+ * contributes only coordinates.
+ */
 function mergeVisiblePositions(
 	graph: MultigraphData,
 	visibleGraph: MultigraphData
