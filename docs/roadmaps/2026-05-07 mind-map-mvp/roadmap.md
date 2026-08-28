@@ -61,6 +61,9 @@ individual PR-sized tasks.
 | 06c | Single-surface morph (one frame element)           | complete    | [milestone](milestones/06c-single-surface-morph.md), [plan](plans/2026-07-10%2006c-single-surface-morph.md)                                           |
 | 06d | Deep zoom hardening and nested image zoom          | complete    | [milestone](milestones/06d-deep-zoom-hardening-and-nested-image-zoom.md), [plan](plans/2026-07-11%2006d-deep-zoom-hardening-and-nested-image-zoom.md) |
 | 07  | Multiplayer                                        | not started | [milestones/07-multiplayer.md](milestones/07-multiplayer.md)                                                                                          |
+| 08  | LaTeX math in node descriptions                    | not started | [milestone](milestones/08-latex-math-in-node-descriptions.md), [plan](plans/2026-08-27%2008-latex-math-in-node-descriptions.md)                       |
+| 09  | Variable dataflow layer                            | not started | [milestones/09-variable-dataflow-layer.md](milestones/09-variable-dataflow-layer.md)                                                                  |
+| 10  | Dataflow tracing and navigation                    | not started | [milestones/10-dataflow-tracing-and-navigation.md](milestones/10-dataflow-tracing-and-navigation.md)                                                  |
 
 Milestones 04a-04m deepen the local-first graph experience before multiplayer.
 Milestone 04b intentionally supersedes 04a's Fibonacci reveal and dimming
@@ -99,6 +102,18 @@ into one `FocusController` with a single input surface — and then proves the
 recursive stack for real by making images inside a focused node their own nested
 zoom level (the first production consumer at depth 2). Milestone 07 follows with
 multiplayer after rich local document behavior is settled.
+Milestones 08-10 add mathematical notation and the quantity dataflow it makes
+possible, as an escalator where each step ships on its own. Milestone 08 renders
+LaTeX in node descriptions as MathML, chosen over a font-shipping renderer so the
+propagated offline shell stays small. Milestone 09 reads that rendered MathML to
+infer which node defines a quantity and which nodes use it, then draws the
+resulting producer-to-consumer arrows as derived edges that are computed rather
+than stored; there is no new authoring syntax, so writing the equation is the
+whole interaction. Milestone 10 makes that structure navigable — trace a quantity
+across the graph, walk upstream or downstream, and jump to a definition — largely
+by reusing milestone 05's query roles and milestone 06d's focus controller.
+Numeric evaluation and units stay out of scope throughout; these milestones
+visualize structure, not results.
 
 ## How this directory is organized
 
@@ -121,7 +136,8 @@ we change approach mid-stream — old plans stay as historical record.
 
 - Authentication and accounts (deferred; blocks Multiplayer #7).
 - Rich text / markdown in node descriptions (post-MVP). Image attachments are
-  tracked separately in milestone 06.
+  tracked separately in milestone 06, and LaTeX math in milestone 08; neither
+  opens the door to general markdown.
 - Versioning / undo-redo UI (the immutable-update pattern enables it; a
   UI for it can come later).
 - AI-generated nodes / auto-suggest edges (interesting future direction;

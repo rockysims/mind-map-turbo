@@ -83,3 +83,16 @@ the non tag related part of the search is saying any nodes with any of the chara
 seems like filter input text box should open via key combo (with another way in a menu for discoverability) but I'm not sure
 it would also be really nice if tags could be color coded as the user types them in
 and maybe bounce (scale up and down a little on repeat) the most recent tag/word/phrase added to the search
+
+- When node is unpinned, trigger relayout (currently have to manually drag any node to trigger relayout of newly unpinned node)
+- We should add a way to tell which version of the mind map is being used (mostly needed so its easier to tell, when upgrading an old graph to a new version, which .html file is newer). Maybe a faint grey version number in the upper left that only appears when mouse is close by (fallback to toggle visibility on tap for mobile devices?). Feels like there might be a better way.
+- When a graph becomes two disconnected graphs, I'd like the beacon node(s) to be the node/edge adjacent to the removal that severed the graph. It looks weird to remove an edge and have the node in the, now severed, graph disappear.
+
+folded into the 08/09/10 math and dataflow milestones:
+
+- New feature to support latex (math) within node description. Also I want to be able to visualize input variables as coming from nodes (description would include the variable as a latex object) with directed edges that go to other nodes where those variables are used (in latex objects in the node description) and also output latex object(s) in turn to be used in yet other nodes.
+  - `08-latex-math-in-node-descriptions.md`: Temml-rendered LaTeX in descriptions, `$`/`$$` syntax, and offline single-file packaging of the math engine.
+  - `09-variable-dataflow-layer.md`: inferring definitions and references from the rendered MathML, derived producer-to-consumer edges, on-canvas quantity chips, and unresolved/conflict/cycle diagnostics.
+  - `10-dataflow-tracing-and-navigation.md`: tracing a quantity across the graph, upstream/downstream chain walking, jump-to-definition, the quantities panel, and query integration.
+
+- Consider allowing deep zoom to show iframe (with url configured by node) so third party websites can be accessed smoothly via deep zoom
