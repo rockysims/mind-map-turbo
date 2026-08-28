@@ -94,8 +94,16 @@
 		 * The key rides along with the label so the new node can be seeded with the
 		 * designation that makes it a definer — and it is *this* card's key, not the
 		 * root's, or drilling three levels down would define the wrong quantity.
+		 * `consumerNodeId` is the node whose confirmed input this card answers — the
+		 * last step's definer — so the new node lands beside the node that actually
+		 * asked for it; undefined at the root card, whose consumer only the details
+		 * view knows.
 		 */
-		onCreateDefiningNode?: (quantityLabel: string, quantityKey: string) => void;
+		onCreateDefiningNode?: (
+			quantityLabel: string,
+			quantityKey: string,
+			consumerNodeId?: string
+		) => void;
 		/** Root card only: dismiss the whole cascade. */
 		onClose?: () => void;
 	} = $props();
@@ -194,7 +202,7 @@
 				type="button"
 				class="create"
 				data-create-defining-node={label}
-				onclick={() => onCreateDefiningNode?.(label, quantityKey)}
+				onclick={() => onCreateDefiningNode?.(label, quantityKey, path.at(-1)?.definerNodeId)}
 			>
 				Define {label}
 			</button>

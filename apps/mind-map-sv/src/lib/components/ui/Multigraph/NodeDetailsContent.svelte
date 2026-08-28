@@ -70,7 +70,11 @@
 		 * The key rides along with the label so the new node can be seeded with the
 		 * designation that makes it a definer — the label alone is display text.
 		 */
-		onCreateDefiningNode?: (quantityLabel: string, quantityKey: string) => void;
+		onCreateDefiningNode?: (
+			quantityLabel: string,
+			quantityKey: string,
+			consumerNodeId?: string
+		) => void;
 		/**
 		 * Leave for another node without pinning it. Every navigation offered here
 		 * goes through this: a surface that reads is not a surface that edits, and
