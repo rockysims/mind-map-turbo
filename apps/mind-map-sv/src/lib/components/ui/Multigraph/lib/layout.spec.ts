@@ -161,6 +161,18 @@ describe('layout', () => {
 			).toBe(2);
 		});
 
+		it('measures from the given origins when nothing is pinned', () => {
+			// Nothing pinned means no origin of its own, so without being told where
+			// to start every node keeps the flat hop it came in with.
+			const unpinned = makeGraph({ nodeCount: 3, edges: [[1, 2]] });
+
+			expect(
+				withHopsThroughEdges(unpinned, { n0: 1, n1: 1, n2: 1 }, dataflow, {
+					origins: { n0: 1 }
+				})
+			).toEqual({ n0: 1, n1: 2, n2: 3 });
+		});
+
 		it('returns the same object when the extra edges change nothing', () => {
 			const hops = { n0: 0, n1: 1, n2: 1 };
 

@@ -105,6 +105,27 @@
 	});
 
 	/**
+	 * The same shape with nothing pinned. `root` and `b` each light a beacon of
+	 * their own on the authored edges, so both used to sit at the flat beacon
+	 * hop while `a`, the one actually next to `root`, came out smaller than
+	 * either. `root` was pinned most recently, so it is where reading starts.
+	 */
+	const BEHIND_A_CONSUMER_UNPINNED = makeGraph({
+		nodes: [
+			{ id: 'root', title: 'Gravity', description: '$$g = 9.8$$', lastPinnedSeq: 2 },
+			{ id: 'a', title: 'Weight', description: '' },
+			{ id: 'b', title: 'Behind', description: '', lastPinnedSeq: 1 }
+		],
+		pinned: [],
+		edges: [['a', 'b']],
+		posByNodeId: {
+			root: { x: -300, y: 0 },
+			a: { x: 0, y: 0 },
+			b: { x: 300, y: 0 }
+		}
+	});
+
+	/**
 	 * `a` defines two quantities and the pair d–e consumes one each, so both are
 	 * pulled in by a dataflow edge. Joined to each other, they land in the same
 	 * component once on screen, where only one of them can be the beacon — the
@@ -308,6 +329,28 @@
 		// `b` reaches the pin only by going through `a`, so it is one step further
 		// out and reads smaller. It stays on screen either way — it is the beacon
 		// for its cluster — this is about size alone.
+		expect(Number(scaleOf(canvasElement, 'b'))).toBeLessThan(Number(scaleOf(canvasElement, 'a')));
+	}}
+/>
+
+<Story
+	name="SizeStillFollowsDistanceWithNothingPinned"
+	args={{
+		baseGraph: BEHIND_A_CONSUMER_UNPINNED,
+		editNodeId: 'a',
+		equation: CONSUMES_G,
+		startWithEquation: true,
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitFor(() => expect(nodeOnCanvas(canvasElement, 'b')).toBeInTheDocument());
+
+		// Reading starts at `root` and falls away from there, rather than `root`
+		// and `b` both claiming to be a start because the author drew no edge
+		// between the two clusters the equation joins.
+		expect(Number(scaleOf(canvasElement, 'a'))).toBeLessThan(
+			Number(scaleOf(canvasElement, 'root'))
+		);
 		expect(Number(scaleOf(canvasElement, 'b'))).toBeLessThan(Number(scaleOf(canvasElement, 'a')));
 	}}
 />

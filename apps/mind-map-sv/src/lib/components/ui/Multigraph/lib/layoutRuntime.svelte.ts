@@ -1,5 +1,5 @@
 import type { MultigraphData } from '../../types/multigraph';
-import { beaconNodeIds, withBeaconHops } from './beacons';
+import { BEACON_HOP, beaconNodeIds, withBeaconHops } from './beacons';
 import {
 	edgeVisibilityForPinnedNeighborhood,
 	graphWithVisibleNodes,
@@ -441,12 +441,40 @@ export class LayoutRuntime {
 	 * through the dataflow edges cannot pull anything new into view.
 	 */
 	#scaleHopsFor(layoutGraph: MultigraphData): Record<string, number> {
-		return withHopsThroughEdges(
-			layoutGraph,
-			this.#effectiveHopsFor(layoutGraph),
-			this.#options.composeRevealEdges?.(layoutGraph) ?? [],
-			{ displayedLayers: this.#resolvedSettings().displayedLayers }
-		);
+		const dataflowEdges = this.#options.composeRevealEdges?.(layoutGraph) ?? [];
+		return withHopsThroughEdges(layoutGraph, this.#effectiveHopsFor(layoutGraph), dataflowEdges, {
+			displayedLayers: this.#resolvedSettings().displayedLayers,
+			origins: this.#distanceOriginsFor(layoutGraph, dataflowEdges)
+		});
+	}
+
+	/**
+	 * Where measuring distance starts. Pinned nodes anchor at zero; a cluster
+	 * with no pin in it anchors on its beacon, which is the one node of that
+	 * cluster on screen and so the only thing there is to measure from. Without
+	 * the second case, unpinning everything leaves no origin at all and every
+	 * node keeps the flat hop it came in with.
+	 *
+	 * Beacons are picked here over the dataflow-joined graph rather than the
+	 * authored one. Two clusters an equation ties together are one cluster to
+	 * the reader, so they need one origin between them; picked separately, both
+	 * beacons start at the same hop and the graph reads as two unrelated things.
+	 */
+	#distanceOriginsFor(
+		graph: MultigraphData,
+		dataflowEdges: readonly EdgeEndpointIds[]
+	): Record<string, number> {
+		const origins: Record<string, number> = {};
+		for (const node of graph.nodes) {
+			if (node.pinned) origins[node.id] = 0;
+		}
+		for (const beaconId of beaconNodeIds(graph, {
+			preferredNodeIds: this.#options.getPreferredBeaconNodeIds(),
+			extraEdges: dataflowEdges
+		})) {
+			origins[beaconId] = BEACON_HOP;
+		}
+		return origins;
 	}
 
 	#effectiveHopsFor(graph: MultigraphData): Record<string, number> {

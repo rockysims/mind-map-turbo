@@ -1,6 +1,7 @@
 import type { MultigraphData } from '../../types/multigraph';
 import type { NodeData } from '../../types/node';
 import { buildAdjacency } from './layout';
+import type { EdgeEndpointIds } from './physics';
 
 /**
  * Beacons keep pinless connected components reachable: instead of the whole
@@ -18,6 +19,13 @@ export interface BeaconOptions {
 	 * Array order is preference order.
 	 */
 	preferredNodeIds?: readonly string[];
+	/**
+	 * Edges that join components for the purpose of this count, without being
+	 * part of the graph. Currently the dataflow layer, so that a cluster an
+	 * equation ties to another is one component with one beacon rather than two
+	 * nodes each claiming to be the start of something.
+	 */
+	extraEdges?: readonly EdgeEndpointIds[];
 }
 
 /**
@@ -32,7 +40,7 @@ export interface BeaconOptions {
  * other visible component contains a pinned node.
  */
 export function beaconNodeIds(data: MultigraphData, options: BeaconOptions = {}): Set<string> {
-	const adjacency = buildAdjacency(data);
+	const adjacency = buildAdjacency(data, options.extraEdges);
 	const nodeById = new Map(data.nodes.map((node) => [node.id, node]));
 	const preferenceRank = new Map(
 		(options.preferredNodeIds ?? []).map((nodeId, index) => [nodeId, index])

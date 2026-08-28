@@ -8,15 +8,31 @@ export function hopsFromPinned(
 	data: MultigraphData,
 	extraEdges: readonly EdgeEndpointIds[] = []
 ): Record<string, number> {
+	return hopsFromOrigins(data, pinnedOrigins(data), extraEdges);
+}
+
+function pinnedOrigins(data: MultigraphData): Record<string, number> {
+	return Object.fromEntries(data.nodes.filter((node) => node.pinned).map((node) => [node.id, 0]));
+}
+
+/**
+ * Distance to the nearest origin, where origins may start at different hops.
+ * The relax-and-requeue loop settles that correctly: a node reached early from
+ * a distant origin is revisited when a nearer one gets to it.
+ */
+function hopsFromOrigins(
+	data: MultigraphData,
+	origins: Record<string, number>,
+	extraEdges: readonly EdgeEndpointIds[]
+): Record<string, number> {
 	const hops = Object.fromEntries(data.nodes.map((node) => [node.id, Infinity]));
 	const adjacency = buildAdjacency(data, extraEdges);
 	const queue: string[] = [];
 
-	for (const node of data.nodes) {
-		if (node.pinned) {
-			hops[node.id] = 0;
-			queue.push(node.id);
-		}
+	for (const [nodeId, hop] of Object.entries(origins)) {
+		if (!(nodeId in hops) || hop >= hops[nodeId]) continue;
+		hops[nodeId] = hop;
+		queue.push(nodeId);
 	}
 
 	for (let index = 0; index < queue.length; index += 1) {
@@ -45,8 +61,21 @@ export function shortestPathHopsByNodeId(
 	);
 }
 
+export interface HopsThroughEdgesOptions {
+	displayedLayers?: number;
+	/**
+	 * Where measuring starts, as node id to starting hop. Defaults to the pinned
+	 * nodes at zero.
+	 *
+	 * Callers override this because a pin is not the only thing that can anchor
+	 * a view: with nothing pinned at all there is no origin, and every node
+	 * would keep whatever hop it came in with.
+	 */
+	origins?: Record<string, number>;
+}
+
 /**
- * Re-measures each node's distance from a pinned node with `extraEdges`
+ * Re-measures each node's distance from an origin with `extraEdges`
  * counting as steps, keeping `hops` wherever they reach nothing. Currently the
  * dataflow layer, so that a node a written equation links to your pin reads as
  * near as one you drew an edge to, and a node behind it reads as one further.
@@ -66,7 +95,7 @@ export function withHopsThroughEdges(
 	data: MultigraphData,
 	hops: Record<string, number>,
 	extraEdges: readonly EdgeEndpointIds[],
-	options: { displayedLayers?: number } = {}
+	options: HopsThroughEdgesOptions = {}
 ): Record<string, number> {
 	if (extraEdges.length === 0) return hops;
 
@@ -74,7 +103,7 @@ export function withHopsThroughEdges(
 		0,
 		Math.floor(options.displayedLayers ?? DEFAULT_DISPLAYED_LAYERS)
 	);
-	const distances = hopsFromPinned(data, extraEdges);
+	const distances = hopsFromOrigins(data, options.origins ?? pinnedOrigins(data), extraEdges);
 	let next: Record<string, number> | null = null;
 
 	for (const [nodeId, distance] of Object.entries(distances)) {

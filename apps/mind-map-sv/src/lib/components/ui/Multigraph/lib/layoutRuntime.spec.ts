@@ -458,6 +458,42 @@ describe('LayoutRuntime', () => {
 			expect(layout.scaleByNodeId.n2).toBeLessThan(layout.scaleByNodeId.n1);
 		});
 
+		it('sizes by distance with nothing pinned at all', () => {
+			// Same chain, no pin anywhere. n0 and n2 each light a beacon of their own
+			// on the authored edges, which put them at the same hop and so the same
+			// size, with n1 — the one actually next to n0 — smaller than both.
+			const unpinned = makeGraph({ nodeCount: 3, edges: [[1, 2]] });
+			const withHistory = {
+				...unpinned,
+				nodes: unpinned.nodes.map((node) =>
+					node.id === 'n0'
+						? { ...node, lastPinnedSeq: 2 }
+						: node.id === 'n2'
+							? { ...node, lastPinnedSeq: 1 }
+							: node
+				)
+			};
+			const runtime = new LayoutRuntime({
+				getGraph: () => withHistory,
+				getLayoutSettings: () => ({ displayedLayers: 3 }),
+				getActiveDragNodeId: () => null,
+				getPreferredBeaconNodeIds: () => [],
+				applyGraph: () => {},
+				composeRevealEdges: () => [{ sourceNodeId: 'n0', targetNodeId: 'n1' }],
+				scheduler: new TestScheduler()
+			});
+			const visible = graphWithVisibleNodes(withHistory, new Set(['n0', 'n1', 'n2']));
+			const layout = deriveGraphLayout(
+				visible,
+				runtime.layoutOptions(visible, { relaxIterations: 0 })
+			);
+
+			// n0 was pinned most recently, so it is where reading starts and the
+			// other two fall away from it in order.
+			expect(layout.scaleByNodeId.n1).toBeLessThan(layout.scaleByNodeId.n0);
+			expect(layout.scaleByNodeId.n2).toBeLessThan(layout.scaleByNodeId.n1);
+		});
+
 		it('does not reveal a node whose partner is hidden too', () => {
 			// n3 and n4 are both out of view, so there is nothing to hang n4 off.
 			expect(relaxedN4(() => [{ sourceNodeId: 'n3', targetNodeId: 'n4' }])).toEqual(
