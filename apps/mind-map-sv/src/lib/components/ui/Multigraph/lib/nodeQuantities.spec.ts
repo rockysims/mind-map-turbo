@@ -68,16 +68,30 @@ describe('nodeQuantities definitions', () => {
 });
 
 describe('nodeQuantities inline math', () => {
-	it('never defines from inline math', () => {
-		expect(defines('$F = ma$')).toEqual([]);
+	// Delimiters are a typographic choice, not a semantic one. Requiring `$$` to
+	// define made `$x = 1$` report the quantity it introduced as undefined.
+	it('defines from inline math on the same terms as display math', () => {
+		expect(defines('$F = ma$')).toEqual(['F']);
 	});
 
-	it('references every symbol in inline math, including the left side', () => {
-		expect(references('$F = ma$')).toEqual(['F', 'm', 'a']);
+	it('references only the right side of an inline definition', () => {
+		expect(references('$F = ma$')).toEqual(['m', 'a']);
 	});
 
-	it('references a bare inline symbol', () => {
+	it('reads the same equation identically inline and in display', () => {
+		expect(defines('$x = 1$')).toEqual(defines('$$x = 1$$'));
+		expect(references('$y = x$')).toEqual(references('$$y = x$$'));
+	});
+
+	it('references a bare inline symbol without defining it', () => {
+		expect(defines('velocity $v$ matters')).toEqual([]);
 		expect(references('velocity $v$ matters')).toEqual(['v']);
+	});
+
+	// The prose guard is the equality, not the delimiter: a mention has none.
+	it('defines nothing from an inline expression with no equality', () => {
+		expect(defines('the product $ma$ appears')).toEqual([]);
+		expect(references('the product $ma$ appears')).toEqual(['m', 'a']);
 	});
 });
 

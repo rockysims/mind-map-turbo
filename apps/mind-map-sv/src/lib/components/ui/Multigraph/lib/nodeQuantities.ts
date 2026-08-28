@@ -1,11 +1,18 @@
 /**
  * Decide which quantities a single node defines and which it merely references.
  *
- * The rule is deliberately narrow so it is predictable without documentation:
- * display math can define, inline math can only reference, and a definition
- * needs exactly one top-level equality with a single symbol on its left. An
- * author who writes an equation gets the behavior they expect; an author who
- * writes prose with a stray letter in it gets nothing.
+ * The rule is deliberately narrow so it is predictable without documentation: a
+ * definition is exactly one top-level equality with a single symbol on its left.
+ * An author who writes an equation gets the behavior they expect; an author who
+ * writes prose with a stray letter in it gets nothing, because a bare mention
+ * has no equality.
+ *
+ * Delimiter choice does not decide this. Requiring `$$` to define looked tidy
+ * from inside the parser, but `$x = 1$` reads as a definition to anyone writing
+ * it, and treating it as a reference made the quantity it introduced report as
+ * undefined — the node blamed itself for not defining what it had just defined.
+ * Whether math is set inline or on its own line is a typographic choice, not a
+ * semantic one.
  */
 
 import { renderMath, type MathNode } from '../../MathText/lib/mathRender';
@@ -58,8 +65,8 @@ function dedupe(symbols: readonly QuantitySymbol[]): QuantitySymbol[] {
 }
 
 /**
- * Split a display expression into the symbol it defines and the symbols it
- * consumes, or null when it defines nothing.
+ * Split an expression into the symbol it defines and the symbols it consumes,
+ * or null when it defines nothing.
  */
 function definitionOf(
 	children: readonly MathNode[],
@@ -123,13 +130,11 @@ export function nodeQuantities(
 
 		const children = topLevelChildren(rendered.tree);
 
-		if (segment.kind === 'display-math') {
-			const definition = definitionOf(children, symbolOptions);
-			if (definition !== null) {
-				defines.push(definition.defined);
-				references.push(...definition.consumed);
-				continue;
-			}
+		const definition = definitionOf(children, symbolOptions);
+		if (definition !== null) {
+			defines.push(definition.defined);
+			references.push(...definition.consumed);
+			continue;
 		}
 
 		references.push(...collectSymbolsFromNodes(children, symbolOptions));
