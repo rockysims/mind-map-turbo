@@ -7,7 +7,12 @@ function entry(
 	revealedNodeId: string | null = null,
 	scale = 1
 ): NavStackEntry {
-	return { originNodeId, viewState: { panX: 10, panY: -20, scale }, revealedNodeId };
+	return {
+		originNodeId,
+		viewState: { panX: 10, panY: -20, scale },
+		revealedNodeId,
+		originFocused: true
+	};
 }
 
 describe('transient reveal controller', () => {

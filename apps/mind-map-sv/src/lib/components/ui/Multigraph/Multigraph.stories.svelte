@@ -657,11 +657,18 @@
 		within(canvasElement).getByRole('menuitem', { name: 'Focus' }).click();
 
 		const dialog = await within(canvasElement).findByRole('dialog');
-		expect(canvasElement.querySelector('.focus-surface')).toHaveAttribute(
-			'data-focus-subject-id',
-			nodeId
-		);
+		await expectFocusOn(canvasElement, nodeId);
 		return dialog;
+	}
+
+	/** Which node's details the reader is currently reading. */
+	async function expectFocusOn(canvasElement: HTMLElement, nodeId: string): Promise<void> {
+		await waitFor(() => {
+			expect(canvasElement.querySelector('.focus-surface')).toHaveAttribute(
+				'data-focus-subject-id',
+				nodeId
+			);
+		});
 	}
 
 	/** Open the peek card for one confirmed input and follow it to its definer. */
@@ -686,12 +693,10 @@
 			return button as HTMLElement;
 		});
 		goto.click();
-		// The overlay the jump was made from has to give way before the next step:
-		// it covers the canvas the jump acts on, and a story that read through it
-		// would be reading the node it just left.
-		await waitFor(() => {
-			expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
-		});
+		// The reader asked what that node says, so the jump has to hand them the
+		// definer's details — not the canvas around it, with the overlay to reopen
+		// by hand. The subject swapping is also how a story knows the jump ran.
+		await expectFocusOn(canvasElement, definerNodeId);
 		// A reveal changes who is on screen, which the layout settles for — and a
 		// story that reached for a node mid-settle would be aiming at where it was.
 		await waitFor(() => {
@@ -4881,15 +4886,13 @@
 		await enterFocusOn(canvasElement, 'reader');
 		await jumpFromPeek(canvasElement, 'g', 'gravity');
 
-		// The definer arrives, and the overlay the jump was made from gets out of
-		// the way — a jump that left the reader looking at the node they left would
-		// be indistinguishable from a dead button.
+		// The definer arrives on the canvas underneath, and the reader arrives in its
+		// details: the seed lands before the overlay opens, so closing the details
+		// later morphs back down onto a node that is really there.
 		await waitFor(() => {
 			expect(canvasElement.querySelector('[data-node-id="gravity"]')).toBeInTheDocument();
 		});
-		await waitFor(() => {
-			expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
-		});
+		await expectFocusOn(canvasElement, 'gravity');
 
 		// The invariant this whole flow exists for: following a reference is
 		// reading, not editing. Nothing was written to the graph, so nothing was
@@ -4934,6 +4937,8 @@
 		// Verbatim pan and scale, not a fit: a fit clamps to what it can frame and
 		// would drop the reader somewhere near where they were.
 		expect(getStageTransform(canvasElement)).toEqual(before);
+		// And back into what they were reading, since that is what they left.
+		await expectFocusOn(canvasElement, 'reader');
 		// The seed goes back out with the entry that carried it — the graph never
 		// held it, so there is nothing to undo.
 		await waitFor(() => {
@@ -4963,20 +4968,22 @@
 			expect(canvasElement.querySelector('[data-nav-back="reader"]')).toBeInTheDocument();
 		});
 
-		// `gravity` needs h in turn, so the reader follows a second reference from
-		// where the first one left them.
-		await enterFocusOn(canvasElement, 'gravity');
+		// `gravity` needs h in turn, and the first jump already left the reader
+		// inside its details — so the second reference is followed from there, with
+		// no trip back out to the canvas to re-enter what they are already reading.
 		await jumpFromPeek(canvasElement, 'h', 'scale');
 		await waitFor(() => {
 			expect(canvasElement.querySelector('[data-nav-back="gravity"]')).toBeInTheDocument();
 		});
 		expect(canvasElement.querySelector('[data-node-id="scale"]')).toBeInTheDocument();
 
-		// Back unwinds one hop at a time, in the order the reader made them.
+		// Back unwinds one hop at a time, in the order the reader made them, and
+		// each hop lands in the details the jump before it was made from.
 		(canvasElement.querySelector('[data-nav-back]') as HTMLElement).click();
 		await waitFor(() => {
 			expect(canvasElement.querySelector('[data-nav-back="reader"]')).toBeInTheDocument();
 		});
+		await expectFocusOn(canvasElement, 'gravity');
 		expect(canvasElement.querySelector('[data-node-id="scale"]')).not.toBeInTheDocument();
 		expect(canvasElement.querySelector('[data-node-id="gravity"]')).toBeInTheDocument();
 
@@ -4984,6 +4991,7 @@
 		await waitFor(() => {
 			expect(canvasElement.querySelector('[data-nav-back]')).not.toBeInTheDocument();
 		});
+		await expectFocusOn(canvasElement, 'reader');
 		expect(canvasElement.querySelector('[data-node-id="gravity"]')).not.toBeInTheDocument();
 
 		const changeSpy = args.onMultigraphChange as unknown as ChangeSpy;

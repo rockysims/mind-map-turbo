@@ -10,9 +10,15 @@ import {
 function entry(
 	originNodeId: string,
 	revealedNodeId: string | null = null,
-	scale = 1
+	scale = 1,
+	originFocused = true
 ): NavStackEntry {
-	return { originNodeId, viewState: { panX: 10, panY: -20, scale }, revealedNodeId };
+	return {
+		originNodeId,
+		viewState: { panX: 10, panY: -20, scale },
+		revealedNodeId,
+		originFocused
+	};
 }
 
 describe('pushNavStackEntry', () => {
@@ -39,6 +45,12 @@ describe('pushNavStackEntry', () => {
 		const entries = pushNavStackEntry([entry('a'), entry('b')], entry('c'), 2);
 
 		expect(entries.map((item) => item.originNodeId)).toEqual(['b', 'c']);
+	});
+
+	it('carries where the reader was reading, so back can put them back there', () => {
+		const entries = pushNavStackEntry([], entry('a', null, 1, false));
+
+		expect(entries[0].originFocused).toBe(false);
 	});
 });
 

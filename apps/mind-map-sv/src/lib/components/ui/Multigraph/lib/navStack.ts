@@ -25,6 +25,14 @@ export interface NavStackEntry {
 	 * screen. Only a jump that created a seed removes one when it pops.
 	 */
 	revealedNodeId: string | null;
+	/**
+	 * Whether the reader was reading the origin's details when they left. Back
+	 * returns them to what they were doing, and today every jump starts from the
+	 * focus view — but recorded rather than assumed, so a jump launched from the
+	 * canvas would come back to the canvas instead of opening an overlay the
+	 * reader never had.
+	 */
+	originFocused: boolean;
 }
 
 /**
