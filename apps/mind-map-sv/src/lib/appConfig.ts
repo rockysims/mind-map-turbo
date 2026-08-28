@@ -58,6 +58,7 @@ export const APP_CONFIG = {
 		layout: {
 			baseRadius: NODE_RADIUS_PX, // base radius for hop-scaled layout
 			displayedLayers: 3, // hop layers visible around pinned nodes
+			dataflowDisplayedLayers: 1, // hop layers a derived dataflow edge may reveal past those
 			scaleFalloff: 0.7, // scale multiplier per hop from pinned
 			minScale: 0.1, // minimum node scale in layout
 			relaxIterations: 12, // physics relax iterations per layout pass
