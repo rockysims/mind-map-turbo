@@ -3,9 +3,54 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { expect, test, type Page } from '@playwright/test';
+import { APP_CONFIG } from '../src/lib/appConfig';
+import { DEFAULT_ZOOM_SENSITIVITY } from '../src/lib/components/ui/Multigraph/lib/graphMath';
 
 const CURRENT_SCHEMA_VERSION = 5;
 const GRAPH_HTML_PAYLOAD_SCRIPT_ID = 'mind-map-embedded-graph';
+
+const { preInscribeZoneFraction, subFitExitZoneFraction } = APP_CONFIG.multigraph.focus;
+
+// Headroom over the computed requirement: absorbs rounding and the odd event
+// lost to animation timing without letting a budget become a magic number.
+const SCRUB_BUDGET_SLACK = 1.5;
+// Scale ratio a scrub may have to climb before the view locks onto the entry
+// boundary. Geometry (node radius vs. viewport), not config, sets the real
+// number; this is a generous bound for the graphs these tests seed.
+const ENTRY_APPROACH_SCALE_RATIO = 8;
+// Hard stop so a nonsensical zone fraction fails fast instead of looping.
+const MAX_SCRUB_EVENTS = 200;
+
+/**
+ * Wheel events a focus-entry scrub may need: the climb up to the entry boundary
+ * plus the events the pre-inscribe zone requires at it. Each event at the
+ * boundary adds `(|deltaY| * sensitivity) / preInscribeZoneFraction` to
+ * boundaryProgress (see `boundaryProgressDelta` in lib/focusEntryBoundary.ts),
+ * which commits at 1 — one such event at deltaY -600 with the shipped 0.88.
+ */
+function entryScrubBudget(deltaY: number): number {
+	const factor = 1 + Math.abs(deltaY) * DEFAULT_ZOOM_SENSITIVITY;
+	const approachEvents = Math.ceil(Math.log(ENTRY_APPROACH_SCALE_RATIO) / Math.log(factor));
+	const commitEvents = Math.ceil(preInscribeZoneFraction / (factor - 1));
+	return Math.min(
+		MAX_SCRUB_EVENTS,
+		Math.ceil((approachEvents + commitEvents) * SCRUB_BUDGET_SLACK)
+	);
+}
+
+/**
+ * Wheel notches an exit scrub needs. Each wheel-out event past fit advances the
+ * exit amount by `next = k / f + (1 - k) * a`, with `k = |deltaY| * sensitivity`
+ * and `f = subFitExitZoneFraction` (see `wheelExitBoundaryAmount` in
+ * lib/zoomWorldController.ts), so reaching 1 takes `ceil(ln(1 - f) / ln(1 - k))`
+ * events — 21 notches at deltaY 30 with the shipped 0.72.
+ */
+function exitScrubBudget(deltaY: number): number {
+	const k = Math.abs(deltaY) * DEFAULT_ZOOM_SENSITIVITY;
+	// A single event overshooting the whole zone ends the scrub outright.
+	const events = k >= 1 ? 1 : Math.ceil(Math.log(1 - subFitExitZoneFraction) / Math.log(1 - k));
+	return Math.min(MAX_SCRUB_EVENTS, Math.max(1, Math.ceil(events * SCRUB_BUDGET_SLACK)));
+}
 
 function graphUrl(graphId: string): string {
 	return `/#/?${new URLSearchParams({ graph: graphId }).toString()}`;
@@ -21,11 +66,12 @@ function documentDraftGraphId(documentId: string): string {
 async function scrubFocusEntry(
 	page: Page,
 	point: { x: number; y: number },
-	{ deltaY = -600, maxEvents = 24 }: { deltaY?: number; maxEvents?: number } = {}
+	{ deltaY = -600, maxEvents }: { deltaY?: number; maxEvents?: number } = {}
 ): Promise<void> {
+	const budget = maxEvents ?? entryScrubBudget(deltaY);
 	const stage = page.locator('.stage');
 	const graph = page.locator('.graph');
-	for (let i = 0; i < maxEvents; i += 1) {
+	for (let i = 0; i < budget; i += 1) {
 		if (((await graph.getAttribute('class')) ?? '').includes('focus-active')) return;
 		await stage.dispatchEvent('wheel', {
 			deltaY,
@@ -36,6 +82,11 @@ async function scrubFocusEntry(
 		});
 		await page.waitForTimeout(20);
 	}
+	if (((await graph.getAttribute('class')) ?? '').includes('focus-active')) return;
+	throw new Error(
+		`Focus entry did not commit after ${budget} wheel events of deltaY ${deltaY} at ` +
+			`(${point.x}, ${point.y}) (preInscribeZoneFraction ${preInscribeZoneFraction})`
+	);
 }
 
 test('home page renders the graph entrypoint', async ({ page }) => {
@@ -603,7 +654,10 @@ test('deep zoom enters node focus and exits by wheel gestures', async ({ page })
 	await page.waitForTimeout(20);
 	expect(await stageContent.getAttribute('style')).toBe(stageTransformBeforeFocusExit);
 
+	// Past entryGestureIdleMs the gate must re-open: the same wheel now moves the
+	// stage again (a permanently-armed gate would leave the transform frozen).
 	await page.waitForTimeout(220);
+	const stageTransformBeforeFreshWheel = await stageContent.getAttribute('style');
 	await stage.dispatchEvent('wheel', {
 		deltaY: 5000,
 		clientX: imageCenter.x,
@@ -611,6 +665,9 @@ test('deep zoom enters node focus and exits by wheel gestures', async ({ page })
 		bubbles: true,
 		cancelable: true
 	});
+	await expect
+		.poll(async () => stageContent.getAttribute('style'))
+		.not.toBe(stageTransformBeforeFreshWheel);
 	await expect(dialog).not.toBeVisible();
 });
 
@@ -662,8 +719,11 @@ test('deep zoom nests a node image as a second level and pops back to the node',
 	await expect(nodeWorld).toHaveAttribute('data-zoom-world-scale', /^(?!1(?:\.0*)?$).+/);
 
 	// Bold zoom-in past max, cursor over the image, scrubs the child entry
-	// zone and descends to depth 2.
-	for (let attempt = 0; attempt < 12; attempt += 1) {
+	// zone and descends to depth 2. deltaY -4000 requests far more than
+	// maxScale * (1 + preInscribeZoneFraction), so descend pressure saturates on
+	// the first event (see descendBoundaryDelta in lib/zoomWorldController.ts);
+	// the second attempt only covers an event lost to the entry morph.
+	for (let attempt = 0; attempt < 2; attempt += 1) {
 		if ((await stack.getAttribute('data-depth')) === '2') break;
 		await nodeWorld.dispatchEvent('wheel', {
 			deltaY: -4000,
@@ -771,7 +831,7 @@ test('deep zoom entry keeps driving focus after boundary steering slides the nod
 	// events. Those wheels must keep falling through to the stage (the surface
 	// content must not swallow them) for the scrub to reach commit.
 	const graph = page.locator('.graph');
-	for (let i = 0; i < 40; i += 1) {
+	for (let i = 0; i < entryScrubBudget(-40); i += 1) {
 		if (((await graph.getAttribute('class')) ?? '').includes('focus-active')) break;
 		await page.mouse.wheel(0, -40);
 		await page.waitForTimeout(20);
@@ -798,7 +858,7 @@ test('deep zoom exit keeps scrubbing when the cursor leaves the shrinking frame'
 	// Enter focus by scrubbing wheel-in over the centered node.
 	await page.mouse.move(640, 360);
 	const graph = page.locator('.graph');
-	for (let i = 0; i < 24; i += 1) {
+	for (let i = 0; i < entryScrubBudget(-600); i += 1) {
 		if (((await graph.getAttribute('class')) ?? '').includes('focus-active')) break;
 		await page.mouse.wheel(0, -600);
 		await page.waitForTimeout(20);
@@ -814,7 +874,7 @@ test('deep zoom exit keeps scrubbing when the cursor leaves the shrinking frame'
 	// Continued wheel-out must keep driving the exit rather than being lost to
 	// the stage or the page.
 	await page.mouse.move(5, 5);
-	for (let i = 0; i < 40; i += 1) {
+	for (let i = 0; i < exitScrubBudget(30); i += 1) {
 		if (!((await graph.getAttribute('class')) ?? '').includes('focus-active')) break;
 		await page.mouse.wheel(0, 30);
 		await page.waitForTimeout(30);
