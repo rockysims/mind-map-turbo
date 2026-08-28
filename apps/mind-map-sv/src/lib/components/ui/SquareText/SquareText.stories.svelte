@@ -138,6 +138,20 @@
 />
 
 <Story
+	args={{ text: 'Rate $\\frac{1}{$', classList: ['title'] }}
+	name="Test:UnparseableMathInATitleFallsBackToSource"
+	play={async (context) => {
+		// A title is read at graph scale, so a half-typed formula must degrade to
+		// what the author typed rather than putting an error message on the node's
+		// face. Descriptions already behave this way mid-keystroke.
+		const segment = context.canvasElement.querySelector('[data-math-error="true"]');
+		await expect(segment).not.toBeNull();
+		await expect(context.canvasElement.textContent).toContain('\\frac{1}{');
+		await expect(context.canvasElement.textContent).toContain('Rate');
+	}}
+/>
+
+<Story
 	name="Test:RefitsWhenTheTextChanges"
 	play={async (context) => {
 		// The fit effect used to track only the element binding, so a retitle kept
