@@ -76,6 +76,46 @@ describe('graphQuery', () => {
 		expect(result.nodeStateById.a.role).toBe('background');
 	});
 
+	describe('text matching against math', () => {
+		// Two people search for the same node differently: whoever wrote `\alpha`
+		// looks for "alpha", and whoever only ever saw the node on screen looks for
+		// "α". Matching one form leaves the other hunting for a node in plain view.
+		const mathGraph = makeGraph({
+			nodes: [
+				{ id: 'src', title: 'Growth rate $\\alpha$', description: '', tags: [] },
+				{ id: 'body', title: 'Mass', description: 'Given $E = mc^2$ we get more.', tags: [] },
+				{ id: 'other', title: 'Unrelated', description: 'Nothing here.', tags: [] }
+			]
+		});
+
+		function rolesFor(query: string) {
+			const result = evaluateGraphQuery(mathGraph, query);
+			return Object.fromEntries(
+				Object.entries(result.nodeStateById).map(([id, state]) => [id, state.role])
+			);
+		}
+
+		it('matches a title by its LaTeX source', () => {
+			expect(rolesFor('alpha').src).toBe('focus');
+		});
+
+		it('matches a title by the character it typesets to', () => {
+			expect(rolesFor('α').src).toBe('focus');
+		});
+
+		it('matches a description by the typeset reading', () => {
+			expect(rolesFor('E=mc').body).toBe('focus');
+		});
+
+		it('leaves unrelated nodes in the background', () => {
+			expect(rolesFor('α').other).toBe('background');
+		});
+
+		it('does not match a symbol that appears nowhere', () => {
+			expect(rolesFor('β').src).toBe('background');
+		});
+	});
+
 	it('focuses node tags and preserves background for unrelated elements', () => {
 		const result = evaluateGraphQuery(graph, '#dialog');
 

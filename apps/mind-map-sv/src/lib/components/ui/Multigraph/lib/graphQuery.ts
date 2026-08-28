@@ -1,5 +1,7 @@
 import type { MultigraphData } from '../../types/multigraph';
 import type { NodeData } from '../../types/node';
+import { mathPlainText } from '../../MathText/lib/mathPlainText';
+import { hasMath } from '../../MathText/lib/mathSegments';
 import { colorForTag } from './tagColors';
 import { DEFAULT_TAG_SYNTAX, type TagSyntaxConfig } from './titleSyntax';
 
@@ -310,14 +312,32 @@ function matchingTag(tags: string[], queryTag: string): string | undefined {
 	return tags.find((tag) => normalize(tag) === normalizedQuery);
 }
 
+/**
+ * Match against both what the author typed and what the reader sees.
+ *
+ * Neither alone is enough. Someone who wrote `\alpha` searches for `alpha`;
+ * someone who only ever saw the typeset node searches for `α`. Matching one form
+ * would leave the other looking for a node that is plainly on screen.
+ *
+ * The source is tried first because it is a substring test on a string we
+ * already hold, while the projection has to render the math. Which one matches
+ * does not change the answer, so the cheap one goes first.
+ */
+function textMatches(value: string, needle: string): boolean {
+	if (normalize(value).includes(needle)) {
+		return true;
+	}
+	return value.includes('$') && hasMath(value) && normalize(mathPlainText(value)).includes(needle);
+}
+
 function nodeTextMatches(node: NodeData, queryText: string): boolean {
 	const needle = normalize(queryText);
 	const contentText = (node.content ?? [])
 		.flatMap((block) => (block.type === 'image' ? [block.alt, block.caption ?? ''] : []))
 		.join(' ');
 	return (
-		normalize(node.title).includes(needle) ||
-		normalize(node.description).includes(needle) ||
+		textMatches(node.title, needle) ||
+		textMatches(node.description, needle) ||
 		normalize(contentText).includes(needle)
 	);
 }
