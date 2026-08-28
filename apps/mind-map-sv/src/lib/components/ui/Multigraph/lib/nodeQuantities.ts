@@ -40,6 +40,12 @@ export interface NodeQuantitiesOptions extends SymbolExtractionOptions {
 }
 
 export interface QuantityBearingNode {
+	/**
+	 * Read on the same terms as the description. A node titled `$x = 1$` has
+	 * defined `x` by any reading, and a rule that says otherwise gets discovered
+	 * as a bug rather than learned.
+	 */
+	title?: string;
 	description: string;
 	tags: string[];
 }
@@ -114,7 +120,11 @@ export function nodeQuantities(
 	const defines: QuantitySymbol[] = [];
 	const references: QuantitySymbol[] = [];
 
-	for (const segment of splitMathSegments(node.description)) {
+	// Title first, so a node that defines a quantity in its title and elaborates
+	// in its description reports them in the order they are read.
+	const sources = node.title ? [node.title, node.description] : [node.description];
+
+	for (const segment of sources.flatMap(splitMathSegments)) {
 		if (segment.kind === 'text') {
 			continue;
 		}

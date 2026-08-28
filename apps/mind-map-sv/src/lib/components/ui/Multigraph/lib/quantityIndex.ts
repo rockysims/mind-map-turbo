@@ -43,11 +43,16 @@ export interface QuantityIndexerOptions extends NodeQuantitiesOptions {
 }
 
 /**
- * A node's contribution changes only when its description or its tags change,
- * since the opt-out is a tag. Nothing else about a node can affect extraction.
+ * A node's contribution changes only when its title, description, or tags
+ * change, since the opt-out is a tag. Nothing else about a node can affect
+ * extraction.
+ *
+ * The title must be in here. Omitting it produces a graph that is correct after
+ * a reload and wrong until then, because a title edit would leave the cached
+ * extraction in place — the hardest class of bug to notice.
  */
 function signatureOf(node: IndexableNode): string {
-	return `${node.description}\u0000${node.tags.join('\u0001')}`;
+	return `${node.title ?? ''}\u0000${node.description}\u0000${node.tags.join('\u0001')}`;
 }
 
 function entryFor(entries: Map<string, QuantityIndexEntry>, symbol: QuantitySymbol) {

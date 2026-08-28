@@ -179,3 +179,60 @@ describe('nodeQuantities deduplication', () => {
 		expect(defines('$$v = 1$$ and again $$v = 2$$')).toEqual(['v']);
 	});
 });
+
+describe('nodeQuantities titles', () => {
+	function titled(title: string, description = '') {
+		return nodeQuantities({ title, description, tags: [] });
+	}
+
+	function labels(symbols: { label: string }[]): string[] {
+		return symbols.map((symbol) => symbol.label);
+	}
+
+	// A title is read on the same terms as a description. Giving titles their own
+	// rule would repeat the mistake that made `$x = 1$` in a description define
+	// nothing and then report itself undefined.
+	it('defines from a title', () => {
+		expect(labels(titled('$x = 1$').defines)).toEqual(['x']);
+	});
+
+	it('reads a title identically to the same text in a description', () => {
+		expect(labels(titled('$y = x$').defines)).toEqual(
+			labels(nodeQuantities({ description: '$y = x$', tags: [] }).defines)
+		);
+	});
+
+	it('references from a title', () => {
+		expect(labels(titled('$w = m g$').references)).toEqual(['m', 'g']);
+	});
+
+	it('combines a title definition with description references', () => {
+		const quantities = titled('$w$ is weight', 'where $w = m g$');
+		expect(labels(quantities.defines)).toEqual(['w']);
+		expect(labels(quantities.references)).toEqual(['m', 'g']);
+	});
+
+	// The guard against decorative math is the equality, exactly as for
+	// descriptions. A title naming a quantity is not a claim about its value.
+	it('defines nothing from a decorative title', () => {
+		expect(labels(titled('Energy $E$').defines)).toEqual([]);
+		expect(labels(titled('Energy $E$').references)).toEqual(['E']);
+	});
+
+	it('ignores a title with no math', () => {
+		expect(labels(titled('Kinematics', '$$a = 2$$').defines)).toEqual(['a']);
+	});
+
+	it('honours the opt-out tag for titles too', () => {
+		const quantities = nodeQuantities({
+			title: '$x = 1$',
+			description: '',
+			tags: [DEFAULT_DATAFLOW_OPT_OUT_TAG]
+		});
+		expect(quantities.defines).toEqual([]);
+	});
+
+	it('treats a missing title as no title', () => {
+		expect(nodeQuantities({ description: '$$a = 1$$', tags: [] }).defines).toHaveLength(1);
+	});
+});

@@ -186,4 +186,30 @@ describe('memoization', () => {
 		build(chain);
 		expect(extract).toHaveBeenCalledTimes(1);
 	});
+
+	// A title left out of the signature yields a graph that is correct after a
+	// reload and wrong until then, which is the hardest kind of bug to notice.
+	it('re-extracts a node whose title changed', () => {
+		const { extract, build } = countingIndexer();
+		const before = [{ id: 'a', title: '$x = 1$', description: '', tags: [] }];
+		const after = [{ id: 'a', title: '$x = 2$', description: '', tags: [] }];
+		build(before);
+		extract.mockClear();
+		build(after);
+		expect(extract).toHaveBeenCalledTimes(1);
+	});
+
+	it('reflects a title edit that introduces a definition', () => {
+		const { build } = countingIndexer();
+		build([{ id: 'a', title: 'Untitled', description: '', tags: [] }]);
+		const after = build([{ id: 'a', title: '$x = 1$', description: '', tags: [] }]);
+		expect(definersOf(after, 'x')).toEqual(['a']);
+	});
+
+	it('reflects a title edit that removes a definition', () => {
+		const { build } = countingIndexer();
+		build([{ id: 'a', title: '$x = 1$', description: '', tags: [] }]);
+		const after = build([{ id: 'a', title: 'Untitled', description: '', tags: [] }]);
+		expect(definersOf(after, 'x')).toEqual([]);
+	});
 });
