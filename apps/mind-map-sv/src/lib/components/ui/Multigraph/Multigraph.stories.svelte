@@ -509,6 +509,67 @@
 			}
 		}
 	} satisfies MultigraphData;
+
+	/**
+	 * `d` consumes g and nothing defines it yet, so `d` sits three authored hops
+	 * from the pin with two layers on show — off screen. Writing the definition
+	 * into `a` is a pure content edit that changes the topology, which is the
+	 * case the harness stories cannot reach: they re-ingest the whole graph on
+	 * every equation change, and ingest settles everything on its way in.
+	 */
+	const DATAFLOW_CONTENT_COMMIT_CHAIN = makeGraph({
+		nodes: [
+			{ id: 'a', title: 'Gravity', description: '' },
+			{ id: 'b', title: 'Middle', description: '' },
+			{ id: 'c', title: 'Third', description: '' },
+			{ id: 'd', title: 'Weight', description: '$$w = m g$$' }
+		],
+		pinned: ['a'],
+		edges: [
+			['a', 'b'],
+			['b', 'c'],
+			['c', 'd']
+		],
+		posByNodeId: {
+			a: { x: -300, y: 0 },
+			b: { x: -100, y: 0 },
+			c: { x: 100, y: 0 },
+			d: { x: 300, y: 0 }
+		}
+	});
+
+	const DEFINES_G = '$$g = 9.8$$';
+
+	const TWO_LAYERS_SETTLING = { displayedLayers: 2 };
+
+	function isSettling(el: HTMLElement): boolean {
+		const graph = el.querySelector('.graph');
+		if (!graph) throw new Error('Graph root not found');
+		return (graph as HTMLElement).dataset.settling === 'true';
+	}
+
+	/** Long-press a node, open its sheet, replace the description, and save. */
+	async function commitDescriptionThroughSheet(
+		canvasElement: HTMLElement,
+		nodeId: string,
+		description: string
+	): Promise<void> {
+		const circle = getCircle(canvasElement, nodeId);
+		const center = getCenter(circle);
+		await dispatchLongPress(circle, center.x, center.y);
+
+		const canvas = within(canvasElement);
+		canvas.getByRole('menuitem', { name: 'Edit' }).click();
+		await sleep();
+
+		const descriptionInput = canvas.getByLabelText('Description') as HTMLTextAreaElement;
+		descriptionInput.value = description;
+		descriptionInput.dispatchEvent(new Event('input', { bubbles: true }));
+		canvas.getByRole('button', { name: 'Save' }).click();
+		// A microtask flush, not a frame: the settle kick has to be observable
+		// before the first animation frame could have consumed it.
+		await tick();
+	}
 </script>
 
 <Story
@@ -1362,6 +1423,91 @@
 		expect(canvas.getByText('Updated mobile title')).toBeInTheDocument();
 		expect(lastChangedGraph(args).nodes[0].title).toBe('Updated mobile title');
 		expect(lastChangedGraph(args).nodes[0].tags).toEqual(['abc', 'urgent']);
+	}}
+/>
+
+<Story
+	name="AnEquationSavedInTheSheetSettlesTheRevealedNode"
+	args={{
+		multigraphData: DATAFLOW_CONTENT_COMMIT_CHAIN,
+		defaultPrimaryNodeId: 'a',
+		layoutSettings: TWO_LAYERS_SETTLING,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		// Three authored hops out with two layers on show.
+		expect(canvasElement.querySelector('[data-node-id="d"]')).not.toBeInTheDocument();
+
+		await commitDescriptionThroughSheet(canvasElement, 'a', DEFINES_G);
+
+		// Defining g links `a` to `d`, which brings `d` on screen at whatever
+		// position it was last given. Without a settle it stays there frozen —
+		// drawn at its new, much larger size on top of whatever it overlaps —
+		// until the reader happens to drag something.
+		expect(canvasElement.querySelector('[data-node-id="d"]')).toBeInTheDocument();
+		expect(isSettling(canvasElement)).toBe(true);
+
+		const revealedAt = nodePosition(canvasElement, 'd');
+		await waitForFrames(5);
+		expect(nodePosition(canvasElement, 'd')).not.toEqual(revealedAt);
+	}}
+/>
+
+<Story
+	name="RemovingAnEquationInTheSheetSettlesTheGraphToo"
+	args={{
+		multigraphData: {
+			...DATAFLOW_CONTENT_COMMIT_CHAIN,
+			nodes: DATAFLOW_CONTENT_COMMIT_CHAIN.nodes.map((node) =>
+				node.id === 'a' ? { ...node, description: DEFINES_G } : node
+			)
+		},
+		defaultPrimaryNodeId: 'a',
+		layoutSettings: TWO_LAYERS_SETTLING,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		expect(canvasElement.querySelector('[data-node-id="d"]')).toBeInTheDocument();
+
+		await commitDescriptionThroughSheet(canvasElement, 'a', 'No math here.');
+
+		// Taking the definition away drops `d` back out of view, which leaves a
+		// hole in the layout the remaining nodes have to close.
+		expect(canvasElement.querySelector('[data-node-id="d"]')).not.toBeInTheDocument();
+		expect(isSettling(canvasElement)).toBe(true);
+	}}
+/>
+
+<Story
+	name="RenamingANodeSettlesCheaply"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'a', title: 'One', description: 'Just prose.' },
+				{ id: 'b', title: 'Two', description: 'More prose.' }
+			],
+			pinned: ['a'],
+			edges: [['a', 'b']],
+			posByNodeId: { a: { x: -300, y: 0 }, b: { x: 300, y: 0 } }
+		}),
+		defaultPrimaryNodeId: 'a',
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const before = nodePosition(canvasElement, 'b');
+
+		// The commit path is the same one an equation takes, so a rename kicks the
+		// settle too. It has to cost nothing: the graph is already at rest, so the
+		// first frame moves less than the settle epsilon and ends it.
+		await commitDescriptionThroughSheet(canvasElement, 'a', 'Still just prose.');
+		expect(isSettling(canvasElement)).toBe(true);
+
+		await waitForFrames(3);
+		expect(isSettling(canvasElement)).toBe(false);
+		expect(nodePosition(canvasElement, 'b')).toEqual(before);
 	}}
 />
 

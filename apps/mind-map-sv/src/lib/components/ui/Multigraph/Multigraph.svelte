@@ -1055,7 +1055,7 @@
 		nodeId: string,
 		content: { title: string; description: string; tags?: string[] }
 	) {
-		commitUserGraph(updateNodeContent(graph, nodeId, content));
+		commitContentGraph(updateNodeContent(graph, nodeId, content));
 		closeOverlays();
 	}
 
@@ -1203,6 +1203,25 @@
 	function commitUserGraph(nextGraph: MultigraphData) {
 		graph = nextGraph;
 		onMultigraphChange?.(nextGraph);
+	}
+
+	/**
+	 * Commits an edit to a node's own text. Since the dataflow layer is derived
+	 * from that text, writing an equation is as topology-changing as drawing an
+	 * edge: it can put a node on the canvas that has never been placed by
+	 * physics, and taking one away leaves a hole for the rest to close. Both are
+	 * cases every structural mutation already handles by committing through the
+	 * runtime, and content was the one path that did not, so an edit left the
+	 * canvas frozen until the reader next dragged something.
+	 *
+	 * Unconditional rather than gated on a dataflow diff: the settle stops itself
+	 * on the first frame that moves less than `postDragSettleEpsilonPx`, so a
+	 * rename costs one frame that moves nothing rather than an equality check on
+	 * the whole derived layer.
+	 */
+	function commitContentGraph(nextGraph: MultigraphData) {
+		commitUserGraph(layoutRuntime.relaxAfterMutation(nextGraph));
+		layoutRuntime.settleAfterDrag();
 	}
 </script>
 
@@ -1539,13 +1558,17 @@
 							const shouldUnpin = titleEditContext?.unpinOnCommit === true;
 							titleEditContext = null;
 							const committedGraph = commitInlineTitleSyntax(graph, node.id, title, createdEdgeId);
-							const nextGraph = shouldUnpin
-								? layoutRuntime.beginScaleChange(
+							if (shouldUnpin) {
+								// `beginScaleChange` kicks the loop on its own account.
+								commitUserGraph(
+									layoutRuntime.beginScaleChange(
 										setNodePinned(committedGraph, node.id, false),
 										node.id
 									)
-								: committedGraph;
-							commitUserGraph(nextGraph);
+								);
+								return;
+							}
+							commitContentGraph(committedGraph);
 						}}
 					/>
 				</div>
