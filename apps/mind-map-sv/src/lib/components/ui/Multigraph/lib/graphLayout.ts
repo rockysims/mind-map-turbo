@@ -1,8 +1,8 @@
 import type { MultigraphData, Point } from '../../types/multigraph';
-import { hopsFromPinned, radiusOf, scaleByHops, shortestPathHopsByNodeId } from './layout';
+import { radiusOf, scaleByHops, shortestPathHopsByNodeId } from './layout';
 import type { LayoutSettings } from './layoutSettings';
 import { withDefaultLayoutSettings } from './layoutSettings';
-import { relaxGraphPhysics, type EdgeEndpointIds } from './physics';
+import { relaxGraphPhysics } from './physics';
 import { normalizeRigidMotion } from './rigidMotion';
 
 const CENTERED_POSITION: Point = { x: 0, y: 0 };
@@ -31,23 +31,20 @@ export interface GraphLayoutOptions {
 	activeDragNodeId?: string | null;
 	/** Keep these nodes fixed during relaxation while their scale animates (e.g. after unpin). */
 	scaleAnchoredNodeIds?: readonly string[];
-	/** Effective hop counts merged over the pinned-BFS hops (e.g. beacons at BEACON_HOP). */
-	hopOverridesByNodeId?: Record<string, number>;
+	/**
+	 * Every node's distance, as the one bounded hop map (`computeBoundedHops`).
+	 * Required, and never recomputed here: `data` is usually the visible subgraph,
+	 * where a beacon or a node an equation revealed has no edges at all and a
+	 * fresh BFS would size it as if it were unreachable. Sizing and visibility are
+	 * the same number, measured once by whoever owns the whole graph.
+	 *
+	 * May cover nodes outside `data`; the extras are ignored.
+	 */
+	hopsByNodeId: Record<string, number>;
 	relaxIterations?: number;
 	scaleByNodeId?: Record<string, number>;
 	participatingNodeIds?: ReadonlySet<string>;
 	mobilityByNodeId?: Record<string, number>;
-	/**
-	 * Edges that exert spring force, when that is not the same set that defines
-	 * the graph's shape. Defaults to `data.edges`.
-	 *
-	 * This exists so an edge can pull without also counting as a step through the
-	 * graph. Dataflow edges should draw related nodes together, but letting them
-	 * shorten hop distance would change node scale and which nodes are visible at
-	 * all — a much larger claim than "these two are related", and one the author
-	 * never made by writing an equation.
-	 */
-	springEdges?: readonly EdgeEndpointIds[];
 }
 
 export interface GraphRelaxationStep {
@@ -55,12 +52,9 @@ export interface GraphRelaxationStep {
 	maxPositionDelta: number;
 }
 
-export function deriveGraphLayout(
-	data: MultigraphData,
-	options: GraphLayoutOptions = {}
-): GraphLayout {
+export function deriveGraphLayout(data: MultigraphData, options: GraphLayoutOptions): GraphLayout {
 	const settings = withDefaultLayoutSettings(options.settings);
-	const hopsByNodeId = withHopOverrides(hopsFromPinned(data), options.hopOverridesByNodeId);
+	const hopsByNodeId = hopsForNodes(data, options.hopsByNodeId);
 	const targetScaleByNodeId = scaleByHops(hopsByNodeId, settings);
 	const scaleByNodeId = {
 		...targetScaleByNodeId,
@@ -72,15 +66,20 @@ export function deriveGraphLayout(
 	const basePositions = positionsForNodes(data);
 	const anchoredIds = anchoredNodeIds(data, options);
 	const iterations = options.relaxIterations ?? settings.relaxIterations;
-	// Topology stays with `data.edges` throughout — hops above, shortest paths
-	// here — so spring-only edges cannot move a node into a different layer.
+	// Pairwise node-to-node hops for repulsion, a different question from the hop
+	// map above: that one says how far each node is from where reading starts,
+	// this one how far every node is from every other. Reads `data.edges`, which
+	// is every edge of the composed layout graph — a derived edge makes its
+	// endpoints neighbors here exactly as it does for the spring, instead of
+	// leaving them infinitely far apart and pushing at full strength against
+	// their own pull.
 	const shortestPathHops = shortestPathHopsByNodeId(data);
 	const posByNodeId =
 		iterations > 0
 			? relaxGraphPhysics(
 					basePositions,
 					radiusByNodeId,
-					[...(options.springEdges ?? data.edges)],
+					[...data.edges],
 					settings,
 					iterations,
 					anchoredIds,
@@ -108,14 +107,14 @@ export function deriveGraphLayout(
 
 export function relaxGraphPositions(
 	data: MultigraphData,
-	options: GraphLayoutOptions = {}
+	options: GraphLayoutOptions
 ): Record<string, Point> {
 	return deriveGraphLayout(data, options).posByNodeId;
 }
 
 export function withRelaxedGraphPositions(
 	data: MultigraphData,
-	options: GraphLayoutOptions = {}
+	options: GraphLayoutOptions
 ): MultigraphData {
 	return {
 		...data,
@@ -125,7 +124,7 @@ export function withRelaxedGraphPositions(
 
 export function relaxGraphPositionsStep(
 	data: MultigraphData,
-	options: GraphLayoutOptions = {}
+	options: GraphLayoutOptions
 ): GraphRelaxationStep {
 	const settings = withDefaultLayoutSettings(options.settings);
 	const nextPositions = relaxGraphPositions(data, options);
@@ -157,7 +156,7 @@ export function relaxGraphPositionsStep(
 
 export function withSettledGraphPositions(
 	data: MultigraphData,
-	options: GraphLayoutOptions = {}
+	options: GraphLayoutOptions
 ): MultigraphData {
 	const settings = withDefaultLayoutSettings(options.settings);
 
@@ -188,17 +187,15 @@ function anchoredNodeIds(data: MultigraphData, options: GraphLayoutOptions): Set
 	return anchoredIds;
 }
 
-function withHopOverrides(
-	hops: Record<string, number>,
-	overrides: Record<string, number> | undefined
+/**
+ * Narrows the hop map to this graph's nodes. A node the map has never heard of
+ * is infinitely far, which is what an unreachable node has always meant.
+ */
+function hopsForNodes(
+	data: MultigraphData,
+	hopsByNodeId: Record<string, number>
 ): Record<string, number> {
-	if (!overrides) return hops;
-
-	const nextHops = { ...hops };
-	for (const [nodeId, hop] of Object.entries(overrides)) {
-		if (nodeId in nextHops) nextHops[nodeId] = hop;
-	}
-	return nextHops;
+	return Object.fromEntries(data.nodes.map((node) => [node.id, hopsByNodeId[node.id] ?? Infinity]));
 }
 
 function participatingNodeIds(

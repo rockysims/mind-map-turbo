@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-	hopsFromPinned,
-	radiusOf,
-	scaleByHops,
-	shortestPathHopsByNodeId,
-	withHopsThroughEdges
-} from './layout';
+import { hopsFromPinned, radiusOf, scaleByHops, shortestPathHopsByNodeId } from './layout';
 import { makeGraph } from './testFixtures';
 
 describe('layout', () => {
@@ -112,71 +106,6 @@ describe('layout', () => {
 				n3: { n0: 1, n1: 2, n2: 1, n3: 0, n4: Infinity },
 				n4: { n0: Infinity, n1: Infinity, n2: Infinity, n3: Infinity, n4: 0 }
 			});
-		});
-	});
-
-	describe('withHopsThroughEdges', () => {
-		// n0 pinned, joined to nothing; n1—n2 authored off on their own. A dataflow
-		// edge n0→n1 is the only thing tying the two together.
-		const detached = makeGraph({ nodeCount: 3, pinned: [0], edges: [[1, 2]] });
-		const dataflow = [{ sourceNodeId: 'n0', targetNodeId: 'n1' }];
-
-		it('measures a node the extra edges reach', () => {
-			const hops = withHopsThroughEdges(detached, { n0: 0, n1: 1, n2: 1 }, dataflow);
-
-			expect(hops.n1).toBe(1);
-		});
-
-		it('pushes a node behind a reached one out by a hop', () => {
-			// n2 comes in at the flat hop a beacon gets, which stands in for "no path
-			// to a pin". There is a path now, and it runs through n1, so n2 is two
-			// steps out and should read as smaller than n1 rather than its equal.
-			const hops = withHopsThroughEdges(detached, { n0: 0, n1: 1, n2: 1 }, dataflow);
-
-			expect(hops.n2).toBe(2);
-		});
-
-		it('leaves a node the extra edges never reach at the hop it came with', () => {
-			const isolated = makeGraph({ nodeCount: 3, pinned: [0], edges: [] });
-
-			expect(withHopsThroughEdges(isolated, { n0: 0, n1: 1, n2: 1 }, dataflow).n2).toBe(1);
-		});
-
-		it('caps at the displayed layers so a distant node stays on screen', () => {
-			// Sized down to the outermost visible ring rather than off the canvas: a
-			// beacon exists to keep its cluster reachable.
-			const chain = makeGraph({
-				nodeCount: 4,
-				pinned: [0],
-				edges: [
-					[1, 2],
-					[2, 3]
-				]
-			});
-
-			expect(
-				withHopsThroughEdges(chain, { n0: 0, n1: 1, n2: 1, n3: 1 }, dataflow, {
-					displayedLayers: 2
-				}).n3
-			).toBe(2);
-		});
-
-		it('measures from the given origins when nothing is pinned', () => {
-			// Nothing pinned means no origin of its own, so without being told where
-			// to start every node keeps the flat hop it came in with.
-			const unpinned = makeGraph({ nodeCount: 3, edges: [[1, 2]] });
-
-			expect(
-				withHopsThroughEdges(unpinned, { n0: 1, n1: 1, n2: 1 }, dataflow, {
-					origins: { n0: 1 }
-				})
-			).toEqual({ n0: 1, n1: 2, n2: 3 });
-		});
-
-		it('returns the same object when the extra edges change nothing', () => {
-			const hops = { n0: 0, n1: 1, n2: 1 };
-
-			expect(withHopsThroughEdges(detached, hops, [])).toBe(hops);
 		});
 	});
 

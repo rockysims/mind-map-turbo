@@ -3,6 +3,12 @@ import { APP_CONFIG } from '../../../../appConfig';
 export interface LayoutSettings {
 	baseRadius: number;
 	displayedLayers: number;
+	/**
+	 * How many further hops a derived dataflow edge may reveal, once a path has
+	 * spent its authored budget crossing one. A derived edge differs from an
+	 * authored one in exactly this: it carries its own, smaller budget.
+	 */
+	dataflowDisplayedLayers: number;
 	scaleFalloff: number;
 	minScale: number;
 	relaxIterations: number;

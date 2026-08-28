@@ -1,14 +1,21 @@
 import { describe, expect, it } from 'vitest';
+import type { EdgeData } from '../../types/edge';
 import { hopsFromPinned } from './layout';
-import { beaconNodeIds, withBeaconHops } from './beacons';
+import { BEACON_HOP, beaconNodeIds, withBeaconHops } from './beacons';
 import {
+	composeVisibleLayoutGraph,
+	computeBoundedHops,
+	type EdgeVisibility,
 	edgeVisibilityForPinnedNeighborhood,
 	graphWithVisibleNodes,
 	pinnedNodeIds,
 	visibleNodeIdsForPinnedNeighborhood,
-	withRevealedNeighborHops
+	withDerivedBoundaryEdgesHidden,
+	withDerivedHops
 } from './boundedVisibility';
 import { makeGraph } from './testFixtures';
+
+const NO_BEACONS = new Set<string>();
 
 describe('boundedVisibility', () => {
 	it('shows exactly the beacon of a pinless component under beacon-effective hops', () => {
@@ -62,8 +69,150 @@ describe('boundedVisibility', () => {
 		]).toEqual(['n0', 'n1', 'n3', 'n4', 'n5']);
 	});
 
-	describe('withRevealedNeighborHops', () => {
-		// n0 pinned, a chain out to n3, and n4/n5 in a component of their own.
+	describe('computeBoundedHops', () => {
+		const derived = (sourceNodeId: string, targetNodeId: string) => ({
+			sourceNodeId,
+			targetNodeId
+		});
+
+		it('reveals a derived neighbor of a pinned node one hop out', () => {
+			const graph = makeGraph({ nodeCount: 2, pinned: [0] });
+
+			const hops = computeBoundedHops(graph, [derived('n0', 'n1')], NO_BEACONS, {
+				displayedLayers: 3
+			});
+
+			expect(hops).toEqual({ n0: 0, n1: 1 });
+		});
+
+		it('leaves the drawn neighbors of a node an equation revealed hidden, at any budget', () => {
+			// The path grammar as a theorem: crossing a derived edge ends the
+			// authored budget, so n1 appears and the n2 it was drawn to does not.
+			const graph = makeGraph({ nodeCount: 3, pinned: [0], edges: [[1, 2]] });
+
+			for (const dataflowDisplayedLayers of [1, 2, 5]) {
+				const hops = computeBoundedHops(graph, [derived('n0', 'n1')], NO_BEACONS, {
+					displayedLayers: 3,
+					dataflowDisplayedLayers
+				});
+
+				expect(hops.n1).toBe(1);
+				expect(hops.n2).toBe(Infinity);
+			}
+		});
+
+		it('reveals a second derived step only once the derived budget pays for it', () => {
+			const graph = makeGraph({ nodeCount: 3, pinned: [0] });
+			const edges = [derived('n0', 'n1'), derived('n1', 'n2')];
+
+			expect(
+				computeBoundedHops(graph, edges, NO_BEACONS, {
+					displayedLayers: 3,
+					dataflowDisplayedLayers: 1
+				}).n2
+			).toBe(Infinity);
+			expect(
+				computeBoundedHops(graph, edges, NO_BEACONS, {
+					displayedLayers: 3,
+					dataflowDisplayedLayers: 2
+				})
+			).toEqual({ n0: 0, n1: 1, n2: 2 });
+		});
+
+		it('defaults the derived budget to a single layer', () => {
+			const graph = makeGraph({ nodeCount: 3, pinned: [0] });
+
+			const hops = computeBoundedHops(
+				graph,
+				[derived('n0', 'n1'), derived('n1', 'n2')],
+				NO_BEACONS,
+				{ displayedLayers: 3 }
+			);
+
+			expect(hops).toEqual({ n0: 0, n1: 1, n2: Infinity });
+		});
+
+		it('caps a chained derived reveal at displayedLayers', () => {
+			const graph = makeGraph({ nodeCount: 3, pinned: [0] });
+
+			const hops = computeBoundedHops(
+				graph,
+				[derived('n0', 'n1'), derived('n1', 'n2')],
+				NO_BEACONS,
+				{ displayedLayers: 1, dataflowDisplayedLayers: 2 }
+			);
+
+			expect(hops).toEqual({ n0: 0, n1: 1, n2: 1 });
+		});
+
+		it('sizes an already-visible node nearer without changing who is visible', () => {
+			// What the separate sizing re-measure existed for: the shortcut says n3
+			// is one hop away, and the visible set is the same set either way.
+			const graph = makeGraph({
+				nodeCount: 4,
+				pinned: [0],
+				edges: [
+					[0, 1],
+					[1, 2],
+					[2, 3]
+				]
+			});
+			const options = { displayedLayers: 3, dataflowDisplayedLayers: 1 };
+
+			const hops = computeBoundedHops(graph, [derived('n0', 'n3')], NO_BEACONS, options);
+
+			expect(hops).toEqual({ n0: 0, n1: 1, n2: 2, n3: 1 });
+			expect(visibleNodeIdsForPinnedNeighborhood(graph, hops, options)).toEqual(
+				visibleNodeIdsForPinnedNeighborhood(graph, hopsFromPinned(graph), options)
+			);
+		});
+
+		it('reveals nothing and relaxes nothing at a derived budget of zero', () => {
+			const graph = makeGraph({
+				nodeCount: 5,
+				pinned: [0],
+				edges: [
+					[0, 1],
+					[1, 2],
+					[2, 3]
+				]
+			});
+
+			const hops = computeBoundedHops(
+				graph,
+				[derived('n0', 'n4'), derived('n0', 'n3')],
+				NO_BEACONS,
+				{ displayedLayers: 3, dataflowDisplayedLayers: 0 }
+			);
+
+			expect(hops).toEqual({ n0: 0, n1: 1, n2: 2, n3: 3, n4: Infinity });
+		});
+
+		it('seeds from beacons alone when nothing is pinned', () => {
+			// n0 anchors its own component, n2 its own; the equation off n0 reaches
+			// one hop past the beacon hop.
+			const graph = makeGraph({ nodeCount: 3, edges: [[0, 1]], pinHistory: { 0: 4 } });
+
+			const hops = computeBoundedHops(graph, [derived('n0', 'n1')], beaconNodeIds(graph), {
+				displayedLayers: 3
+			});
+
+			expect(hops).toEqual({ n0: BEACON_HOP, n1: BEACON_HOP + 1, n2: BEACON_HOP });
+		});
+
+		it('ignores a derived edge naming a node the graph does not have', () => {
+			const graph = makeGraph({ nodeCount: 2, pinned: [0] });
+
+			expect(
+				computeBoundedHops(graph, [derived('n0', 'gone')], NO_BEACONS, { displayedLayers: 3 })
+			).toEqual({ n0: 0, n1: Infinity });
+		});
+	});
+
+	describe('withDerivedHops', () => {
+		// The behavior block that pinned the old non-cascading reveal override,
+		// restated against the derived phase of the unified computation: n0 pinned,
+		// a chain out to n3, and n4/n5 in a component of their own.
 		const graph = makeGraph({
 			nodeCount: 6,
 			pinned: [0],
@@ -80,56 +229,48 @@ describe('boundedVisibility', () => {
 		];
 
 		it('brings a hidden endpoint into view one layer out from its anchor', () => {
-			const hops = withRevealedNeighborHops(
-				baseHops(),
-				[{ sourceNodeId: 'n0', targetNodeId: 'n4' }],
-				{ displayedLayers: 2 }
-			);
+			const hops = withDerivedHops(baseHops(), [{ sourceNodeId: 'n0', targetNodeId: 'n4' }], {
+				displayedLayers: 2
+			});
 
 			expect(hops.n4).toBe(1);
 			expect(visible(hops)).toContain('n4');
 		});
 
-		it('does not drag the revealed node\u2019s own neighbors along', () => {
-			// The whole point of the rule: n4 appears, n5 does not, so one equation
-			// cannot open up a cluster the author never connected.
-			const hops = withRevealedNeighborHops(
-				baseHops(),
-				[{ sourceNodeId: 'n0', targetNodeId: 'n4' }],
-				{ displayedLayers: 2 }
-			);
+		it('does not drag the revealed node’s own drawn neighbors along', () => {
+			const hops = withDerivedHops(baseHops(), [{ sourceNodeId: 'n0', targetNodeId: 'n4' }], {
+				displayedLayers: 2
+			});
 
 			expect(hops.n5).toBe(Infinity);
 			expect(visible(hops)).not.toContain('n5');
 		});
 
-		it('does not let a revealed node anchor another reveal', () => {
-			// Measured against the hops passed in, so n4 being revealed in this same
-			// pass cannot make n5 visible through a second dataflow edge.
-			const hops = withRevealedNeighborHops(
+		it('does not let a revealed node anchor a further reveal within the budget', () => {
+			// Steps are counted from the seed, so at a budget of 1 the reveal of n4
+			// cannot pay for a second derived step to n5.
+			const hops = withDerivedHops(
 				baseHops(),
 				[
 					{ sourceNodeId: 'n0', targetNodeId: 'n4' },
 					{ sourceNodeId: 'n4', targetNodeId: 'n5' }
 				],
-				{ displayedLayers: 2 }
+				{ displayedLayers: 2, dataflowDisplayedLayers: 1 }
 			);
 
 			expect(hops.n5).toBe(Infinity);
 		});
 
 		it('reveals in either direction', () => {
-			const hops = withRevealedNeighborHops(
-				baseHops(),
-				[{ sourceNodeId: 'n4', targetNodeId: 'n0' }],
-				{ displayedLayers: 2 }
-			);
+			const hops = withDerivedHops(baseHops(), [{ sourceNodeId: 'n4', targetNodeId: 'n0' }], {
+				displayedLayers: 2
+			});
 
 			expect(hops.n4).toBe(1);
 		});
 
 		it('takes the closest anchor when several reveal the same node', () => {
-			const hops = withRevealedNeighborHops(
+			const hops = withDerivedHops(
 				baseHops(),
 				[
 					{ sourceNodeId: 'n2', targetNodeId: 'n4' },
@@ -144,38 +285,57 @@ describe('boundedVisibility', () => {
 		it('caps the revealed hop so a node hanging off the last layer still shows', () => {
 			// n2 sits on the outermost visible layer; n4 would land at 3 and be
 			// filtered straight back out.
-			const hops = withRevealedNeighborHops(
-				baseHops(),
-				[{ sourceNodeId: 'n2', targetNodeId: 'n4' }],
-				{ displayedLayers: 2 }
-			);
+			const hops = withDerivedHops(baseHops(), [{ sourceNodeId: 'n2', targetNodeId: 'n4' }], {
+				displayedLayers: 2
+			});
 
 			expect(hops.n4).toBe(2);
 			expect(visible(hops)).toContain('n4');
 		});
 
 		it('leaves an edge between two hidden nodes alone', () => {
-			const hops = withRevealedNeighborHops(
-				baseHops(),
-				[{ sourceNodeId: 'n4', targetNodeId: 'n5' }],
-				{ displayedLayers: 2 }
-			);
+			const hops = baseHops();
 
-			expect(hops.n4).toBe(Infinity);
-			expect(hops.n5).toBe(Infinity);
+			expect(
+				withDerivedHops(hops, [{ sourceNodeId: 'n4', targetNodeId: 'n5' }], {
+					displayedLayers: 2
+				})
+			).toBe(hops);
 		});
 
 		it('returns the same object when nothing is revealed', () => {
 			const hops = baseHops();
 
-			expect(withRevealedNeighborHops(hops, [], { displayedLayers: 2 })).toBe(hops);
+			expect(withDerivedHops(hops, [], { displayedLayers: 2 })).toBe(hops);
+		});
+
+		it('returns the same object when a derived edge changes no distance', () => {
+			const hops = baseHops();
+
+			// n1 already sits one hop from n0; the equation restates it.
+			expect(
+				withDerivedHops(hops, [{ sourceNodeId: 'n0', targetNodeId: 'n1' }], {
+					displayedLayers: 2
+				})
+			).toBe(hops);
+		});
+
+		it('returns the same object at a derived budget of zero', () => {
+			const hops = baseHops();
+
+			expect(
+				withDerivedHops(hops, [{ sourceNodeId: 'n0', targetNodeId: 'n4' }], {
+					displayedLayers: 2,
+					dataflowDisplayedLayers: 0
+				})
+			).toBe(hops);
 		});
 
 		it('ignores an edge naming a node the graph does not have', () => {
 			const hops = baseHops();
 
 			expect(
-				withRevealedNeighborHops(hops, [{ sourceNodeId: 'n0', targetNodeId: 'gone' }], {
+				withDerivedHops(hops, [{ sourceNodeId: 'n0', targetNodeId: 'gone' }], {
 					displayedLayers: 2
 				})
 			).toBe(hops);
@@ -240,6 +400,51 @@ describe('boundedVisibility', () => {
 		expect(visibleGraph.edges.map((edge) => edge.id)).toEqual(['e0', 'e3']);
 	});
 
+	describe('composeVisibleLayoutGraph', () => {
+		const graph = makeGraph({
+			nodeCount: 4,
+			edges: [
+				[0, 1],
+				[2, 3]
+			]
+		});
+		const visibleIds = new Set(['n0', 'n1', 'n2']);
+
+		function derivedEdge(sourceNodeId: string, targetNodeId: string): EdgeData {
+			return {
+				id: `dataflow:${sourceNodeId}->${targetNodeId}`,
+				sourceNodeId,
+				targetNodeId,
+				tags: [],
+				directed: true,
+				springFactor: 1
+			};
+		}
+
+		it('joins derived edges between visible nodes as ordinary edges', () => {
+			// Ordinary is the whole point: spring force, degree counting, edge-gap
+			// constraints, and the pairwise hops repulsion reads are all one question
+			// about `edges` once the edge is in there.
+			const composed = composeVisibleLayoutGraph(graph, visibleIds, [derivedEdge('n1', 'n2')]);
+
+			expect(composed.nodes.map((node) => node.id)).toEqual(['n0', 'n1', 'n2']);
+			expect(composed.edges.map((edge) => edge.id)).toEqual(['e0', 'dataflow:n1->n2']);
+			expect(composed.edges[1].springFactor).toBe(1);
+		});
+
+		it('drops a derived edge reaching a hidden node', () => {
+			expect(composeVisibleLayoutGraph(graph, visibleIds, [derivedEdge('n1', 'n3')]).edges).toEqual(
+				[graph.edges[0]]
+			);
+		});
+
+		it('returns the plain visible subgraph when nothing derived survives', () => {
+			expect(composeVisibleLayoutGraph(graph, visibleIds, [])).toEqual(
+				graphWithVisibleNodes(graph, visibleIds)
+			);
+		});
+	});
+
 	it('returns pinned node ids', () => {
 		const graph = makeGraph({ nodeCount: 4, pinned: [1, 3] });
 
@@ -296,5 +501,68 @@ describe('boundedVisibility', () => {
 			fadeRatio: 0.25
 		});
 		expect(edgeVisibility[2]).toMatchObject({ kind: 'hidden' });
+	});
+
+	describe('withDerivedBoundaryEdgesHidden', () => {
+		const isDerivedEdge = (edgeId: string) => edgeId.startsWith('dataflow:');
+
+		const edgeData = (id: string): EdgeData => ({
+			id,
+			sourceNodeId: 'n0',
+			targetNodeId: 'n1',
+			tags: []
+		});
+
+		const boundary = (id: string): EdgeVisibility => ({
+			kind: 'boundary',
+			edge: edgeData(id),
+			visibleNodeId: 'n0',
+			hiddenNodeId: 'n1',
+			visibleEndpoint: 'source',
+			hiddenEndpoint: 'target',
+			fadeRatio: 0.5
+		});
+
+		it('hides a derived edge whose far endpoint is off screen', () => {
+			const visibilities = [boundary('dataflow:n0->n1')];
+
+			expect(withDerivedBoundaryEdgesHidden(visibilities, isDerivedEdge)).toEqual([
+				{ kind: 'hidden', edge: visibilities[0].edge }
+			]);
+		});
+
+		it('leaves an authored boundary edge fading', () => {
+			const visibilities = [boundary('e0')];
+
+			expect(withDerivedBoundaryEdgesHidden(visibilities, isDerivedEdge)).toBe(visibilities);
+		});
+
+		it('touches only the boundary entries, and only the derived ones', () => {
+			const authoredFade = boundary('e0');
+			const visibilities: EdgeVisibility[] = [
+				{ kind: 'visible', edge: edgeData('dataflow:n0->n1') },
+				authoredFade,
+				boundary('dataflow:n1->n2'),
+				{ kind: 'hidden', edge: edgeData('dataflow:n2->n3') }
+			];
+
+			expect(
+				withDerivedBoundaryEdgesHidden(visibilities, isDerivedEdge).map(
+					(visibility) => visibility.kind
+				)
+			).toEqual(['visible', 'boundary', 'hidden', 'hidden']);
+			expect(withDerivedBoundaryEdgesHidden(visibilities, isDerivedEdge)[1]).toBe(authoredFade);
+		});
+
+		it('returns the same array when no derived edge is at the boundary', () => {
+			// It feeds a $derived chain that re-runs every frame, so an untouched
+			// result has to stay the same object.
+			const visibilities: EdgeVisibility[] = [
+				{ kind: 'visible', edge: edgeData('dataflow:n0->n1') },
+				boundary('e0')
+			];
+
+			expect(withDerivedBoundaryEdgesHidden(visibilities, isDerivedEdge)).toBe(visibilities);
+		});
 	});
 });

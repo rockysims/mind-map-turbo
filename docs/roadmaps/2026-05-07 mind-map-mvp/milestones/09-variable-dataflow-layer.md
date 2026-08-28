@@ -216,6 +216,25 @@ titles define made an existing bug likely enough to be found. A test asserting
 the wrong thing is worse than no test, because it converts a bug into documented
 intent and stops anyone from looking.
 
+## Amendment: layout participation superseded (2026-08-28)
+
+Two parts of this milestone were overtaken by what shipping it taught.
+
+**"Decide whether derived edges participate in hop distance and layout"** was
+resolved in the plan as the `dataflowInLayout` toggle, off by default. Five fix
+commits later (96e565e, 1fefed6, f0ae896, 2faed60, c31aa45) the verdict on
+that trial is that neither position of one on/off toggle is right: force,
+distance, and visibility deserve separate answers, and giving each consumer of
+hops its own patched view of the graph produced pairwise disagreements faster
+than they could be fixed. Milestone 11 replaces the toggle with a
+`dataflowDisplayedLayers` budget and one shared hop computation.
+
+**"Treat only display math as capable of defining"** was reversed during
+implementation: inline math defines on the same terms as display math, on the
+reasoning (documented in `nodeQuantities.ts` and pinned by its spec) that the
+distinction is typography, not semantics. The scope text above is kept as
+written; this note is the correction.
+
 ## References
 
 - Milestone 08 supplies the rendering substrate this milestone reads.

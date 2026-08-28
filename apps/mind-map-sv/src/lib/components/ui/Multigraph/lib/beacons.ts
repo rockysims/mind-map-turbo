@@ -1,7 +1,6 @@
 import type { MultigraphData } from '../../types/multigraph';
 import type { NodeData } from '../../types/node';
 import { buildAdjacency } from './layout';
-import type { EdgeEndpointIds } from './physics';
 
 /**
  * Beacons keep pinless connected components reachable: instead of the whole
@@ -19,28 +18,24 @@ export interface BeaconOptions {
 	 * Array order is preference order.
 	 */
 	preferredNodeIds?: readonly string[];
-	/**
-	 * Edges that join components for the purpose of this count, without being
-	 * part of the graph. Currently the dataflow layer, so that a cluster an
-	 * equation ties to another is one component with one beacon rather than two
-	 * nodes each claiming to be the start of something.
-	 */
-	extraEdges?: readonly EdgeEndpointIds[];
 }
 
 /**
- * Picks one beacon node per connected component that contains no pinned node.
+ * Picks one beacon node per **authored** connected component that contains no
+ * pinned node.
+ *
+ * Deliberately blind to derived edges: two clusters an equation ties together
+ * each keep their own anchor, so a cluster cannot mostly vanish — represented
+ * only by whatever the derived budget reveals — because someone wrote an
+ * equation about one of its nodes.
+ *
  * Selection priority within such a component:
  *   1. highest pin recency (`lastPinnedSeq`),
  *   2. the first `preferredNodeIds` entry inside the component,
  *   3. highest distinct-neighbor degree, tie-broken by lowest node id.
- *
- * Applied to an already-visible subgraph this is idempotent: each beacon is
- * the sole (pinless) member of its component there and picks itself, and every
- * other visible component contains a pinned node.
  */
 export function beaconNodeIds(data: MultigraphData, options: BeaconOptions = {}): Set<string> {
-	const adjacency = buildAdjacency(data, options.extraEdges);
+	const adjacency = buildAdjacency(data);
 	const nodeById = new Map(data.nodes.map((node) => [node.id, node]));
 	const preferenceRank = new Map(
 		(options.preferredNodeIds ?? []).map((nodeId, index) => [nodeId, index])
@@ -76,11 +71,6 @@ export function beaconNodeIds(data: MultigraphData, options: BeaconOptions = {})
 	}
 
 	return beacons;
-}
-
-/** Layout hop overrides (see GraphLayoutOptions) mapping each beacon to BEACON_HOP. */
-export function beaconHopOverrides(beaconIds: ReadonlySet<string>): Record<string, number> {
-	return Object.fromEntries([...beaconIds].map((beaconId) => [beaconId, BEACON_HOP]));
 }
 
 /**

@@ -224,3 +224,63 @@ describe('memoization', () => {
 		expect(definersOf(after, 'x')).toEqual([]);
 	});
 });
+
+// Callers rebuild the index from the whole graph, which gets a new identity on
+// every frame of a drag. Reusing the extraction is not enough: a fresh index
+// object invalidates everything derived from it just as thoroughly as changed
+// math would.
+describe('index identity', () => {
+	function countingIndexer() {
+		const extract = vi.fn((candidate: { description: string; tags: string[] }) =>
+			nodeQuantities(candidate)
+		);
+		return { extract, build: createQuantityIndexer({ extract }) };
+	}
+
+	it('returns the identical index when every node still matches its memo', () => {
+		const { build } = countingIndexer();
+		expect(build(chain)).toBe(build(chain));
+	});
+
+	it('returns the identical index for equal nodes in fresh objects', () => {
+		// The graph hands over rebuilt node objects, not the ones it was given.
+		const { build } = countingIndexer();
+		const first = build(chain);
+		const second = build(chain.map((each) => ({ ...each })));
+		expect(second).toBe(first);
+	});
+
+	it('returns a fresh index when one node changed', () => {
+		const { build } = countingIndexer();
+		const first = build(chain);
+		expect(build([chain[0], chain[1], node('c', '$$v = a t$$')])).not.toBe(first);
+	});
+
+	it('returns a fresh index when a node is removed', () => {
+		const { build } = countingIndexer();
+		const first = build(chain);
+		expect(build([chain[0], chain[1]])).not.toBe(first);
+	});
+
+	it('returns a fresh index when a node is added', () => {
+		const { build } = countingIndexer();
+		const first = build(chain);
+		expect(build([...chain, node('d', '$$p = m v$$')])).not.toBe(first);
+	});
+
+	it('settles back onto one identity after an edit', () => {
+		const { build } = countingIndexer();
+		build(chain);
+		const edited = [chain[0], chain[1], node('c', '$$v = a t$$')];
+		const after = build(edited);
+		expect(build(edited)).toBe(after);
+	});
+
+	// Same id set, same content, but a node swapped in for one of the same id and
+	// content: the identity return must not paper over a removal by counting.
+	it('returns a fresh index when one node is swapped for a different one', () => {
+		const { build } = countingIndexer();
+		const first = build(chain);
+		expect(build([chain[0], chain[1], node('d', '$$p = m v$$')])).not.toBe(first);
+	});
+});

@@ -18,16 +18,14 @@ describe('beaconNodeIds', () => {
 		expect(beaconNodeIds(graph)).toEqual(new Set());
 	});
 
-	it('treats components the extra edges join as one', () => {
-		// n0 alone and n1—n2 are two components on the author's own edges, so they
-		// would light two beacons. A dataflow edge makes them one thing to read,
-		// and one thing to read wants one place to start reading from.
+	it('counts components on the authored edges alone', () => {
+		// n0 alone and n1—n2 are two components on the author's own edges, and stay
+		// two however many equations tie them together. Merging them would leave the
+		// second cluster represented only by whatever the derived budget reveals —
+		// a whole cluster mostly vanishing because someone wrote an equation.
 		const graph = makeGraph({ nodeCount: 3, edges: [[1, 2]] });
-		expect(beaconNodeIds(graph).size).toBe(2);
 
-		expect(
-			beaconNodeIds(graph, { extraEdges: [{ sourceNodeId: 'n0', targetNodeId: 'n1' }] }).size
-		).toBe(1);
+		expect(beaconNodeIds(graph).size).toBe(2);
 	});
 
 	it('returns one beacon per pinless component', () => {
