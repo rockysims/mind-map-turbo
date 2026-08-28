@@ -1,8 +1,20 @@
 @import 'tailwindcss';
-/* Local delegates the main math face to the OS and ships one small woff2 for
-   script letters and prime alignment. Vite base64s that font into the stylesheet
-   so the offline single-file shell stays one file. */
-@import 'temml/dist/Temml-Local.css';
+/* A vendored copy of Temml's "Local" stylesheet, which delegates the main math
+   face to the OS and ships one small woff2 for script letters. Vendored so the
+   font it serves is ours rather than the mislicensed upstream binary; see the
+   header of the file itself. */
+@import '../lib/vendor/temml-local.css';
+
+/* Declared here rather than in the vendored file because Tailwind flattens the
+   @import above into this file and resolves relative url()s against it. Vite
+   base64s the font into the stylesheet so the offline single-file shell stays
+   one file; mathScriptFont.spec.ts pins the size that depends on. */
+@font-face {
+	font-family: 'MindMapScript';
+	src: url('../lib/fonts/MindMapScript-Regular.woff2') format('woff2');
+	font-weight: normal;
+	font-style: normal;
+}
 
 @custom-variant dark (&:is(.dark *));
 
