@@ -230,6 +230,54 @@ test('self-contained build artifact opens from disk without sibling app assets',
 	expect(requests.filter((url) => url.includes('/_app/'))).toEqual([]);
 });
 
+test('typeset math renders from a self-contained file opened from disk', async ({ page }) => {
+	const documentId = `doc-math-${Date.now()}`;
+	const tmpFile = join(tmpdir(), `e2e-offline-math-${Date.now()}.html`);
+	const failedRequests: string[] = [];
+	page.on('requestfailed', (request) => {
+		failedRequests.push(request.url());
+	});
+
+	await writeFile(
+		tmpFile,
+		await selfContainedGraphHtml(
+			graphDocumentPayload({
+				documentId,
+				title: 'Math Node',
+				// \mathscr is deliberate: it is one of the few constructs that actually
+				// uses Temml's bundled woff2, so this exercises the inlined font rather
+				// than the OS math face that covers ordinary symbols.
+				description: 'Constant acceleration gives $$v = v_0 + a t$$ for flux $\\mathscr{F}$.'
+			})
+		)
+	);
+	await page.goto(pathToFileURL(tmpFile).href);
+	await expect(page.getByText('Math Node')).toBeVisible();
+
+	const circle = page.locator('.node-wrapper .circle').first();
+	const nodeBox = await circle.boundingBox();
+	if (!nodeBox) throw new Error('Node .circle element not found');
+	await scrubFocusEntry(page, {
+		x: nodeBox.x + nodeBox.width / 2,
+		y: nodeBox.y + nodeBox.height / 2
+	});
+
+	await expect(page.getByRole('dialog')).toBeVisible();
+	await expect(page.locator('[data-segment="display-math"] math')).toHaveCount(1);
+	await expect(page.locator('[data-segment="inline-math"] math')).toHaveCount(1);
+	await expect(page.locator('math .mathscr')).toHaveCount(1);
+
+	// The math font is inlined as a data URI; a fetch here would mean it escaped
+	// the single-file build and would silently fall back for offline readers.
+	expect(failedRequests).toEqual([]);
+	expect(
+		await page.evaluate(async () => {
+			await document.fonts.ready;
+			return document.fonts.check('16px Temml');
+		})
+	).toBe(true);
+});
+
 test('opened HTML save file data wins when no local draft exists', async ({ page }) => {
 	const documentId = `doc-stale-${Date.now()}`;
 	const tmpFile = join(tmpdir(), `e2e-open-save-${Date.now()}.html`);
@@ -1005,11 +1053,19 @@ async function brokenSelfContainedGraphHtml(payload: unknown): Promise<string> {
 ${html.slice(insertAt)}`;
 }
 
-function graphDocumentPayload({ documentId, title }: { documentId: string; title: string }) {
+function graphDocumentPayload({
+	documentId,
+	title,
+	description = 'Embedded description'
+}: {
+	documentId: string;
+	title: string;
+	description?: string;
+}) {
 	return {
 		schemaVersion: CURRENT_SCHEMA_VERSION,
 		data: {
-			nodes: [{ id: 'n0', title, description: 'Embedded description', tags: [] }],
+			nodes: [{ id: 'n0', title, description, tags: [] }],
 			edges: [],
 			posByNodeId: { n0: { x: 0, y: 0 } },
 			tagColorConfig: { nodeTags: {}, edgeTags: {} }

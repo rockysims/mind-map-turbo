@@ -15,6 +15,22 @@ The active roadmap, milestones, and (when work is in flight) plans live under
 
 - [Roadmap: MindMap MVP](docs/roadmaps/2026-05-07%20mind-map-mvp/roadmap.md)
 
+## Writing math in node descriptions
+
+Node descriptions accept LaTeX between dollar delimiters: `$…$` renders inline
+with the surrounding prose, and `$$…$$` renders as a centered display equation.
+Write `\$` for a literal dollar sign. A delimiter that is never closed stays
+ordinary text, so a stray `$` cannot blank out the rest of a description.
+
+The node edit sheet shows a live preview as soon as a draft contains math, and
+invalid LaTeX renders an inline error marker instead of blocking the save — the
+description is always stored as the raw source you typed.
+
+Expressions are typeset to MathML by [Temml](https://temml.org), which the
+browser draws with its own math font. Temml's stylesheet and its one small
+`woff2` are inlined into the downloadable HTML, so math still renders in a saved
+file opened from disk with no network.
+
 ## Working on this project
 
 Coding conventions, test discipline, and commit format are documented in:

@@ -402,8 +402,13 @@ entries when you add them.
   KaTeX 0.18.4 for comparison: `katex.min.js` 272,179 B, `katex.min.css`
   24,727 B, and 259,792 B across 20 `woff2` faces (~347 KB base64'd), so roughly
   640 KB for the full package or ~455 KB with a seven-face subset. Baseline
-  `static/offline-app-shell.html` is 278,791 B. Record the measured post-T01 and
-  post-T07 sizes here.
+  `static/offline-app-shell.html` is 278,791 B.
+- 2026-08-27: **Measured shell size after T07.** 278,791 B → 512,306 B, a delta
+  of +233,515 B (+228.0 KB, +83.8%). Close to the 505,581 B the spike predicted;
+  the extra ~6.7 KB is milestone 08's own component and adapter code, which the
+  spike did not include. Roughly 220 KB of the delta is Temml itself, which is
+  the floor for any client-side math engine — KaTeX with a font subset would
+  have cost about 270 KB more.
 - 2026-08-27: Throwaway spike run to de-risk T01, then fully reverted. Results:
   shell went 278,791 B to 505,581 B, so **+226,790 B (~221 KB)** against a
   then-current 600 KB budget. `build/` contained only `index.html`;
