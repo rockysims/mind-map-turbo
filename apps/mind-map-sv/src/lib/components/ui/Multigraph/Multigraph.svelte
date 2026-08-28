@@ -69,7 +69,8 @@
 	import {
 		edgeVisibilityForPinnedNeighborhood,
 		graphWithVisibleNodes,
-		visibleNodeIdsForPinnedNeighborhood
+		visibleNodeIdsForPinnedNeighborhood,
+		withRevealedNeighborHops
 	} from './lib/boundedVisibility.js';
 	import { composeEdgesForRender, createDataflowModel } from './lib/dataflowLayer.js';
 	import { isDerivedEdgeId, type DerivedEdge } from './lib/derivedEdges.js';
@@ -333,6 +334,7 @@
 				)
 			);
 		},
+		composeRevealEdges: (data) => dataflowModel(data, dataflowEnabled).edges,
 		getLayoutSettings: () => layoutSettings,
 		getActiveDragNodeId: () => activeDragNodeId,
 		getPreferredBeaconNodeIds: () => severedBeaconPreference,
@@ -412,7 +414,18 @@
 	const beaconIds = $derived(
 		beaconNodeIds(adjacencyGraph, { preferredNodeIds: severedBeaconPreference })
 	);
-	const hopsByNodeId = $derived(withBeaconHops(hopsFromPinned(adjacencyGraph), beaconIds));
+	/**
+	 * Pinned BFS, then beacons, then dataflow reveals. `LayoutRuntime` runs the
+	 * same three steps in the same order; they have to match or a node shows up
+	 * on the canvas without being placed by physics.
+	 */
+	const hopsByNodeId = $derived(
+		withRevealedNeighborHops(
+			withBeaconHops(hopsFromPinned(adjacencyGraph), beaconIds),
+			dataflow.edges,
+			{ displayedLayers: resolvedLayoutSettings.displayedLayers }
+		)
+	);
 	const visibleNodeIds = $derived(
 		visibleNodeIdsForPinnedNeighborhood(adjacencyGraph, hopsByNodeId, {
 			displayedLayers: resolvedLayoutSettings.displayedLayers

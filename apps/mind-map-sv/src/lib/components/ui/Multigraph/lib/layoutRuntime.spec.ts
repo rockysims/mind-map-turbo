@@ -345,4 +345,59 @@ describe('LayoutRuntime', () => {
 			expect(seen).toEqual([graph]);
 		});
 	});
+
+	describe('composeRevealEdges', () => {
+		// n4 is four authored hops from the pin with only two layers shown, and it
+		// starts sitting on top of the pinned node. Overlap resolution will shove it
+		// clear, but only if it is in the graph physics runs over at all.
+		const graph = makeGraph({
+			nodeCount: 5,
+			pinned: [0],
+			edges: [
+				[0, 1],
+				[1, 2],
+				[2, 3],
+				[3, 4]
+			],
+			posByNodeId: {
+				n0: { x: 0, y: 0 },
+				n1: { x: 400, y: 0 },
+				n2: { x: 800, y: 0 },
+				n3: { x: 1200, y: 0 },
+				n4: { x: 5, y: 0 }
+			}
+		});
+
+		function relaxedN4(composeRevealEdges?: (graph: MultigraphData) => readonly EdgeEndpointIds[]) {
+			const runtime = new LayoutRuntime({
+				getGraph: () => graph,
+				getLayoutSettings: () => ({ displayedLayers: 2 }),
+				getActiveDragNodeId: () => null,
+				getPreferredBeaconNodeIds: () => [],
+				applyGraph: () => {},
+				composeRevealEdges,
+				scheduler: new TestScheduler()
+			});
+			return runtime.relaxAfterMutation(graph, null, 4).posByNodeId.n4;
+		}
+
+		it('leaves a node beyond the displayed layers out of the physics', () => {
+			expect(relaxedN4()).toEqual(graph.posByNodeId.n4);
+		});
+
+		it('places a revealed node along with everything else', () => {
+			// Without this the node would be drawn on the canvas and then never
+			// moved, sitting stale on top of whatever it happened to overlap.
+			expect(relaxedN4(() => [{ sourceNodeId: 'n0', targetNodeId: 'n4' }])).not.toEqual(
+				graph.posByNodeId.n4
+			);
+		});
+
+		it('does not reveal a node whose partner is hidden too', () => {
+			// n3 and n4 are both out of view, so there is nothing to hang n4 off.
+			expect(relaxedN4(() => [{ sourceNodeId: 'n3', targetNodeId: 'n4' }])).toEqual(
+				graph.posByNodeId.n4
+			);
+		});
+	});
 });

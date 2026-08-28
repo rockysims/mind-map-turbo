@@ -4,7 +4,8 @@ import {
 	edgeVisibilityForPinnedNeighborhood,
 	graphWithVisibleNodes,
 	pinnedNodeIds,
-	visibleNodeIdsForPinnedNeighborhood
+	visibleNodeIdsForPinnedNeighborhood,
+	withRevealedNeighborHops
 } from './boundedVisibility';
 import type { EdgeVisibility } from './boundedVisibility';
 import {
@@ -91,6 +92,18 @@ export interface LayoutRuntimeOptions {
 	 * Defaults to none, which leaves the force exactly as it was.
 	 */
 	composeSpringEdges?: (visibleGraph: MultigraphData) => readonly EdgeEndpointIds[];
+	/**
+	 * Edges whose hidden endpoint should be pulled into view beside the node it
+	 * hangs off, without joining the topology. Currently the dataflow layer.
+	 *
+	 * The runtime needs this rather than leaving it to the renderer: a node drawn
+	 * on the canvas but missing from the runtime's visible graph gets no physics,
+	 * so it would sit at a stale position while everything else moves around and
+	 * through it.
+	 *
+	 * Defaults to none, which leaves visibility exactly as it was.
+	 */
+	composeRevealEdges?: (graph: MultigraphData) => readonly EdgeEndpointIds[];
 	scheduler?: LayoutRuntimeScheduler;
 	/** Returns true while enter/exit animations are active; keeps the frame loop running. */
 	getHasActiveTransitions?: () => boolean;
@@ -418,7 +431,14 @@ export class LayoutRuntime {
 
 	#effectiveHopsFor(graph: MultigraphData): Record<string, number> {
 		const adjacency = this.#adjacency(graph);
-		return withBeaconHops(hopsFromPinned(adjacency), this.#beaconIdsFor(adjacency));
+		// Same three steps, in the same order, as the renderer's own hop chain. The
+		// two must agree or a node appears on the canvas without taking part in the
+		// physics that places it.
+		return withRevealedNeighborHops(
+			withBeaconHops(hopsFromPinned(adjacency), this.#beaconIdsFor(adjacency)),
+			this.#options.composeRevealEdges?.(adjacency) ?? [],
+			{ displayedLayers: this.#resolvedSettings().displayedLayers }
+		);
 	}
 
 	#visibleGraphFor(graph: MultigraphData): MultigraphData {

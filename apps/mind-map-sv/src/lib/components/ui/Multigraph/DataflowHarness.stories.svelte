@@ -47,6 +47,40 @@
 		});
 
 	/**
+	 * An authored chain longer than the layers on show. With `displayedLayers` at
+	 * 2 only a, b and c are visible; `e` is four authored hops out and hidden,
+	 * which is the case where a dataflow arrow trailed off into nothing.
+	 */
+	const CHAIN_BEYOND_LAYERS = makeGraph({
+		nodes: [
+			{ id: 'a', title: 'Gravity', description: '$$g = 9.8$$' },
+			{ id: 'b', title: 'Second', description: '' },
+			{ id: 'c', title: 'Third', description: '' },
+			{ id: 'd', title: 'Fourth', description: '' },
+			{ id: 'e', title: 'Weight', description: '' }
+		],
+		pinned: ['a'],
+		edges: [
+			['a', 'b'],
+			['b', 'c'],
+			['c', 'd'],
+			['d', 'e']
+		],
+		posByNodeId: {
+			a: { x: -400, y: 0 },
+			b: { x: -200, y: 0 },
+			c: { x: 0, y: 0 },
+			d: { x: 200, y: 0 },
+			e: { x: 400, y: 0 }
+		}
+	});
+
+	const TWO_LAYERS = { displayedLayers: 2, relaxIterations: 0 };
+
+	const nodeOnCanvas = (canvasElement: HTMLElement, nodeId: string) =>
+		canvasElement.querySelector(`[data-node-id="${nodeId}"]`);
+
+	/**
 	 * `a` defines g and `c` consumes it, with no authored edge anywhere. Any
 	 * movement between them has to come from the derived edge.
 	 */
@@ -166,6 +200,45 @@
 
 		// Nothing else connects these two, so the equation alone moved them.
 		await waitFor(() => expect(distanceBetween(canvasElement, 'a', 'c')).toBeLessThan(before));
+	}}
+/>
+
+<Story
+	name="ADataflowLinkRevealsANodeBeyondTheVisibleLayers"
+	args={{
+		baseGraph: CHAIN_BEYOND_LAYERS,
+		editNodeId: 'e',
+		equation: CONSUMES_G,
+		layoutSettings: TWO_LAYERS
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitFor(() => expect(nodeOnCanvas(canvasElement, 'a')).toBeInTheDocument());
+		// Four authored hops out with only two layers on show.
+		expect(nodeOnCanvas(canvasElement, 'e')).not.toBeInTheDocument();
+
+		await click(canvasElement, '[data-add-equation]');
+
+		// Consuming g puts `e` beside the node that defines it, rather than leaving
+		// an arrow pointing at somewhere the reader cannot go.
+		await waitFor(() => expect(nodeOnCanvas(canvasElement, 'e')).toBeInTheDocument());
+	}}
+/>
+
+<Story
+	name="ARevealedNodeDoesNotBringItsNeighborsAlong"
+	args={{
+		baseGraph: CHAIN_BEYOND_LAYERS,
+		editNodeId: 'e',
+		equation: CONSUMES_G,
+		startWithEquation: true,
+		layoutSettings: TWO_LAYERS
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitFor(() => expect(nodeOnCanvas(canvasElement, 'e')).toBeInTheDocument());
+
+		// `d` is `e`'s own authored neighbor and stays hidden. One equation must not
+		// open up a cluster the author never connected to the pinned node.
+		expect(nodeOnCanvas(canvasElement, 'd')).not.toBeInTheDocument();
 	}}
 />
 
