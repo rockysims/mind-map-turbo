@@ -63,14 +63,9 @@ milestone 05 already renders, rather than building new rendering.
   `closeOverlays()`. The focus stack is about focus depth, not selection, so
   trace state does not belong in it.
 
-### ASK USER
-
-- **Glyph selection limited to focus mode.** The milestone's wording is
-  "selecting a rendered quantity anywhere in a description", which could be read
-  as including the canvas. The tap-target argument above says that cannot work at
-  graph scale, so this plan restricts glyph tapping to focus and covers the
-  canvas with chips and the panel. Confirm that reading before T06 starts, since
-  it also decides whether T01 is needed at all.
+All open questions are resolved. The one that needed the user, whether the
+milestone's "anywhere in a description" included the canvas, was **confirmed on
+2026-08-27 as focus mode only**, so T01 and T06 both stay in scope.
 
 ## Out of scope (for this plan)
 
@@ -365,9 +360,8 @@ free: T07, T08, and T09 each add a handler, so run them in sequence within the
 wave or expect to resolve conflicts. T06 is the only one that stays out of that
 file.
 
-T01 is in wave 1 rather than blocking on the ASK USER item so the wave is not
-idle, but it should not merge before that question is answered — if glyph
-selection is dropped, T01 and T06 both disappear.
+T01 sits in wave 1 with nothing blocking it, since the glyph-selection question
+that would have removed it is now settled.
 
 ## Risks and rollback
 
