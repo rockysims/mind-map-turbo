@@ -1,10 +1,18 @@
 <script lang="ts">
+	import MathText from '../MathText/MathText.svelte';
+
 	const { text = 'SquareText fallback text.', classList = [] } = $props<{
 		text: string;
 		classList: string[];
 	}>();
 
 	let squareTextRef = $state<HTMLElement | null>(null);
+
+	/**
+	 * Cheap enough to run for every visible node, and it keeps text without math
+	 * on the plain path so its markup and its fit are untouched by this feature.
+	 */
+	const hasMath = $derived(text.includes('$'));
 
 	function checkOverflow(el: HTMLElement) {
 		const oldOverflow = el.style.overflow;
@@ -69,12 +77,40 @@
 		}
 	}
 
-	$effect(setSize);
+	$effect(() => {
+		// Read the content so a retitle re-fits. Without this the effect tracks only
+		// the element binding, and the fit found for the previous text would stand.
+		void text;
+		setSize();
+	});
+
+	/**
+	 * Temml's fonts are fetched only once a glyph needs them, so the first fit of
+	 * a math title is measured in a fallback face and is wrong by however much the
+	 * two differ. One re-fit when loading settles corrects it.
+	 *
+	 * Text without math never subscribes: it is already drawn in a face the
+	 * document has, and re-fitting every node on a font event would be a cost paid
+	 * by graphs that contain no math at all.
+	 */
+	$effect(() => {
+		if (!hasMath) return;
+
+		let active = true;
+		void document.fonts?.ready.then(() => {
+			if (active) setSize();
+		});
+
+		return () => {
+			active = false;
+		};
+	});
 </script>
 
 <div class="squareTextContainer">
 	<div bind:this={squareTextRef} class={['squareText', ...classList]}>
-		{text}
+		<!-- prettier-ignore -->
+		{#if hasMath}<MathText {text} singleLine />{:else}{text}{/if}
 	</div>
 </div>
 

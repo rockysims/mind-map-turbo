@@ -1,7 +1,7 @@
 <script module lang="ts">
 	import { defineMeta } from '@storybook/addon-svelte-csf';
 	import SquareText from '$lib/components/ui/SquareText/SquareText.svelte';
-	import { expect } from 'storybook/test';
+	import { expect, waitFor } from 'storybook/test';
 
 	const { Story } = defineMeta({
 		title: 'Components/SquareText',
@@ -64,6 +64,72 @@
 	name="Test:Long"
 	play={async (context) => {
 		await expect(context.canvas.getByText(context.args.text)).toBeInTheDocument();
+	}}
+/>
+
+<Story
+	args={{ text: 'Text without math', classList: ['title'] }}
+	name="Test:TextWithoutMathStaysOnThePlainPath"
+	play={async (context) => {
+		// The math renderer is an opt-in for content that needs it. A title with no
+		// math must be the same DOM it has always been, so nothing about its
+		// existing fit or styling can shift under this feature.
+		await expect(context.canvas.getByText(context.args.text)).toBeInTheDocument();
+		await expect(context.canvasElement.querySelector('[data-math-text]')).toBeNull();
+	}}
+/>
+
+<Story
+	args={{ text: '$E = mc^2$', classList: ['title'] }}
+	name="Test:MathTitleRendersAsMath"
+	play={async (context) => {
+		const math = context.canvasElement.querySelector('math');
+		await expect(math).not.toBeNull();
+		// Typeset, not the source: seeing the delimiters means the title fell back
+		// to raw LaTeX.
+		await expect(context.canvasElement.textContent).not.toContain('$');
+	}}
+/>
+
+<Story
+	args={{ text: '$\\mathscr{F} = m a$', classList: ['title'] }}
+	name="Test:MathTitleFitsItsSquareOnceFontsLoad"
+	play={async (context) => {
+		// \mathscr forces Temml's own face, which is fetched only when a glyph needs
+		// it. The first fit is therefore measured in a fallback and is wrong; this
+		// asserts the re-fit that corrects it.
+		await document.fonts.ready;
+
+		const fitted = context.canvasElement.querySelector('.squareText');
+		const container = context.canvasElement.querySelector('.innerContainer');
+		await expect(fitted).not.toBeNull();
+		await expect(container).not.toBeNull();
+
+		await waitFor(() => {
+			const box = (fitted as HTMLElement).getBoundingClientRect();
+			const bounds = (container as HTMLElement).getBoundingClientRect();
+			// Sub-pixel slack: the fit lands on whole pixels, so an exact comparison
+			// would flake on fractional layout.
+			expect(box.width).toBeLessThanOrEqual(bounds.width + 1);
+			expect(box.height).toBeLessThanOrEqual(bounds.height + 1);
+		});
+	}}
+>
+	{#snippet template(args)}
+		<div class="outerContainer">
+			<div class="innerContainer">
+				<SquareText {...args} />
+			</div>
+		</div>
+	{/snippet}
+</Story>
+
+<Story
+	args={{ text: 'Speed $v$', classList: ['title'] }}
+	name="Test:MathMixesWithProseInATitle"
+	play={async (context) => {
+		await expect(context.canvasElement.querySelector('math')).not.toBeNull();
+		await expect(context.canvasElement.textContent).toContain('Speed');
 	}}
 />
 

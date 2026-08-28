@@ -5,13 +5,26 @@
 
 	let {
 		text = '',
-		classList = []
+		classList = [],
+		singleLine = false
 	}: {
 		text?: string;
 		classList?: string[];
+		/**
+		 * Render display math inline instead of as a block. A title is one line and
+		 * is measured by a container that resizes it, and the block path installs a
+		 * ResizeObserver that would fight that measurement.
+		 */
+		singleLine?: boolean;
 	} = $props();
 
-	const segments = $derived(splitMathSegments(text));
+	const segments = $derived(
+		singleLine
+			? splitMathSegments(text).map((segment) =>
+					segment.kind === 'display-math' ? { ...segment, kind: 'inline-math' as const } : segment
+				)
+			: splitMathSegments(text)
+	);
 
 	/**
 	 * Scale a display equation down to its column width. Transforms do not affect
