@@ -203,11 +203,18 @@ A node contradicting itself is reported as its own state. There is no second nod
 to name and nowhere to navigate to, so the panel says that rather than offering to
 reveal the node being read.
 
-Worth keeping: the original rule was defensible when only descriptions defined
-quantities, because one node could not then produce two definitions of a symbol.
-Milestone 10 let titles define, which made the missing case reachable, and only
-then did the "duplication versus disagreement" confusion in the rule become
-visible.
+Worth keeping: this was never a gap that milestone 10 opened. A single
+description of `$$x = 1$$ and $$x = 2$$` had always collapsed the same way, and
+the spec introduced alongside description inference asserted exactly that
+collapse as correct — `lists a symbol defined twice once`. The behavior was not
+overlooked; it was pinned by a passing test that had mistaken deduplication for a
+feature.
+
+What milestone 10 changed was the odds of anyone meeting it. A title and a
+description are two natural places to restate the same quantity, so letting
+titles define made an existing bug likely enough to be found. A test asserting
+the wrong thing is worse than no test, because it converts a bug into documented
+intent and stops anyone from looking.
 
 ## References
 
