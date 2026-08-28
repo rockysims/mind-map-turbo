@@ -729,3 +729,98 @@
 		expect(boundaryEdgeIds.filter((id) => id.startsWith('dataflow:'))).toEqual([]);
 	}}
 />
+
+<Story
+	name="ADerivedArrowFadesWithTheRevealWaveBothWays"
+	args={{
+		baseGraph: makeGraph({
+			nodes: [
+				{ id: 'a', title: 'Anchor', description: '' },
+				{ id: 'b', title: 'Middle', description: '' },
+				{ id: 'c', title: 'Gravity', description: '$$g = 9.8$$' },
+				{ id: 'd', title: 'Weight', description: '' }
+			],
+			pinned: ['a', 'c'],
+			edges: [
+				['a', 'b'],
+				['b', 'c'],
+				['c', 'd']
+			],
+			posByNodeId: {
+				a: { x: -750, y: 0 },
+				b: { x: -250, y: 0 },
+				c: { x: 250, y: 0 },
+				d: { x: 750, y: 0 }
+			}
+		}),
+		editNodeId: 'd',
+		equation: CONSUMES_G,
+		startWithEquation: true,
+		layoutSettings: {
+			displayedLayers: 1,
+			relaxIterations: 0,
+			scaleAnimationDurationMs: 600,
+			postScaleChangeSettleMaxFrames: 0
+		},
+		initialViewState: FIXED_VIEW
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		// The wave cross-fades what is drawn, and an inferred arrow is drawn like
+		// anything else. Unpinning `c` takes it and `d` off screen; pinning `b`
+		// brings them back across the equation. Either way the arrow has to travel
+		// with the wave rather than vanishing on the first frame or snapping in at
+		// full opacity toward a node that is still fading up.
+		const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+		const pointerAt = (target: HTMLElement, type: string, x: number, y: number) =>
+			target.dispatchEvent(
+				new PointerEvent(type, {
+					clientX: x,
+					clientY: y,
+					pointerId: 1,
+					pointerType: '',
+					bubbles: true,
+					cancelable: true
+				})
+			);
+		const doubleClickNode = async (nodeId: string) => {
+			const circle = canvasElement.querySelector(
+				`[data-node-id="${nodeId}"] .circle`
+			) as HTMLElement;
+			const rect = circle.getBoundingClientRect();
+			const x = rect.left + rect.width / 2;
+			const y = rect.top + rect.height / 2;
+			pointerAt(circle, 'pointerdown', x, y);
+			pointerAt(circle, 'pointerup', x, y);
+			// Well inside the double-click window, so the pair reads as one gesture.
+			await sleep(25);
+			pointerAt(circle, 'pointerdown', x, y);
+			pointerAt(circle, 'pointerup', x, y);
+		};
+		const arrow = () =>
+			canvasElement.querySelector('[data-edge-id="dataflow:c->d"]') as HTMLElement | null;
+		const arrowOpacity = () => Number(arrow()?.dataset.edgeOpacity);
+
+		await waitFor(() => expect(arrow()).toBeInTheDocument());
+		expect(arrowOpacity()).toBe(1);
+
+		await doubleClickNode('c');
+		await sleep(300);
+
+		expect(arrow()).toBeInTheDocument();
+		expect(arrowOpacity()).toBeGreaterThan(0);
+		expect(arrowOpacity()).toBeLessThan(1);
+
+		await sleep(500);
+		expect(arrow()).not.toBeInTheDocument();
+
+		await doubleClickNode('b');
+		await sleep(300);
+
+		expect(arrow()).toBeInTheDocument();
+		expect(arrowOpacity()).toBeGreaterThan(0);
+		expect(arrowOpacity()).toBeLessThan(1);
+
+		await sleep(500);
+		expect(arrowOpacity()).toBe(1);
+	}}
+/>

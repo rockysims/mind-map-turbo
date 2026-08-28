@@ -8,11 +8,12 @@ import {
 	visibleNodeIdsForPinnedNeighborhood,
 	type BoundedHopsOptions
 } from './boundedVisibility';
+import { derivedEdgeId } from './derivedEdges';
 import { togglePinned } from './graph';
 import { deriveGraphLayout } from './graphLayout';
 import type { LayoutRuntimeScheduler } from './layoutRuntime.svelte';
 import { LayoutRuntime } from './layoutRuntime.svelte';
-import type { LayoutSettings } from './layoutSettings';
+import { DEFAULT_LAYOUT_SETTINGS, type LayoutSettings } from './layoutSettings';
 import type { EdgeEndpointIds } from './physics';
 import { makeGraph } from './testFixtures';
 
@@ -600,6 +601,202 @@ describe('LayoutRuntime', () => {
 		it('does not reveal a node whose partner is hidden too', () => {
 			// n3 and n4 are both out of view, so there is nothing to hang n4 off.
 			expect(relaxedN4([{ sourceNodeId: 'n3', targetNodeId: 'n4' }])).toEqual(graph.posByNodeId.n4);
+		});
+	});
+
+	describe('the reveal wave over the composed render edges', () => {
+		function derivedEdge(sourceNodeId: string, targetNodeId: string): EdgeData {
+			return {
+				id: derivedEdgeId(sourceNodeId, targetNodeId),
+				sourceNodeId,
+				targetNodeId,
+				tags: [],
+				directed: true,
+				springFactor: 1
+			};
+		}
+
+		/**
+		 * A runtime wired the way `Multigraph.svelte` wires one: the same derived
+		 * edges feed the hop map and the composition, so what the wave diffs is
+		 * what the canvas draws.
+		 */
+		function waveFixture(
+			graph: MultigraphData,
+			derivedEdges: readonly EdgeData[],
+			settings: Partial<LayoutSettings> = {}
+		) {
+			const resolved: Partial<LayoutSettings> = {
+				relaxIterations: 0,
+				displayedLayers: 1,
+				scaleAnimationDurationMs: 100,
+				postScaleChangeSettleMaxFrames: 0,
+				...settings
+			};
+			let current = graph;
+			const scheduler = new TestScheduler();
+			const computeHops = hopsThrough(derivedEdges, {
+				displayedLayers: resolved.displayedLayers,
+				dataflowDisplayedLayers: resolved.dataflowDisplayedLayers
+			});
+			const runtime = new LayoutRuntime({
+				getGraph: () => current,
+				getLayoutSettings: () => resolved,
+				getActiveDragNodeId: () => null,
+				getPreferredBeaconNodeIds: () => [],
+				applyGraph: (nextGraph) => {
+					current = nextGraph;
+				},
+				computeHops,
+				composeDerivedEdges: () => derivedEdges,
+				scheduler
+			});
+
+			return {
+				runtime,
+				computeHops,
+				getGraph: () => current,
+				beginScaleChangeAt: (nowMs: number, focalNodeId: string, nextGraph: MultigraphData) => {
+					scheduler.nowMs = nowMs;
+					current = runtime.beginScaleChange(nextGraph, focalNodeId);
+				}
+			};
+		}
+
+		it('fades a derived arrow out with the wave when its endpoints leave', () => {
+			// n3 and n5 are on screen only because n4 is pinned. Unpinning it takes
+			// the equation between them off the canvas too, and an arrow that
+			// vanished on the first frame while the authored edges swept out would
+			// read as a glitch rather than as the same movement.
+			const graph = makeGraph({
+				nodeCount: 6,
+				pinned: [1, 4],
+				edges: [
+					[0, 1],
+					[1, 2],
+					[2, 3],
+					[3, 4],
+					[4, 5]
+				]
+			});
+			const fadingArrow = derivedEdge('n3', 'n5');
+			const { runtime, getGraph, beginScaleChangeAt } = waveFixture(graph, [fadingArrow]);
+
+			beginScaleChangeAt(10, 'n4', togglePinned(getGraph(), 'n4'));
+
+			expect(runtime.revealWavePreviousOnlyEdgeVisibility.map((entry) => entry.edge.id)).toContain(
+				fadingArrow.id
+			);
+
+			runtime.step(30);
+			const midFade = runtime.revealWaveEdgeOpacityByEdgeId[fadingArrow.id];
+			expect(midFade).toBeGreaterThan(0);
+			expect(midFade).toBeLessThan(1);
+
+			runtime.step(60);
+			expect(runtime.revealWaveEdgeOpacityByEdgeId[fadingArrow.id]).toBeLessThan(midFade);
+		});
+
+		it('fades a derived arrow in with the wave when its endpoints arrive', () => {
+			// Pinning n2 brings n2 and n3 on screen, and the equation between them
+			// with them. Without an entry in the wave the renderer falls back to
+			// full opacity, so the arrow snapped in ahead of everything it connects.
+			const graph = makeGraph({
+				nodeCount: 4,
+				pinned: [0],
+				edges: [
+					[0, 1],
+					[1, 2],
+					[2, 3]
+				]
+			});
+			const arrivingArrow = derivedEdge('n2', 'n3');
+			const { runtime, getGraph, beginScaleChangeAt } = waveFixture(graph, [arrivingArrow]);
+
+			beginScaleChangeAt(10, 'n2', togglePinned(getGraph(), 'n2'));
+
+			runtime.step(30);
+			const midFade = runtime.revealWaveEdgeOpacityByEdgeId[arrivingArrow.id];
+			expect(midFade).toBeGreaterThan(0);
+			expect(midFade).toBeLessThan(1);
+
+			runtime.step(60);
+			expect(runtime.revealWaveEdgeOpacityByEdgeId[arrivingArrow.id]).toBeGreaterThan(midFade);
+		});
+
+		it('keeps a derived edge at the visibility boundary out of the wave', () => {
+			// A derived edge renders only when both endpoints are visible, so a
+			// boundary one is not on the canvas to be cross-faded. With no derived
+			// budget n2 stays hidden, and the arrow into it is a stub the renderer
+			// drops — while the authored edge alongside it keeps its boundary fade.
+			const graph = makeGraph({
+				nodeCount: 4,
+				pinned: [0],
+				edges: [
+					[0, 1],
+					[1, 2],
+					[2, 3]
+				]
+			});
+			const stubArrow = derivedEdge('n1', 'n2');
+			const { runtime, getGraph, beginScaleChangeAt } = waveFixture(graph, [stubArrow], {
+				dataflowDisplayedLayers: 0
+			});
+
+			beginScaleChangeAt(10, 'n2', togglePinned(getGraph(), 'n2'));
+
+			const revealState = runtime.scaleChangeRevealState;
+			const previousEdgeIds = (revealState?.previousRenderableEdges ?? []).map(
+				(entry) => entry.edge.id
+			);
+			expect(previousEdgeIds).toContain('e1');
+			expect(previousEdgeIds).not.toContain(stubArrow.id);
+			// Both endpoints arrive with the pin, so it joins the wave on the way in.
+			expect(revealState?.nextRenderableEdgeIds).toContain(stubArrow.id);
+		});
+
+		it('snapshots a dataflow-sized node at the scale it was drawn at', () => {
+			// n4 is four authored hops out — off screen on its own account — and on
+			// screen only because an equation reaches it from n1, one hop past its
+			// anchor. The wave's previous-scale snapshot reads the same hop map the
+			// layout sized it with, so it enters the wave at the size it was drawn
+			// rather than at the flat hop a separate visibility measure handed it.
+			const graph = makeGraph({
+				nodeCount: 5,
+				pinned: [0],
+				edges: [
+					[0, 1],
+					[1, 2],
+					[2, 3],
+					[3, 4]
+				]
+			});
+			const { runtime, computeHops, getGraph, beginScaleChangeAt } = waveFixture(
+				graph,
+				[derivedEdge('n1', 'n4')],
+				{ displayedLayers: 3, dataflowDisplayedLayers: 1 }
+			);
+			const previousHopsByNodeId = computeHops(graph);
+			const previousVisibleGraph = runtime.visibleGraphFor(graph, previousHopsByNodeId);
+			const drawnLayout = deriveGraphLayout(
+				previousVisibleGraph,
+				runtime.layoutOptions(previousVisibleGraph, {
+					hopsByNodeId: previousHopsByNodeId,
+					relaxIterations: 0
+				})
+			);
+
+			expect(previousHopsByNodeId.n4).toBe(2);
+
+			beginScaleChangeAt(10, 'n1', togglePinned(getGraph(), 'n1'));
+			runtime.step(30);
+
+			expect(runtime.revealWavePreviousScaleByNodeId.n4).toBe(drawnLayout.scaleByNodeId.n4);
+			// Teeth: the one-hop scale is ~43% larger, which is the jump this pins shut.
+			expect(runtime.revealWavePreviousScaleByNodeId.n4).toBeCloseTo(
+				DEFAULT_LAYOUT_SETTINGS.scaleFalloff ** 2
+			);
+			expect(runtime.revealWavePreviousScaleByNodeId.n4).toBeLessThan(drawnLayout.scaleByNodeId.n1);
 		});
 	});
 

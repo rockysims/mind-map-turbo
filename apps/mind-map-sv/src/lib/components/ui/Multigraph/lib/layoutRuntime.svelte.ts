@@ -9,6 +9,7 @@ import {
 	visibleNodeIdsForPinnedNeighborhood
 } from './boundedVisibility';
 import type { EdgeVisibility } from './boundedVisibility';
+import { isDerivedEdgeId } from './derivedEdges';
 import {
 	deriveGraphLayout,
 	relaxGraphPositionsStep,
@@ -586,6 +587,13 @@ export class LayoutRuntime {
 		);
 	}
 
+	/**
+	 * The size each node had when the wave started, for the ones still drawn on
+	 * their way out. `scaleByHops` of the previous hop map — the same map, through
+	 * the same function, that `deriveGraphLayout` sized them with — so a node an
+	 * equation put on screen exits from the size it was actually drawn at instead
+	 * of jumping to the one a second, visibility-only measure implied.
+	 */
 	get revealWavePreviousScaleByNodeId(): Record<string, number> {
 		const revealState = this.scaleChangeRevealState;
 		if (!revealState || this.revealWaveProgress >= 1) return {};
@@ -613,19 +621,16 @@ export class LayoutRuntime {
 				displayedLayers: settings.displayedLayers
 			})
 		);
-		// The edge sets are the authored edges alone: the wave cross-fades what is
-		// drawn, and what is drawn is the composed render graph, so a derived arrow
-		// currently snaps rather than fading. T06 owns composing these.
-		const previousRenderableEdges = edgeVisibilityForPinnedNeighborhood(
+		const previousRenderableEdges = this.#renderableEdgesFor(
 			currentGraph,
 			previousHopsByNodeId,
-			{
-				displayedLayers: settings.displayedLayers
-			}
-		).filter((visibility): visibility is RenderableEdgeVisibility => visibility.kind !== 'hidden');
-		const nextRenderableEdges = edgeVisibilityForPinnedNeighborhood(nextGraph, nextHopsByNodeId, {
-			displayedLayers: settings.displayedLayers
-		}).filter((visibility): visibility is RenderableEdgeVisibility => visibility.kind !== 'hidden');
+			settings.displayedLayers
+		);
+		const nextRenderableEdges = this.#renderableEdgesFor(
+			nextGraph,
+			nextHopsByNodeId,
+			settings.displayedLayers
+		);
 		const nextRenderableEdgeIds = nextRenderableEdges.map((visibility) => visibility.edge.id);
 
 		return {
@@ -637,6 +642,37 @@ export class LayoutRuntime {
 			nextRenderableEdges,
 			nextRenderableEdgeIds
 		};
+	}
+
+	/**
+	 * The edges a graph would draw: authored plus derived, classified against the
+	 * one hop map.
+	 *
+	 * The wave cross-fades what is drawn, and what is drawn is the composed render
+	 * graph — so the sets it diffs have to be composed too. Built from the
+	 * authored edges alone, a derived arrow was in neither set: the renderer's
+	 * `?? 1` fallback snapped it to full opacity while everything around it swept
+	 * in, and on the way out it disappeared on the first frame with no exit fade.
+	 */
+	#renderableEdgesFor(
+		graph: MultigraphData,
+		hopsByNodeId: Record<string, number>,
+		displayedLayers: number
+	): RenderableEdgeVisibility[] {
+		const derivedEdges = this.#options.composeDerivedEdges?.(graph) ?? [];
+		const composedGraph =
+			derivedEdges.length === 0 ? graph : { ...graph, edges: [...graph.edges, ...derivedEdges] };
+
+		return edgeVisibilityForPinnedNeighborhood(composedGraph, hopsByNodeId, {
+			displayedLayers
+		}).filter((visibility): visibility is RenderableEdgeVisibility => {
+			if (visibility.kind === 'hidden') return false;
+			// A derived edge renders only when both its endpoints are visible — an
+			// arrow toward somewhere the reader cannot go is worse than no arrow — so
+			// a derived edge at the boundary is not on the canvas to be faded. An
+			// authored edge keeps its boundary fade in the wave exactly as before.
+			return !(visibility.kind === 'boundary' && isDerivedEdgeId(visibility.edge.id));
+		});
 	}
 }
 
