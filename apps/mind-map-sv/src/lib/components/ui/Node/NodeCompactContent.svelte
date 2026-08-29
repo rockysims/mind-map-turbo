@@ -6,6 +6,7 @@
 	const {
 		title,
 		isTitleEditing = false,
+		titleCaretAt,
 		diameterPx,
 		fontSizePx,
 		detailsMode = false,
@@ -15,6 +16,15 @@
 	} = $props<{
 		title: string;
 		isTitleEditing?: boolean;
+		/**
+		 * Where to leave the caret when the title input opens, instead of selecting
+		 * the whole title. Set when the caller seeded the text and the author is
+		 * meant to continue it rather than replace it — a Define node arrives as
+		 * `$k = $` with the caret just before the closing `$`, ready for the
+		 * right-hand side. Omitted everywhere else, so select-all stays the default:
+		 * a title the author never asked for is one they usually want to overwrite.
+		 */
+		titleCaretAt?: number;
 		diameterPx: number;
 		fontSizePx: number;
 		detailsMode?: boolean;
@@ -28,9 +38,18 @@
 	$effect(() => {
 		if (!isTitleEditing || !titleInputRef) return;
 		const el = titleInputRef;
+		const caretAt = titleCaretAt;
 		requestAnimationFrame(() => {
 			el.focus();
-			el.select();
+			if (caretAt === undefined) {
+				el.select();
+				return;
+			}
+			// Clamp rather than trust: the caller computed the offset against the
+			// title it seeded, and the input's value is the only authority on what
+			// is actually there.
+			const offset = Math.max(0, Math.min(caretAt, el.value.length));
+			el.setSelectionRange(offset, offset);
 		});
 	});
 </script>

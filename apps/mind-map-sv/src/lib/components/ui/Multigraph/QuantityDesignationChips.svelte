@@ -3,19 +3,29 @@
 	 * The two columns a node's quantities live in: what it takes in on the left,
 	 * what it produces on the right.
 	 *
-	 * Tap never means two things on one surface. In `edit` mode a chip cycles its
-	 * assignment and nothing here navigates; in `view` mode nothing here mutates
-	 * and an input chip opens its definition. That mirrors the app's existing split
-	 * between the edit sheet and the focus overlay, so a tap on the canvas can
-	 * never quietly rewrite the graph.
+	 * Tap decides, hold asks. A tap cycles the quantity's assignment on both
+	 * surfaces — the edit sheet and the details view — because a chip that means
+	 * one thing in one place and something else in another is two controls wearing
+	 * the same clothes. In `view` mode a hold on any pointer, a right-click, or
+	 * Shift+Enter opens the peek card instead, on every chip: an output's
+	 * definition is as fair a question as an input's, and the answer to it is
+	 * where the conflicts show.
+	 *
+	 * That a tap here rewrites the graph is deliberate and was not always true.
+	 * The cycle is reversible in at most two taps by construction, which is what
+	 * makes committing on the tap safe without an undo to fall back on.
 	 *
 	 * Suggestions render as ghosts in the column they would land in, so accepting
 	 * one looks like confirming what is already drawn rather than filing it
 	 * somewhere new.
 	 */
+	import { APP_CONFIG } from '$lib/appConfig';
 	import type { QuantitySymbol } from '../MathText/lib/mathSymbols';
 	import QuantityChip from './QuantityChip.svelte';
+	import { beginChipPress, isChipLongPress, trackChipPress, type ChipPress } from './lib/chipPress';
 	import type { DesignationChip, DesignationView } from './lib/quantityDesignations';
+
+	const PEEK_HOLD_MS = APP_CONFIG.multigraph.dataflow.chipPeekLongPressMs;
 
 	let {
 		mode,
@@ -26,11 +36,11 @@
 	}: {
 		mode: 'edit' | 'view';
 		view: DesignationView;
-		/** Edit mode only: advance this quantity around the assignment cycle. */
+		/** Advance this quantity around the assignment cycle — what a tap does. */
 		onCycle?: (symbol: QuantitySymbol, suggestedRole?: 'input' | 'output') => void;
-		/** View mode only: show where this input is defined, anchored to its chip. */
+		/** View mode only: show where this quantity is defined, anchored to its chip. */
 		onPeek?: (key: string, anchor: HTMLElement) => void;
-		/** The input whose peek card is open, so its chip can read as pressed. */
+		/** The quantity whose peek card is open, so its chip can be marked. */
 		peekKey?: string | null;
 	} = $props();
 
@@ -49,47 +59,191 @@
 	const isEmpty = $derived(inputColumn.length === 0 && outputColumn.length === 0);
 	const hasSuggestions = $derived(view.suggestions.length > 0);
 
-	function isInteractive(chip: DesignationChip): boolean {
-		if (mode === 'edit') return onCycle !== undefined;
-		return chip.role === 'input' && onPeek !== undefined;
+	const canPeek = $derived(mode === 'view' && onPeek !== undefined);
+
+	/** The subtree the columns live in, for the focus scan and its activeElement guard. */
+	let section = $state<HTMLElement | null>(null);
+	/** The press in flight, or null between gestures. */
+	let press: ChipPress | null = null;
+	let peekTimer: ReturnType<typeof setTimeout> | null = null;
+	/**
+	 * The chip whose trailing click must be swallowed because its hold already
+	 * answered. Only the click clears it — clearing it in `pointerup` is the
+	 * classic bug, since the click has not happened yet when the pointer lifts.
+	 */
+	let suppressClickForKey: string | null = null;
+	/** The quantity a cycle just moved, to be refocused once its column re-renders. */
+	let refocusKey = $state<string | null>(null);
+
+	/**
+	 * Which chip it is no longer decides: every chip answers in view mode, because
+	 * an output's definers are exactly where a disagreement about that quantity
+	 * shows up, and a ghost is as fair a thing to ask about as a confirmed input.
+	 */
+	const chipsAreInteractive = $derived(
+		mode === 'edit' ? onCycle !== undefined : onCycle !== undefined || onPeek !== undefined
+	);
+
+	/** What the next tap on this chip would do, in the cycle's own terms. */
+	function cycleTitle(chip: DesignationChip): string {
+		// The cycle enters at the suggested role, so the next stop depends on
+		// where the parser put this quantity, not on a fixed order.
+		const first = chip.suggestedRole ?? 'input';
+		const second = first === 'input' ? 'output' : 'input';
+		if (chip.role === 'suggestion') return `Confirm ${chip.symbol.label} as an ${first}`;
+		if (chip.role === first) return `Make ${chip.symbol.label} an ${second}`;
+		return `Unassign ${chip.symbol.label}`;
 	}
 
+	/**
+	 * Both gestures, named. A chip that now does two things has to say so, or the
+	 * hold is a secret and the tap is a surprise.
+	 */
 	function chipTitle(chip: DesignationChip): string {
-		if (mode === 'edit') {
-			// The cycle enters at the suggested role, so the next stop depends on
-			// where the parser put this quantity, not on a fixed order.
-			const first = chip.suggestedRole ?? 'input';
-			const second = first === 'input' ? 'output' : 'input';
-			if (chip.role === 'suggestion') return `Confirm ${chip.symbol.label} as an ${first}`;
-			if (chip.role === first) return `Make ${chip.symbol.label} an ${second}`;
-			return `Unassign ${chip.symbol.label}`;
+		if (mode === 'edit') return cycleTitle(chip);
+		const parts: string[] = [];
+		if (onCycle) parts.push(cycleTitle(chip));
+		if (onPeek) {
+			parts.push(
+				parts.length === 0
+					? `Hold or right-click to see where ${chip.symbol.label} is defined`
+					: 'hold or right-click to see where it is defined'
+			);
 		}
-		if (chip.role === 'input') return `Show where ${chip.symbol.label} is defined`;
-		return chip.symbol.label;
+		return parts.length === 0 ? chip.symbol.label : parts.join(' — ');
 	}
 
-	function activate(chip: DesignationChip, event: MouseEvent) {
-		if (mode === 'edit') {
-			onCycle?.(chip.symbol, chip.suggestedRole);
+	/**
+	 * A click on a chip. Deliberately not `pointerup`: the whole point of the
+	 * suppression below is that a real DOM click still arrives after a hold, and
+	 * the only place to swallow it is where it lands.
+	 */
+	function activate(chip: DesignationChip) {
+		const key = chip.symbol.key;
+		if (suppressClickForKey === key) {
+			suppressClickForKey = null;
 			return;
 		}
-		if (chip.role !== 'input') return;
+		suppressClickForKey = null;
+		if (onCycle === undefined) return;
+		// Cycling can move the chip between the two `{#each}` blocks, which destroys
+		// and recreates it — so focus has to be put back by key. Whether it was in
+		// these columns at all is only knowable here: once the old chip is gone,
+		// what it held has already fallen back to the body.
+		if (focusIsInColumns()) refocusKey = key;
+		onCycle(chip.symbol, chip.suggestedRole);
+	}
+
+	function focusIsInColumns(): boolean {
+		const host = section;
+		const active = document.activeElement;
+		return host !== null && active instanceof Node && host.contains(active);
+	}
+
+	function beginPeekPress(chip: DesignationChip, event: PointerEvent) {
+		if (!canPeek) return;
+		// Secondary buttons have their own meaning, and `contextmenu` covers the
+		// right one; a hold is the primary button held down.
+		if (event.button !== 0) return;
+		// `currentTarget` during dispatch is the chip this handler is bound to; TS
+		// only knows it as an EventTarget.
+		const anchor = event.currentTarget as HTMLElement;
+		const key = chip.symbol.key;
+		endPeekPress();
+		suppressClickForKey = null;
+		press = beginChipPress(key, { x: event.clientX, y: event.clientY }, performance.now());
+		peekTimer = setTimeout(() => {
+			peekTimer = null;
+			if (!isChipLongPress(press, performance.now(), { key })) return;
+			press = null;
+			// Set before the callback: opening the card can move focus, and the
+			// trailing click is still on its way regardless.
+			suppressClickForKey = key;
+			onPeek?.(key, anchor);
+		}, PEEK_HOLD_MS);
+	}
+
+	function trackPeekPress(event: PointerEvent) {
+		if (press === null) return;
+		press = trackChipPress(press, { x: event.clientX, y: event.clientY });
+	}
+
+	/**
+	 * The gesture is over — by a lift, a cancel, a fresh press, or the component
+	 * going away — so the timer is. The suppression flag deliberately survives:
+	 * the click it exists to swallow has not happened yet.
+	 */
+	function endPeekPress() {
+		if (peekTimer !== null) clearTimeout(peekTimer);
+		peekTimer = null;
+		press = null;
+	}
+
+	function peekFromContextMenu(chip: DesignationChip, event: MouseEvent) {
+		if (mode !== 'view') return;
+		// The focus overlay is a sibling of the stage with no pointer handlers, so
+		// nothing else is going to stop the browser's own menu covering the card.
+		event.preventDefault();
+		if (!canPeek) return;
+		// Android synthesizes a contextmenu from a touch long-press. The hold has
+		// already opened the card, and answering twice would toggle it shut.
+		if (suppressClickForKey !== null) return;
+		endPeekPress();
 		onPeek?.(chip.symbol.key, event.currentTarget as HTMLElement);
 	}
 
-	/** How this column labels a chip: what it is, and what its tap would do. */
+	/**
+	 * Shift+Enter asks the question a hold asks. Plain Enter cycles, as a click
+	 * does. Nothing is bound to the ContextMenu key on purpose: browsers that have
+	 * one fire a real `contextmenu` on the focused element, which is already
+	 * handled, and handling both would toggle the card shut.
+	 */
+	function peekFromKeyboard(chip: DesignationChip, event: KeyboardEvent) {
+		if (!canPeek) return;
+		if (event.key !== 'Enter' || !event.shiftKey) return;
+		// Or the browser activates the button as well, and the card opens and cycles.
+		event.preventDefault();
+		onPeek?.(chip.symbol.key, event.currentTarget as HTMLElement);
+	}
+
+	/**
+	 * Put the keyboard back on the chip it was on, wherever the cycle has moved it.
+	 *
+	 * Runs after the columns have re-derived, and only for a cycle that started
+	 * with focus in here — a reader elsewhere on the page must not be dragged into
+	 * the columns by a mutation they did not make with the keyboard.
+	 *
+	 * The chip is found by reading the attribute rather than by selector: a
+	 * subscripted key embeds a NUL, and `CSS.escape` replaces it with U+FFFD
+	 * rather than escaping it, so the raw key is not usable in a selector.
+	 */
+	$effect(() => {
+		const key = refocusKey;
+		if (key === null) return;
+		refocusKey = null;
+		const host = section;
+		if (host === null) return;
+		for (const candidate of host.querySelectorAll('[data-designation-key]')) {
+			if (candidate.getAttribute('data-designation-key') !== key) continue;
+			if (candidate instanceof HTMLElement) candidate.focus();
+			return;
+		}
+	});
+
+	$effect(() => () => endPeekPress());
+
+	/** How this column labels a chip: what it is, and what its gestures would do. */
 	function chipAttributes(chip: DesignationChip): Record<string, string | undefined> {
-		const pressed =
-			mode === 'view' && chip.role === 'input'
-				? peekKey === chip.symbol.key
-					? 'true'
-					: 'false'
-				: undefined;
 		return {
 			'data-designation-role': chip.role,
 			'data-designation-stale': chip.stale ? 'true' : undefined,
 			'data-designation-key': chip.symbol.key,
-			'aria-pressed': pressed,
+			// No `aria-pressed` anywhere now: a three-state cycle button is not a
+			// toggle, and `aria-expanded` would be a second lie. The peeked chip is
+			// marked below for styling and tests; the card's own role and label are
+			// what carry the semantics to assistive tech.
+			'data-designation-peeking':
+				mode === 'view' && peekKey === chip.symbol.key ? 'true' : undefined,
 			title: chipTitle(chip)
 		};
 	}
@@ -104,9 +258,16 @@
 					stale={chip.stale}
 					suggestion={chip.role === 'suggestion'}
 					peeking={mode === 'view' && peekKey === chip.symbol.key}
-					interactive={isInteractive(chip)}
+					interactive={chipsAreInteractive}
 					attributes={chipAttributes(chip)}
-					onclick={(event) => activate(chip, event)}
+					onclick={() => activate(chip)}
+					oncontextmenu={mode === 'view' ? (event) => peekFromContextMenu(chip, event) : undefined}
+					onpointerdown={canPeek ? (event) => beginPeekPress(chip, event) : undefined}
+					onpointermove={canPeek ? trackPeekPress : undefined}
+					onpointerup={canPeek ? endPeekPress : undefined}
+					onpointercancel={canPeek ? endPeekPress : undefined}
+					onpointerleave={canPeek ? endPeekPress : undefined}
+					onkeydown={canPeek ? (event) => peekFromKeyboard(chip, event) : undefined}
 				/>
 			</li>
 		{/each}
@@ -120,6 +281,7 @@
 	class="designations"
 	aria-label="Quantity inputs and outputs"
 	data-designation-chips={mode}
+	bind:this={section}
 >
 	<div class="columns">
 		<div class="column">
@@ -137,7 +299,7 @@
 	{:else if mode === 'edit'}
 		<p class="hint">Tap a quantity to cycle it: unassigned, input, output.</p>
 	{:else if hasSuggestions}
-		<p class="hint" data-designation-edit-hint>Suggested quantities are confirmed while editing.</p>
+		<p class="hint">Tap to cycle a quantity; hold or right-click to see where it is defined.</p>
 	{/if}
 </section>
 

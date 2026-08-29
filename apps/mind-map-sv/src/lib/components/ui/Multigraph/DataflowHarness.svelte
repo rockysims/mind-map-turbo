@@ -166,10 +166,18 @@
 		await tick();
 	}
 
-	/** One tap on each ghost chip, which lands it in the column it was drawn in. */
+	/**
+	 * One tap on each ghost chip, which lands it in the column it was drawn in.
+	 *
+	 * Scoped to the edit surface: the details view's chips cycle on a tap too now,
+	 * so an unscoped selector would designate quantities on whatever else happened
+	 * to be open.
+	 */
 	async function confirmSuggestedChips(canvas: HTMLElement) {
 		for (const chip of Array.from(
-			canvas.querySelectorAll('[data-designation-role="suggestion"]')
+			canvas.querySelectorAll(
+				'[data-designation-chips="edit"] [data-designation-role="suggestion"]'
+			)
 		)) {
 			(chip as HTMLElement).click();
 			await tick();
@@ -183,7 +191,9 @@
 	 */
 	async function unassignConfirmedChips(canvas: HTMLElement) {
 		const confirmed = () =>
-			canvas.querySelector('[data-designation-role="input"], [data-designation-role="output"]');
+			canvas.querySelector(
+				'[data-designation-chips="edit"] [data-designation-role="input"], [data-designation-chips="edit"] [data-designation-role="output"]'
+			);
 		for (let taps = 0; taps < 24 && confirmed(); taps += 1) {
 			(confirmed() as HTMLElement).click();
 			await tick();

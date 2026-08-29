@@ -22,6 +22,8 @@
 	import NodeActionMenu from './NodeActionMenu.svelte';
 	import NavBreadcrumbs from './NavBreadcrumbs.svelte';
 	import { mathPlainText } from '../MathText/lib/mathPlainText';
+	import type { QuantitySymbol } from '../MathText/lib/mathSymbols';
+	import { cycleDesignation } from './lib/quantityDesignations.js';
 	import NodeEditSheet from './NodeEditSheet.svelte';
 	import DeepZoomStack, { type StackFrameArgs, type LayerBaseSize } from './DeepZoomStack.svelte';
 	import Stage from './Stage.svelte';
@@ -67,6 +69,7 @@
 		removeNode,
 		removeNodeImageContent,
 		moveNodeContentBlock,
+		setNodeDesignations,
 		setNodePinned,
 		setTagColor,
 		togglePinned,
@@ -258,6 +261,13 @@
 		nodeId: string;
 		edgeId?: string;
 		unpinOnCommit?: boolean;
+		/**
+		 * Where the caret lands when the input opens. Omitted means select-all,
+		 * which is right for a title the author never wrote ("New Node"). Set only
+		 * when the seed is meant to be continued rather than replaced — Define
+		 * seeds `$k = $` and puts the caret before the closing `$`.
+		 */
+		caretAt?: number;
 	} | null>(null);
 	let tagColorLegendOpen = $state(false);
 	let graphQueryPanelOpen = $state(false);
@@ -1188,25 +1198,75 @@
 	}
 
 	/**
-	 * Turn an unresolved reference into a node that defines it, placed beside the
-	 * node that asked for it and left with an empty right-hand side — inventing a
-	 * value would be guessing at the author's intent.
+	 * Turn an unresolved reference into a node that defines it, and hand the
+	 * author the cursor.
+	 *
+	 * The node arrives titled `$k = $` with an empty description and the caret
+	 * just before the closing `$`: the equation lives in the title because titles
+	 * define on equal terms with descriptions here, and the right-hand side is
+	 * left blank because inventing a value would be guessing at the author's
+	 * intent. It is placed beside the node that asked for it, the camera is fitted
+	 * to it, and a nav entry records the deep zoom the reader left — so Back
+	 * returns them to the details they were reading rather than stranding them on
+	 * the canvas.
+	 *
+	 * Ordering is load-bearing twice over. The departure state is read first
+	 * because `focusRootNodeId` is null once focus is gone; the title-edit context
+	 * is set last because `leaveFocusForCanvasAction()` runs `closeOverlays()`,
+	 * which clears it.
 	 */
 	function createDefiningNode(consumerNodeId: string, quantityLabel: string, quantityKey: string) {
+		// The origin is where the *reader* was, not whose input this is: the
+		// consumer can be a definer three peek levels down, and Back has to return
+		// to the node whose details are actually on screen.
+		const originNodeId = focusRootNodeId;
+		const originFocused = focus.isFocused;
+		// Stage's live pan/zoom, so the snapshot is the exact camera the reader is
+		// looking at rather than a reconstruction of one.
+		const departureViewState = {
+			panX: stageViewState.panX,
+			panY: stageViewState.panY,
+			scale: stageViewState.scale
+		};
+
 		leaveFocusForCanvasAction();
+
 		const origin = graphLayout.posByNodeId[consumerNodeId] ?? CENTERED_POSITION;
 		// Asking for this node IS the confirmation that it defines the quantity.
 		// Without the designation the repair flow would end in a node whose edge
 		// never appears, and a second trip through the edit sheet to say what the
 		// button already said.
 		const symbol = dataflow.index.entries.get(quantityKey)?.symbol;
+		const title = `$${quantityLabel} = $`;
 		const nextGraph = addNode(graph, {
-			title: quantityLabel,
-			description: `$$${quantityLabel} = $$`,
+			title,
+			description: '',
 			position: { x: origin.x, y: origin.y + NODE_RADIUS * 2.5 },
 			outputs: symbol ? [{ base: symbol.base, subscript: symbol.subscript }] : undefined
 		});
+		const newNode = nextGraph.nodes[nextGraph.nodes.length - 1] ?? null;
 		commitUserGraph(layoutRuntime.relaxAfterMutation(nextGraph, null, 1));
+		if (!newNode) return;
+
+		if (originNodeId) {
+			// Nothing was revealed to get here: an edge-less node is its own
+			// component, so it is its own beacon and is on screen regardless. The
+			// entry survives the author deleting the new node, because pruning only
+			// checks the origin and the revealed id.
+			transientReveal.push({
+				originNodeId,
+				viewState: departureViewState,
+				revealedNodeId: null,
+				originFocused
+			});
+		}
+
+		// `graphLayout` is derived, so this reads the post-commit layout — the new
+		// node's placed position, not the empty slot it had a statement ago.
+		const bounds = boundsForNodeIds([newNode.id]);
+		if (bounds) fitViewRequest = { id: (fitViewRequestId += 1), bounds };
+
+		titleEditContext = { nodeId: newNode.id, caretAt: title.length - 1 };
 	}
 
 	function deleteNode(nodeId: string) {
@@ -1478,6 +1538,29 @@
 	function commitContentGraph(nextGraph: MultigraphData) {
 		commitUserGraph(layoutRuntime.relaxAfterMutation(nextGraph));
 		layoutRuntime.settleAfterDrag();
+	}
+
+	/**
+	 * Advance one quantity around the assignment cycle from the details view.
+	 *
+	 * Through `commitContentGraph` rather than `saveNodeContent`: a designation is
+	 * what draws a derived edge, so changing one is a topology change — and the
+	 * save path closes the overlays, which would throw the reader out of the node
+	 * they are reading every time they confirmed a ghost.
+	 */
+	function cycleNodeDesignation(
+		nodeId: string,
+		symbol: QuantitySymbol,
+		suggestedRole?: 'input' | 'output'
+	) {
+		const node = nodeById[nodeId];
+		if (!node) return;
+		const next = cycleDesignation(
+			{ inputs: node.inputs, outputs: node.outputs },
+			symbol,
+			suggestedRole
+		);
+		commitContentGraph(setNodeDesignations(graph, nodeId, next));
 	}
 </script>
 
@@ -1820,6 +1903,9 @@
 					<Node
 						nodeData={node}
 						isTitleEditing={titleEditContext?.nodeId === node.id}
+						titleCaretAt={titleEditContext?.nodeId === node.id
+							? titleEditContext?.caretAt
+							: undefined}
 						quantityLabels={nodeChips.labels}
 						quantityOverflowCount={nodeChips.overflowCount}
 						borderSegments={nodeBorderSegments(node, graph.tagColorConfig.nodeTags)}
@@ -2025,6 +2111,9 @@
 							quantityEntryFor={(key) => dataflow.index.entries.get(key)}
 							inputsForNodeId={(nodeId) => nodeById[nodeId]?.inputs ?? EMPTY_DESIGNATIONS}
 							{titleForNodeId}
+							currentNodeId={detailsNode.id}
+							onCycleDesignation={(symbol, suggestedRole) =>
+								cycleNodeDesignation(detailsNode.id, symbol, suggestedRole)}
 							onCreateDefiningNode={(quantityLabel, quantityKey, consumerNodeId) =>
 								createDefiningNode(consumerNodeId ?? detailsNode.id, quantityLabel, quantityKey)}
 							onJumpToNode={(nodeId) => jumpToNode(detailsNode.id, nodeId)}
