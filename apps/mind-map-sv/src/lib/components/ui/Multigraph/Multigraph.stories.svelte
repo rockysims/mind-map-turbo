@@ -725,6 +725,17 @@
 	});
 
 	/**
+	 * The same node, having filed the quantity it writes under Inputs. Nobody else
+	 * is involved, so every part of the report and its repair has to fit on this
+	 * one node's surface.
+	 */
+	const ITS_OWN_DEFINER_LABELED_INPUT = makeGraph({
+		nodes: [{ id: 'reader', title: '$y = 1$', description: '', inputs: designations('y') }],
+		pinned: ['reader'],
+		posByNodeId: { reader: { x: 0, y: 0 } }
+	});
+
+	/**
 	 * `reader` has confirmed g as an input and `gravity` has written what g is
 	 * without confirming it. Nothing is joined and nothing is derived, so the only
 	 * thing that can put an edge between them is the confirm in the peek card.
@@ -5549,6 +5560,46 @@
 		expect(row.querySelector('math')).not.toBeNull();
 		// Nowhere to go: this is the node the reader is already in.
 		expect(row.querySelector('[data-peek-goto]')).toBeNull();
+	}}
+/>
+
+<Story
+	name="AMislabeledQuantityIsRepairedOnTheNodeThatWroteIt"
+	args={{
+		multigraphData: ITS_OWN_DEFINER_LABELED_INPUT,
+		defaultPrimaryNodeId: 'reader',
+		layoutSettings: NO_REVEALS,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		await enterFocusOn(canvasElement, 'reader');
+
+		const item = canvasElement.querySelector('[data-diagnostic-quantity="y"]') as HTMLElement;
+		expect(item).toHaveAttribute('data-diagnostic-state', 'self-unconfirmed');
+
+		// The reported bug. This row used to name the node it was rendered in —
+		// "not confirmed by `$y = 1$`" — so the only offered way out of a mislabel
+		// was a jump to the page the reader was already on, which pushed that page
+		// into its own trail.
+		expect(item.querySelector('[data-reveal-node]')).toBeNull();
+
+		(item.querySelector('[data-confirm-definer="reader"]') as HTMLElement).click();
+
+		// The label moves rather than being added: a quantity in both columns at
+		// once is what the reader was trying to stop saying.
+		await waitFor(() => {
+			const reader = lastChangedGraph(args).nodes.find((node) => node.id === 'reader');
+			expect(reader?.outputs?.map((output) => output.base)).toEqual(['y']);
+			expect(reader?.inputs ?? []).toEqual([]);
+		});
+
+		// Still on the node, with nothing to walk back out of.
+		await expectFocusOn(canvasElement, 'reader');
+		expect(canvasElement.querySelector('[data-nav-breadcrumbs]')).not.toBeInTheDocument();
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-diagnostic-quantity="y"]')).toBeNull();
+		});
 	}}
 />
 

@@ -6,10 +6,11 @@
  * node needs or an output it claims — so each one is worth interrupting them
  * about. Symbols the parser merely noticed belong to the chips, not here.
  *
- * Ordered so the actionable states come first: an unconfirmed quantity is one
- * tap from resolved, an unresolved one is an invitation to extend the graph, an
- * out-of-view one is only a navigation hop, and a conflict is a judgement call
- * the author has to make.
+ * Ordered so the actionable states come first: a quantity this node labelled as
+ * an input while its own math defines it is a mislabel the reader repairs where
+ * they stand, an unconfirmed one is one tap from resolved, an unresolved one is
+ * an invitation to extend the graph, an out-of-view one is only a navigation
+ * hop, and a conflict is a judgement call the author has to make.
  */
 
 import {
@@ -22,7 +23,14 @@ import {
 export type QuantityDiagnosticState =
 	| Exclude<ReferenceState, 'resolved'>
 	| 'conflict'
-	| 'self-conflict';
+	| 'self-conflict'
+	/**
+	 * This node takes the quantity as an input and its own text defines it. The
+	 * graph-wide state is `unconfirmed` — nobody claimed the output — but read
+	 * from the node that wrote it, the repair is to move its own label rather
+	 * than to agree with somebody else's equation.
+	 */
+	| 'self-unconfirmed';
 
 export interface QuantityDiagnosticItem {
 	key: string;
@@ -31,9 +39,9 @@ export interface QuantityDiagnosticItem {
 	/**
 	 * Nodes to act on: the definers for `out-of-view`, the *other* definers for
 	 * `conflict`, and for `unconfirmed` the nodes whose text already states this
-	 * quantity — the ones a confirmation would point at. Empty for `unresolved`
-	 * and for `self-conflict`, where in both cases there is nowhere else to go,
-	 * which is the point of each state.
+	 * quantity — the ones a confirmation would point at. Empty for `unresolved`,
+	 * `self-conflict` and `self-unconfirmed`, where in every case there is nowhere
+	 * else to go, which is the point of each state.
 	 */
 	nodeIds: string[];
 }
@@ -45,28 +53,44 @@ export interface NodeDiagnosticsView {
 }
 
 const STATE_ORDER: Record<QuantityDiagnosticState, number> = {
-	// First: the graph already contains the answer and is one tap from saying so,
+	// First: the answer is on this node's own surface, disagreeing with a label
+	// this node put there, so it is both the plainest mistake and the one repair
+	// that needs nothing outside the node.
+	'self-unconfirmed': 0,
+	// Then: the graph already contains the answer and is one tap from saying so,
 	// which is the cheapest repair anything here can offer.
-	unconfirmed: 0,
-	unresolved: 1,
-	'out-of-view': 2,
+	unconfirmed: 1,
+	unresolved: 2,
+	'out-of-view': 3,
 	// Before a cross-node conflict: this one is repairable without leaving the
 	// node, whereas reconciling with another node is a judgement about both.
-	'self-conflict': 3,
-	conflict: 4
+	'self-conflict': 4,
+	conflict: 5
 };
 
-/** Which nodes this reference's repair points at, if any. */
-function nodeIdsFor(reference: ReferenceDiagnostic): string[] {
-	if (reference.state === 'out-of-view') {
-		return [...reference.definerNodeIds];
+/** What one reference says on this node's surface, and where its repair points. */
+function itemStateFor(
+	reference: ReferenceDiagnostic,
+	nodeId: string
+): { state: QuantityDiagnosticState; nodeIds: string[] } {
+	switch (reference.state) {
+		case 'out-of-view':
+			return { state: 'out-of-view', nodeIds: [...reference.definerNodeIds] };
+		case 'unconfirmed':
+			// Reading a node whose own text defines a quantity it labelled as an
+			// input, the repair is that label — not a confirmation of somebody's
+			// equation. Naming the node would offer a trip to where the reader
+			// already is, which is what put this node in its own jump trail.
+			return reference.textDefinerNodeIds.includes(nodeId)
+				? { state: 'self-unconfirmed', nodeIds: [] }
+				: // The nodes that already state this quantity: naming them is what
+					// turns "nothing defines it" into "label the one that does".
+					{ state: 'unconfirmed', nodeIds: [...reference.textDefinerNodeIds] };
+		default:
+			// `resolved` never arrives — the caller drops it — leaving `unresolved`,
+			// which is the one state with nothing anywhere to point at.
+			return { state: 'unresolved', nodeIds: [] };
 	}
-	// The nodes that already state this quantity: naming them is what turns
-	// "nothing defines it" into "confirm the one that does".
-	if (reference.state === 'unconfirmed') {
-		return [...reference.textDefinerNodeIds];
-	}
-	return [];
 }
 
 export function nodeDiagnosticsView(
@@ -89,8 +113,7 @@ export function nodeDiagnosticsView(
 		items.set(reference.symbol.key, {
 			key: reference.symbol.key,
 			label: reference.symbol.label,
-			state: reference.state,
-			nodeIds: nodeIdsFor(reference)
+			...itemStateFor(reference, nodeId)
 		});
 	}
 

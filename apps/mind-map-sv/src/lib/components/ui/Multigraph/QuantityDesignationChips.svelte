@@ -90,7 +90,7 @@
 		// where the parser put this quantity, not on a fixed order.
 		const first = chip.suggestedRole ?? 'input';
 		const second = first === 'input' ? 'output' : 'input';
-		if (chip.role === 'suggestion') return `Confirm ${chip.symbol.label} as an ${first}`;
+		if (chip.role === 'suggestion') return `Label ${chip.symbol.label} as an ${first}`;
 		if (chip.role === first) return `Make ${chip.symbol.label} an ${second}`;
 		return `Unassign ${chip.symbol.label}`;
 	}

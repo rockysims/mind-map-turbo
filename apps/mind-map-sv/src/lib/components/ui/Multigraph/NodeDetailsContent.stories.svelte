@@ -1285,7 +1285,7 @@
 		expect(title).toContain('Make g an output');
 		expect(title).toContain('hold or right-click to see where it is defined');
 
-		expect(viewChip(canvasElement, 'm').getAttribute('title')).toContain('Confirm m as an input');
+		expect(viewChip(canvasElement, 'm').getAttribute('title')).toContain('Label m as an input');
 	}}
 />
 
@@ -1476,7 +1476,7 @@
 		// Opacity is not an accessible signal, so the control says it in words.
 		expect(card.querySelector('[data-peek-confirm="moon"]')).toHaveAttribute(
 			'aria-label',
-			'Confirm moon as where g is defined'
+			'Label g as an output of moon'
 		);
 		expect(card.querySelector('[data-peek-confirm="earth"]')).toBeNull();
 	}}
@@ -1503,7 +1503,7 @@
 		// was worse: the graph already contains the answer and needs one tap, not a
 		// second node saying the same thing.
 		expect(item).toHaveAttribute('data-diagnostic-state', 'unconfirmed');
-		expect(item).toHaveTextContent('is defined in text but not confirmed by');
+		expect(item).toHaveTextContent('is written but not labeled as an output in');
 		expect(content.querySelector('[data-create-defining-node="g"]')).not.toBeInTheDocument();
 
 		// The node that wrote it is named, so the reader can go read it — and
@@ -1513,6 +1513,47 @@
 		expect((args.onConfirmDefiner as unknown as ConfirmSpy).mock.calls.at(-1)).toEqual([
 			'gravity',
 			'g'
+		]);
+	}}
+/>
+
+<Story
+	name="SaysAQuantityIsMislabeledWhenThisNodeWroteIt"
+	args={{
+		...OWN_EQUATION_ARGS,
+		node: { ...OWN_EQUATION_NODE, inputs: designations('y') },
+		diagnostics: {
+			items: [{ key: 'y', label: 'y', state: 'self-unconfirmed', nodeIds: [] }],
+			cycleNodeIds: []
+		},
+		onJumpToNode: fn(),
+		onCreateDefiningNode: fn(),
+		onConfirmDefiner: fn()
+	}}
+	play={async ({ canvasElement, args }) => {
+		const content = focusContent(canvasElement);
+		const item = content.querySelector('[data-diagnostic-quantity="y"]') as HTMLElement;
+
+		// The reader is told which rule read their equation as a definition, since
+		// that rule is the one thing on this row they cannot see for themselves.
+		expect(item).toHaveAttribute('data-diagnostic-state', 'self-unconfirmed');
+		expect(item).toHaveTextContent('is labeled as an input');
+		expect(item).toHaveTextContent('alone on the left of “=”');
+
+		// The reported bug: the row named the node it was rendered in, so the way
+		// out of a mislabel was a jump to the page the reader was already on —
+		// which pushed that page into its own trail.
+		expect(item.querySelector('[data-reveal-node]')).not.toBeInTheDocument();
+		// And no offer to define it: this node already does.
+		expect(content.querySelector('[data-create-defining-node="y"]')).not.toBeInTheDocument();
+
+		// The repair is this node's own label, moved.
+		const relabel = item.querySelector('[data-confirm-definer="node-1"]') as HTMLElement;
+		expect(relabel).toHaveTextContent('Relabel as output');
+		relabel.click();
+		expect((args.onConfirmDefiner as unknown as ConfirmSpy).mock.calls.at(-1)).toEqual([
+			'node-1',
+			'y'
 		]);
 	}}
 />

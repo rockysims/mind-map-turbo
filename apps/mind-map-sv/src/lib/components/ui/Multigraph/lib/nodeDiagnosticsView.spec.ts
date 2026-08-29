@@ -218,6 +218,71 @@ describe('nodeDiagnosticsView', () => {
 		});
 	});
 
+	/**
+	 * The reported bug's data. A node titled `$y = 1$` that labelled y as one of
+	 * its own inputs is `unconfirmed` graph-wide — nobody claimed the output — but
+	 * the node it would name is the node being read, and naming it put that node
+	 * in its own jump trail.
+	 */
+	describe('a quantity this node writes and labels as an input', () => {
+		const mislabeled: IndexableNode[] = [
+			{
+				id: 'reader',
+				title: '$y = 1$',
+				description: '',
+				tags: [],
+				inputs: [{ base: 'y', subscript: null }]
+			}
+		];
+
+		it('reports it against this node rather than as somebody to confirm', () => {
+			expect(viewFor(mislabeled, 'reader').items.map((item) => [item.label, item.state])).toEqual([
+				['y', 'self-unconfirmed']
+			]);
+		});
+
+		it('names nobody, since the writer is the node being read', () => {
+			expect(viewFor(mislabeled, 'reader').items[0].nodeIds).toEqual([]);
+		});
+
+		it('still names nobody when another node writes it too', () => {
+			const view = viewFor(
+				[...mislabeled, { id: 'other', description: '$$y = 2$$', tags: [] }],
+				'reader'
+			);
+			expect(view.items.map((item) => [item.state, item.nodeIds])).toEqual([
+				['self-unconfirmed', []]
+			]);
+		});
+
+		it('reports nothing once the label moves to outputs', () => {
+			const view = viewFor(
+				[{ ...mislabeled[0], inputs: [], outputs: [{ base: 'y', subscript: null }] }],
+				'reader'
+			);
+			expect(view.items).toEqual([]);
+		});
+
+		// The repair needs nothing outside the node, which no other state can say.
+		it('sorts before a quantity another node wrote', () => {
+			const view = viewFor(
+				[
+					{
+						...mislabeled[0],
+						description: 'and $$w = g$$',
+						inputs: [
+							{ base: 'y', subscript: null },
+							{ base: 'g', subscript: null }
+						]
+					},
+					{ id: 'writer', description: '$$g = 9.8$$', tags: [] }
+				],
+				'reader'
+			);
+			expect(view.items.map((item) => item.state)).toEqual(['self-unconfirmed', 'unconfirmed']);
+		});
+	});
+
 	it('orders unconfirmed before unresolved before out-of-view before conflict', () => {
 		const view = viewFor(
 			[

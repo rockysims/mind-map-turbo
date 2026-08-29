@@ -25,16 +25,42 @@
 	const EMPTY_QUANTITIES: NodeQuantities = { defines: [], references: [] };
 	const EMPTY_DESIGNATIONS: readonly QuantityDesignation[] = [];
 
+	/**
+	 * One sentence per state, in the reader's vocabulary rather than the model's.
+	 * "Confirm" is a word for something they were never shown; what they were
+	 * shown is two columns of labels, so every repair here is described as
+	 * labelling.
+	 *
+	 * Each line ends where its node buttons pick the sentence up, so the trailing
+	 * preposition is load-bearing.
+	 */
 	const DIAGNOSTIC_TEXT = {
 		unresolved: 'is not defined anywhere',
+		// Nothing to name and nowhere to go: the equation is on this node's own
+		// surface, so the sentence finishes itself — and says which rule read it as
+		// a definition, since that rule is the one thing the reader cannot see.
+		'self-unconfirmed':
+			'is labeled as an input, but this node’s math defines it (alone on the left of “=”)',
 		// The related-node buttons finish the sentence by naming who wrote it, so
-		// the copy ends on "by" rather than restating the node names in prose.
-		unconfirmed: 'is defined in text but not confirmed by',
-		'out-of-view': 'is defined outside the visible area',
+		// the copy ends on "in" rather than restating the node names in prose.
+		unconfirmed: 'is written but not labeled as an output in',
+		// "Off screen" rather than "outside the visible area": the reader is being
+		// told where to look, and it flows into the node button that follows.
+		'out-of-view': 'is defined off screen, in',
 		// Both say "differently" rather than "more than once", because agreeing
 		// definitions are not reported at all and the copy should not imply they are.
 		conflict: 'is defined differently by',
 		'self-conflict': 'is defined more than one way in this node'
+	} as const;
+
+	/**
+	 * The repair, named for what it does to the label that is already there. A
+	 * writer nobody has decided about gets its first label; this node, which has
+	 * the quantity filed under Inputs, gets that label moved.
+	 */
+	const DESIGNATE_TEXT = {
+		unconfirmed: 'Label as output',
+		'self-unconfirmed': 'Relabel as output'
 	} as const;
 
 	let {
@@ -355,12 +381,18 @@
 		>
 			<ul>
 				{#each diagnostics.items as item (item.key)}
+					<!-- Never a way back to where the reader already is. The states that
+					     name other nodes exclude this one by construction; the filter is
+					     what makes that a property of the list rather than of each state
+					     that remembers to. -->
+					{@const relatedIds = item.nodeIds.filter((nodeId) => nodeId !== currentNodeId)}
+					{@const selfId = currentNodeId}
 					<li data-diagnostic-state={item.state} data-diagnostic-quantity={item.label}>
 						<span class="quantity">{item.label}</span>
 						<span class="reason">{DIAGNOSTIC_TEXT[item.state]}</span>
-						{#if item.nodeIds.length > 0}
+						{#if relatedIds.length > 0}
 							<span class="related">
-								{#each item.nodeIds as relatedId (relatedId)}
+								{#each relatedIds as relatedId (relatedId)}
 									<button
 										type="button"
 										data-reveal-node={relatedId}
@@ -373,12 +405,26 @@
 											type="button"
 											class="confirm"
 											data-confirm-definer={relatedId}
-											aria-label={`Confirm ${titleForNodeId(relatedId)} as where ${item.label} is defined`}
-											onclick={() => onConfirmDefiner(relatedId, item.key)}>Confirm</button
+											aria-label={`Label ${item.label} as an output of ${titleForNodeId(relatedId)}`}
+											onclick={() => onConfirmDefiner(relatedId, item.key)}
+											>{DESIGNATE_TEXT.unconfirmed}</button
 										>
 									{/if}
 								{/each}
 							</span>
+						{/if}
+						<!-- The one repair that lands on the node being read: its own label is
+						     what disagrees with its own math, so there is no writer to name
+						     and no journey to offer. -->
+						{#if item.state === 'self-unconfirmed' && onConfirmDefiner && selfId}
+							<button
+								type="button"
+								class="confirm"
+								data-confirm-definer={selfId}
+								aria-label={`Relabel ${item.label} as an output of this node`}
+								onclick={() => onConfirmDefiner(selfId, item.key)}
+								>{DESIGNATE_TEXT['self-unconfirmed']}</button
+							>
 						{/if}
 						<!-- `unresolved` alone, and no wider: an `unconfirmed` quantity already
 						     has a node stating it, so offering to define it here is the
@@ -396,7 +442,7 @@
 				{/each}
 				{#if diagnostics.cycleNodeIds.length > 0}
 					<li data-diagnostic-state="cycle">
-						<span class="reason">Defined in terms of itself, through</span>
+						<span class="reason">This node depends on itself, through</span>
 						<span class="related">
 							{#each diagnostics.cycleNodeIds as relatedId (relatedId)}
 								<button
@@ -484,7 +530,11 @@
 		border-left: 3px solid #cbd5e1;
 	}
 
-	.quantity-diagnostics li[data-diagnostic-state='unresolved'] {
+	/* Amber, with the states that need the author to change something. A label
+	   this node put on contradicting math this node wrote is a mistake, not the
+	   quiet "nobody has said so yet" the grey below means. */
+	.quantity-diagnostics li[data-diagnostic-state='unresolved'],
+	.quantity-diagnostics li[data-diagnostic-state='self-unconfirmed'] {
 		border-left-color: #f59e0b;
 	}
 

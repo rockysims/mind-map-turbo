@@ -306,10 +306,10 @@
 								type="button"
 								class="confirm"
 								data-peek-confirm={definerId}
-								aria-label={`Confirm ${titleForNodeId(definerId)} as where ${label} is defined`}
+								aria-label={`Label ${label} as an output of ${titleForNodeId(definerId)}`}
 								onclick={() => onConfirmDefiner?.(definerId, quantityKey)}
 							>
-								Confirm
+								Label as output
 							</button>
 						{/if}
 					</div>

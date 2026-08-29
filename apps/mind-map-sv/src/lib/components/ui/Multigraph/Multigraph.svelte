@@ -1097,6 +1097,11 @@
 	function jumpToNode(originNodeId: string, targetNodeId: string) {
 		const targetNode = nodeById[targetNodeId];
 		if (!targetNode) return;
+		// Going where the reader already is. Every surface that offers a jump hides
+		// it for the current node, so this is the backstop for the one that forgets
+		// — and it has been forgotten once, which put a node in its own jump trail
+		// behind a crumb that led back to the page it was pushed from.
+		if (targetNodeId === originNodeId) return;
 		// Read before pushing: the push changes the hop map, and what matters is
 		// whether the reader could already see the target — a node that was
 		// already on screen must not be taken away again when this entry pops.
