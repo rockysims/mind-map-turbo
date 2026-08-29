@@ -139,6 +139,30 @@
 
 	const wEntryLookup = (key: string) => (key === 'w' ? W_DEFINED_HERE_AND_ELSEWHERE : undefined);
 
+	/** `w` feeds two nodes — what a downstream card is for. */
+	const W_USED_TWICE: QuantityIndexEntry = {
+		symbol: symbolFor('w', null),
+		definerNodeIds: ['node-1'],
+		definitions: [
+			{ nodeId: 'node-1', bodyKey: 'node-1-w', sourceTex: 'w = m g', displayMode: true }
+		],
+		textDefinerNodeIds: [],
+		textDefinitions: [],
+		consumerNodeIds: ['scales', 'crane']
+	};
+
+	/** Both columns answerable at once: `g` upstream, `w` downstream. */
+	const BOTH_DIRECTIONS = (key: string) =>
+		key === 'g' ? G_DEFINED_TWICE : key === 'w' ? W_USED_TWICE : undefined;
+
+	const BOTH_DIRECTIONS_ARGS = {
+		node: WEIGHT_NODE,
+		currentNodeId: 'node-1',
+		quantities: nodeQuantities(WEIGHT_NODE),
+		quantityEntryFor: BOTH_DIRECTIONS,
+		titleForNodeId: (nodeId: string) => nodeId
+	};
+
 	const entryLookup = (entry: QuantityIndexEntry) => (key: string) =>
 		key === 'g' ? entry : undefined;
 
@@ -231,6 +255,30 @@
 			expect(card).toBeInTheDocument();
 			return card as HTMLElement;
 		});
+	}
+
+	/** The root cards of one column, in the order they are rendered. */
+	function columnCards(canvasElement: HTMLElement, column: 'input' | 'output'): HTMLElement[] {
+		return [
+			...canvasElement.querySelectorAll(`[data-peek-column="${column}"] [data-peek-path=""]`)
+		].filter((card): card is HTMLElement => card instanceof HTMLElement);
+	}
+
+	/** Every root card on screen, whichever column it sits in. */
+	function allCards(canvasElement: HTMLElement): HTMLElement[] {
+		return [...columnCards(canvasElement, 'input'), ...columnCards(canvasElement, 'output')];
+	}
+
+	/** The quantities each column's cards answer, top to bottom. */
+	function cardLabels(canvasElement: HTMLElement, column: 'input' | 'output'): string[] {
+		return columnCards(canvasElement, column).map(
+			(card) => card.getAttribute('data-quantity-peek') ?? ''
+		);
+	}
+
+	/** A press somewhere that is neither a chip nor a card. */
+	function pressOutside(canvasElement: HTMLElement): void {
+		canvasElement.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1 }));
 	}
 
 	/** Open the peek for the one confirmed input, the way a reader does. */
@@ -1289,12 +1337,15 @@
 	play={async ({ canvasElement }) => {
 		const card = await peekAt(canvasElement, 'w');
 
-		// This node's own equation is still an answer — often the interesting one
-		// when definers disagree — so the row stays. What goes is the button that
-		// would fly the reader to where they already are.
-		const own = card.querySelector('[data-peek-definer="node-1"]') as HTMLElement;
-		expect(own.querySelector('math')).not.toBeNull();
-		expect(own.querySelector('[data-peek-goto]')).toBeNull();
+		// `w` is an output, so its card looks downstream — and the reader's own
+		// definition is not an answer to "what uses this". It is on screen above the
+		// chips anyway, which is the reason it is not repeated here.
+		expect(card.querySelector('[data-peek-definer="node-1"]')).toBeNull();
+
+		// The disagreement still surfaces, which is what the output card existed
+		// for before it changed direction: somebody else defines w, differently.
+		const also = card.querySelector('[data-peek-also-defined]') as HTMLElement;
+		expect(also.querySelector('[data-peek-definer="scales"]')).toBeInTheDocument();
 		expect(card.querySelector('[data-peek-goto="scales"]')).toBeInTheDocument();
 	}}
 />
@@ -1421,18 +1472,15 @@
 	name="TheNodesOwnUnconfirmedEquationAnswersItsOwnChip"
 	args={{ ...OWN_EQUATION_ARGS, onJumpToNode: fn(), onConfirmDefiner: fn() }}
 	play={async ({ canvasElement }) => {
-		// The reported bug: a node titled `$y = 1$` asked what defines y and was
-		// told nothing did — by the card hanging under its own equation.
+		// The reported bug was a node titled `$y = 1$` being told nothing defined y
+		// — by the card hanging under its own equation. `y` is what this node
+		// produces, so its chip sits in the outputs and its card looks downstream:
+		// the false claim is not merely corrected, it is not made.
 		const card = await peekAt(canvasElement, 'y');
-		const row = definerRow(card, 'node-1');
 
 		expect(card).not.toHaveTextContent('Nothing defines y yet.');
-		expect(row).toHaveAttribute('data-peek-definer-state', 'unconfirmed');
-		expect(row.querySelector('math')).not.toBeNull();
-		// Nowhere to go — the reader is already in the node that says it — but the
-		// one thing worth doing here is still offered.
-		expect(row.querySelector('[data-peek-goto]')).toBeNull();
-		expect(row.querySelector('[data-peek-confirm="node-1"]')).toBeInTheDocument();
+		expect(card).toHaveTextContent('Nothing uses y yet.');
+		expect(card.querySelector('[data-peek-definer="node-1"]')).toBeNull();
 	}}
 />
 
@@ -1479,9 +1527,18 @@
 
 <Story
 	name="OpeningTheCardFocusesSomethingThatChangesNothing"
-	args={{ ...OWN_EQUATION_ARGS, onConfirmDefiner: fn() }}
+	args={{
+		node: WEIGHT_NODE,
+		currentNodeId: 'node-1',
+		quantities: nodeQuantities(WEIGHT_NODE),
+		quantityEntryFor: entryLookup(G_WRITTEN_BUT_UNCONFIRMED),
+		titleForNodeId: (nodeId: string) => nodeId,
+		onConfirmDefiner: fn()
+	}}
 	play={async ({ canvasElement, args }) => {
-		const card = await peekAt(canvasElement, 'y');
+		// An input chip, where the confirm offer lives: asking who defines `g`
+		// turns up a node whose text says so without anyone having confirmed it.
+		const card = await peekAt(canvasElement, 'g');
 
 		// With no "Go to node" on a self row, the card's mount focus lands on the
 		// confirm button — which is fine, and only fine because focus is not
@@ -1490,7 +1547,7 @@
 		await waitFor(() => {
 			expect(card.contains(document.activeElement)).toBe(true);
 		});
-		expect(document.activeElement).toHaveAttribute('data-peek-confirm', 'node-1');
+		expect(document.activeElement).toHaveAttribute('data-peek-goto', 'gravity');
 		expect((args.onConfirmDefiner as unknown as ConfirmSpy).mock.calls).toHaveLength(0);
 	}}
 />
@@ -1641,3 +1698,115 @@
 		/>
 	{/snippet}
 </Story>
+
+<Story
+	name="TwoChipsOpenTwoCardsOnePerColumn"
+	args={{ ...BOTH_DIRECTIONS_ARGS, onJumpToNode: fn() }}
+	play={async ({ canvasElement }) => {
+		rightClickChip(viewChip(canvasElement, 'g'));
+		await waitFor(() => expect(columnCards(canvasElement, 'input')).toHaveLength(1));
+
+		// Asking a second question keeps the first answer: the whole point is the
+		// comparison, and a card that closed on the next press would forbid it.
+		rightClickChip(viewChip(canvasElement, 'w'));
+		await waitFor(() => expect(columnCards(canvasElement, 'output')).toHaveLength(1));
+		expect(columnCards(canvasElement, 'input')).toHaveLength(1);
+
+		// Each card sits under the column its question came from, and both chips
+		// read as pressed while their card is open.
+		expect(cardLabels(canvasElement, 'input')).toEqual(['g']);
+		expect(cardLabels(canvasElement, 'output')).toEqual(['w']);
+		expect(viewChip(canvasElement, 'g')).toHaveAttribute('data-designation-peeking', 'true');
+		expect(viewChip(canvasElement, 'w')).toHaveAttribute('data-designation-peeking', 'true');
+	}}
+/>
+
+<Story
+	name="AThirdCardOpensWithoutClosingTheSecond"
+	args={{ ...BOTH_DIRECTIONS_ARGS, onJumpToNode: fn() }}
+	play={async ({ canvasElement }) => {
+		// The guard that made this impossible exempted only the open card and its
+		// own anchor, so pressing a third chip counted as a press outside the second
+		// card and closed it on the way in — a permanent cap of two.
+		for (const key of ['g', 'm', 'w']) {
+			rightClickChip(viewChip(canvasElement, key));
+			await sleep(0);
+		}
+
+		await waitFor(() => expect(allCards(canvasElement)).toHaveLength(3));
+		expect(cardLabels(canvasElement, 'input')).toEqual(['g', 'm']);
+		expect(cardLabels(canvasElement, 'output')).toEqual(['w']);
+	}}
+/>
+
+<Story
+	name="AnOutputCardAnswersWithItsConsumers"
+	args={{ ...BOTH_DIRECTIONS_ARGS, onJumpToNode: fn() }}
+	play={async ({ canvasElement }) => {
+		const card = await peekAt(canvasElement, 'w');
+
+		expect(card).toHaveAttribute('data-peek-direction', 'downstream');
+		// The nodes that take w as a confirmed input, each with the way to them.
+		expect(card.querySelector('[data-peek-consumer="scales"]')).toBeInTheDocument();
+		expect(card.querySelector('[data-peek-consumer="crane"]')).toBeInTheDocument();
+		expect(card.querySelector('[data-peek-goto="crane"]')).toBeInTheDocument();
+
+		// Nothing else defines w here, so the conflict section is absent rather
+		// than empty — it exists to be alarming, and an always-on heading is not.
+		expect(card.querySelector('[data-peek-also-defined]')).toBeNull();
+		expect(card.querySelector('[data-peek-definer="node-1"]')).toBeNull();
+	}}
+/>
+
+<Story
+	name="AnOutsidePressClosesTheNewestCardOnly"
+	args={{ ...BOTH_DIRECTIONS_ARGS, onJumpToNode: fn() }}
+	play={async ({ canvasElement }) => {
+		for (const key of ['g', 'w']) {
+			rightClickChip(viewChip(canvasElement, key));
+			await sleep(0);
+		}
+		await waitFor(() => expect(allCards(canvasElement)).toHaveLength(2));
+
+		// Newest first, so the reader unwinds the way they built it up — and one at
+		// a time, so a stray press costs one card rather than the comparison.
+		pressOutside(canvasElement);
+		await waitFor(() => expect(allCards(canvasElement)).toHaveLength(1));
+		expect(cardLabels(canvasElement, 'input')).toEqual(['g']);
+
+		pressOutside(canvasElement);
+		await waitFor(() => expect(allCards(canvasElement)).toHaveLength(0));
+	}}
+/>
+
+<Story
+	name="CardsHoldChipOrderWhateverOrderTheyWereOpenedIn"
+	args={{ ...BOTH_DIRECTIONS_ARGS, onJumpToNode: fn() }}
+	play={async ({ canvasElement }) => {
+		// Opened second, but `g` is the first input chip, so its card is first.
+		rightClickChip(viewChip(canvasElement, 'm'));
+		await sleep(0);
+		rightClickChip(viewChip(canvasElement, 'g'));
+		await waitFor(() => expect(columnCards(canvasElement, 'input')).toHaveLength(2));
+
+		expect(cardLabels(canvasElement, 'input')).toEqual(['g', 'm']);
+	}}
+/>
+
+<Story
+	name="ACardOutlivesTheDesignationThatOpenedIt"
+	args={{ ...BOTH_DIRECTIONS_ARGS, onCycleDesignation: fn(), onJumpToNode: fn() }}
+	play={async ({ canvasElement }) => {
+		const card = await peekAt(canvasElement, 'g');
+		expect(card).toBeInTheDocument();
+
+		// Cycling the chip is an edit, not a withdrawal of the question. The card
+		// keeps its place until the reader dismisses it, which is what lets a
+		// comparison survive a change made while reading it.
+		viewChip(canvasElement, 'g').click();
+		await sleep(0);
+
+		expect(columnCards(canvasElement, 'input')).toHaveLength(1);
+		expect(cardLabels(canvasElement, 'input')).toEqual(['g']);
+	}}
+/>

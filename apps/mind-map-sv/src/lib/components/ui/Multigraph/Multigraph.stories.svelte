@@ -5550,16 +5550,18 @@
 		// The reported bug, end to end. A node titled `$y = 1$` asked what defines y
 		// and was told nothing did — by the card hanging under its own equation —
 		// and then offered to define it, which would have made a second node saying
-		// the same thing.
+		// the same thing. `y` is what this node produces, so its chip sits in the
+		// outputs and its card looks downstream: neither the false claim nor the
+		// offer that followed from it is made at all.
 		const card = await openPeekCard(canvasElement, 'y');
 		expect(card).not.toHaveTextContent('Nothing defines y yet.');
 		expect(card.querySelector('[data-create-defining-node]')).not.toBeInTheDocument();
 
-		const row = card.querySelector('[data-peek-definer="reader"]') as HTMLElement;
-		expect(row).toHaveAttribute('data-peek-definer-state', 'unconfirmed');
-		expect(row.querySelector('math')).not.toBeNull();
-		// Nowhere to go: this is the node the reader is already in.
-		expect(row.querySelector('[data-peek-goto]')).toBeNull();
+		expect(card).toHaveAttribute('data-peek-direction', 'downstream');
+		expect(card).toHaveTextContent('Nothing uses y yet.');
+		// The reader's own definition is on screen above the chips; repeating it as
+		// an answer to "what uses this" is what the direction rule removes.
+		expect(card.querySelector('[data-peek-definer="reader"]')).toBeNull();
 	}}
 />
 
