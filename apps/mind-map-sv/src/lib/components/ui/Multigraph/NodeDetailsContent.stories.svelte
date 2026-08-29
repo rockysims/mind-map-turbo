@@ -169,6 +169,28 @@
 		return event;
 	}
 
+	/**
+	 * A desktop right-click in full. The browser fires `pointerdown` with the
+	 * secondary button before `contextmenu`, and that pointerdown is what clears a
+	 * click suppression left over from an earlier hold — dispatching the
+	 * `contextmenu` alone would test the guard without the thing that disarms it.
+	 */
+	function rightClickChip(chip: HTMLElement): void {
+		const rect = chip.getBoundingClientRect();
+		chip.dispatchEvent(
+			new PointerEvent('pointerdown', {
+				bubbles: true,
+				cancelable: true,
+				pointerId: 1,
+				button: 2,
+				pointerType: 'mouse',
+				clientX: rect.left + rect.width / 2,
+				clientY: rect.top + rect.height / 2
+			})
+		);
+		dispatchContextMenu(chip);
+	}
+
 	function dispatchChipPointer(
 		target: HTMLElement,
 		type: 'pointerdown' | 'pointermove' | 'pointerup',
@@ -1192,6 +1214,37 @@
 		});
 		chip.click();
 		expect((args.onCycleDesignation as unknown as CycleSpy).mock.calls).toHaveLength(0);
+	}}
+/>
+
+<Story
+	name="RightClickStillAnswersAfterAHoldThatLostItsClick"
+	args={{
+		node: WEIGHT_NODE,
+		quantities: nodeQuantities(WEIGHT_NODE),
+		quantityEntryFor: entryLookup(G_DEFINED_TWICE),
+		titleForNodeId: MOON_AND_EARTH_TITLES,
+		onCycleDesignation: fn(),
+		onJumpToNode: fn()
+	}}
+	play={async ({ canvasElement }) => {
+		// A hold answers, then arms a flag to swallow the click still on its way. If
+		// the finger wanders off the chip before lifting, that click lands on an
+		// ancestor instead and the flag is never spent.
+		await holdChip(viewChip(canvasElement, 'g'));
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-quantity-peek="g"]')).toBeInTheDocument();
+		});
+
+		// Read as the bare "a hold just answered", one leftover flag made the
+		// right-click on every chip do nothing at all — and `preventDefault` had
+		// already taken the browser's own menu away, so the reader got no answer
+		// from either surface.
+		rightClickChip(viewChip(canvasElement, 'm'));
+
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-quantity-peek="m"]')).toBeInTheDocument();
+		});
 	}}
 />
 
