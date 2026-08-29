@@ -3,13 +3,19 @@
 	 * The two columns a node's quantities live in: what it takes in on the left,
 	 * what it produces on the right.
 	 *
-	 * Tap decides, hold asks. A tap cycles the quantity's assignment on both
-	 * surfaces — the edit sheet and the details view — because a chip that means
-	 * one thing in one place and something else in another is two controls wearing
-	 * the same clothes. In `view` mode a hold on any pointer, a right-click, or
-	 * Shift+Enter opens the peek card instead, on every chip: an output's
-	 * definition is as fair a question as an input's, and the answer to it is
-	 * where the conflicts show.
+	 * Tap decides, hold does the other thing. A tap cycles the quantity's
+	 * assignment on both surfaces — the edit sheet and the details view — because a
+	 * chip that means one thing in one place and something else in another is two
+	 * controls wearing the same clothes. A hold on any pointer, a right-click, or
+	 * Shift+Enter reaches each surface's secondary action instead: in `view` the
+	 * peek card, because an output's definition is as fair a question as an
+	 * input's; in `edit` writing the symbol into the text at the caret, because the
+	 * chip is the only place its exact spelling is already known.
+	 *
+	 * One recognizer serves both. Which action a hold reaches is the surface's
+	 * business, but *what counts as a hold* — and the flag that stops the trailing
+	 * click from also cycling — must not differ between two chips that look
+	 * identical.
 	 *
 	 * That a tap here rewrites the graph is deliberate and was not always true.
 	 * The cycle is reversible in at most two taps by construction, which is what
@@ -26,12 +32,14 @@
 	import type { DesignationChip, DesignationView } from './lib/quantityDesignations';
 
 	const PEEK_HOLD_MS = APP_CONFIG.multigraph.dataflow.chipPeekLongPressMs;
+	const INSERT_HOLD_MS = APP_CONFIG.multigraph.dataflow.chipInsertLongPressMs;
 
 	let {
 		mode,
 		view,
 		onCycle,
 		onPeek,
+		onInsert,
 		peekKey = null
 	}: {
 		mode: 'edit' | 'view';
@@ -40,6 +48,8 @@
 		onCycle?: (symbol: QuantitySymbol, suggestedRole?: 'input' | 'output') => void;
 		/** View mode only: show where this quantity is defined, anchored to its chip. */
 		onPeek?: (key: string, anchor: HTMLElement) => void;
+		/** Edit mode only: write this quantity into the text the author is editing. */
+		onInsert?: (symbol: QuantitySymbol) => void;
 		/** The quantity whose peek card is open, so its chip can be marked. */
 		peekKey?: string | null;
 	} = $props();
@@ -60,6 +70,15 @@
 	const hasSuggestions = $derived(view.suggestions.length > 0);
 
 	const canPeek = $derived(mode === 'view' && onPeek !== undefined);
+	const canInsert = $derived(mode === 'edit' && onInsert !== undefined);
+	/** Whether this surface has anything for a hold, a right-click, or Shift+Enter to reach. */
+	const hasSecondaryAction = $derived(canPeek || canInsert);
+	/**
+	 * Its own tunable rather than the peek's. The two answer different questions —
+	 * one opens a card to read, the other writes a character into a field — and a
+	 * reader who finds one hold too slow has no reason to want the other changed.
+	 */
+	const holdMs = $derived(canInsert ? INSERT_HOLD_MS : PEEK_HOLD_MS);
 
 	/** The subtree the columns live in, for the focus scan and its activeElement guard. */
 	let section = $state<HTMLElement | null>(null);
@@ -80,9 +99,7 @@
 	 * an output's definers are exactly where a disagreement about that quantity
 	 * shows up, and a ghost is as fair a thing to ask about as a confirmed input.
 	 */
-	const chipsAreInteractive = $derived(
-		mode === 'edit' ? onCycle !== undefined : onCycle !== undefined || onPeek !== undefined
-	);
+	const chipsAreInteractive = $derived(onCycle !== undefined || hasSecondaryAction);
 
 	/** What the next tap on this chip would do, in the cycle's own terms. */
 	function cycleTitle(chip: DesignationChip): string {
@@ -100,14 +117,19 @@
 	 * hold is a secret and the tap is a surprise.
 	 */
 	function chipTitle(chip: DesignationChip): string {
-		if (mode === 'edit') return cycleTitle(chip);
 		const parts: string[] = [];
 		if (onCycle) parts.push(cycleTitle(chip));
-		if (onPeek) {
+		const secondary = canPeek
+			? ['see where', 'is defined']
+			: canInsert
+				? ['write', 'into the text']
+				: null;
+		if (secondary !== null) {
+			const [verb, tail] = secondary;
 			parts.push(
 				parts.length === 0
-					? `Hold or right-click to see where ${chip.symbol.label} is defined`
-					: 'hold or right-click to see where it is defined'
+					? `Hold or right-click to ${verb} ${chip.symbol.label} ${tail}`
+					: `hold or right-click to ${verb} it ${tail}`
 			);
 		}
 		return parts.length === 0 ? chip.symbol.label : parts.join(' — ');
@@ -140,15 +162,28 @@
 		return host !== null && active instanceof Node && host.contains(active);
 	}
 
-	function beginPeekPress(chip: DesignationChip, event: PointerEvent) {
-		if (!canPeek) return;
+	/**
+	 * The secondary action for this surface: read where a quantity is defined, or
+	 * write it into the text. Every path — hold, right-click, Shift+Enter — comes
+	 * through here so the three cannot drift apart.
+	 */
+	function performSecondary(chip: DesignationChip, anchor: HTMLElement) {
+		if (canPeek) {
+			onPeek?.(chip.symbol.key, anchor);
+			return;
+		}
+		if (canInsert) onInsert?.(chip.symbol);
+	}
+
+	function beginSecondaryPress(chip: DesignationChip, event: PointerEvent) {
+		if (!hasSecondaryAction) return;
 		// A fresh press ends whatever came before it, whichever button it is on:
 		// the click a previous hold was suppressing has either arrived or was lost
 		// with a pointer that wandered off the chip before lifting, and carrying
 		// the flag into the next gesture is how a later press silently does
 		// nothing. Cleared before the button check for exactly that reason — a
 		// right-click's own pointerdown has to clear it too.
-		endPeekPress();
+		endSecondaryPress();
 		suppressClickForKey = null;
 		// Secondary buttons have their own meaning, and `contextmenu` covers the
 		// right one; a hold is the primary button held down.
@@ -162,14 +197,15 @@
 			peekTimer = null;
 			if (!isChipLongPress(press, performance.now(), { key })) return;
 			press = null;
-			// Set before the callback: opening the card can move focus, and the
-			// trailing click is still on its way regardless.
+			// Set before the callback: answering can move focus — opening a card, or
+			// putting the caret in the field just written to — and the trailing click
+			// is still on its way regardless.
 			suppressClickForKey = key;
-			onPeek?.(key, anchor);
-		}, PEEK_HOLD_MS);
+			performSecondary(chip, anchor);
+		}, holdMs);
 	}
 
-	function trackPeekPress(event: PointerEvent) {
+	function trackSecondaryPress(event: PointerEvent) {
 		if (press === null) return;
 		press = trackChipPress(press, { x: event.clientX, y: event.clientY });
 	}
@@ -179,40 +215,40 @@
 	 * going away — so the timer is. The suppression flag deliberately survives:
 	 * the click it exists to swallow has not happened yet.
 	 */
-	function endPeekPress() {
+	function endSecondaryPress() {
 		if (peekTimer !== null) clearTimeout(peekTimer);
 		peekTimer = null;
 		press = null;
 	}
 
-	function peekFromContextMenu(chip: DesignationChip, event: MouseEvent) {
-		if (mode !== 'view') return;
+	function secondaryFromContextMenu(chip: DesignationChip, event: MouseEvent) {
+		if (!hasSecondaryAction) return;
 		// The focus overlay is a sibling of the stage with no pointer handlers, so
-		// nothing else is going to stop the browser's own menu covering the card.
+		// nothing else is going to stop the browser's own menu covering the answer.
 		event.preventDefault();
-		if (!canPeek) return;
 		// Android synthesizes a contextmenu from a touch long-press. The hold has
-		// already opened the card, and answering twice would toggle it shut. Scoped
-		// to this chip's own key: a suppression belonging to some other chip says
-		// nothing about this one, and reading it as "a hold just answered" made one
-		// stale flag silently swallow the right-click on every chip.
+		// already answered — opening a card, or writing the symbol — and answering
+		// twice would toggle the card shut or insert the symbol a second time.
+		// Scoped to this chip's own key: a suppression belonging to some other chip
+		// says nothing about this one, and reading it as "a hold just answered" made
+		// one stale flag silently swallow the right-click on every chip.
 		if (suppressClickForKey === chip.symbol.key) return;
-		endPeekPress();
-		onPeek?.(chip.symbol.key, event.currentTarget as HTMLElement);
+		endSecondaryPress();
+		performSecondary(chip, event.currentTarget as HTMLElement);
 	}
 
 	/**
-	 * Shift+Enter asks the question a hold asks. Plain Enter cycles, as a click
-	 * does. Nothing is bound to the ContextMenu key on purpose: browsers that have
-	 * one fire a real `contextmenu` on the focused element, which is already
-	 * handled, and handling both would toggle the card shut.
+	 * Shift+Enter does what a hold does. Plain Enter cycles, as a click does.
+	 * Nothing is bound to the ContextMenu key on purpose: browsers that have one
+	 * fire a real `contextmenu` on the focused element, which is already handled,
+	 * and handling both would answer twice.
 	 */
-	function peekFromKeyboard(chip: DesignationChip, event: KeyboardEvent) {
-		if (!canPeek) return;
+	function secondaryFromKeyboard(chip: DesignationChip, event: KeyboardEvent) {
+		if (!hasSecondaryAction) return;
 		if (event.key !== 'Enter' || !event.shiftKey) return;
-		// Or the browser activates the button as well, and the card opens and cycles.
+		// Or the browser activates the button as well, and the chip answers and cycles.
 		event.preventDefault();
-		onPeek?.(chip.symbol.key, event.currentTarget as HTMLElement);
+		performSecondary(chip, event.currentTarget as HTMLElement);
 	}
 
 	/**
@@ -239,7 +275,7 @@
 		}
 	});
 
-	$effect(() => () => endPeekPress());
+	$effect(() => () => endSecondaryPress());
 
 	/** How this column labels a chip: what it is, and what its gestures would do. */
 	function chipAttributes(chip: DesignationChip): Record<string, string | undefined> {
@@ -270,13 +306,17 @@
 					interactive={chipsAreInteractive}
 					attributes={chipAttributes(chip)}
 					onclick={() => activate(chip)}
-					oncontextmenu={mode === 'view' ? (event) => peekFromContextMenu(chip, event) : undefined}
-					onpointerdown={canPeek ? (event) => beginPeekPress(chip, event) : undefined}
-					onpointermove={canPeek ? trackPeekPress : undefined}
-					onpointerup={canPeek ? endPeekPress : undefined}
-					onpointercancel={canPeek ? endPeekPress : undefined}
-					onpointerleave={canPeek ? endPeekPress : undefined}
-					onkeydown={canPeek ? (event) => peekFromKeyboard(chip, event) : undefined}
+					oncontextmenu={hasSecondaryAction
+						? (event) => secondaryFromContextMenu(chip, event)
+						: undefined}
+					onpointerdown={hasSecondaryAction
+						? (event) => beginSecondaryPress(chip, event)
+						: undefined}
+					onpointermove={hasSecondaryAction ? trackSecondaryPress : undefined}
+					onpointerup={hasSecondaryAction ? endSecondaryPress : undefined}
+					onpointercancel={hasSecondaryAction ? endSecondaryPress : undefined}
+					onpointerleave={hasSecondaryAction ? endSecondaryPress : undefined}
+					onkeydown={hasSecondaryAction ? (event) => secondaryFromKeyboard(chip, event) : undefined}
 				/>
 			</li>
 		{/each}
@@ -305,6 +345,11 @@
 
 	{#if isEmpty}
 		<p class="hint">No quantities yet. Write an equation to get suggestions.</p>
+	{:else if canInsert}
+		<p class="hint">
+			Tap a quantity to cycle it: unassigned, input, output. Hold, right-click, or press Shift+Enter
+			to write it into the text at the cursor.
+		</p>
 	{:else if mode === 'edit'}
 		<p class="hint">Tap a quantity to cycle it: unassigned, input, output.</p>
 	{:else if hasSuggestions}

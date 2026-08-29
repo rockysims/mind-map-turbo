@@ -95,7 +95,8 @@ export const APP_CONFIG = {
 			labelMaxVisibleQuantities: 3, // quantities named before collapsing to a count
 			chipMinOnScreenDiameterPx: 180, // on-screen node size below which chips are hidden
 			chipMaxVisibleQuantities: 3, // quantities a compact node names before a count
-			chipPeekLongPressMs: 500 // hold on a details chip before its definition peek opens
+			chipPeekLongPressMs: 500, // hold on a details chip before its definition peek opens
+			chipInsertLongPressMs: 500 // hold on an edit chip before its symbol is written into the text
 		}
 	}
 } as const;
