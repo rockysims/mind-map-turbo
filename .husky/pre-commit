@@ -1,1 +1,35 @@
+# Serialize lint-staged across every worktree of this repo.
+#
+# `refs/stash` is a shared ref: every worktree resolves it to the same file in
+# the common git dir, and git has no per-worktree stash (only HEAD, refs/bisect,
+# refs/worktree and refs/rewritten are per-worktree). lint-staged stores your
+# backup there, then resolves it by POSITION — `stash list` -> index ->
+# `stash drop <index>`. A commit in another worktree pushing a stash between
+# those two steps shifts every index down one, so the drop lands on someone
+# else's backup, and the restore-on-failure path applies someone else's snapshot
+# into this working tree.
+#
+# One commit at a time, repo-wide. The hook takes seconds, and this keeps
+# lint-staged's backup — which `--no-stash` would throw away.
+#
+# Run by husky as `sh -e`, so a failing command aborts: `until mkdir` is a loop
+# condition and exempt, and the EXIT trap releases the lock on every path out.
+LOCK="$(cd "$(git rev-parse --git-common-dir)" && pwd)/lint-staged.lock"
+# Beside the lock, never inside it, so releasing stays a plain `rmdir`.
+OWNER="$LOCK.owner"
+
+waited=0
+until mkdir "$LOCK" 2>/dev/null; do
+	waited=$((waited + 1))
+	if [ "$waited" -gt 600 ]; then
+		echo "pre-commit: waited 5m for the repo-wide lint-staged lock." >&2
+		echo "pre-commit: last taken by $(cat "$OWNER" 2>/dev/null || echo unknown)" >&2
+		echo "pre-commit: if that process is gone, release it with: rmdir '$LOCK'" >&2
+		exit 1
+	fi
+	sleep 0.5
+done
+trap 'rmdir "$LOCK" 2>/dev/null || :' EXIT INT TERM
+echo "pid $$ in $(pwd) at $(date)" > "$OWNER"
+
 pnpm exec lint-staged
