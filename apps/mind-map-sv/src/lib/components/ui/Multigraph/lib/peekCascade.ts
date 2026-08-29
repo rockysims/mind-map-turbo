@@ -17,6 +17,16 @@
  * if the designation comes back. Nothing here has to watch the graph.
  */
 
+/**
+ * Which way a cascade reads the graph.
+ *
+ * A card answers the question its chip's column implies: an input asks who
+ * defines this, an output asks who consumes it. The direction belongs to the
+ * whole cascade rather than to a row, because a tree that flips halfway leaves a
+ * reader three levels down unable to say what they are looking at.
+ */
+export type PeekDirection = 'upstream' | 'downstream';
+
 /** One drill: the row it was taken from, and the quantity its chip named. */
 export interface PeekStep {
 	definerNodeId: string;
@@ -33,14 +43,23 @@ export interface PeekBranch extends PeekStep {
 
 /** Every card open under one root quantity. */
 export interface PeekCascade {
+	/**
+	 * Identity and open order in one number. A quantity key cannot serve: keys
+	 * embed a NUL, which `CSS.escape` replaces with U+FFFD rather than escaping,
+	 * so a key is unusable in the selector that has to find this cascade's cards.
+	 * Increasing with each open is also what lets dismissal find the newest
+	 * without a second timestamp.
+	 */
+	id: number;
 	/** The quantity the root card answers — the chip the reader tapped. */
 	rootKey: string;
+	direction: PeekDirection;
 	children: PeekBranch[];
 }
 
 /** A cascade showing one quantity and nothing drilled yet. */
-export function openCascade(rootKey: string): PeekCascade {
-	return { rootKey, children: [] };
+export function openCascade(id: number, rootKey: string, direction: PeekDirection): PeekCascade {
+	return { id, rootKey, direction, children: [] };
 }
 
 function indexOfStep(branches: readonly PeekBranch[], step: PeekStep): number {
@@ -171,4 +190,86 @@ export function parsePath(serialized: string): PeekStep[] {
 			key: decodeURIComponent(segment.slice(separator + 1))
 		};
 	});
+}
+
+/**
+ * Every cascade a reader has open, in the order they opened them.
+ *
+ * Open order is what dismissal needs — a press outside closes the newest — and
+ * chip order is what rendering needs, so cards sit under the chips they came
+ * from. Only one of the two is stored: deriving the other is what stops them
+ * disagreeing after a designation moves a chip between columns.
+ */
+export type PeekCascades = readonly PeekCascade[];
+
+/** Whether this quantity already has a card open in this direction. */
+export function findCascade(
+	cascades: PeekCascades,
+	rootKey: string,
+	direction: PeekDirection
+): PeekCascade | undefined {
+	return cascades.find((cascade) => cascade.rootKey === rootKey && cascade.direction === direction);
+}
+
+/**
+ * Add a card for this quantity, or leave the set alone if it already has one.
+ *
+ * Idempotent per `(key, direction)` rather than per key: a quantity confirmed as
+ * both an input and an output is two chips asking two different questions, and
+ * collapsing them to one card would make the second chip close the first.
+ */
+export function openCascadeIn(
+	cascades: PeekCascades,
+	nextId: number,
+	rootKey: string,
+	direction: PeekDirection
+): PeekCascades {
+	if (findCascade(cascades, rootKey, direction) !== undefined) return cascades;
+	return [...cascades, openCascade(nextId, rootKey, direction)];
+}
+
+/** Drop one cascade by id. An id that is not open is a no-op. */
+export function closeCascadeIn(cascades: PeekCascades, id: number): PeekCascades {
+	const index = cascades.findIndex((cascade) => cascade.id === id);
+	if (index === -1) return cascades;
+	return [...cascades.slice(0, index), ...cascades.slice(index + 1)];
+}
+
+/**
+ * Drop the most recently opened cascade — what a press outside the section does.
+ *
+ * Newest first so the reader unwinds the way they built the comparison up, and
+ * one at a time so a stray press costs one card rather than the whole set.
+ */
+export function closeNewestCascade(cascades: PeekCascades): PeekCascades {
+	if (cascades.length === 0) return cascades;
+	const newest = cascades.reduce((latest, cascade) => (cascade.id > latest.id ? cascade : latest));
+	return closeCascadeIn(cascades, newest.id);
+}
+
+/** Replace one cascade with a rebuilt version of itself, matched by id. */
+export function replaceCascade(cascades: PeekCascades, next: PeekCascade): PeekCascades {
+	return cascades.map((cascade) => (cascade.id === next.id ? next : cascade));
+}
+
+/**
+ * The cascades of one direction, ordered to match the chips above them.
+ *
+ * A cascade whose quantity is no longer among the chips keeps its place rather
+ * than disappearing: the reader asked the question, and a designation cycled off
+ * elsewhere is not them withdrawing it. Ordering is stable for those orphans —
+ * they sort after the chips, by open order — so nothing jumps as the columns
+ * change around them.
+ */
+export function cascadesInChipOrder(
+	cascades: PeekCascades,
+	direction: PeekDirection,
+	chipKeys: readonly string[]
+): PeekCascade[] {
+	const rank = new Map(chipKeys.map((key, index) => [key, index]));
+	return cascades
+		.filter((cascade) => cascade.direction === direction)
+		.map((cascade) => ({ cascade, rank: rank.get(cascade.rootKey) ?? Number.MAX_SAFE_INTEGER }))
+		.sort((a, b) => (a.rank === b.rank ? a.cascade.id - b.cascade.id : a.rank - b.rank))
+		.map((entry) => entry.cascade);
 }
