@@ -735,3 +735,38 @@
 		expect(roleOf(canvasElement, 'w')).toBe('output');
 	}}
 />
+
+<Story
+	name="RepeatingAnInsertionAnnouncesItAgain"
+	play={async ({ canvasElement }) => {
+		typeDescription(canvasElement, WEIGHT_EQUATION);
+		await settle();
+		await caretAfter(canvasElement, 'title', 'Kinematics');
+
+		const region = canvasElement.querySelector('[data-insert-status]');
+		if (!(region instanceof HTMLElement)) throw new Error('no status region');
+
+		// A live region speaks on change, not on assignment. Counting mutations is
+		// the only way to tell "said twice" from "assigned the same sentence twice",
+		// which is what the reader actually experiences.
+		let mutations = 0;
+		const observer = new MutationObserver(() => (mutations += 1));
+		observer.observe(region, { childList: true, characterData: true, subtree: true });
+
+		await holdChip(chip(canvasElement, 'm'));
+		await settle();
+		const afterFirst = mutations;
+		expect(afterFirst).toBeGreaterThan(0);
+
+		// The same symbol into the same field: the sentence is identical, so without
+		// the clear-first the region would never change and the reader would hear
+		// nothing the second time.
+		await holdChip(chip(canvasElement, 'm'));
+		await settle();
+		observer.disconnect();
+
+		expect(mutations).toBeGreaterThan(afterFirst);
+		expect(fieldOf(canvasElement, 'title').value).toBe('Kinematics$m$$m$');
+		expect(statusText(canvasElement)).toBe('Wrote m into the title.');
+	}}
+/>

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import type { EdgeData } from '../types/edge';
 	import type { GraphAssetMetadata } from '../types/multigraph';
@@ -194,6 +194,25 @@
 		return field === 'title' ? titleInput : descriptionInput;
 	}
 
+	/**
+	 * Say something in the live region, even when it is what was just said.
+	 *
+	 * A live region announces changes, not assignments, so writing the same
+	 * sentence twice reaches the reader once — and writing one symbol repeatedly is
+	 * how an equation gets built, so the repeat is the common case rather than the
+	 * odd one. Clearing first and letting that reach the DOM makes the second
+	 * insertion a change again. Focus is already in the field by then, so this
+	 * region is the only thing that reports the insertion at all.
+	 */
+	function announce(message: string) {
+		insertStatus = '';
+		// Deliberately not awaited by the caller: the insertion is finished either
+		// way, and the announcement is allowed to land a frame later.
+		tick().then(() => {
+			insertStatus = message;
+		});
+	}
+
 	/** Where this field's cursor is now, so a later insertion can go back to it. */
 	function rememberCaret(field: TextField, event: Event) {
 		// Bound to the field itself, so `currentTarget` is that control; TS only
@@ -294,7 +313,7 @@
 		if (source === null) {
 			// Better to decline than to write source the parser reads back as a
 			// different quantity, which the author has no way of noticing.
-			insertStatus = `${symbol.label} cannot be written as text.`;
+			announce(`${symbol.label} cannot be written as text.`);
 			return;
 		}
 
@@ -344,7 +363,7 @@
 			field === 'description' ? element.value : description
 		);
 
-		insertStatus = `Wrote ${symbol.label} into the ${field}.`;
+		announce(`Wrote ${symbol.label} into the ${field}.`);
 	}
 
 	function saveEdgeTags(edge: EdgeData) {
