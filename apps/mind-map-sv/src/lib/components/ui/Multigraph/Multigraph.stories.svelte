@@ -883,7 +883,9 @@
 	 * Drill one definer's own input and hand back the card it opens.
 	 *
 	 * The chip is found by reading `data-peek-drill` rather than by selector: a
-	 * subscripted key embeds a NUL, which no attribute selector can carry.
+	 * subscripted key embeds a NUL, which no attribute selector can carry. Opened
+	 * by right-click, the same way the card above it was: a drill chip takes the
+	 * chip gesture, not a plain click.
 	 */
 	async function drillIntoPeek(
 		card: HTMLElement,
@@ -897,7 +899,8 @@
 		).find((candidate) => candidate.getAttribute('data-peek-drill') === quantityKey);
 		if (!(chip instanceof HTMLElement)) throw new Error(`no drill chip for ${quantityKey}`);
 		const pathKey = chip.getAttribute('data-peek-drill-path') ?? '';
-		chip.click();
+		const center = getCenter(chip);
+		dispatchContextMenu(chip, center.x, center.y);
 
 		return await waitFor(() => {
 			const nested = card.querySelector(`[data-peek-path="${pathKey}"]`);

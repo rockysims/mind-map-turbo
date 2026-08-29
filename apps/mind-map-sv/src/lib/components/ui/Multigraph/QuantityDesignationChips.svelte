@@ -12,10 +12,11 @@
 	 * input's; in `edit` writing the symbol into the text at the caret, because the
 	 * chip is the only place its exact spelling is already known.
 	 *
-	 * One recognizer serves both. Which action a hold reaches is the surface's
-	 * business, but *what counts as a hold* — and the flag that stops the trailing
-	 * click from also cycling — must not differ between two chips that look
-	 * identical.
+	 * The recognizer lives in the chip rather than here. Which action a hold
+	 * reaches is the surface's business, but *what counts as a hold* — and the
+	 * flag that stops the trailing click from also cycling — must not differ
+	 * between two chips that look identical, and a peek card's drill chips look
+	 * exactly like these.
 	 *
 	 * That a tap here rewrites the graph is deliberate and was not always true.
 	 * The cycle is reversible in at most two taps by construction, which is what
@@ -28,7 +29,6 @@
 	import { APP_CONFIG } from '$lib/appConfig';
 	import type { QuantitySymbol } from '../MathText/lib/mathSymbols';
 	import QuantityChip from './QuantityChip.svelte';
-	import { beginChipPress, isChipLongPress, trackChipPress, type ChipPress } from './lib/chipPress';
 	import type { DesignationChip, DesignationView } from './lib/quantityDesignations';
 	import type { PeekDirection } from './lib/peekCascade';
 
@@ -96,15 +96,6 @@
 
 	/** The subtree the columns live in, for the focus scan and its activeElement guard. */
 	let section = $state<HTMLElement | null>(null);
-	/** The press in flight, or null between gestures. */
-	let press: ChipPress | null = null;
-	let peekTimer: ReturnType<typeof setTimeout> | null = null;
-	/**
-	 * The chip whose trailing click must be swallowed because its hold already
-	 * answered. Only the click clears it — clearing it in `pointerup` is the
-	 * classic bug, since the click has not happened yet when the pointer lifts.
-	 */
-	let suppressClickForKey: string | null = null;
 	/** The quantity a cycle just moved, to be refocused once its column re-renders. */
 	let refocusKey = $state<string | null>(null);
 
@@ -150,17 +141,11 @@
 	}
 
 	/**
-	 * A click on a chip. Deliberately not `pointerup`: the whole point of the
-	 * suppression below is that a real DOM click still arrives after a hold, and
-	 * the only place to swallow it is where it lands.
+	 * A tap on a chip. The chip itself swallows the click that trails a hold, so
+	 * anything arriving here is a real tap.
 	 */
 	function activate(chip: DesignationChip) {
 		const key = chip.symbol.key;
-		if (suppressClickForKey === key) {
-			suppressClickForKey = null;
-			return;
-		}
-		suppressClickForKey = null;
 		if (onCycle === undefined) return;
 		// Cycling can move the chip between the two `{#each}` blocks, which destroys
 		// and recreates it — so focus has to be put back by key. Whether it was in
@@ -178,8 +163,8 @@
 
 	/**
 	 * The secondary action for this surface: read where a quantity is defined, or
-	 * write it into the text. Every path — hold, right-click, Shift+Enter — comes
-	 * through here so the three cannot drift apart.
+	 * write it into the text. Which gesture reached it is the chip's business; all
+	 * this decides is what the answer is.
 	 */
 	function performSecondary(chip: DesignationChip, anchor: HTMLElement, direction: PeekDirection) {
 		if (canPeek) {
@@ -187,94 +172,6 @@
 			return;
 		}
 		if (canInsert) onInsert?.(chip.symbol);
-	}
-
-	function beginSecondaryPress(
-		chip: DesignationChip,
-		event: PointerEvent,
-		direction: PeekDirection
-	) {
-		if (!hasSecondaryAction) return;
-		// A fresh press ends whatever came before it, whichever button it is on:
-		// the click a previous hold was suppressing has either arrived or was lost
-		// with a pointer that wandered off the chip before lifting, and carrying
-		// the flag into the next gesture is how a later press silently does
-		// nothing. Cleared before the button check for exactly that reason — a
-		// right-click's own pointerdown has to clear it too.
-		endSecondaryPress();
-		suppressClickForKey = null;
-		// Secondary buttons have their own meaning, and `contextmenu` covers the
-		// right one; a hold is the primary button held down.
-		if (event.button !== 0) return;
-		// `currentTarget` during dispatch is the chip this handler is bound to; TS
-		// only knows it as an EventTarget.
-		const anchor = event.currentTarget as HTMLElement;
-		const key = chip.symbol.key;
-		press = beginChipPress(key, { x: event.clientX, y: event.clientY }, performance.now());
-		peekTimer = setTimeout(() => {
-			peekTimer = null;
-			if (!isChipLongPress(press, performance.now(), { key })) return;
-			press = null;
-			// Set before the callback: answering can move focus — opening a card, or
-			// putting the caret in the field just written to — and the trailing click
-			// is still on its way regardless.
-			suppressClickForKey = key;
-			performSecondary(chip, anchor, direction);
-		}, holdMs);
-	}
-
-	function trackSecondaryPress(event: PointerEvent) {
-		if (press === null) return;
-		press = trackChipPress(press, { x: event.clientX, y: event.clientY });
-	}
-
-	/**
-	 * The gesture is over — by a lift, a cancel, a fresh press, or the component
-	 * going away — so the timer is. The suppression flag deliberately survives:
-	 * the click it exists to swallow has not happened yet.
-	 */
-	function endSecondaryPress() {
-		if (peekTimer !== null) clearTimeout(peekTimer);
-		peekTimer = null;
-		press = null;
-	}
-
-	function secondaryFromContextMenu(
-		chip: DesignationChip,
-		event: MouseEvent,
-		direction: PeekDirection
-	) {
-		if (!hasSecondaryAction) return;
-		// The focus overlay is a sibling of the stage with no pointer handlers, so
-		// nothing else is going to stop the browser's own menu covering the answer.
-		event.preventDefault();
-		// Android synthesizes a contextmenu from a touch long-press. The hold has
-		// already answered — opening a card, or writing the symbol — and answering
-		// twice would toggle the card shut or insert the symbol a second time.
-		// Scoped to this chip's own key: a suppression belonging to some other chip
-		// says nothing about this one, and reading it as "a hold just answered" made
-		// one stale flag silently swallow the right-click on every chip.
-		if (suppressClickForKey === chip.symbol.key) return;
-		endSecondaryPress();
-		performSecondary(chip, event.currentTarget as HTMLElement, direction);
-	}
-
-	/**
-	 * Shift+Enter does what a hold does. Plain Enter cycles, as a click does.
-	 * Nothing is bound to the ContextMenu key on purpose: browsers that have one
-	 * fire a real `contextmenu` on the focused element, which is already handled,
-	 * and handling both would answer twice.
-	 */
-	function secondaryFromKeyboard(
-		chip: DesignationChip,
-		event: KeyboardEvent,
-		direction: PeekDirection
-	) {
-		if (!hasSecondaryAction) return;
-		if (event.key !== 'Enter' || !event.shiftKey) return;
-		// Or the browser activates the button as well, and the chip answers and cycles.
-		event.preventDefault();
-		performSecondary(chip, event.currentTarget as HTMLElement, direction);
 	}
 
 	/**
@@ -300,8 +197,6 @@
 			return;
 		}
 	});
-
-	$effect(() => () => endSecondaryPress());
 
 	/** How this column labels a chip: what it is, and what its gestures would do. */
 	function chipAttributes(chip: DesignationChip): Record<string, string | undefined> {
@@ -331,19 +226,10 @@
 					peeking={mode === 'view' && peekKeys.has(chip.symbol.key)}
 					interactive={chipsAreInteractive}
 					attributes={chipAttributes(chip)}
+					{holdMs}
 					onclick={() => activate(chip)}
-					oncontextmenu={hasSecondaryAction
-						? (event) => secondaryFromContextMenu(chip, event, direction)
-						: undefined}
-					onpointerdown={hasSecondaryAction
-						? (event) => beginSecondaryPress(chip, event, direction)
-						: undefined}
-					onpointermove={hasSecondaryAction ? trackSecondaryPress : undefined}
-					onpointerup={hasSecondaryAction ? endSecondaryPress : undefined}
-					onpointercancel={hasSecondaryAction ? endSecondaryPress : undefined}
-					onpointerleave={hasSecondaryAction ? endSecondaryPress : undefined}
-					onkeydown={hasSecondaryAction
-						? (event) => secondaryFromKeyboard(chip, event, direction)
+					onsecondary={hasSecondaryAction
+						? (anchor) => performSecondary(chip, anchor, direction)
 						: undefined}
 				/>
 			</li>
