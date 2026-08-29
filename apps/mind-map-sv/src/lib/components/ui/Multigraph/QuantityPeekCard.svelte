@@ -538,11 +538,13 @@
 	}
 
 	.quantity-peek.root {
-		position: absolute;
-		top: calc(100% + 0.35rem);
-		left: 0;
-		right: 0;
-		z-index: 5;
+		/*
+		 * In flow, not floating over the section. It used to be one card absolutely
+		 * positioned below the chips; now there is a card per quantity in a column
+		 * per direction, and an absolute card would stack every one of them at the
+		 * same spot while its column collapsed to nothing.
+		 */
+		position: relative;
 		/* Right padding keeps the rows clear of the corner dismiss, which is now a
 		   full-width control rather than a bare glyph. */
 		padding: 0.5rem 2.75rem 0.5rem 0.75rem;
