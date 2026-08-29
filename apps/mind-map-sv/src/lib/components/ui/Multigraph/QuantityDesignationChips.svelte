@@ -142,6 +142,14 @@
 
 	function beginPeekPress(chip: DesignationChip, event: PointerEvent) {
 		if (!canPeek) return;
+		// A fresh press ends whatever came before it, whichever button it is on:
+		// the click a previous hold was suppressing has either arrived or was lost
+		// with a pointer that wandered off the chip before lifting, and carrying
+		// the flag into the next gesture is how a later press silently does
+		// nothing. Cleared before the button check for exactly that reason — a
+		// right-click's own pointerdown has to clear it too.
+		endPeekPress();
+		suppressClickForKey = null;
 		// Secondary buttons have their own meaning, and `contextmenu` covers the
 		// right one; a hold is the primary button held down.
 		if (event.button !== 0) return;
@@ -149,8 +157,6 @@
 		// only knows it as an EventTarget.
 		const anchor = event.currentTarget as HTMLElement;
 		const key = chip.symbol.key;
-		endPeekPress();
-		suppressClickForKey = null;
 		press = beginChipPress(key, { x: event.clientX, y: event.clientY }, performance.now());
 		peekTimer = setTimeout(() => {
 			peekTimer = null;
@@ -186,8 +192,11 @@
 		event.preventDefault();
 		if (!canPeek) return;
 		// Android synthesizes a contextmenu from a touch long-press. The hold has
-		// already opened the card, and answering twice would toggle it shut.
-		if (suppressClickForKey !== null) return;
+		// already opened the card, and answering twice would toggle it shut. Scoped
+		// to this chip's own key: a suppression belonging to some other chip says
+		// nothing about this one, and reading it as "a hold just answered" made one
+		// stale flag silently swallow the right-click on every chip.
+		if (suppressClickForKey === chip.symbol.key) return;
 		endPeekPress();
 		onPeek?.(chip.symbol.key, event.currentTarget as HTMLElement);
 	}

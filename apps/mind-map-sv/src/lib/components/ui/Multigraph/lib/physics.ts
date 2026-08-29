@@ -250,7 +250,11 @@ export function relaxEdgeDistancesStep(
 		const dy = target.y - source.y;
 		const distance = Math.hypot(dx, dy);
 		const gap = distance - sourceRadius - targetRadius;
-		const edgeStrength = springStrength * springFactorOf(edge);
+		// Clamped like `springStrength` itself, and for the same reason: a step
+		// larger than the whole gap overshoots the target and oscillates instead of
+		// settling, so a factor above 1 must not put the product back past the cap
+		// the base strength was clamped to.
+		const edgeStrength = clamp(springStrength * springFactorOf(edge), 0, 1);
 		const adjustment =
 			gap > maxGap
 				? (gap - maxGap) * edgeStrength
