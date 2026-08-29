@@ -43,23 +43,119 @@ export interface AppliedInsertion {
 }
 
 /**
- * Braces around every subscript, not just multi-character ones.
+ * The command each symbol character is written as, keyed by what the engine
+ * prints for it.
  *
- * `v_0` and `v_{0}` render identically, so the choice is free at the point of
- * writing and only one of them survives an author later extending the subscript
- * in place. Writing the braced form means `v_{0}` becomes `v_{01}` by typing one
- * character, where `v_0` would have become `v_01` — a different quantity.
+ * Derived by rendering every command through the real engine and recording the
+ * character it produced, rather than written from memory — the `var` pairs are
+ * exactly where memory fails. `\epsilon` is U+03F5 while `\varepsilon` is U+03B5;
+ * `\phi` is U+03D5 while `\varphi` is U+03C6. Getting either backwards would emit
+ * source naming a different quantity than the chip did.
+ */
+const LATEX_COMMAND_BY_CHARACTER: ReadonlyMap<string, string> = new Map([
+	['α', 'alpha'],
+	['β', 'beta'],
+	['γ', 'gamma'],
+	['δ', 'delta'],
+	['ϵ', 'epsilon'],
+	['ε', 'varepsilon'],
+	['ζ', 'zeta'],
+	['η', 'eta'],
+	['θ', 'theta'],
+	['ϑ', 'vartheta'],
+	['ι', 'iota'],
+	['κ', 'kappa'],
+	['λ', 'lambda'],
+	['μ', 'mu'],
+	['ν', 'nu'],
+	['ξ', 'xi'],
+	['π', 'pi'],
+	['ϖ', 'varpi'],
+	['ρ', 'rho'],
+	['ϱ', 'varrho'],
+	['σ', 'sigma'],
+	['ς', 'varsigma'],
+	['τ', 'tau'],
+	['υ', 'upsilon'],
+	['ϕ', 'phi'],
+	['φ', 'varphi'],
+	['χ', 'chi'],
+	['ψ', 'psi'],
+	['ω', 'omega'],
+	['Γ', 'Gamma'],
+	['Δ', 'Delta'],
+	['Θ', 'Theta'],
+	['Λ', 'Lambda'],
+	['Ξ', 'Xi'],
+	['Π', 'Pi'],
+	['Σ', 'Sigma'],
+	['Υ', 'Upsilon'],
+	['Φ', 'Phi'],
+	['Ψ', 'Psi'],
+	['Ω', 'Omega'],
+	['ℓ', 'ell'],
+	['ℏ', 'hbar'],
+	['ı', 'imath'],
+	['ȷ', 'jmath'],
+	['℘', 'wp'],
+	['ℜ', 'Re'],
+	['ℑ', 'Im'],
+	['ℵ', 'aleph'],
+	['∞', 'infty'],
+	['∂', 'partial']
+]);
+
+/**
+ * The same text with every character that has a command written as one.
+ *
+ * A command inside a longer run is braced, because `\alpha x` needs the space
+ * that `{\alpha}x` does not, and `\alphax` is a different — undefined — command.
+ * A run that is exactly one command needs neither.
+ */
+function toCommandForm(text: string): string {
+	const characters = [...text];
+	const alone = characters.length === 1;
+	return characters
+		.map((character) => {
+			const command = LATEX_COMMAND_BY_CHARACTER.get(character);
+			if (command === undefined) return character;
+			return alone ? `\\${command}` : `{\\${command}}`;
+		})
+		.join('');
+}
+
+/**
+ * The spellings to try, best first.
+ *
+ * The command form leads because that is what an author types and reads back:
+ * `\Delta` survives being retyped, searched for, and pasted between editors in a
+ * way a bare `Δ` does not, and a keyboard that cannot produce the character can
+ * still produce the command. The literal character remains the fallback, so a
+ * symbol with no command is unaffected.
+ *
+ * Braces around every subscript, not just multi-character ones. `v_0` and `v_{0}`
+ * render identically, so the choice is free at the point of writing and only one
+ * of them survives an author later extending the subscript in place: `v_{0}`
+ * becomes `v_{01}` by typing one character, where `v_0` would have become `v_01`
+ * — a different quantity.
  */
 function candidateSources(symbol: QuantitySymbol): string[] {
-	const bare = symbol.subscript === null ? symbol.base : `${symbol.base}_{${symbol.subscript}}`;
-	// `\mathrm` is the retry, not the default: it is what recovers a base the
+	const withSubscript = (base: string, subscript: string | null) =>
+		subscript === null ? base : `${base}_{${subscript}}`;
+
+	const commanded = withSubscript(
+		toCommandForm(symbol.base),
+		symbol.subscript === null ? null : toCommandForm(symbol.subscript)
+	);
+	const literal = withSubscript(symbol.base, symbol.subscript);
+	// `\mathrm` is the last retry, not the default: it is what recovers a base the
 	// engine printed as several characters, and wrapping a one-character base in
 	// it would add upright styling the author never asked for.
-	const upright =
-		symbol.subscript === null
-			? `\\mathrm{${symbol.base}}`
-			: `\\mathrm{${symbol.base}}_{${symbol.subscript}}`;
-	return [bare, upright];
+	const upright = withSubscript(`\\mathrm{${symbol.base}}`, symbol.subscript);
+
+	// Deduped because an ASCII symbol's command form is just its literal form, and
+	// rendering the same candidate twice to compare it twice is waste.
+	return [...new Set([commanded, literal, upright])];
 }
 
 /** The symbols one expression names, read the same way the chips were. */

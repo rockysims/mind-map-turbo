@@ -32,14 +32,38 @@ describe('serializeSymbol', () => {
 
 	it('braces every subscript, so extending one in place stays one subscript', () => {
 		expect(serializeSymbol(symbolFor('v', '0'))).toBe('v_{0}');
-		expect(serializeSymbol(symbolFor('θ', 'max'))).toBe('θ_{max}');
 	});
 
-	it('writes a Unicode identifier as itself rather than as a command', () => {
-		// The chip's base is what the engine printed, and the engine reads it back.
-		expect(serializeSymbol(symbolFor('α', null))).toBe('α');
-		expect(serializeSymbol(symbolFor('ℓ', null))).toBe('ℓ');
-		expect(serializeSymbol(symbolFor('ℏ', null))).toBe('ℏ');
+	it('writes a symbol as its command rather than as a raw character', () => {
+		// What an author types and reads back. A bare `Δ` needs a keyboard that can
+		// produce it, and survives copying between editors less well.
+		expect(serializeSymbol(symbolFor('α', null))).toBe('\\alpha');
+		expect(serializeSymbol(symbolFor('Δ', null))).toBe('\\Delta');
+		expect(serializeSymbol(symbolFor('ℓ', null))).toBe('\\ell');
+		expect(serializeSymbol(symbolFor('ℏ', null))).toBe('\\hbar');
+	});
+
+	it('keeps the var pairs apart, which is where a remembered map goes wrong', () => {
+		// U+03F5 and U+03B5 are different characters and different quantities.
+		expect(serializeSymbol(symbolFor('ϵ', null))).toBe('\\epsilon');
+		expect(serializeSymbol(symbolFor('ε', null))).toBe('\\varepsilon');
+		expect(serializeSymbol(symbolFor('ϕ', null))).toBe('\\phi');
+		expect(serializeSymbol(symbolFor('φ', null))).toBe('\\varphi');
+	});
+
+	it('writes a command in the base and in the subscript', () => {
+		expect(serializeSymbol(symbolFor('θ', 'max'))).toBe('\\theta_{max}');
+		expect(serializeSymbol(symbolFor('α', 'β'))).toBe('\\alpha_{\\beta}');
+		expect(serializeSymbol(symbolFor('v', 'θ'))).toBe('v_{\\theta}');
+	});
+
+	it('braces a command sharing a subscript with other characters', () => {
+		// `\alpha x` would need the space that `{\alpha}x` does not, and `\alphax`
+		// is a different, undefined command.
+		expect(serializeSymbol(symbolFor('v', 'αx'))).toBe('v_{{\\alpha}x}');
+	});
+
+	it('leaves a character with no command as itself', () => {
 		// A bold identifier is a single astral-plane character, not a command.
 		expect(serializeSymbol(symbolFor('𝐯', null))).toBe('𝐯');
 	});
@@ -68,7 +92,14 @@ describe('serializeSymbol', () => {
 			symbolFor('v', null),
 			symbolFor('v', '0'),
 			symbolFor('α', null),
+			symbolFor('ϵ', null),
+			symbolFor('ε', null),
+			symbolFor('ϕ', null),
+			symbolFor('φ', null),
+			symbolFor('Δ', null),
 			symbolFor('θ', 'max'),
+			symbolFor('α', 'β'),
+			symbolFor('v', 'αx'),
 			symbolFor('𝐯', null),
 			symbolFor('ℓ', null),
 			symbolFor('ℏ', null),

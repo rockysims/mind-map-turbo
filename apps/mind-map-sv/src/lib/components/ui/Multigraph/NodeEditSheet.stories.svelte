@@ -735,3 +735,28 @@
 		expect(roleOf(canvasElement, 'w')).toBe('output');
 	}}
 />
+
+<Story
+	name="WritesASymbolAsItsCommandRatherThanARawCharacter"
+	play={async ({ canvasElement, args }) => {
+		const canvas = within(canvasElement);
+		// Written by the author as commands; the chips show the glyphs.
+		typeDescription(canvasElement, 'Tolerance $$\\epsilon = \\Delta x$$ here.');
+		await settle();
+
+		await caretAfter(canvasElement, 'title', 'Kinematics');
+		await holdChip(chip(canvasElement, '\u03f5'));
+
+		// The command, not the glyph: what an author types, searches for, and can
+		// still produce on a keyboard that has no Greek on it.
+		expect(fieldOf(canvasElement, 'title').value).toBe('Kinematics$\\epsilon$');
+
+		await holdChip(chip(canvasElement, '\u0394'));
+		expect(fieldOf(canvasElement, 'title').value).toBe('Kinematics$\\epsilon$$\\Delta$');
+
+		// And it is the source that gets saved, not the rendered character.
+		canvas.getByRole('button', { name: 'Save' }).click();
+		const saveSpy = args.onSave as unknown as SaveSpy;
+		expect(saveSpy.mock.calls.at(-1)?.[0].title).toBe('Kinematics$\\epsilon$$\\Delta$');
+	}}
+/>
