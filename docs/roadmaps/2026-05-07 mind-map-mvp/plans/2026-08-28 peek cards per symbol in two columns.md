@@ -5,7 +5,7 @@
 **Milestone:** none — contained follow-up polish on
 [milestone 09](../milestones/09-variable-dataflow-layer.md) and
 [milestone 11](../milestones/11-unified-hop-model-for-derived-edges.md)
-**Status:** draft
+**Status:** done
 **Total estimated effort:** M
 
 ## Summary
@@ -332,3 +332,36 @@ dismissal rules only make sense once a card knows its direction.
 - 2026-08-28: `consumerNodeIds` is already on `QuantityIndexEntry`, so the
   downstream card needs no index change. Its unconfirmed mirror is not, and is
   the reason confirming a consumer is out of scope.
+- 2026-08-29: Executed. The manual smoke earned its place in the plan twice.
+
+  **The half-width question is answered: the columns fit.** A definition as
+  awkward as `g = \frac{G M_{earth}}{r^2} + \delta_{tidal}` renders complete in
+  a column at a 1280px viewport, and full width when the layout stacks below the
+  breakpoint. No horizontal scroll and no reduced indent were needed, so the
+  contingencies the risk section listed go unused.
+
+  **And it caught what the stories could not.** The root card was absolutely
+  positioned below the chips — correct for one card, wrong the moment there were
+  several: every card landed at the same offset, stacked over the others, while
+  its column collapsed to zero height. Two cards were in the DOM, in the right
+  columns, in the right order, with the right directions, and one was visible.
+  Every story passed throughout, because they assert structure and order rather
+  than geometry.
+
+- 2026-08-29: The first draft of the multi-card stories was vacuous and passed
+  against the unfixed guard. They opened cards with a bare `contextmenu`, and the
+  dismissal listener is on `pointerdown`, so the guard under test never ran.
+  Caught by narrowing the guard back and finding the stories still green. With
+  the full right-click they fail as they should: three right-clicks leave one
+  card where three were asked for, which is the two-card cap the guard exists to
+  prevent.
+
+- 2026-08-29: Four existing stories asserted the old semantics for an output
+  chip and were adapted. The one covering the reported `$y = 1$` bug now guards
+  it from the other side — the card is asserted to say what uses y and
+  specifically not to claim nothing defines it. The self-confirm offer that
+  fixture also covered has no home on a downstream card, so confirming your own
+  unconfirmed definition from a peek is no longer reachable; tap-to-cycle still
+  does it, and confirming another node's text definition still works from an
+  input card. Restoring it under its own heading is a small follow-up if the loss
+  is felt.
