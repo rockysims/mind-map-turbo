@@ -95,13 +95,11 @@ product and engineering decisions resolved from the current implementation.
   preference that later dragging must not fight. Ineligible drops do not consume
   the opportunity.
 
-- **Which lifecycle resets automatic designation.** **ASK USER:** the current
-  app never shows `NodeEditSheet` inside deep zoom: the sheet opens only from the
-  canvas action menu, and entering focus closes it. Recommended: define the
-  authoring session as one edit-sheet opening and reset on Save, Cancel, or
-  close. If “exit deep zoom” is the required boundary, this plan must also add a
-  deep-zoom edit entry point or lift the guard into `Multigraph`, widening the
-  containment boundary.
+- **Which lifecycle resets automatic designation.** **One edit-sheet opening is
+  one authoring session; Save, Cancel, backdrop/Close, or any other unmount resets
+  every symbol's eligibility.** This is the user's chosen boundary and keeps the
+  guard as local component state instead of coupling it to deep zoom or
+  `Multigraph`.
 
 - **When the graph changes.** **Never during the drag or automatic designation.**
   A successful drop updates the draft title/description and, when eligible, the
@@ -170,14 +168,14 @@ about whether the same symbol happens to appear elsewhere in the node.
 
 ### T02 — Add an editor-local quantity drag protocol
 
-|                |                                                                                                                                                                                                     |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Depends on** | T01                                                                                                                                                                                                 |
-| **Wave**       | 2                                                                                                                                                                                                   |
-| **Agent**      | high-reasoning                                                                                                                                                                                      |
-| **Effort**     | M                                                                                                                                                                                                   |
-| **Files**      | new `Multigraph/lib/quantityDrag.ts` + spec, `QuantityChip.svelte`, `QuantityDesignationChips.svelte`, `NodeEditSheet.svelte`; `Multigraph.svelte` only if the deep-zoom reset boundary is selected |
-| **PR title**   | `feat(editor): drag quantity chips into node text`                                                                                                                                                  |
+|                |                                                                                                                               |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| **Depends on** | T01                                                                                                                           |
+| **Wave**       | 2                                                                                                                             |
+| **Agent**      | high-reasoning                                                                                                                |
+| **Effort**     | M                                                                                                                             |
+| **Files**      | new `Multigraph/lib/quantityDrag.ts` + spec, `QuantityChip.svelte`, `QuantityDesignationChips.svelte`, `NodeEditSheet.svelte` |
+| **PR title**   | `feat(editor): drag quantity chips into node text`                                                                            |
 
 Add a small pure pointer-session reducer in `quantityDrag.ts`: begin with a
 pointer id, symbol, and origin; update with points; become active after the
@@ -208,11 +206,11 @@ View mode retains the current tap/hold/right-click/Shift+Enter contract.
 7. Narrow touch suppression from the whole sheet to draggable edit chips so a
    touch beginning elsewhere can scroll the overflow container vertically.
 
-The automatic-role guard is a `Set` of symbol keys, not saved state. Under the
-recommended edit-sheet-session boundary it stays inside `NodeEditSheet` and a
-manual `cycle` adds the key before changing the draft. If the user chooses the
-deep-zoom boundary, lift only this set/lifecycle signal to `Multigraph`; do not
-move pointer or insertion state with it.
+The automatic-role guard is a `Set` of symbol keys inside `NodeEditSheet`, not
+saved state. A manual `cycle` adds the key before changing the draft. Unmounting
+the sheet discards the set naturally, so Save, Cancel, backdrop/Close, and node
+changes all start a fresh authoring session without a reset callback or wider
+store.
 
 **Acceptance**
 
@@ -229,7 +227,7 @@ move pointer or insertion state with it.
 - Shift+Enter inserts into the remembered field; Enter/Space still cycle.
 - The first eligible insertion of a symbol sets its draft role; after a manual
   cycle or automatic decision, later insertions of that symbol change text only
-  until the selected session boundary resets.
+  until the edit sheet closes and a fresh opening resets the guard.
 - A successful insertion and role hint change only local draft state and keep
   Save/Cancel semantics unchanged.
 - No document-global store or persistent listener is introduced; pointer capture
@@ -237,14 +235,14 @@ move pointer or insertion state with it.
 
 ### T03 — Pin the interaction with browser stories and a real-input smoke test
 
-|                |                                                                                                   |
-| -------------- | ------------------------------------------------------------------------------------------------- |
-| **Depends on** | T02                                                                                               |
-| **Wave**       | 3                                                                                                 |
-| **Agent**      | default workhorse                                                                                 |
-| **Effort**     | M                                                                                                 |
-| **Files**      | `NodeEditSheet.stories.svelte`; possibly `Multigraph.stories.svelte` for a deep-zoom-scoped reset |
-| **PR title**   | `test(editor): cover quantity drag insertion`                                                     |
+|                |                                               |
+| -------------- | --------------------------------------------- |
+| **Depends on** | T02                                           |
+| **Wave**       | 3                                             |
+| **Agent**      | default workhorse                             |
+| **Effort**     | M                                             |
+| **Files**      | `NodeEditSheet.stories.svelte`                |
+| **PR title**   | `test(editor): cover quantity drag insertion` |
 
 Keep the behavior coverage on the edit-sheet surface rather than adding a
 top-level `Multigraph` harness unless pointer capture cannot be exercised there.
@@ -272,8 +270,8 @@ gesture with direct callback calls.
   not role.
 - Story: no/ambiguous/invalid equality changes text without confirming a role or
   consuming the symbol's future eligible inference.
-- Story or top-level integration (depending on the user's lifecycle decision):
-  closing the chosen session resets eligibility.
+- Story: closing and reopening the edit sheet resets eligibility, while closing
+  neither persists nor mutates the discarded draft.
 - Manual browser smoke covers mouse, touch emulation/real touch when available,
   keyboard/assistive secondary action, accessible help text, target highlighting,
   sheet scrolling, and a stale designation becoming current after insertion.
@@ -316,10 +314,6 @@ them would manufacture an interface broader than the feature needs.
   per-symbol one-shot guard, consumed by either inference or manual cycling,
   prevents repeat overrides. Ambiguous equations produce no role and do not
   consume the opportunity.
-- **The requested reset boundary does not match today's component lifecycle.**
-  The edit sheet and deep zoom are mutually exclusive. Resolve the `ASK USER`
-  item before execution; otherwise the implementation would either reset too
-  often or introduce wider session state without an agreed product reason.
 - **Draft re-parsing can reorder or remove a suggestion after insertion.** The
   session carries an immutable symbol value, not a live DOM-node reference, and
   completes before the draft update triggers that re-render.
@@ -339,10 +333,8 @@ them would manufacture an interface broader than the feature needs.
   client/browser, and Storybook projects.
 - `pnpm --filter mind-map-sv test:e2e` passes as a regression gate.
 - The manual real-input smoke in T03 passes.
-- No graph type, persistence module, Stage/ZoomWorld gesture code, or view-mode
-  chip behavior changes. `Multigraph.svelte` remains untouched under the
-  recommended edit-sheet-session boundary and may own only the one-shot guard
-  if the user explicitly chooses the deep-zoom boundary.
+- No graph type, persistence module, `Multigraph.svelte`, Stage/ZoomWorld gesture
+  code, or view-mode chip behavior changes.
 - Plan status is `done`; completed implementation is committed unless the user
   explicitly asks otherwise.
 
@@ -363,3 +355,7 @@ them would manufacture an interface broader than the feature needs.
   found one lifecycle mismatch to resolve before execution: `NodeEditSheet` is
   canvas-only today and entering deep zoom closes it, so “exit deep zoom resets
   it” is not currently an edit-sheet boundary.
+- 2026-08-28: User resolved that mismatch in favor of the contained boundary:
+  one edit-sheet opening is one authoring session, and closing it resets the
+  per-symbol guard. Shift+Enter is confirmed as the keyboard/assistive insertion
+  action.
