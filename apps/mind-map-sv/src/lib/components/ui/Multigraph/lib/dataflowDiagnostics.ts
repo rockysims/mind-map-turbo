@@ -7,10 +7,12 @@
  * — "this node needs a value for `g`" — and reporting one is an invitation to
  * supply it, rather than a complaint about a letter in an equation.
  *
- * The three reference states are deliberately distinct. A quantity whose definer
- * is simply scrolled out of the visible neighborhood is not a mistake, and
- * showing it the same way as a genuinely undefined symbol would train people to
- * ignore both.
+ * The reference states are deliberately distinct, because each one names a
+ * different repair. A quantity whose definer is simply scrolled out of the
+ * visible neighborhood is not a mistake; one that someone has written down but
+ * nobody confirmed needs a tap, not a new node; only a symbol nothing anywhere
+ * states is an invitation to extend the graph. Showing them the same way would
+ * train people to ignore all of them.
  */
 
 import type { QuantitySymbol } from '../../MathText/lib/mathSymbols';
@@ -22,6 +24,12 @@ export type ReferenceState =
 	| 'resolved'
 	/** Defined somewhere, but every definer is outside the visible neighborhood. */
 	| 'out-of-view'
+	/**
+	 * Written down, but no node confirmed it as an output. Not a missing
+	 * definition — a missing confirmation, and the repair is one tap on the node
+	 * that already says it rather than a new node saying it again.
+	 */
+	| 'unconfirmed'
 	/** Defined by no node anywhere. An invitation to extend the graph. */
 	| 'unresolved';
 
@@ -30,8 +38,13 @@ export interface ReferenceDiagnostic {
 	nodeId: string;
 	symbol: QuantitySymbol;
 	state: ReferenceState;
-	/** Nodes defining this quantity. Empty exactly when unresolved. */
+	/** Nodes defining this quantity. Empty exactly when unresolved or unconfirmed. */
 	definerNodeIds: string[];
+	/**
+	 * Nodes whose text defines this quantity without having confirmed it. Non-empty
+	 * exactly when the state is `unconfirmed`; they are who the repair points at.
+	 */
+	textDefinerNodeIds: string[];
 }
 
 export interface ConflictDiagnostic {
@@ -71,10 +84,19 @@ export interface DataflowDiagnosticsOptions {
 
 function referenceState(
 	definerNodeIds: readonly string[],
+	textDefinerNodeIds: readonly string[],
 	visibleNodeIds: ReadonlySet<string> | undefined
 ): ReferenceState {
 	if (definerNodeIds.length === 0) {
-		return 'unresolved';
+		// Someone wrote the equation and nobody confirmed it. Reporting that as
+		// "not defined anywhere" is false, and the offer it used to carry — define
+		// it — would produce a second node saying what the first one already says.
+		//
+		// Visibility deliberately does not split this state the way it splits
+		// `resolved`: the repair is a confirmation, which the reader makes from
+		// where they are, so whether the writer is on screen changes nothing about
+		// what to do next.
+		return textDefinerNodeIds.length > 0 ? 'unconfirmed' : 'unresolved';
 	}
 	if (visibleNodeIds === undefined) {
 		return 'resolved';
@@ -222,8 +244,13 @@ export function computeDataflowDiagnostics(
 			references.push({
 				nodeId,
 				symbol: entry.symbol,
-				state: referenceState(entry.definerNodeIds, options.visibleNodeIds),
-				definerNodeIds: [...entry.definerNodeIds]
+				state: referenceState(
+					entry.definerNodeIds,
+					entry.textDefinerNodeIds,
+					options.visibleNodeIds
+				),
+				definerNodeIds: [...entry.definerNodeIds],
+				textDefinerNodeIds: [...entry.textDefinerNodeIds]
 			});
 		}
 	}

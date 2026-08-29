@@ -27,6 +27,9 @@
 
 	const DIAGNOSTIC_TEXT = {
 		unresolved: 'is not defined anywhere',
+		// The related-node buttons finish the sentence by naming who wrote it, so
+		// the copy ends on "by" rather than restating the node names in prose.
+		unconfirmed: 'is defined in text but not confirmed by',
 		'out-of-view': 'is defined outside the visible area',
 		// Both say "differently" rather than "more than once", because agreeing
 		// definitions are not reported at all and the copy should not imply they are.
@@ -47,6 +50,7 @@
 		currentNodeId,
 		onCycleDesignation,
 		onCreateDefiningNode,
+		onConfirmDefiner,
 		onJumpToNode
 	}: {
 		node: NodeData;
@@ -91,6 +95,13 @@
 			quantityKey: string,
 			consumerNodeId?: string
 		) => void;
+		/**
+		 * Designate a quantity as some *other* node's output — what an unconfirmed
+		 * peek row and an unconfirmed diagnostic both offer. The key rather than the
+		 * symbol, matching `onCreateDefiningNode`, so both callers hand over what
+		 * they already hold.
+		 */
+		onConfirmDefiner?: (definerNodeId: string, quantityKey: string) => void;
 		/**
 		 * Leave for another node without pinning it. Every navigation offered here
 		 * goes through this: a surface that reads is not a surface that edits, and
@@ -324,6 +335,7 @@
 						onJumpToNode?.(nodeId);
 					}}
 					{onCreateDefiningNode}
+					{onConfirmDefiner}
 					onClose={closeCascade}
 				/>
 			{/if}
@@ -354,9 +366,23 @@
 										data-reveal-node={relatedId}
 										onclick={() => onJumpToNode?.(relatedId)}>{titleForNodeId(relatedId)}</button
 									>
+									{#if item.state === 'unconfirmed' && onConfirmDefiner}
+										<!-- Beside the node it belongs to, since the reader is choosing
+										     which writer to believe when there is more than one. -->
+										<button
+											type="button"
+											class="confirm"
+											data-confirm-definer={relatedId}
+											aria-label={`Confirm ${titleForNodeId(relatedId)} as where ${item.label} is defined`}
+											onclick={() => onConfirmDefiner(relatedId, item.key)}>Confirm</button
+										>
+									{/if}
 								{/each}
 							</span>
 						{/if}
+						<!-- `unresolved` alone, and no wider: an `unconfirmed` quantity already
+						     has a node stating it, so offering to define it here is the
+						     duplicate-node trap the peek card just closed. -->
 						{#if item.state === 'unresolved' && onCreateDefiningNode}
 							<button
 								type="button"
@@ -462,6 +488,13 @@
 		border-left-color: #f59e0b;
 	}
 
+	/* Informational grey, the same edge a nested peek card takes: nothing is wrong
+	   here, the graph just has not been told yet. The unresolved amber would put
+	   this at the same volume as a quantity nothing anywhere defines. */
+	.quantity-diagnostics li[data-diagnostic-state='unconfirmed'] {
+		border-left-color: #94a3b8;
+	}
+
 	.quantity-diagnostics li[data-diagnostic-state='conflict'],
 	.quantity-diagnostics li[data-diagnostic-state='cycle'] {
 		border-left-color: #ef4444;
@@ -496,6 +529,13 @@
 	.quantity-diagnostics button.create {
 		border-color: #f59e0b;
 		background: #fffbeb;
+	}
+
+	/* The same fill the peek card's confirm takes, since it is the same act. */
+	.quantity-diagnostics button.confirm {
+		border-color: #94a3b8;
+		background: #e2e8f0;
+		color: #0f172a;
 	}
 
 	.image-grid {

@@ -127,6 +127,54 @@ describe('reference states', () => {
 		expect(stateOf(diagnostics, 'h4', 'x')).toBe('resolved');
 	});
 
+	/**
+	 * The in-between state. `use` needs g and `writer` writes it down without
+	 * having confirmed it: reporting that as "not defined anywhere" is false, and
+	 * the offer that came with it produced a second node saying the same thing.
+	 */
+	describe('a quantity written down but not confirmed', () => {
+		const written = [
+			node('use', '$$w = m g$$'),
+			{ id: 'writer', description: '$$g = 9.8$$', tags: [] }
+		];
+
+		it('reads as unconfirmed rather than unresolved', () => {
+			expect(stateOf(diagnose(written), 'use', 'g')).toBe('unconfirmed');
+		});
+
+		it('names the node whose text states it', () => {
+			const reference = referencesForNode(diagnose(written), 'use').find(
+				(candidate) => candidate.symbol.label === 'g'
+			);
+			expect(reference?.textDefinerNodeIds).toEqual(['writer']);
+			// Nobody confirmed the output, so there is still nothing that draws.
+			expect(reference?.definerNodeIds).toEqual([]);
+		});
+
+		it('goes back to unresolved once nothing states it at all', () => {
+			expect(stateOf(diagnose([node('use', '$$w = m g$$')]), 'use', 'g')).toBe('unresolved');
+		});
+
+		it('becomes resolved once the writer confirms the output', () => {
+			const confirmed = [node('use', '$$w = m g$$'), node('writer', '$$g = 9.8$$')];
+			expect(stateOf(diagnose(confirmed), 'use', 'g')).toBe('resolved');
+		});
+
+		// The repair is a confirmation the reader makes from where they are, so
+		// whether the writer happens to be on screen changes nothing about it.
+		it('does not split on visibility the way a resolved reference does', () => {
+			expect(stateOf(diagnose(written, { visibleNodeIds: new Set(['use']) }), 'use', 'g')).toBe(
+				'unconfirmed'
+			);
+		});
+
+		// A conflict needs two confirmed bodies, so it cannot co-occur with this
+		// state — but the reference should still be reported plainly either way.
+		it('reports no conflict, since nobody has claimed anything', () => {
+			expect(diagnose(written).conflicts).toEqual([]);
+		});
+	});
+
 	it('reports nothing for a graph with no math', () => {
 		expect(diagnose([node('a', 'prose')])).toEqual({
 			references: [],

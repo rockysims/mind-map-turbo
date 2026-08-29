@@ -6,14 +6,16 @@
  * node needs or an output it claims — so each one is worth interrupting them
  * about. Symbols the parser merely noticed belong to the chips, not here.
  *
- * Ordered so the actionable states come first: an unresolved quantity is an
- * invitation to extend the graph, an out-of-view one is only a navigation hop,
- * and a conflict is a judgement call the author has to make.
+ * Ordered so the actionable states come first: an unconfirmed quantity is one
+ * tap from resolved, an unresolved one is an invitation to extend the graph, an
+ * out-of-view one is only a navigation hop, and a conflict is a judgement call
+ * the author has to make.
  */
 
 import {
 	referencesForNode,
 	type DataflowDiagnostics,
+	type ReferenceDiagnostic,
 	type ReferenceState
 } from './dataflowDiagnostics';
 
@@ -27,9 +29,11 @@ export interface QuantityDiagnosticItem {
 	label: string;
 	state: QuantityDiagnosticState;
 	/**
-	 * Nodes to reach: the definers for `out-of-view`, the *other* definers for
-	 * `conflict`. Empty for `unresolved` and for `self-conflict`, where in both
-	 * cases there is nowhere else to go — which is the point of each state.
+	 * Nodes to act on: the definers for `out-of-view`, the *other* definers for
+	 * `conflict`, and for `unconfirmed` the nodes whose text already states this
+	 * quantity — the ones a confirmation would point at. Empty for `unresolved`
+	 * and for `self-conflict`, where in both cases there is nowhere else to go,
+	 * which is the point of each state.
 	 */
 	nodeIds: string[];
 }
@@ -41,13 +45,29 @@ export interface NodeDiagnosticsView {
 }
 
 const STATE_ORDER: Record<QuantityDiagnosticState, number> = {
-	unresolved: 0,
-	'out-of-view': 1,
+	// First: the graph already contains the answer and is one tap from saying so,
+	// which is the cheapest repair anything here can offer.
+	unconfirmed: 0,
+	unresolved: 1,
+	'out-of-view': 2,
 	// Before a cross-node conflict: this one is repairable without leaving the
 	// node, whereas reconciling with another node is a judgement about both.
-	'self-conflict': 2,
-	conflict: 3
+	'self-conflict': 3,
+	conflict: 4
 };
+
+/** Which nodes this reference's repair points at, if any. */
+function nodeIdsFor(reference: ReferenceDiagnostic): string[] {
+	if (reference.state === 'out-of-view') {
+		return [...reference.definerNodeIds];
+	}
+	// The nodes that already state this quantity: naming them is what turns
+	// "nothing defines it" into "confirm the one that does".
+	if (reference.state === 'unconfirmed') {
+		return [...reference.textDefinerNodeIds];
+	}
+	return [];
+}
 
 export function nodeDiagnosticsView(
 	diagnostics: DataflowDiagnostics,
@@ -70,7 +90,7 @@ export function nodeDiagnosticsView(
 			key: reference.symbol.key,
 			label: reference.symbol.label,
 			state: reference.state,
-			nodeIds: reference.state === 'out-of-view' ? [...reference.definerNodeIds] : []
+			nodeIds: nodeIdsFor(reference)
 		});
 	}
 
