@@ -66,6 +66,7 @@
 		isRoot = false,
 		titleForNodeId,
 		inputsForNodeId = () => NO_INPUTS,
+		outputsForNodeId = () => NO_INPUTS,
 		quantityEntryFor,
 		currentNodeId,
 		focusRequestPath = null,
@@ -89,8 +90,15 @@
 		/** The root card is the dialog and owns the dismiss; nested cards are groups. */
 		isRoot?: boolean;
 		titleForNodeId: (nodeId: string) => string;
-		/** A definer's own confirmed inputs — the chips its drill line offers. */
+		/** A definer's own confirmed inputs — the chips an upstream drill line offers. */
 		inputsForNodeId?: (nodeId: string) => readonly QuantityDesignation[];
+		/**
+		 * A consumer's own confirmed outputs — the mirror, for a downstream drill
+		 * line. Asking "who uses this?" and then "and what does that node produce?"
+		 * is how a reader follows the flow forward, the same way inputs follow it
+		 * back.
+		 */
+		outputsForNodeId?: (nodeId: string) => readonly QuantityDesignation[];
 		/** The graph-wide record for one quantity, read when a nested card opens. */
 		quantityEntryFor?: (key: string) => QuantityIndexEntry | undefined;
 		/**
@@ -136,6 +144,14 @@
 	let card = $state<HTMLDivElement | null>(null);
 
 	const selfPath = $derived(serializePath(path));
+	/**
+	 * Names the question rather than the quantity. Two cards for one symbol are on
+	 * screen at once when it is confirmed both ways, and "Where v is defined"
+	 * twice would leave a screen reader unable to tell them apart.
+	 */
+	const cardLabel = $derived(
+		cascade.direction === 'downstream' ? `What uses ${label}` : `Where ${label} is defined`
+	);
 	const indentRem = $derived(Math.min(path.length, MAX_INDENT_LEVELS) * INDENT_REM_PER_LEVEL);
 
 	/** One node that defines this quantity, and whether it has said so. */
@@ -151,22 +167,53 @@
 	}
 
 	/**
+	 * Which way this card reads, taken from the cascade rather than from the row:
+	 * a tree that flips halfway leaves a reader unable to say what they are
+	 * looking at three levels down.
+	 */
+	const downstream = $derived(cascade.direction === 'downstream');
+
+	/**
+	 * The nodes that take this quantity as a confirmed input — what a downstream
+	 * card answers. Read straight off the index, which already sorts them.
+	 */
+	const consumerRows = $derived(downstream ? (entry?.consumerNodeIds ?? []) : []);
+
+	/**
+	 * Other nodes that define this quantity, for a downstream card only.
+	 *
+	 * The output card used to answer "who defines this", and that is where a
+	 * reader discovered somebody else defining their quantity differently. Asking
+	 * the downstream question instead would have taken that discovery away, so the
+	 * conflict survives as its own section — empty in the healthy case, and loud
+	 * in exactly the case that is wrong. Never the current node: "other" means
+	 * other, and its own definition is already on screen above the chips.
+	 */
+	const otherDefinerRows = $derived(
+		downstream ? (entry?.definerNodeIds ?? []).filter((nodeId) => nodeId !== currentNodeId) : []
+	);
+
+	/**
 	 * Confirmed rows first, then the ones only the text claims. The two lists are
 	 * disjoint by construction — the index subtracts the confirmed definers out of
 	 * the text ones — so a node appears at most once and `row.nodeId` is a key.
 	 */
-	const rows = $derived<DefinerRow[]>([
-		...(entry?.definerNodeIds ?? []).map((nodeId) => ({
-			nodeId,
-			confirmed: true,
-			definitions: recordsFor(entry?.definitions ?? [], nodeId)
-		})),
-		...(entry?.textDefinerNodeIds ?? []).map((nodeId) => ({
-			nodeId,
-			confirmed: false,
-			definitions: recordsFor(entry?.textDefinitions ?? [], nodeId)
-		}))
-	]);
+	const rows = $derived<DefinerRow[]>(
+		downstream
+			? []
+			: [
+					...(entry?.definerNodeIds ?? []).map((nodeId) => ({
+						nodeId,
+						confirmed: true,
+						definitions: recordsFor(entry?.definitions ?? [], nodeId)
+					})),
+					...(entry?.textDefinerNodeIds ?? []).map((nodeId) => ({
+						nodeId,
+						confirmed: false,
+						definitions: recordsFor(entry?.textDefinitions ?? [], nodeId)
+					}))
+				]
+	);
 
 	/** One drill chip: the quantity it names, where opening it would land, and its state. */
 	interface DrillChip {
@@ -189,7 +236,10 @@
 		// this runs per row per render.
 		const seen: string[] = [];
 		const chips: DrillChip[] = [];
-		for (const designation of inputsForNodeId(definerNodeId)) {
+		const designations = downstream
+			? outputsForNodeId(definerNodeId)
+			: inputsForNodeId(definerNodeId);
+		for (const designation of designations) {
 			const symbol = symbolFor(designation.base, designation.subscript);
 			if (seen.includes(symbol.key)) continue;
 			seen.push(symbol.key);
@@ -244,8 +294,119 @@
 	});
 </script>
 
+{#snippet drillLine(nodeId: string, drills: DrillChip[])}
+	{#if drills.length > 0}
+		<!--
+			The node's own quantities on the far side of it, in the same visual
+			language as the columns overhead: the reader has already learned that a
+			pill with an italic letter is a quantity worth asking about.
+		-->
+		<div class="drill" data-peek-drill-line={nodeId}>
+			{#each drills as drill (drill.pathKey)}
+				<QuantityChip
+					label={drill.symbol.label}
+					interactive={!drill.loop}
+					peeking={drill.open}
+					marker={drill.loop ? '↺' : undefined}
+					attributes={drillAttributes(drill)}
+					onclick={() => onToggleBranch?.(drill.path)}
+				/>
+			{/each}
+		</div>
+	{/if}
+
+	{#each drills as drill (drill.pathKey)}
+		{#if drill.open}
+			<PeekCard
+				entry={quantityEntryFor?.(drill.symbol.key)}
+				label={drill.symbol.label}
+				quantityKey={drill.symbol.key}
+				path={drill.path}
+				{cascade}
+				{titleForNodeId}
+				{inputsForNodeId}
+				{outputsForNodeId}
+				{quantityEntryFor}
+				{currentNodeId}
+				{focusRequestPath}
+				{onFocusHandled}
+				{onToggleBranch}
+				{onJumpToNode}
+				{onCreateDefiningNode}
+				{onConfirmDefiner}
+			/>
+		{/if}
+	{/each}
+{/snippet}
+
+{#snippet downstreamBody()}
+	{#if consumerRows.length === 0}
+		<!-- No offer to match "Define x": there is no downstream mirror worth a
+		     button, since "add a node that uses this" is not a thing a reader
+		     wants to be prompted into. -->
+		<p class="note">Nothing uses {label} yet.</p>
+	{:else}
+		<ul>
+			{#each consumerRows as consumerId (consumerId)}
+				{@const drills = drillChipsFor(consumerId)}
+				<li data-peek-consumer={consumerId}>
+					<div class="definition-row">
+						<span class="definition">{titleForNodeId(consumerId)}</span>
+						{#if consumerId !== currentNodeId}
+							<button
+								type="button"
+								class="goto"
+								data-peek-goto={consumerId}
+								onclick={() => onJumpToNode?.(consumerId)}
+							>
+								Go to node
+							</button>
+						{/if}
+					</div>
+					{@render drillLine(consumerId, drills)}
+				</li>
+			{/each}
+		</ul>
+	{/if}
+
+	{#if otherDefinerRows.length > 0}
+		<!-- The conflict the output card used to exist for. Absent when nothing
+		     else defines the quantity, which is the ordinary case. -->
+		<section class="also-defined" data-peek-also-defined>
+			<h4>Also defined by</h4>
+			<ul>
+				{#each otherDefinerRows as definerId (definerId)}
+					<li data-peek-definer={definerId} data-peek-definer-state="confirmed">
+						<div class="definition-row">
+							<span class="definition">
+								{#if recordsFor(entry?.definitions ?? [], definerId).length === 0}
+									{titleForNodeId(definerId)}
+								{:else}
+									{#each recordsFor(entry?.definitions ?? [], definerId) as definition (definition.bodyKey)}
+										<MathText text={texOf(definition)} />
+									{/each}
+								{/if}
+							</span>
+							<button
+								type="button"
+								class="goto"
+								data-peek-goto={definerId}
+								onclick={() => onJumpToNode?.(definerId)}
+							>
+								Go to node
+							</button>
+						</div>
+					</li>
+				{/each}
+			</ul>
+		</section>
+	{/if}
+{/snippet}
+
 {#snippet cardBody()}
-	{#if rows.length === 0}
+	{#if downstream}
+		{@render downstreamBody()}
+	{:else if rows.length === 0}
 		<!-- Nothing confirmed AND nothing written down: only here is "define it" the
 		     right offer. Making it when someone has already written the equation is
 		     how a reader ends up with two nodes saying the same thing. -->
@@ -314,47 +475,7 @@
 						{/if}
 					</div>
 
-					{#if drills.length > 0}
-						<!--
-							The definer's own inputs, in the same visual language as the
-							Inputs column overhead: the reader has already learned that a
-							pill with an italic letter is a quantity worth asking about.
-						-->
-						<div class="drill" data-peek-drill-line={definerId}>
-							{#each drills as drill (drill.pathKey)}
-								<QuantityChip
-									label={drill.symbol.label}
-									interactive={!drill.loop}
-									peeking={drill.open}
-									marker={drill.loop ? '↺' : undefined}
-									attributes={drillAttributes(drill)}
-									onclick={() => onToggleBranch?.(drill.path)}
-								/>
-							{/each}
-						</div>
-					{/if}
-
-					{#each drills as drill (drill.pathKey)}
-						{#if drill.open}
-							<PeekCard
-								entry={quantityEntryFor?.(drill.symbol.key)}
-								label={drill.symbol.label}
-								quantityKey={drill.symbol.key}
-								path={drill.path}
-								{cascade}
-								{titleForNodeId}
-								{inputsForNodeId}
-								{quantityEntryFor}
-								{currentNodeId}
-								{focusRequestPath}
-								{onFocusHandled}
-								{onToggleBranch}
-								{onJumpToNode}
-								{onCreateDefiningNode}
-								{onConfirmDefiner}
-							/>
-						{/if}
-					{/each}
+					{@render drillLine(definerId, drills)}
 				</li>
 			{/each}
 		</ul>
@@ -366,10 +487,12 @@
 		bind:this={card}
 		class="quantity-peek root"
 		data-quantity-peek={label}
+		data-peek-cascade={cascade.id}
+		data-peek-direction={cascade.direction}
 		data-peek-path=""
 		data-peek-depth="0"
 		role="dialog"
-		aria-label={`Where ${label} is defined`}
+		aria-label={cardLabel}
 	>
 		<!-- The focus overlay has no scroll container on purpose — wheel input has to
 		     reach the ZoomWorld underneath — and its pan clamp puts below-frame
@@ -392,10 +515,12 @@
 		bind:this={card}
 		class="quantity-peek nested"
 		data-quantity-peek={label}
+		data-peek-cascade={cascade.id}
+		data-peek-direction={cascade.direction}
 		data-peek-path={selfPath}
 		data-peek-depth={path.length}
 		role="group"
-		aria-label={`Where ${label} is defined`}
+		aria-label={cardLabel}
 		style={`margin-left: ${indentRem}rem`}
 	>
 		{@render cardBody()}
