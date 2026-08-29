@@ -106,20 +106,91 @@ const LATEX_COMMAND_BY_CHARACTER: ReadonlyMap<string, string> = new Map([
 ]);
 
 /**
- * The same text with every character that has a command written as one.
+ * The style commands a letter can be dressed in.
  *
- * A command inside a longer run is braced, because `\alpha x` needs the space
- * that `{\alpha}x` does not, and `\alphax` is a different — undefined — command.
- * A run that is exactly one command needs neither.
+ * Order is presentation, not correctness: no two of these produce the same
+ * character, verified across all 52 letters of each, so at most one can ever
+ * match. `\mathrm` is absent because it leaves a letter as itself — there is no
+ * styled character for it to recover.
+ */
+const STYLE_COMMANDS: readonly string[] = [
+	'mathbf',
+	'mathbb',
+	'mathcal',
+	'mathfrak',
+	'mathsf',
+	'mathtt',
+	'mathit'
+];
+
+const ASCII_ALPHANUMERIC = /^[A-Za-z0-9]$/;
+
+/** The spelling chosen for one character, so a repeated chip re-renders nothing. */
+const spellingCache = new Map<string, string>();
+
+/**
+ * The single character this source names, or null if it names anything else.
+ *
+ * Deliberately not `serializeSymbol`'s check: this asks about a character rather
+ * than a quantity, so no stoplist applies — `\pi` is not writable as a chip, but
+ * `π` is still spelled `\pi` when it turns up inside a subscript.
+ */
+function soleCharacterOf(source: string): string | null {
+	const found = symbolsIn(source, { stoplist: [] });
+	if (found.length !== 1 || found[0].subscript !== null) return null;
+	return found[0].base;
+}
+
+/**
+ * How to write one character so an author could have typed it.
+ *
+ * A named command when there is one. Otherwise, for a styled letter — the bold,
+ * blackboard, script, and fraktur alphabets, which live in the astral plane and
+ * are effectively untypeable — the base letter is recovered by compatibility
+ * decomposition and each style is tried until one renders back to exactly this
+ * character. That recovery holds for every letter of every style the engine
+ * supports, so the search is short and never ambiguous.
+ *
+ * Anything else is returned as itself: an ASCII letter needs no help, and a
+ * character with no spelling is better written literally than wrongly.
+ */
+function spellCharacter(character: string): string {
+	const cached = spellingCache.get(character);
+	if (cached !== undefined) return cached;
+
+	const spelling = (() => {
+		const named = LATEX_COMMAND_BY_CHARACTER.get(character);
+		if (named !== undefined) return `\\${named}`;
+
+		const base = character.normalize('NFKD');
+		if (base === character || !ASCII_ALPHANUMERIC.test(base)) return character;
+
+		for (const style of STYLE_COMMANDS) {
+			const candidate = `\\${style}{${base}}`;
+			if (soleCharacterOf(candidate) === character) return candidate;
+		}
+		return character;
+	})();
+
+	spellingCache.set(character, spelling);
+	return spelling;
+}
+
+/**
+ * The same text with every character written the way an author would type it.
+ *
+ * A multi-character spelling inside a longer run is braced, because `\alpha x`
+ * needs the space that `{\alpha}x` does not, and `\alphax` is a different —
+ * undefined — command. A run that is exactly one spelling needs neither.
  */
 function toCommandForm(text: string): string {
 	const characters = [...text];
 	const alone = characters.length === 1;
 	return characters
 		.map((character) => {
-			const command = LATEX_COMMAND_BY_CHARACTER.get(character);
-			if (command === undefined) return character;
-			return alone ? `\\${command}` : `{\\${command}}`;
+			const spelling = spellCharacter(character);
+			if (spelling === character) return character;
+			return alone ? spelling : `{${spelling}}`;
 		})
 		.join('');
 }

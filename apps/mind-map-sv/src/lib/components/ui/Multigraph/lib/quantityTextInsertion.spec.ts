@@ -63,9 +63,24 @@ describe('serializeSymbol', () => {
 		expect(serializeSymbol(symbolFor('v', 'αx'))).toBe('v_{{\\alpha}x}');
 	});
 
-	it('leaves a character with no command as itself', () => {
-		// A bold identifier is a single astral-plane character, not a command.
-		expect(serializeSymbol(symbolFor('𝐯', null))).toBe('𝐯');
+	it('writes a styled letter as its style command', () => {
+		// These live in the astral plane and are effectively untypeable, which is
+		// the whole reason not to leave them in an author's text.
+		expect(serializeSymbol(symbolFor('𝐯', null))).toBe('\\mathbf{v}');
+		expect(serializeSymbol(symbolFor('ℝ', null))).toBe('\\mathbb{R}');
+		expect(serializeSymbol(symbolFor('𝔄', null))).toBe('\\mathfrak{A}');
+		expect(serializeSymbol(symbolFor('𝓋', null))).toBe('\\mathcal{v}');
+		expect(serializeSymbol(symbolFor('𝗏', null))).toBe('\\mathsf{v}');
+		expect(serializeSymbol(symbolFor('𝚟', null))).toBe('\\mathtt{v}');
+	});
+
+	it('writes a styled letter inside a subscript too', () => {
+		expect(serializeSymbol(symbolFor('v', '𝐢'))).toBe('v_{\\mathbf{i}}');
+	});
+
+	it('leaves an ASCII letter alone', () => {
+		expect(serializeSymbol(symbolFor('v', null))).toBe('v');
+		expect(serializeSymbol(symbolFor('v', 'ab'))).toBe('v_{ab}');
 	});
 
 	it('never writes the canonical key, which embeds a NUL', () => {
@@ -101,6 +116,9 @@ describe('serializeSymbol', () => {
 			symbolFor('α', 'β'),
 			symbolFor('v', 'αx'),
 			symbolFor('𝐯', null),
+			symbolFor('ℝ', null),
+			symbolFor('𝔄', null),
+			symbolFor('v', '𝐢'),
 			symbolFor('ℓ', null),
 			symbolFor('ℏ', null),
 			symbolFor('Re', null)
@@ -108,6 +126,30 @@ describe('serializeSymbol', () => {
 			const source = serializeSymbol(symbol);
 			expect(source).not.toBeNull();
 			expect(symbolLabelsOf(`$${source}$`)).toEqual([symbol.label]);
+		}
+	});
+
+	it('writes nothing an author could not have typed', () => {
+		// The point of the whole exercise: whatever lands in a title or description
+		// has to be reachable from an ordinary keyboard. Swept across the styled
+		// alphabets and the named symbols rather than spot-checked, because the
+		// failure mode is one forgotten character, not a wrong design.
+		const styled = ['mathbf', 'mathbb', 'mathcal', 'mathfrak', 'mathsf', 'mathtt', 'mathit']
+			.flatMap((style) => [...'aivRAZ'].map((letter) => `\\${style}{${letter}}`))
+			.concat(['\\alpha', '\\epsilon', '\\varepsilon', '\\Omega', '\\ell', '\\hbar', '\\aleph']);
+
+		for (const source of styled) {
+			const parsed = nodeQuantities({ description: `$${source}$`, tags: [] });
+			const symbol = parsed.references[0];
+			// A stoplisted symbol is not offered as a chip, so it never gets written.
+			if (symbol === undefined) continue;
+
+			const written = serializeSymbol(symbol);
+			expect(written, `no spelling for ${source}`).not.toBeNull();
+			expect(written, `${source} wrote a non-ASCII character`).toMatch(/^[\x20-\x7e]+$/);
+			expect(symbolLabelsOf(`$${written}$`), `${source} did not round-trip`).toEqual([
+				symbol.label
+			]);
 		}
 	});
 
