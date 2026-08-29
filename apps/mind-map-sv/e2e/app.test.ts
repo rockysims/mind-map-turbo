@@ -5,8 +5,10 @@ import { pathToFileURL } from 'url';
 import { expect, test, type Page } from '@playwright/test';
 import { APP_CONFIG } from '../src/lib/appConfig';
 import { DEFAULT_ZOOM_SENSITIVITY } from '../src/lib/components/ui/Multigraph/lib/graphMath';
-
-const CURRENT_SCHEMA_VERSION = 5;
+// Imported, never restated: a second copy of this number goes stale the next
+// time the schema is bumped, and the tests that assert it are the ones that
+// would have caught the bump. It last drifted at 45c4e86 (v5 -> v6).
+import { CURRENT_SCHEMA_VERSION } from '../src/lib/migrations';
 const GRAPH_HTML_PAYLOAD_SCRIPT_ID = 'mind-map-embedded-graph';
 
 const { preInscribeZoneFraction, subFitExitZoneFraction } = APP_CONFIG.multigraph.focus;
