@@ -11,6 +11,25 @@ describe('parseTitleSyntax', () => {
 		});
 	});
 
+	it('leaves a seeded equation title untouched', () => {
+		// The Define flow seeds `$k = $` and hands the author the caret. Nothing in
+		// that string is syntax here — `$` and `=` are plain text, and the trailing
+		// `$` must survive so the author is typing inside the math, not after it.
+		expect(parseTitleSyntax('$k = $')).toEqual({
+			displayTitle: '$k = $',
+			nodeTags: [],
+			edgeTags: [],
+			direction: 'undirected'
+		});
+	});
+
+	it('leaves a subscripted seeded equation title untouched', () => {
+		expect(parseTitleSyntax('$v_0 = $')).toMatchObject({
+			displayTitle: '$v_0 = $',
+			direction: 'undirected'
+		});
+	});
+
 	it('maps > to parent-to-child direction', () => {
 		expect(parseTitleSyntax('> Child title')).toMatchObject({
 			displayTitle: 'Child title',

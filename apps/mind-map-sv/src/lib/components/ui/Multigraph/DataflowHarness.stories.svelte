@@ -490,7 +490,9 @@
 		await waitFor(() =>
 			expect(canvasElement.querySelector('[data-designation-chips="edit"]')).toBeInTheDocument()
 		);
-		const chips = Array.from(canvasElement.querySelectorAll('[data-designation-key]'));
+		const chips = Array.from(
+			canvasElement.querySelectorAll('[data-designation-chips="edit"] [data-designation-key]')
+		);
 		expect(chips.map((chip) => chip.getAttribute('data-designation-key')).sort()).toEqual([
 			'g',
 			'm',

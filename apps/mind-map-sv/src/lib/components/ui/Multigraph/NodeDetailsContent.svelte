@@ -6,7 +6,8 @@
 	import type { NodeDiagnosticsView } from './lib/nodeDiagnosticsView';
 	import type { NodeQuantities } from './lib/nodeQuantities';
 	import type { QuantityIndexEntry } from './lib/quantityIndex';
-	import { designationView } from './lib/quantityDesignations';
+	import type { QuantitySymbol } from '../MathText/lib/mathSymbols';
+	import { designationView, type DesignationChip } from './lib/quantityDesignations';
 	import {
 		closeBranch,
 		isBranchOpen,
@@ -43,6 +44,8 @@
 		quantityEntryFor,
 		inputsForNodeId = () => EMPTY_DESIGNATIONS,
 		titleForNodeId = (nodeId: string) => nodeId,
+		currentNodeId,
+		onCycleDesignation,
 		onCreateDefiningNode,
 		onJumpToNode
 	}: {
@@ -66,6 +69,19 @@
 		 */
 		inputsForNodeId?: (nodeId: string) => readonly QuantityDesignation[];
 		titleForNodeId?: (nodeId: string) => string;
+		/**
+		 * The node these details belong to. A peek row for this node offers no way
+		 * to go to it: the reader is already there, and a button that navigates
+		 * nowhere reads as one that is broken.
+		 */
+		currentNodeId?: string;
+		/**
+		 * Advance one quantity around the assignment cycle — what a tap on a chip
+		 * does here, exactly as it does in the edit sheet. Absent leaves the chips
+		 * answering questions and changing nothing, which is what a surface with no
+		 * graph behind it wants.
+		 */
+		onCycleDesignation?: (symbol: QuantitySymbol, suggestedRole?: 'input' | 'output') => void;
 		/**
 		 * The key rides along with the label so the new node can be seeded with the
 		 * designation that makes it a definer — the label alone is display text.
@@ -108,19 +124,32 @@
 			designations.outputs.length > 0 ||
 			designations.suggestions.length > 0
 	);
+	/**
+	 * Every chip on this surface, whichever column it sits in. A peek belongs to a
+	 * quantity, not to a role — and since a tap now moves a chip between the
+	 * columns, reading only the inputs would lose track of the card the reader
+	 * has open the moment they cycle the chip that opened it.
+	 */
+	const designatedChips = $derived<DesignationChip[]>([
+		...designations.inputs,
+		...designations.outputs,
+		...designations.suggestions
+	]);
 	const peekKey = $derived(cascade?.rootKey ?? null);
 	const peekEntry = $derived(peekKey === null ? undefined : quantityEntryFor?.(peekKey));
 	const peekLabel = $derived(
-		designations.inputs.find((chip) => chip.symbol.key === peekKey)?.symbol.label ?? ''
+		designatedChips.find((chip) => chip.symbol.key === peekKey)?.symbol.label ?? ''
 	);
 
-	// A quantity that stops being an input while its cascade is open has nothing
-	// left to explain, and the node it was read from may have gone with it. Only
-	// the root is watched: a nested chip that disappears already stops rendering,
-	// because the cards walk the definers' live designations.
+	// A quantity that leaves the node entirely while its cascade is open has
+	// nothing left to explain, and the node it was read from may have gone with
+	// it. Changing columns is not leaving: cycling a peeked chip would otherwise
+	// slam shut the card the tap was aimed underneath. Only the root is watched —
+	// a nested chip that disappears already stops rendering, because the cards
+	// walk the definers' live designations.
 	$effect(() => {
 		if (peekKey === null) return;
-		if (designations.inputs.some((chip) => chip.symbol.key === peekKey)) return;
+		if (designatedChips.some((chip) => chip.symbol.key === peekKey)) return;
 		cascade = null;
 		focusRequestPath = null;
 		peekAnchor = null;
@@ -254,12 +283,21 @@
 
 	{#if hasDesignations}
 		<!--
-			Read-only here on purpose: this surface sits over the canvas, where a tap
-			that quietly rewrote the graph would be indistinguishable from a tap that
-			navigated. Assignment lives in the edit sheet; peeking lives here.
+			Tap decides, hold asks. Assignment used to live only in the edit sheet, so
+			that a tap over the canvas could never quietly rewrite the graph; changing
+			a designation from here meant a round trip through a sheet the reader had
+			not asked for. A tap now cycles, as it does in the sheet, and the question
+			the chip used to answer moved to the gesture that means "tell me more":
+			hold, right-click, or Shift+Enter.
 		-->
 		<section class="designation-section" bind:this={peekSection}>
-			<QuantityDesignationChips mode="view" view={designations} onPeek={openPeek} {peekKey} />
+			<QuantityDesignationChips
+				mode="view"
+				view={designations}
+				onCycle={onCycleDesignation}
+				onPeek={openPeek}
+				{peekKey}
+			/>
 			{#if cascade !== null}
 				<!--
 					One instance for the whole cascade, and no remount when the reader asks
@@ -275,6 +313,7 @@
 					{titleForNodeId}
 					{inputsForNodeId}
 					{quantityEntryFor}
+					{currentNodeId}
 					{focusRequestPath}
 					onFocusHandled={() => (focusRequestPath = null)}
 					onToggleBranch={toggleBranchAt}

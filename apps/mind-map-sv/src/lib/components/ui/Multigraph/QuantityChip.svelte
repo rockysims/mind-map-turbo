@@ -13,6 +13,11 @@
 	 * props: the two call sites label their chips for entirely different
 	 * selectors (`data-designation-*` versus `data-peek-drill`), and inventing a
 	 * union of both here would put each surface's vocabulary in the other's way.
+	 *
+	 * The gesture handlers, by contrast, are named props rather than more entries
+	 * in that bag: they are typed events, not identifying strings, and widening
+	 * `attributes` to carry them would mean casting every one of them back out of
+	 * a string map at the call site.
 	 */
 
 	let {
@@ -23,7 +28,14 @@
 		interactive = false,
 		marker,
 		attributes,
-		onclick
+		onclick,
+		oncontextmenu,
+		onpointerdown,
+		onpointerup,
+		onpointercancel,
+		onpointermove,
+		onpointerleave,
+		onkeydown
 	}: {
 		/** Human-readable quantity name, e.g. `v` or `v_0`. */
 		label: string;
@@ -40,6 +52,14 @@
 		/** Whatever identifies this chip to its surface: data attributes, aria, title. */
 		attributes?: Record<string, string | undefined>;
 		onclick?: (event: MouseEvent) => void;
+		/** Right-click. A surface that answers on a hold answers here too. */
+		oncontextmenu?: (event: MouseEvent) => void;
+		onpointerdown?: (event: PointerEvent) => void;
+		onpointerup?: (event: PointerEvent) => void;
+		onpointercancel?: (event: PointerEvent) => void;
+		onpointermove?: (event: PointerEvent) => void;
+		onpointerleave?: (event: PointerEvent) => void;
+		onkeydown?: (event: KeyboardEvent) => void;
 	} = $props();
 </script>
 
@@ -62,6 +82,13 @@
 		class:peeking
 		{...attributes}
 		{onclick}
+		{oncontextmenu}
+		{onpointerdown}
+		{onpointerup}
+		{onpointercancel}
+		{onpointermove}
+		{onpointerleave}
+		{onkeydown}
 	>
 		{@render chipContent()}
 	</button>
@@ -84,6 +111,14 @@
 		color: #0f172a;
 		font: inherit;
 		font-size: 0.9rem;
+		/*
+		 * A hold on a chip is a question, not a text selection: without this, holding
+		 * one on touch starts a selection drag and on desktop paints the label blue.
+		 * `touch-action` is deliberately left alone — wheel and pinch have to keep
+		 * reaching the ZoomWorld underneath, and a scroll canceling the hold is the
+		 * right outcome.
+		 */
+		user-select: none;
 	}
 
 	button.chip {

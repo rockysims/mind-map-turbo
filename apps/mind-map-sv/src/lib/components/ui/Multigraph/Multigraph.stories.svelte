@@ -23,6 +23,7 @@
 		withRandomTagsAndDirections
 	} from './lib/testFixtures';
 	import type { MultigraphData, Point } from '../types/multigraph';
+	import type { QuantityDesignation } from '../types/node';
 	import type { ViewState } from '$lib/migrations';
 	import type { ExitingBuffer } from './lib/elementTransitions';
 	import type { GraphAssetStore, StoredGraphAsset } from '$lib/assets/assetStore';
@@ -687,6 +688,63 @@
 	});
 
 	/**
+	 * `gravity` defines g and `reader`'s equation mentions it. Whether that counts
+	 * as a dataflow edge is exactly the decision a chip in the details view now
+	 * makes, so the two nodes are pinned rather than joined: the only thing that
+	 * can put an edge between them is the tap.
+	 */
+	function cycleInDeepZoom(readerInputs: QuantityDesignation[]) {
+		return makeGraph({
+			nodes: [
+				{
+					id: 'reader',
+					title: 'Weight',
+					description: '$$w = m g$$',
+					inputs: readerInputs,
+					outputs: designations('w')
+				},
+				{ id: 'gravity', title: 'Gravity', description: '$$g = 9.8$$', outputs: designations('g') }
+			],
+			pinned: ['reader', 'gravity'],
+			posByNodeId: {
+				reader: { x: 0, y: 0 },
+				gravity: { x: 400, y: 0 }
+			}
+		});
+	}
+
+	/**
+	 * `reader` needs g, `gravity` defines it and in turn needs h — and nothing
+	 * anywhere defines h. The offer to define it is therefore made two levels down
+	 * a peek cascade, by a card about a quantity the reader never named, on behalf
+	 * of a node the reader is not focused on.
+	 */
+	const DEFINE_FROM_A_NESTED_PEEK = makeGraph({
+		nodes: [
+			{
+				id: 'reader',
+				title: 'Weight',
+				description: '$$w = m g$$',
+				inputs: designations('g'),
+				outputs: designations('w')
+			},
+			{
+				id: 'gravity',
+				title: 'Gravity',
+				description: '$$g = 9.8 h$$',
+				inputs: designations('h'),
+				outputs: designations('g')
+			}
+		],
+		pinned: ['reader'],
+		edges: [['reader', 'gravity']],
+		posByNodeId: {
+			reader: { x: 0, y: 0 },
+			gravity: { x: 400, y: 0 }
+		}
+	});
+
+	/**
 	 * Open one named node's focus overlay through its action menu.
 	 *
 	 * The overzoom gesture is the everyday route and has its own stories; a story
@@ -714,21 +772,24 @@
 		});
 	}
 
-	/** Open the peek card for one confirmed input and follow it to its definer. */
-	async function jumpFromPeek(
-		canvasElement: HTMLElement,
-		quantityKey: string,
-		definerNodeId: string
-	): Promise<void> {
-		const chip = await waitFor(() => {
+	/** One quantity chip in the details view, once the overlay has drawn it. */
+	async function viewChip(canvasElement: HTMLElement, quantityKey: string): Promise<HTMLElement> {
+		return await waitFor(() => {
 			const found = canvasElement.querySelector(
 				`[data-designation-chips="view"] [data-designation-key="${quantityKey}"]`
 			);
 			expect(found).toBeInTheDocument();
 			return found as HTMLElement;
 		});
-		expect(chip).toHaveAttribute('data-designation-role', 'input');
-		chip.click();
+	}
+
+	/** Open the peek card for one quantity and follow it to its definer. */
+	async function jumpFromPeek(
+		canvasElement: HTMLElement,
+		quantityKey: string,
+		definerNodeId: string
+	): Promise<void> {
+		await openPeekCard(canvasElement, quantityKey);
 
 		const goto = await waitFor(() => {
 			const button = canvasElement.querySelector(`[data-peek-goto="${definerNodeId}"]`);
@@ -746,6 +807,71 @@
 			expect(isSettling(canvasElement)).toBe(false);
 		});
 		await waitForLayout();
+	}
+
+	/**
+	 * Open a view chip's peek card and hand back the root card.
+	 *
+	 * Deliberately one place: the gesture that opens a peek is a decision this
+	 * suite makes, and a story about what a card offers should not have to
+	 * re-state it. A tap on a view chip cycles the designation now, so the
+	 * question is asked the way the surface asks it — by right-clicking, the
+	 * desktop half of the hold.
+	 */
+	async function openPeekCard(
+		canvasElement: HTMLElement,
+		quantityKey: string
+	): Promise<HTMLElement> {
+		const chip = await viewChip(canvasElement, quantityKey);
+		const center = getCenter(chip);
+		dispatchContextMenu(chip, center.x, center.y);
+
+		// The root card specifically — nested cards carry the same label attribute.
+		return await waitFor(() => {
+			const card = canvasElement.querySelector('[data-peek-path=""]');
+			expect(card).toBeInTheDocument();
+			return card as HTMLElement;
+		});
+	}
+
+	/**
+	 * Drill one definer's own input and hand back the card it opens.
+	 *
+	 * The chip is found by reading `data-peek-drill` rather than by selector: a
+	 * subscripted key embeds a NUL, which no attribute selector can carry.
+	 */
+	async function drillIntoPeek(
+		card: HTMLElement,
+		definerNodeId: string,
+		quantityKey: string
+	): Promise<HTMLElement> {
+		const row = card.querySelector(`[data-peek-definer="${definerNodeId}"]`);
+		if (!(row instanceof HTMLElement)) throw new Error(`no definer row for ${definerNodeId}`);
+		const chip = Array.from(
+			row.querySelectorAll(':scope > [data-peek-drill-line] [data-peek-drill]')
+		).find((candidate) => candidate.getAttribute('data-peek-drill') === quantityKey);
+		if (!(chip instanceof HTMLElement)) throw new Error(`no drill chip for ${quantityKey}`);
+		const pathKey = chip.getAttribute('data-peek-drill-path') ?? '';
+		chip.click();
+
+		return await waitFor(() => {
+			const nested = card.querySelector(`[data-peek-path="${pathKey}"]`);
+			expect(nested).toBeInTheDocument();
+			return nested as HTMLElement;
+		});
+	}
+
+	/** The inline title input a Define lands the author in, once it opens. */
+	async function openTitleInput(canvasElement: HTMLElement): Promise<HTMLInputElement> {
+		const input = await waitFor(() => {
+			const found = canvasElement.querySelector('.title-input');
+			expect(found).toBeInTheDocument();
+			return found as HTMLInputElement;
+		});
+		await waitFor(() => {
+			expect(document.activeElement).toBe(input);
+		});
+		return input;
 	}
 
 	/** The jump trail as the reader reads it, oldest first. */
@@ -771,9 +897,17 @@
 		return (graph as HTMLElement).dataset.settling === 'true';
 	}
 
-	/** One tap on each ghost chip, which confirms it in the column it is drawn in. */
+	/**
+	 * One tap on each ghost chip, which confirms it in the column it is drawn in.
+	 *
+	 * Scoped to the edit surface: the details view's chips answer to a tap too
+	 * now, and a helper that reached for whichever chip happened to be on screen
+	 * would be confirming designations somewhere the story never opened.
+	 */
 	async function confirmSuggestedChips(canvasElement: HTMLElement): Promise<void> {
-		const suggestions = canvasElement.querySelectorAll('[data-designation-role="suggestion"]');
+		const suggestions = canvasElement.querySelectorAll(
+			'[data-designation-chips="edit"] [data-designation-role="suggestion"]'
+		);
 		expect(suggestions.length).toBeGreaterThan(0);
 		for (const chip of Array.from(suggestions)) {
 			(chip as HTMLElement).click();
@@ -789,7 +923,7 @@
 	async function clearDesignationChips(canvasElement: HTMLElement): Promise<void> {
 		const confirmed = () =>
 			canvasElement.querySelector(
-				'[data-designation-role="input"], [data-designation-role="output"]'
+				'[data-designation-chips="edit"] [data-designation-role="input"], [data-designation-chips="edit"] [data-designation-role="output"]'
 			);
 		for (let taps = 0; taps < 24 && confirmed(); taps += 1) {
 			(confirmed() as HTMLElement).click();
@@ -4831,9 +4965,10 @@
 		}),
 		defaultPrimaryNodeId: 'n0',
 		initialViewState: { panX: 0, panY: 0, scale: APP_CONFIG.multigraph.zoom.maxScale },
-		layoutSettings: { relaxIterations: 0 }
+		layoutSettings: { relaxIterations: 0 },
+		onMultigraphChange: fn()
 	}}
-	play={async ({ canvasElement }: PlayContext) => {
+	play={async ({ canvasElement, args }: PlayContext) => {
 		await waitForLayout();
 		const stage = getStage(canvasElement);
 		const center = getCenter(getCircle(canvasElement, 'n0'));
@@ -4875,12 +5010,20 @@
 			expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
 		});
 
-		await waitFor(() => {
-			const titles = Array.from(canvasElement.querySelectorAll('.node')).map(
-				(node) => (node as HTMLElement).querySelector('.title')?.textContent
-			);
-			expect(titles).toContain(quantity);
-		});
+		// The node does not merely appear — it appears with the cursor in it. The
+		// author asked for a definition of m, so what lands is the beginning of the
+		// equation that defines it, open for editing with the caret in the gap
+		// where the right-hand side goes.
+		const titleInput = await openTitleInput(canvasElement);
+		expect(titleInput.value).toBe(`$${quantity} = $`);
+		const caret = titleInput.value.length - 1;
+		expect(titleInput.selectionStart).toBe(caret);
+		expect(titleInput.selectionEnd).toBe(caret);
+
+		// The equation lives in the title, so the description arrives empty: a
+		// second copy of the same statement is a second place to keep it true.
+		const created = lastChangedGraph(args).nodes.find((node) => node.id !== 'n0');
+		expect(created?.description).toBe('');
 
 		// Asking for the node IS the confirmation that it defines the quantity, so
 		// its arrow is there on arrival. Without the seeded output the repair flow
@@ -5163,6 +5306,186 @@
 		await expectFocusOn(canvasElement, 'reader');
 		await waitFor(() => {
 			expect(canvasElement.querySelector('[data-nav-back]')).not.toBeInTheDocument();
+		});
+	}}
+/>
+
+<Story
+	name="DefineFromDeepZoomLandsInTheEquationTitleReadyToType"
+	args={{
+		multigraphData: DEFINE_FROM_A_NESTED_PEEK,
+		defaultPrimaryNodeId: 'reader',
+		initialViewState: { panX: 0, panY: 0, scale: APP_CONFIG.multigraph.zoom.maxScale },
+		layoutSettings: { relaxIterations: 0 },
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		await enterFocusOn(canvasElement, 'reader');
+
+		// Two levels down: the reader asked what g is, the answer named gravity, and
+		// gravity turns out to need an h that nothing defines.
+		const card = await openPeekCard(canvasElement, 'g');
+		const underH = await drillIntoPeek(card, 'gravity', 'h');
+		expect(underH).toHaveTextContent('Nothing defines h yet.');
+		(underH.querySelector('[data-create-defining-node="h"]') as HTMLElement).click();
+
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
+		});
+
+		// The offer belongs to the card that made it, so what lands is the equation
+		// for h — not for g, the quantity the reader started from two levels up.
+		const titleInput = await openTitleInput(canvasElement);
+		expect(titleInput.value).toBe('$h = $');
+		const caret = titleInput.value.length - 1;
+		expect(titleInput.selectionStart).toBe(caret);
+		expect(titleInput.selectionEnd).toBe(caret);
+
+		const created = lastChangedGraph(args).nodes.find(
+			(node) => node.id !== 'reader' && node.id !== 'gravity'
+		);
+		expect(created?.title).toBe('$h = $');
+		expect(created?.description).toBe('');
+
+		// The way back is to where the reader was, which is the node whose details
+		// were on screen — not `gravity`, the consumer this definition was made for
+		// and a node the reader never opened.
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-nav-back="reader"]')).toBeInTheDocument();
+		});
+	}}
+/>
+
+<Story
+	name="BackAfterDefineReturnsToTheConsumersDetails"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{
+					id: 'n0',
+					title: 'Energy',
+					description: 'Energy is $E = m c^2$.',
+					inputs: designations('m'),
+					outputs: designations('E')
+				}
+			],
+			pinned: ['n0'],
+			posByNodeId: { n0: { x: 0, y: 0 } }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: { panX: 0, panY: 0, scale: APP_CONFIG.multigraph.zoom.maxScale },
+		layoutSettings: { relaxIterations: 0 },
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		await enterFocusOn(canvasElement, 'n0');
+		const atReader = getStageTransform(canvasElement);
+
+		(canvasElement.querySelector('[data-create-defining-node="m"]') as HTMLElement).click();
+
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
+		});
+		await openTitleInput(canvasElement);
+
+		// Defining something takes the reader out of the details and flies the camera
+		// to the new node — so there has to be a way back, and it is the same one a
+		// jump leaves behind.
+		expect(getStageTransform(canvasElement)).not.toEqual(atReader);
+		const back = await waitFor(() => {
+			const button = canvasElement.querySelector('[data-nav-back="n0"]');
+			expect(button).toBeInTheDocument();
+			return button as HTMLElement;
+		});
+
+		back.click();
+		await waitForLayout();
+
+		expect(getStageTransform(canvasElement)).toEqual(atReader);
+		await expectFocusOn(canvasElement, 'n0');
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-nav-back]')).not.toBeInTheDocument();
+		});
+	}}
+/>
+
+<Story
+	name="CyclingAChipInDeepZoomDrawsTheEdge"
+	args={{
+		multigraphData: cycleInDeepZoom([]),
+		defaultPrimaryNodeId: 'reader',
+		layoutSettings: NO_REVEALS,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		await enterFocusOn(canvasElement, 'reader');
+
+		// The parser noticed g; nobody has said it is an input, so nothing is drawn.
+		const ghost = await viewChip(canvasElement, 'g');
+		expect(ghost).toHaveAttribute('data-designation-role', 'suggestion');
+		expect(canvasElement.querySelector('[data-edge-derived="true"]')).not.toBeInTheDocument();
+
+		ghost.click();
+
+		// Confirming a ghost used to mean leaving the node, opening the edit sheet
+		// and saving. One tap on the chip already in front of the reader commits it,
+		// and a designation is what draws a derived edge.
+		await waitFor(() => {
+			const reader = lastChangedGraph(args).nodes.find((node) => node.id === 'reader');
+			expect(reader?.inputs?.map((input) => input.base)).toEqual(['g']);
+		});
+		expect(await viewChip(canvasElement, 'g')).toHaveAttribute('data-designation-role', 'input');
+
+		within(canvasElement).getByRole('button', { name: 'Close node focus' }).click();
+		await waitForLayout();
+		await waitFor(() => {
+			expect(
+				canvasElement.querySelector('[data-edge-derived="true"][data-target-node-id="reader"]')
+			).toBeInTheDocument();
+		});
+	}}
+/>
+
+<Story
+	name="CyclingAChipInDeepZoomOffTakesTheEdgeAway"
+	args={{
+		multigraphData: cycleInDeepZoom(designations('g')),
+		defaultPrimaryNodeId: 'reader',
+		layoutSettings: NO_REVEALS,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		expect(
+			canvasElement.querySelector('[data-edge-derived="true"][data-target-node-id="reader"]')
+		).toBeInTheDocument();
+
+		await enterFocusOn(canvasElement, 'reader');
+
+		// Input, then output, then unassigned: the cycle the edit sheet has always
+		// had, which is what makes committing on every tap safe without an undo —
+		// whatever a stray tap did is at most two taps from where it started.
+		(await viewChip(canvasElement, 'g')).click();
+		await waitFor(async () => {
+			expect(await viewChip(canvasElement, 'g')).toHaveAttribute('data-designation-role', 'output');
+		});
+		(await viewChip(canvasElement, 'g')).click();
+
+		await waitFor(() => {
+			const reader = lastChangedGraph(args).nodes.find((node) => node.id === 'reader');
+			expect(reader?.inputs ?? []).toHaveLength(0);
+			expect(reader?.outputs?.map((output) => output.base)).toEqual(['w']);
+		});
+
+		within(canvasElement).getByRole('button', { name: 'Close node focus' }).click();
+		await waitForLayout();
+		await waitFor(() => {
+			expect(
+				canvasElement.querySelector('[data-edge-derived="true"][data-target-node-id="reader"]')
+			).not.toBeInTheDocument();
 		});
 	}}
 />

@@ -60,6 +60,7 @@
 		titleForNodeId,
 		inputsForNodeId = () => NO_INPUTS,
 		quantityEntryFor,
+		currentNodeId,
 		focusRequestPath = null,
 		onFocusHandled,
 		onToggleBranch,
@@ -84,6 +85,13 @@
 		inputsForNodeId?: (nodeId: string) => readonly QuantityDesignation[];
 		/** The graph-wide record for one quantity, read when a nested card opens. */
 		quantityEntryFor?: (key: string) => QuantityIndexEntry | undefined;
+		/**
+		 * The node the reader is currently in. Its own definer row still shows its
+		 * equation — it is a real answer to "who defines this", and often the most
+		 * interesting one when definers disagree — but offers no "Go to node",
+		 * because there is nowhere for it to go.
+		 */
+		currentNodeId?: string;
 		/** Serialized path of the card that should take focus, or null for none. */
 		focusRequestPath?: string | null;
 		/** Consume the focus request, so a re-render does not refocus. */
@@ -223,14 +231,16 @@
 								{/each}
 							{/if}
 						</span>
-						<button
-							type="button"
-							class="goto"
-							data-peek-goto={definerId}
-							onclick={() => onJumpToNode?.(definerId)}
-						>
-							Go to node
-						</button>
+						{#if definerId !== currentNodeId}
+							<button
+								type="button"
+								class="goto"
+								data-peek-goto={definerId}
+								onclick={() => onJumpToNode?.(definerId)}
+							>
+								Go to node
+							</button>
+						{/if}
 					</div>
 
 					{#if drills.length > 0}
@@ -264,6 +274,7 @@
 								{titleForNodeId}
 								{inputsForNodeId}
 								{quantityEntryFor}
+								{currentNodeId}
 								{focusRequestPath}
 								{onFocusHandled}
 								{onToggleBranch}

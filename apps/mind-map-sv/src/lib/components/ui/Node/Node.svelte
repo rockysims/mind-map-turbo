@@ -21,6 +21,7 @@
 			tags: []
 		},
 		isTitleEditing = false,
+		titleCaretAt,
 		borderSegments = [],
 		spotlightColor,
 		quantityLabels = [],
@@ -29,6 +30,8 @@
 	} = $props<{
 		nodeData: NodeData;
 		isTitleEditing?: boolean;
+		/** Caret offset for the opening title input; omitted means select-all. */
+		titleCaretAt?: number;
 		borderSegments?: TagColorSegment[];
 		spotlightColor?: string;
 		/** Quantities this node defines. The caller decides whether there is room. */
@@ -62,6 +65,7 @@
 		<NodeCompactContent
 			title={nodeData.title}
 			{isTitleEditing}
+			{titleCaretAt}
 			diameterPx={NODE_RADIUS * 2}
 			fontSizePx={NODE_TEXT_FONT_SIZE}
 			{quantityLabels}

@@ -94,7 +94,8 @@ export const APP_CONFIG = {
 			labelMinOnScreenLengthPx: 90, // shortest on-screen edge worth labelling
 			labelMaxVisibleQuantities: 3, // quantities named before collapsing to a count
 			chipMinOnScreenDiameterPx: 180, // on-screen node size below which chips are hidden
-			chipMaxVisibleQuantities: 3 // quantities a compact node names before a count
+			chipMaxVisibleQuantities: 3, // quantities a compact node names before a count
+			chipPeekLongPressMs: 500 // hold on a details chip before its definition peek opens
 		}
 	}
 } as const;
