@@ -534,19 +534,3 @@ needs.
   away. And the mount-time `requestAnimationFrame` focus can steal a caret placed
   within that same frame, which no author can hit but every story can — so the
   story helpers wait a frame before placing one.
-- 2026-08-28: User confirmed undo by hand — two insertions, two undos, both
-  reverted. So the `execCommand` path is the one taken in a real browser and the
-  native undo stack survives, which is the thing the automated suite could not
-  show: headless, the command reports success and does nothing, so the stories
-  exercise the fallback instead.
-
-- 2026-08-28: The serializer now writes commands rather than characters, on a
-  rule broader than the Greek it started with — nothing goes into a title or
-  description that an author could not have typed. Named symbols become
-  `\epsilon`, `\Delta`, `\ell`; styled letters become `\mathbf{v}`,
-  `\mathbb{R}`, `\mathfrak{A}`. The styled case needs no table: compatibility
-  decomposition recovers the ASCII base for all 416 styled letters the engine
-  supports, and no character is produced by two styles, so trying each style and
-  keeping the one that renders back is short and unambiguous. A spec sweeps the
-  styled alphabets and named symbols asserting the output is pure ASCII and
-  round-trips, which is the invariant rather than any particular spelling.

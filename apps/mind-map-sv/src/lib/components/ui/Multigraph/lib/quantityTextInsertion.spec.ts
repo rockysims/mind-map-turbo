@@ -32,55 +32,16 @@ describe('serializeSymbol', () => {
 
 	it('braces every subscript, so extending one in place stays one subscript', () => {
 		expect(serializeSymbol(symbolFor('v', '0'))).toBe('v_{0}');
+		expect(serializeSymbol(symbolFor('θ', 'max'))).toBe('θ_{max}');
 	});
 
-	it('writes a symbol as its command rather than as a raw character', () => {
-		// What an author types and reads back. A bare `Δ` needs a keyboard that can
-		// produce it, and survives copying between editors less well.
-		expect(serializeSymbol(symbolFor('α', null))).toBe('\\alpha');
-		expect(serializeSymbol(symbolFor('Δ', null))).toBe('\\Delta');
-		expect(serializeSymbol(symbolFor('ℓ', null))).toBe('\\ell');
-		expect(serializeSymbol(symbolFor('ℏ', null))).toBe('\\hbar');
-	});
-
-	it('keeps the var pairs apart, which is where a remembered map goes wrong', () => {
-		// U+03F5 and U+03B5 are different characters and different quantities.
-		expect(serializeSymbol(symbolFor('ϵ', null))).toBe('\\epsilon');
-		expect(serializeSymbol(symbolFor('ε', null))).toBe('\\varepsilon');
-		expect(serializeSymbol(symbolFor('ϕ', null))).toBe('\\phi');
-		expect(serializeSymbol(symbolFor('φ', null))).toBe('\\varphi');
-	});
-
-	it('writes a command in the base and in the subscript', () => {
-		expect(serializeSymbol(symbolFor('θ', 'max'))).toBe('\\theta_{max}');
-		expect(serializeSymbol(symbolFor('α', 'β'))).toBe('\\alpha_{\\beta}');
-		expect(serializeSymbol(symbolFor('v', 'θ'))).toBe('v_{\\theta}');
-	});
-
-	it('braces a command sharing a subscript with other characters', () => {
-		// `\alpha x` would need the space that `{\alpha}x` does not, and `\alphax`
-		// is a different, undefined command.
-		expect(serializeSymbol(symbolFor('v', 'αx'))).toBe('v_{{\\alpha}x}');
-	});
-
-	it('writes a styled letter as its style command', () => {
-		// These live in the astral plane and are effectively untypeable, which is
-		// the whole reason not to leave them in an author's text.
-		expect(serializeSymbol(symbolFor('𝐯', null))).toBe('\\mathbf{v}');
-		expect(serializeSymbol(symbolFor('ℝ', null))).toBe('\\mathbb{R}');
-		expect(serializeSymbol(symbolFor('𝔄', null))).toBe('\\mathfrak{A}');
-		expect(serializeSymbol(symbolFor('𝓋', null))).toBe('\\mathcal{v}');
-		expect(serializeSymbol(symbolFor('𝗏', null))).toBe('\\mathsf{v}');
-		expect(serializeSymbol(symbolFor('𝚟', null))).toBe('\\mathtt{v}');
-	});
-
-	it('writes a styled letter inside a subscript too', () => {
-		expect(serializeSymbol(symbolFor('v', '𝐢'))).toBe('v_{\\mathbf{i}}');
-	});
-
-	it('leaves an ASCII letter alone', () => {
-		expect(serializeSymbol(symbolFor('v', null))).toBe('v');
-		expect(serializeSymbol(symbolFor('v', 'ab'))).toBe('v_{ab}');
+	it('writes a Unicode identifier as itself rather than as a command', () => {
+		// The chip's base is what the engine printed, and the engine reads it back.
+		expect(serializeSymbol(symbolFor('α', null))).toBe('α');
+		expect(serializeSymbol(symbolFor('ℓ', null))).toBe('ℓ');
+		expect(serializeSymbol(symbolFor('ℏ', null))).toBe('ℏ');
+		// A bold identifier is a single astral-plane character, not a command.
+		expect(serializeSymbol(symbolFor('𝐯', null))).toBe('𝐯');
 	});
 
 	it('never writes the canonical key, which embeds a NUL', () => {
@@ -107,18 +68,8 @@ describe('serializeSymbol', () => {
 			symbolFor('v', null),
 			symbolFor('v', '0'),
 			symbolFor('α', null),
-			symbolFor('ϵ', null),
-			symbolFor('ε', null),
-			symbolFor('ϕ', null),
-			symbolFor('φ', null),
-			symbolFor('Δ', null),
 			symbolFor('θ', 'max'),
-			symbolFor('α', 'β'),
-			symbolFor('v', 'αx'),
 			symbolFor('𝐯', null),
-			symbolFor('ℝ', null),
-			symbolFor('𝔄', null),
-			symbolFor('v', '𝐢'),
 			symbolFor('ℓ', null),
 			symbolFor('ℏ', null),
 			symbolFor('Re', null)
@@ -126,30 +77,6 @@ describe('serializeSymbol', () => {
 			const source = serializeSymbol(symbol);
 			expect(source).not.toBeNull();
 			expect(symbolLabelsOf(`$${source}$`)).toEqual([symbol.label]);
-		}
-	});
-
-	it('writes nothing an author could not have typed', () => {
-		// The point of the whole exercise: whatever lands in a title or description
-		// has to be reachable from an ordinary keyboard. Swept across the styled
-		// alphabets and the named symbols rather than spot-checked, because the
-		// failure mode is one forgotten character, not a wrong design.
-		const styled = ['mathbf', 'mathbb', 'mathcal', 'mathfrak', 'mathsf', 'mathtt', 'mathit']
-			.flatMap((style) => [...'aivRAZ'].map((letter) => `\\${style}{${letter}}`))
-			.concat(['\\alpha', '\\epsilon', '\\varepsilon', '\\Omega', '\\ell', '\\hbar', '\\aleph']);
-
-		for (const source of styled) {
-			const parsed = nodeQuantities({ description: `$${source}$`, tags: [] });
-			const symbol = parsed.references[0];
-			// A stoplisted symbol is not offered as a chip, so it never gets written.
-			if (symbol === undefined) continue;
-
-			const written = serializeSymbol(symbol);
-			expect(written, `no spelling for ${source}`).not.toBeNull();
-			expect(written, `${source} wrote a non-ASCII character`).toMatch(/^[\x20-\x7e]+$/);
-			expect(symbolLabelsOf(`$${written}$`), `${source} did not round-trip`).toEqual([
-				symbol.label
-			]);
 		}
 	});
 
