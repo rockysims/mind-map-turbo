@@ -127,6 +127,31 @@ describe('physics', () => {
 				expect(pullFor(2)).toBeCloseTo(pullFor(1) * 2, 10);
 			});
 
+			// `edgeSpringStrength` is clamped to 1 because a step larger than the gap
+			// carries the endpoints past the target and oscillates instead of settling.
+			// A factor multiplies that strength, so the product has to respect the same
+			// cap — otherwise one `derivedEdgeSpringFactor` above 1/strength puts the
+			// clamp back where it started.
+			it('never pulls past full strength, however large the factor', () => {
+				// The base strength is 0.25, so a factor of 4 is already the whole
+				// correction and everything above it is the same move.
+				expect(pullFor(8)).toBe(pullFor(4));
+				expect(pullFor(64)).toBe(pullFor(4));
+			});
+
+			it('lands on the target gap at full strength rather than overshooting it', () => {
+				const next = relaxEdgeDistancesStep(
+					positions,
+					radii,
+					[{ sourceNodeId: 'n0', targetNodeId: 'n1', springFactor: 64 }],
+					EDGE_DISTANCE_SETTINGS
+				);
+				expect(gapAmount(next, radii, 'n0', 'n1')).toBeCloseTo(
+					(radii.n0 + radii.n1) * EDGE_DISTANCE_SETTINGS.edgeGapMaxRadiusFactor,
+					10
+				);
+			});
+
 			it('exerts nothing at zero', () => {
 				expect(pullFor(0)).toBe(0);
 			});
