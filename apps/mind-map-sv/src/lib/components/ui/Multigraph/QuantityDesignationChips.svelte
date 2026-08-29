@@ -30,6 +30,10 @@
 	import QuantityChip from './QuantityChip.svelte';
 	import { beginChipPress, isChipLongPress, trackChipPress, type ChipPress } from './lib/chipPress';
 	import type { DesignationChip, DesignationView } from './lib/quantityDesignations';
+	import type { PeekDirection } from './lib/peekCascade';
+
+	/** Shared so a surface with no peek at all allocates nothing per render. */
+	const EMPTY_PEEK_KEYS: ReadonlySet<string> = new Set();
 
 	const PEEK_HOLD_MS = APP_CONFIG.multigraph.dataflow.chipPeekLongPressMs;
 	const INSERT_HOLD_MS = APP_CONFIG.multigraph.dataflow.chipInsertLongPressMs;
@@ -40,18 +44,28 @@
 		onCycle,
 		onPeek,
 		onInsert,
-		peekKey = null
+		peekKeys = EMPTY_PEEK_KEYS
 	}: {
 		mode: 'edit' | 'view';
 		view: DesignationView;
 		/** Advance this quantity around the assignment cycle — what a tap does. */
 		onCycle?: (symbol: QuantitySymbol, suggestedRole?: 'input' | 'output') => void;
-		/** View mode only: show where this quantity is defined, anchored to its chip. */
-		onPeek?: (key: string, anchor: HTMLElement) => void;
+		/**
+		 * View mode only: answer this quantity, anchored to its chip. The direction
+		 * comes from the column the chip sits in rather than from its confirmed
+		 * role — a ghost in the outputs asks the downstream question, and reading
+		 * the role instead would change what the card means at the moment it is
+		 * confirmed, which is the one moment the reader is looking at it.
+		 */
+		onPeek?: (key: string, anchor: HTMLElement, direction: PeekDirection) => void;
 		/** Edit mode only: write this quantity into the text the author is editing. */
 		onInsert?: (symbol: QuantitySymbol) => void;
-		/** The quantity whose peek card is open, so its chip can be marked. */
-		peekKey?: string | null;
+		/**
+		 * Every quantity with a card open, so a chip reads as pressed while any of
+		 * its cards is. A set rather than one key: several are open at once, and a
+		 * quantity confirmed both ways has a card per column.
+		 */
+		peekKeys?: ReadonlySet<string>;
 	} = $props();
 
 	/**
@@ -167,15 +181,19 @@
 	 * write it into the text. Every path — hold, right-click, Shift+Enter — comes
 	 * through here so the three cannot drift apart.
 	 */
-	function performSecondary(chip: DesignationChip, anchor: HTMLElement) {
+	function performSecondary(chip: DesignationChip, anchor: HTMLElement, direction: PeekDirection) {
 		if (canPeek) {
-			onPeek?.(chip.symbol.key, anchor);
+			onPeek?.(chip.symbol.key, anchor, direction);
 			return;
 		}
 		if (canInsert) onInsert?.(chip.symbol);
 	}
 
-	function beginSecondaryPress(chip: DesignationChip, event: PointerEvent) {
+	function beginSecondaryPress(
+		chip: DesignationChip,
+		event: PointerEvent,
+		direction: PeekDirection
+	) {
 		if (!hasSecondaryAction) return;
 		// A fresh press ends whatever came before it, whichever button it is on:
 		// the click a previous hold was suppressing has either arrived or was lost
@@ -201,7 +219,7 @@
 			// putting the caret in the field just written to — and the trailing click
 			// is still on its way regardless.
 			suppressClickForKey = key;
-			performSecondary(chip, anchor);
+			performSecondary(chip, anchor, direction);
 		}, holdMs);
 	}
 
@@ -221,7 +239,11 @@
 		press = null;
 	}
 
-	function secondaryFromContextMenu(chip: DesignationChip, event: MouseEvent) {
+	function secondaryFromContextMenu(
+		chip: DesignationChip,
+		event: MouseEvent,
+		direction: PeekDirection
+	) {
 		if (!hasSecondaryAction) return;
 		// The focus overlay is a sibling of the stage with no pointer handlers, so
 		// nothing else is going to stop the browser's own menu covering the answer.
@@ -234,7 +256,7 @@
 		// one stale flag silently swallow the right-click on every chip.
 		if (suppressClickForKey === chip.symbol.key) return;
 		endSecondaryPress();
-		performSecondary(chip, event.currentTarget as HTMLElement);
+		performSecondary(chip, event.currentTarget as HTMLElement, direction);
 	}
 
 	/**
@@ -243,12 +265,16 @@
 	 * fire a real `contextmenu` on the focused element, which is already handled,
 	 * and handling both would answer twice.
 	 */
-	function secondaryFromKeyboard(chip: DesignationChip, event: KeyboardEvent) {
+	function secondaryFromKeyboard(
+		chip: DesignationChip,
+		event: KeyboardEvent,
+		direction: PeekDirection
+	) {
 		if (!hasSecondaryAction) return;
 		if (event.key !== 'Enter' || !event.shiftKey) return;
 		// Or the browser activates the button as well, and the chip answers and cycles.
 		event.preventDefault();
-		performSecondary(chip, event.currentTarget as HTMLElement);
+		performSecondary(chip, event.currentTarget as HTMLElement, direction);
 	}
 
 	/**
@@ -288,13 +314,13 @@
 			// marked below for styling and tests; the card's own role and label are
 			// what carry the semantics to assistive tech.
 			'data-designation-peeking':
-				mode === 'view' && peekKey === chip.symbol.key ? 'true' : undefined,
+				mode === 'view' && peekKeys.has(chip.symbol.key) ? 'true' : undefined,
 			title: chipTitle(chip)
 		};
 	}
 </script>
 
-{#snippet chipList(chips: DesignationChip[], columnLabel: string)}
+{#snippet chipList(chips: DesignationChip[], columnLabel: string, direction: PeekDirection)}
 	<ul aria-label={columnLabel}>
 		{#each chips as chip (chip.symbol.key)}
 			<li>
@@ -302,21 +328,23 @@
 					label={chip.symbol.label}
 					stale={chip.stale}
 					suggestion={chip.role === 'suggestion'}
-					peeking={mode === 'view' && peekKey === chip.symbol.key}
+					peeking={mode === 'view' && peekKeys.has(chip.symbol.key)}
 					interactive={chipsAreInteractive}
 					attributes={chipAttributes(chip)}
 					onclick={() => activate(chip)}
 					oncontextmenu={hasSecondaryAction
-						? (event) => secondaryFromContextMenu(chip, event)
+						? (event) => secondaryFromContextMenu(chip, event, direction)
 						: undefined}
 					onpointerdown={hasSecondaryAction
-						? (event) => beginSecondaryPress(chip, event)
+						? (event) => beginSecondaryPress(chip, event, direction)
 						: undefined}
 					onpointermove={hasSecondaryAction ? trackSecondaryPress : undefined}
 					onpointerup={hasSecondaryAction ? endSecondaryPress : undefined}
 					onpointercancel={hasSecondaryAction ? endSecondaryPress : undefined}
 					onpointerleave={hasSecondaryAction ? endSecondaryPress : undefined}
-					onkeydown={hasSecondaryAction ? (event) => secondaryFromKeyboard(chip, event) : undefined}
+					onkeydown={hasSecondaryAction
+						? (event) => secondaryFromKeyboard(chip, event, direction)
+						: undefined}
 				/>
 			</li>
 		{/each}
@@ -335,11 +363,11 @@
 	<div class="columns">
 		<div class="column">
 			<h4>Inputs</h4>
-			{@render chipList(inputColumn, 'Input quantities')}
+			{@render chipList(inputColumn, 'Input quantities', 'upstream')}
 		</div>
 		<div class="column">
 			<h4>Outputs</h4>
-			{@render chipList(outputColumn, 'Output quantities')}
+			{@render chipList(outputColumn, 'Output quantities', 'downstream')}
 		</div>
 	</div>
 

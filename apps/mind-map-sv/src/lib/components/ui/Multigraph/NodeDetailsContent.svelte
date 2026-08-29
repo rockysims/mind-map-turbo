@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { SvelteMap } from 'svelte/reactivity';
 	import type { GraphAssetStore } from '$lib/assets/assetStore';
 	import MathText from '../MathText/MathText.svelte';
 	import type { GraphAssetMetadata } from '../types/multigraph';
@@ -9,13 +10,19 @@
 	import type { QuantitySymbol } from '../MathText/lib/mathSymbols';
 	import { designationView, type DesignationChip } from './lib/quantityDesignations';
 	import {
+		cascadesInChipOrder,
 		closeBranch,
+		closeCascadeIn,
+		findCascade,
 		isBranchOpen,
-		openCascade,
+		openCascadeIn,
 		parsePath,
+		replaceCascade,
 		serializePath,
 		toggleBranch,
 		type PeekCascade,
+		type PeekCascades,
+		type PeekDirection,
 		type PeekPath
 	} from './lib/peekCascade';
 	import QuantityDesignationChips from './QuantityDesignationChips.svelte';
@@ -72,6 +79,7 @@
 		quantities = EMPTY_QUANTITIES,
 		quantityEntryFor,
 		inputsForNodeId = () => EMPTY_DESIGNATIONS,
+		outputsForNodeId = () => EMPTY_DESIGNATIONS,
 		titleForNodeId = (nodeId: string) => nodeId,
 		currentNodeId,
 		onCycleDesignation,
@@ -98,6 +106,8 @@
 		 * the node's own array so the cards do no work per graph frame.
 		 */
 		inputsForNodeId?: (nodeId: string) => readonly QuantityDesignation[];
+		/** A consumer's own confirmed outputs — what a downstream drill line offers. */
+		outputsForNodeId?: (nodeId: string) => readonly QuantityDesignation[];
 		titleForNodeId?: (nodeId: string) => string;
 		/**
 		 * The node these details belong to. A peek row for this node offers no way
@@ -144,14 +154,25 @@
 	 * document listener would race — every one of them stopping propagation, and
 	 * the wrong one closing.
 	 */
-	let cascade = $state<PeekCascade | null>(null);
-	/** The chip the cascade belongs to, so dismissing returns focus to it. */
-	let peekAnchor: HTMLElement | null = null;
+	let cascades = $state<PeekCascades>([]);
 	/**
-	 * The card that should take focus, addressed by serialized path. Consumed and
-	 * cleared by whichever card matches, or every later render would refocus it.
+	 * The chip each cascade belongs to, so dismissing returns focus to it. Keyed by
+	 * cascade id rather than held singly: several are open at once, and the one a
+	 * dismissal has to return focus to is the one being dismissed.
 	 */
-	let focusRequestPath = $state<string | null>(null);
+	let peekAnchors = new SvelteMap<number, HTMLElement>();
+	/**
+	 * Ids increase with each open, which is what makes "the newest" answerable
+	 * without a timestamp — and, being integers, what lets a card be found by
+	 * selector when its quantity key cannot be.
+	 */
+	let nextCascadeId = 1;
+	/**
+	 * The card that should take focus, addressed by cascade and serialized path.
+	 * Consumed and cleared by whichever card matches, or every later render would
+	 * refocus it.
+	 */
+	let focusRequest = $state<{ cascadeId: number; path: string } | null>(null);
 	/** The subtree the cards live in, for hit-testing a press against them. */
 	let peekSection = $state<HTMLElement | null>(null);
 
@@ -172,109 +193,156 @@
 		...designations.outputs,
 		...designations.suggestions
 	]);
-	const peekKey = $derived(cascade?.rootKey ?? null);
-	const peekEntry = $derived(peekKey === null ? undefined : quantityEntryFor?.(peekKey));
-	const peekLabel = $derived(
-		designatedChips.find((chip) => chip.symbol.key === peekKey)?.symbol.label ?? ''
+	/**
+	 * Every key with a card open, so a chip reads as pressed while any of its
+	 * cards is. A quantity confirmed both ways has two, and either one marks it.
+	 */
+	const peekKeys = $derived(new Set(cascades.map((cascade) => cascade.rootKey)));
+
+	/** The cards of one column, ordered to sit under the chips they came from. */
+	function columnCascades(direction: PeekDirection, chips: DesignationChip[]): PeekCascade[] {
+		return cascadesInChipOrder(
+			cascades,
+			direction,
+			chips.map((chip) => chip.symbol.key)
+		);
+	}
+
+	const inputCascades = $derived(
+		columnCascades('upstream', [
+			...designations.inputs,
+			...designations.suggestions.filter((chip) => chip.suggestedRole !== 'output')
+		])
+	);
+	const outputCascades = $derived(
+		columnCascades('downstream', [
+			...designations.outputs,
+			...designations.suggestions.filter((chip) => chip.suggestedRole === 'output')
+		])
 	);
 
-	// A quantity that leaves the node entirely while its cascade is open has
-	// nothing left to explain, and the node it was read from may have gone with
-	// it. Changing columns is not leaving: cycling a peeked chip would otherwise
-	// slam shut the card the tap was aimed underneath. Only the root is watched —
-	// a nested chip that disappears already stops rendering, because the cards
-	// walk the definers' live designations.
-	$effect(() => {
-		if (peekKey === null) return;
-		if (designatedChips.some((chip) => chip.symbol.key === peekKey)) return;
-		cascade = null;
-		focusRequestPath = null;
-		peekAnchor = null;
-	});
-
-	function rootCard(): Element | null {
-		return peekSection?.querySelector('[data-peek-path=""]') ?? null;
+	function labelFor(key: string): string {
+		return designatedChips.find((chip) => chip.symbol.key === key)?.symbol.label ?? '';
 	}
 
-	function openPeek(key: string, anchor: HTMLElement) {
-		// A chip that reads as pressed has to un-press: the same tap that asked the
-		// question is how a reader takes it back.
-		if (cascade?.rootKey === key) {
-			closeCascade();
+	// A card whose quantity leaves the node deliberately stays: the reader asked
+	// the question, and a designation cycled off — here or anywhere else — is not
+	// them withdrawing it. It keeps its column position until dismissed, which is
+	// what makes a comparison survive an edit made while reading it.
+
+	function openPeek(key: string, anchor: HTMLElement, direction: PeekDirection) {
+		// A chip that reads as pressed has to un-press: the same gesture that asked
+		// the question is how a reader takes it back. Scoped to this direction, so
+		// the output chip of a quantity confirmed both ways does not close the card
+		// its input chip opened.
+		const open = findCascade(cascades, key, direction);
+		if (open !== undefined) {
+			closeCascade(open.id);
 			return;
 		}
-		peekAnchor = anchor;
-		cascade = openCascade(key);
-		focusRequestPath = '';
+		const id = nextCascadeId;
+		nextCascadeId += 1;
+		peekAnchors.set(id, anchor);
+		cascades = openCascadeIn(cascades, id, key, direction);
+		focusRequest = { cascadeId: id, path: '' };
 	}
 
-	function closeCascade() {
-		cascade = null;
-		focusRequestPath = null;
-		peekAnchor?.focus();
-		peekAnchor = null;
-	}
-
-	function toggleBranchAt(path: PeekPath) {
-		const open = cascade;
-		if (open === null) return;
-		const opening = !isBranchOpen(open, path);
-		cascade = toggleBranch(open, path);
-		// Opening is the same gesture as opening the root card, so it lands the
-		// reader inside the answer; closing leaves them on the chip they pressed.
-		focusRequestPath = opening ? serializePath(path) : null;
+	function closeCascade(id: number) {
+		cascades = closeCascadeIn(cascades, id);
+		if (focusRequest?.cascadeId === id) focusRequest = null;
+		const anchor = peekAnchors.get(id);
+		peekAnchors.delete(id);
+		anchor?.focus();
 	}
 
 	/**
-	 * The chip that opened the card at this path. It carries the same serialized
-	 * path the card does, which is what makes this a lookup rather than a search:
-	 * quantity keys embed a NUL, and `CSS.escape` turns that into U+FFFD rather
-	 * than escaping it, so the raw key is not usable in a selector.
+	 * What a press outside the section does: drop the most recent card and leave
+	 * the rest. Unwinding newest-first is how the reader built the comparison up,
+	 * and one at a time is what stops a stray press costing the whole set.
 	 */
-	function drillChipFor(serializedPath: string): HTMLElement | null {
-		const found = rootCard()?.querySelector(`[data-peek-drill-path="${serializedPath}"]`);
+	function closeNewest() {
+		const newest = cascades.reduce<PeekCascade | null>(
+			(latest, cascade) => (latest === null || cascade.id > latest.id ? cascade : latest),
+			null
+		);
+		if (newest !== null) closeCascade(newest.id);
+	}
+
+	function toggleBranchAt(cascadeId: number, path: PeekPath) {
+		const open = cascades.find((cascade) => cascade.id === cascadeId);
+		if (open === undefined) return;
+		const opening = !isBranchOpen(open, path);
+		cascades = replaceCascade(cascades, toggleBranch(open, path));
+		// Opening is the same gesture as opening the root card, so it lands the
+		// reader inside the answer; closing leaves them on the chip they pressed.
+		focusRequest = opening ? { cascadeId, path: serializePath(path) } : null;
+	}
+
+	/**
+	 * The chip that opened the card at this path, within one cascade. It carries
+	 * the same serialized path the card does, which is what makes this a lookup
+	 * rather than a search: quantity keys embed a NUL, and `CSS.escape` turns that
+	 * into U+FFFD rather than escaping it, so the raw key is not usable in a
+	 * selector — but the cascade id is an integer and is.
+	 */
+	function drillChipFor(cascadeId: number, serializedPath: string): HTMLElement | null {
+		// A descendant of the cascade's card rather than the same element: the chip
+		// carries the path, the card carries the id, and a path is unique within one
+		// cascade so the nearest enclosing card is enough to disambiguate.
+		const found = peekSection?.querySelector(
+			`[data-peek-cascade="${cascadeId}"] [data-peek-drill-path="${serializedPath}"]`
+		);
 		return found instanceof HTMLElement ? found : null;
 	}
 
-	// One listener pair for the whole cascade, registered from inside the click
-	// that opened it, so the opening gesture's own pointerdown has been and gone.
+	// One listener pair for every card on screen, registered from inside the click
+	// that opened the first, so that opening gesture's own pointerdown has been and
+	// gone. One pair rather than one per card: N cards each stopping propagation
+	// would race, and the wrong one would close.
 	$effect(() => {
-		if (cascade === null) return;
+		if (cascades.length === 0) return;
 
 		function onPointerDown(event: PointerEvent) {
 			const target = event.target;
-			if (target instanceof Node) {
-				if (rootCard()?.contains(target)) return;
-				// The chip is a toggle; letting the press close the cascade would leave
-				// its click reopening what the reader just asked to dismiss.
-				if (peekAnchor?.contains(target)) return;
-			}
-			closeCascade();
+			// Inside means the whole designation section — every chip and every card,
+			// not just the pressed card and its own anchor. Scoped any tighter, a
+			// press on a third chip would count as outside the second card and close
+			// it on the way in, capping the reader at two cards forever.
+			if (target instanceof Node && peekSection?.contains(target)) return;
+			closeNewest();
 		}
 
 		function onKeyDown(event: KeyboardEvent) {
 			if (event.key !== 'Escape') return;
-			const open = cascade;
-			if (open === null) return;
+			if (cascades.length === 0) return;
 			// The focus overlay closes on Escape too, and dismissing a card is the
 			// narrower intent while one is open.
 			event.stopPropagation();
 
 			// Deepest wins, read off the DOM rather than from a second copy of the
-			// tree: the card holding focus is the one the reader is in.
+			// tree: the card holding focus is the one the reader is in. With focus
+			// outside every card there is no "the one they are in", so the newest
+			// goes — the same card an outside press would have taken.
 			const active = document.activeElement;
 			const holder = active instanceof Element ? active.closest('[data-peek-path]') : null;
-			const serializedPath = holder?.getAttribute('data-peek-path') ?? '';
+			if (holder === null) {
+				closeNewest();
+				return;
+			}
+			const cascadeId = Number(holder.getAttribute('data-peek-cascade'));
+			const serializedPath = holder.getAttribute('data-peek-path') ?? '';
+			const open = cascades.find((cascade) => cascade.id === cascadeId);
+			if (open === undefined) return;
 			if (serializedPath === '') {
-				closeCascade();
+				closeCascade(cascadeId);
 				return;
 			}
 
 			// Read the chip before the card goes, then hand the reader back to the
 			// question they had just asked rather than to the top of the tab order.
-			const chip = drillChipFor(serializedPath);
-			cascade = closeBranch(open, parsePath(serializedPath));
-			focusRequestPath = null;
+			const chip = drillChipFor(cascadeId, serializedPath);
+			cascades = replaceCascade(cascades, closeBranch(open, parsePath(serializedPath)));
+			focusRequest = null;
 			chip?.focus();
 		}
 
@@ -313,6 +381,33 @@
 	});
 </script>
 
+{#snippet peekCard(cascade: PeekCascade)}
+	<QuantityPeekCard
+		isRoot
+		{cascade}
+		entry={quantityEntryFor?.(cascade.rootKey)}
+		label={labelFor(cascade.rootKey)}
+		quantityKey={cascade.rootKey}
+		{titleForNodeId}
+		{inputsForNodeId}
+		{outputsForNodeId}
+		{quantityEntryFor}
+		{currentNodeId}
+		focusRequestPath={focusRequest?.cascadeId === cascade.id ? focusRequest.path : null}
+		onFocusHandled={() => (focusRequest = null)}
+		onToggleBranch={(path) => toggleBranchAt(cascade.id, path)}
+		onJumpToNode={(nodeId) => {
+			cascades = [];
+			focusRequest = null;
+			peekAnchors.clear();
+			onJumpToNode?.(nodeId);
+		}}
+		{onCreateDefiningNode}
+		{onConfirmDefiner}
+		onClose={() => closeCascade(cascade.id)}
+	/>
+{/snippet}
+
 <div class="focus-content" data-focus-zoom-scale="1">
 	{#if node.description.trim()}
 		<p class="description"><MathText text={node.description} /></p>
@@ -333,37 +428,27 @@
 				view={designations}
 				onCycle={onCycleDesignation}
 				onPeek={openPeek}
-				{peekKey}
+				{peekKeys}
 			/>
-			{#if cascade !== null}
+			{#if cascades.length > 0}
 				<!--
-					One instance for the whole cascade, and no remount when the reader asks
-					about another quantity: focus is directed by `focusRequestPath`, which
-					lands them inside the new answer without throwing away the DOM.
+					Two columns matching the chips above, so a card sits under the column
+					its question came from: inputs look upstream, outputs downstream.
+					Below the breakpoint they stack — two half-width columns of equations
+					do not fit a phone, and the chip columns are already tight there.
 				-->
-				<QuantityPeekCard
-					isRoot
-					entry={peekEntry}
-					label={peekLabel}
-					quantityKey={cascade.rootKey}
-					{cascade}
-					{titleForNodeId}
-					{inputsForNodeId}
-					{quantityEntryFor}
-					{currentNodeId}
-					{focusRequestPath}
-					onFocusHandled={() => (focusRequestPath = null)}
-					onToggleBranch={toggleBranchAt}
-					onJumpToNode={(nodeId) => {
-						cascade = null;
-						focusRequestPath = null;
-						peekAnchor = null;
-						onJumpToNode?.(nodeId);
-					}}
-					{onCreateDefiningNode}
-					{onConfirmDefiner}
-					onClose={closeCascade}
-				/>
+				<div class="peek-columns">
+					<div class="peek-column" data-peek-column="input">
+						{#each inputCascades as cascade (cascade.id)}
+							{@render peekCard(cascade)}
+						{/each}
+					</div>
+					<div class="peek-column" data-peek-column="output">
+						{#each outputCascades as cascade (cascade.id)}
+							{@render peekCard(cascade)}
+						{/each}
+					</div>
+				</div>
 			{/if}
 		</section>
 	{/if}
@@ -510,6 +595,47 @@
 	/* Positions the peek card, which is absolute so it never reflows the section. */
 	.designation-section {
 		position: relative;
+	}
+
+	/*
+	 * One column per side, matching the `1fr 1fr` the chips use above, so a card
+	 * sits under the column its question came from. Stacked below the breakpoint:
+	 * two half-width columns of equations do not fit a phone, and the chip
+	 * columns are already tight there. `min-width: 0` because a grid track
+	 * otherwise refuses to shrink below its content, and a long definition would
+	 * push the other column off screen rather than wrap.
+	 */
+	.peek-columns {
+		display: grid;
+		grid-template-columns: 1fr;
+		gap: 0.5rem;
+		margin-top: 0.5rem;
+	}
+
+	.peek-column {
+		display: grid;
+		align-content: start;
+		gap: 0.5rem;
+		min-width: 0;
+	}
+
+	.peek-column:empty {
+		display: none;
+	}
+
+	@media (min-width: 640px) {
+		.peek-columns {
+			grid-template-columns: 1fr 1fr;
+			gap: 0.75rem;
+		}
+
+		/*
+		 * Kept in the grid when empty above the breakpoint, so the column that does
+		 * have cards stays under its own chips instead of sliding across.
+		 */
+		.peek-column:empty {
+			display: grid;
+		}
 	}
 
 	.quantity-diagnostics ul {

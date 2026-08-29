@@ -2149,6 +2149,7 @@
 							quantities={dataflow.index.byNodeId.get(detailsNode.id)}
 							quantityEntryFor={(key) => dataflow.index.entries.get(key)}
 							inputsForNodeId={(nodeId) => nodeById[nodeId]?.inputs ?? EMPTY_DESIGNATIONS}
+							outputsForNodeId={(nodeId) => nodeById[nodeId]?.outputs ?? EMPTY_DESIGNATIONS}
 							{titleForNodeId}
 							currentNodeId={detailsNode.id}
 							onCycleDesignation={(symbol, suggestedRole) =>
