@@ -6,7 +6,7 @@
 [milestone 09](../milestones/09-variable-dataflow-layer.md),
 [milestone 10](../milestones/10-latex-math-in-node-titles.md), and
 [milestone 11](../milestones/11-unified-hop-model-for-derived-edges.md)
-**Status:** draft
+**Status:** done
 **Total estimated effort:** M
 
 ## Summary
@@ -501,3 +501,36 @@ needs.
   `da9b1b2` conflict naming, `1d59d15` shell regen) leave the plan unchanged;
   `da9b1b2` independently reinforces the decision not to treat a stale designation
   as a live claim.
+- 2026-08-28: Executed. Four things the plan got wrong, found by building it.
+
+  **T01's story could not be written as specified.** The acceptance asked for a
+  touch pointer sequence asserting `scrollTop` moved, but `touch-action` governs
+  the browser's own gesture handling: dispatched PointerEvents scroll nothing and
+  `scrollTop = n` works whatever the rule says, so that story would have passed
+  with the bug still in place. It asserts the computed `touch-action` instead.
+
+  **The "no role, eligibility preserved" case is unreachable from the UI.** With
+  whole-draft parsing a suggestion chip exists _because_ the parser sees its
+  symbol, so after writing that symbol in again the parser still sees it and
+  always returns a role. The branch stays as defensive code but has no story; the
+  acceptance bullet was inherited from the per-segment design, where "no
+  equality" was an ordinary outcome, and did not survive the switch.
+
+  **Undo cannot be asserted in a story.** `execCommand` reports success and then
+  does nothing when the browsing context is not the focused one, which is the
+  norm headless — so the suite exercises the fallback path, and the undo the
+  `execCommand` path exists for belongs to the manual smoke. That discovery also
+  changed the component: the return value is not trusted, the resulting text is
+  compared against what was expected, and the fallback runs on mismatch.
+
+  **Reopening the sheet is not story-testable** — a play function cannot remount
+  its own component — so the per-symbol guard reset is covered by the node effect
+  and the manual smoke rather than a story.
+
+- 2026-08-28: Two bugs worth remembering, both about `NodeEditSheet` timing.
+  The draft-reset `$effect` must never read the `title` draft it writes: an
+  earlier version initialised the caret from `title.length`, which made the effect
+  depend on its own output, so every insertion re-ran the reset and threw the edit
+  away. And the mount-time `requestAnimationFrame` focus can steal a caret placed
+  within that same frame, which no author can hit but every story can — so the
+  story helpers wait a frame before placing one.
