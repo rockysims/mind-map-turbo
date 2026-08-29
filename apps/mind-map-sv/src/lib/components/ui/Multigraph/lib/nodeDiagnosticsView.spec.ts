@@ -168,19 +168,70 @@ describe('nodeDiagnosticsView', () => {
 		expect(view.items.map((item) => item.state)).toEqual(['conflict']);
 	});
 
-	it('orders unresolved before out-of-view before conflict', () => {
+	/**
+	 * Someone has written the equation and nobody confirmed it. The old report —
+	 * "is not defined anywhere", with an offer to define it — was both wrong and
+	 * a trap: taking the offer produced a second node saying the same thing.
+	 */
+	describe('a quantity written down but not confirmed', () => {
+		const written = [
+			node('use', '$$w = g$$'),
+			{ id: 'writer', description: '$$g = 9.8$$', tags: [] }
+		];
+
+		it('reports it as unconfirmed rather than unresolved', () => {
+			expect(viewFor(written, 'use').items.map((item) => [item.label, item.state])).toEqual([
+				['g', 'unconfirmed']
+			]);
+		});
+
+		it('names the node to confirm', () => {
+			expect(viewFor(written, 'use').items[0].nodeIds).toEqual(['writer']);
+		});
+
+		it('names every node that wrote it down', () => {
+			const view = viewFor(
+				[
+					node('use', '$$w = g$$'),
+					{ id: 'earth', description: '$$g = 9.8$$', tags: [] },
+					{ id: 'moon', description: '$$g = 1.6$$', tags: [] }
+				],
+				'use'
+			);
+			expect(view.items[0].nodeIds).toEqual(['earth', 'moon']);
+		});
+
+		it('reports nothing once the writer confirms it', () => {
+			expect(
+				viewFor([node('use', '$$w = g$$'), node('writer', '$$g = 9.8$$')], 'use').items
+			).toEqual([]);
+		});
+
+		// Confirming is the cheapest repair anything here offers: the answer is
+		// already in the graph and one tap from being said.
+		it('sorts before an unresolved quantity', () => {
+			const view = viewFor(
+				[node('use', '$$w = g + z$$'), { id: 'writer', description: '$$g = 9.8$$', tags: [] }],
+				'use'
+			);
+			expect(view.items.map((item) => item.state)).toEqual(['unconfirmed', 'unresolved']);
+		});
+	});
+
+	it('orders unconfirmed before unresolved before out-of-view before conflict', () => {
 		const view = viewFor(
 			[
 				node('def', '$$p = 1$$'),
 				node('one', '$$q = 1$$'),
 				node('two', '$$q = 2$$'),
+				{ id: 'writer', description: '$$u = 1$$', tags: [] },
 				node('use', '$$w = p + q + u + v$$')
 			],
 			'use',
 			new Set(['use'])
 		);
 		expect(view.items.map((item) => item.state)).toEqual([
-			'unresolved',
+			'unconfirmed',
 			'unresolved',
 			'out-of-view',
 			'conflict'

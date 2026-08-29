@@ -13,6 +13,12 @@
  * some node defines it — is applied by callers that draw things, not here.
  * Discarding unclaimed symbols at index time would keep the canvas quiet but
  * leave the chips and the diagnostics with nothing to offer.
+ *
+ * The in-between state gets a name of its own: a symbol some node's *text*
+ * defines while nobody has confirmed it. Those are the `text*` facets. They draw
+ * nothing — no chips, no edges, no promotion — but a reader asking "what defines
+ * this?" has to be told about them, because answering "nothing" invites them to
+ * write a second node saying what the first one already says.
  */
 
 import { symbolFor, type QuantitySymbol } from '../../MathText/lib/mathSymbols';
@@ -57,6 +63,26 @@ export interface QuantityIndexEntry {
 	 * rather than an error: the edge the user confirmed survives a reworded node.
 	 */
 	definitions: QuantityDefinitionRecord[];
+	/**
+	 * Nodes whose *text* defines this quantity without anyone having confirmed it,
+	 * sorted and distinct — the mirror of `definerNodeIds` for the in-between
+	 * state. A confirmed definer never appears here: once the output is confirmed
+	 * the node is a definer, full stop, and listing it twice would offer the reader
+	 * a confirmation they have already made.
+	 *
+	 * Nothing draws from this. It exists because a symbol whose only definers are
+	 * unconfirmed is not "defined by nobody" — saying so leads a reader to write a
+	 * second node stating what the first one already says.
+	 */
+	textDefinerNodeIds: string[];
+	/**
+	 * What those unconfirmed definers' text says this quantity equals, sorted the
+	 * same way `definitions` is and carrying the same record shape, so one row
+	 * renderer serves both. A text definer always has at least one record here, by
+	 * construction: it is on the list precisely because its text defines the
+	 * symbol.
+	 */
+	textDefinitions: QuantityDefinitionRecord[];
 	/** Nodes whose confirmed inputs include this quantity, sorted. */
 	consumerNodeIds: string[];
 }
@@ -119,10 +145,20 @@ function entryFor(entries: Map<string, QuantityIndexEntry>, symbol: QuantitySymb
 		symbol,
 		definerNodeIds: [],
 		definitions: [],
+		textDefinerNodeIds: [],
+		textDefinitions: [],
 		consumerNodeIds: []
 	};
 	entries.set(symbol.key, created);
 	return created;
+}
+
+/**
+ * One order for both record lists, so a confirmed row and an unconfirmed one
+ * sort the same way and a confirmation does not reshuffle the card it lands in.
+ */
+function byNodeThenBody(left: QuantityDefinitionRecord, right: QuantityDefinitionRecord): number {
+	return left.nodeId.localeCompare(right.nodeId) || left.bodyKey.localeCompare(right.bodyKey);
 }
 
 /** True when some node defines this quantity, so it may be drawn. */
@@ -210,11 +246,27 @@ export function createQuantityIndexer(options: QuantityIndexerOptions = {}) {
 			cache.set(node.id, { signature, ioSignature: ioSignatures[position], quantities });
 			byNodeId.set(node.id, quantities);
 
-			// Every extracted symbol earns an entry and nothing more. This is the pool
-			// the chips are offered from and what the diagnostics reason about; the
-			// edges come from the designation pass below.
+			// Every extracted symbol earns an entry and nothing more that draws. This is
+			// the pool the chips are offered from and what the diagnostics reason about;
+			// the edges come from the designation pass below.
+			//
+			// A parsed definition also records itself as a *text* definer, which is the
+			// answer to "who writes this down?" for a symbol nobody has confirmed. The
+			// confirmed ones are subtracted back out once this pass knows them, below.
+			const optedOut = node.tags.includes(optOutTag);
 			for (const definition of quantities.defines) {
-				entryFor(entries, definition.symbol);
+				const entry = entryFor(entries, definition.symbol);
+				// Belt and braces: extraction already yields nothing for an opted-out
+				// node, and one tag has to mean one thing whichever side reads it.
+				if (optedOut) {
+					continue;
+				}
+				entry.textDefinitions.push({
+					nodeId: node.id,
+					bodyKey: definition.bodyKey,
+					sourceTex: definition.sourceTex,
+					displayMode: definition.displayMode
+				});
 			}
 			for (const symbol of quantities.references) {
 				entryFor(entries, symbol);
@@ -280,10 +332,20 @@ export function createQuantityIndexer(options: QuantityIndexerOptions = {}) {
 		for (const entry of entries.values()) {
 			entry.definerNodeIds.sort();
 			entry.consumerNodeIds.sort();
-			entry.definitions.sort(
-				(left, right) =>
-					left.nodeId.localeCompare(right.nodeId) || left.bodyKey.localeCompare(right.bodyKey)
-			);
+			entry.definitions.sort(byNodeThenBody);
+
+			// Confirmed wins: a node that both writes the equation and has the output
+			// confirmed is a definer, and appearing on both lists would show the reader
+			// one node twice and offer to confirm what is already confirmed.
+			const confirmed = new Set(entry.definerNodeIds);
+			entry.textDefinitions = entry.textDefinitions
+				.filter((record) => !confirmed.has(record.nodeId))
+				.sort(byNodeThenBody);
+			// Distinct: a node stating the same quantity twice is one answer to "who
+			// writes this down?", however many equations it took.
+			entry.textDefinerNodeIds = [
+				...new Set(entry.textDefinitions.map((record) => record.nodeId))
+			].sort();
 		}
 
 		previous = { entries, byNodeId };

@@ -144,6 +144,34 @@ function withoutKey(
 }
 
 /**
+ * Put one quantity in a named column and leave it there, whatever it was before.
+ *
+ * Deliberately not the cycle. The cycle's job is a three-state toggle under a
+ * repeated tap, so its terminal state is *unassigned* — which means asking it to
+ * "make this an output" on a quantity currently confirmed as an input takes the
+ * designation away instead. That state is two taps from any ghost chip, so a
+ * one-tap "confirm this node as the definer" built on the cycle would sometimes
+ * unconfirm what the reader pointed at, and would look like a bug in the button
+ * rather than in the state it started from.
+ *
+ * Idempotent by construction: both columns lose the key before the target gains
+ * it, so pressing twice says the same thing twice. Entries the call did not name
+ * keep their order, since that order is the user's and is what gets persisted.
+ */
+export function designateAs(
+	io: NodeDesignations,
+	symbol: DesignatableSymbol,
+	role: 'input' | 'output'
+): { inputs: QuantityDesignation[]; outputs: QuantityDesignation[] } {
+	const key = keyOf(symbol);
+	const assigned = [designationOf(symbol)];
+	return {
+		inputs: [...withoutKey(io.inputs, key), ...(role === 'input' ? assigned : [])],
+		outputs: [...withoutKey(io.outputs, key), ...(role === 'output' ? assigned : [])]
+	};
+}
+
+/**
  * Advance one quantity around the assignment cycle: unassigned → suggested role
  * → the other role → unassigned. With no suggestion the cycle enters at input.
  *

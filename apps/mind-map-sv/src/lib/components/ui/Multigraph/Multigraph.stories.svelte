@@ -714,6 +714,40 @@
 	}
 
 	/**
+	 * One node, one equation, nothing confirmed — the literal repro. Asking what
+	 * defines y used to be answered "nothing does", by the card hanging under the
+	 * very equation that defines it.
+	 */
+	const ITS_OWN_DEFINER = makeGraph({
+		nodes: [{ id: 'reader', title: '$y = 1$', description: '' }],
+		pinned: ['reader'],
+		posByNodeId: { reader: { x: 0, y: 0 } }
+	});
+
+	/**
+	 * `reader` has confirmed g as an input and `gravity` has written what g is
+	 * without confirming it. Nothing is joined and nothing is derived, so the only
+	 * thing that can put an edge between them is the confirm in the peek card.
+	 */
+	const CONFIRM_FROM_A_PEEK = makeGraph({
+		nodes: [
+			{
+				id: 'reader',
+				title: 'Weight',
+				description: '$$w = m g$$',
+				inputs: designations('g'),
+				outputs: designations('w')
+			},
+			{ id: 'gravity', title: 'Gravity', description: '$$g = 9.8$$' }
+		],
+		pinned: ['reader', 'gravity'],
+		posByNodeId: {
+			reader: { x: 0, y: 0 },
+			gravity: { x: 400, y: 0 }
+		}
+	});
+
+	/**
 	 * `reader` needs g, `gravity` defines it and in turn needs h — and nothing
 	 * anywhere defines h. The offer to define it is therefore made two levels down
 	 * a peek cascade, by a card about a quantity the reader never named, on behalf
@@ -5487,5 +5521,107 @@
 				canvasElement.querySelector('[data-edge-derived="true"][data-target-node-id="reader"]')
 			).not.toBeInTheDocument();
 		});
+	}}
+/>
+
+<Story
+	name="TheNodesOwnEquationAnswersItsOwnPeek"
+	args={{
+		multigraphData: ITS_OWN_DEFINER,
+		defaultPrimaryNodeId: 'reader',
+		layoutSettings: NO_REVEALS,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		await enterFocusOn(canvasElement, 'reader');
+
+		// The reported bug, end to end. A node titled `$y = 1$` asked what defines y
+		// and was told nothing did — by the card hanging under its own equation —
+		// and then offered to define it, which would have made a second node saying
+		// the same thing.
+		const card = await openPeekCard(canvasElement, 'y');
+		expect(card).not.toHaveTextContent('Nothing defines y yet.');
+		expect(card.querySelector('[data-create-defining-node]')).not.toBeInTheDocument();
+
+		const row = card.querySelector('[data-peek-definer="reader"]') as HTMLElement;
+		expect(row).toHaveAttribute('data-peek-definer-state', 'unconfirmed');
+		expect(row.querySelector('math')).not.toBeNull();
+		// Nowhere to go: this is the node the reader is already in.
+		expect(row.querySelector('[data-peek-goto]')).toBeNull();
+	}}
+/>
+
+<Story
+	name="ConfirmingFromAPeekWiresTheEdgeWithoutLeavingTheNode"
+	args={{
+		multigraphData: CONFIRM_FROM_A_PEEK,
+		defaultPrimaryNodeId: 'reader',
+		layoutSettings: NO_REVEALS,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		expect(canvasElement.querySelector('[data-edge-derived="true"]')).not.toBeInTheDocument();
+
+		await enterFocusOn(canvasElement, 'reader');
+		const card = await openPeekCard(canvasElement, 'g');
+
+		(card.querySelector('[data-peek-confirm="gravity"]') as HTMLElement).click();
+
+		// The designation lands on the node that wrote the equation — the first
+		// affordance here that edits a node the reader is not focused on, which is
+		// the whole point: agreeing with an answer should not cost a journey.
+		await waitFor(() => {
+			const gravity = lastChangedGraph(args).nodes.find((node) => node.id === 'gravity');
+			expect(gravity?.outputs?.map((output) => output.base)).toEqual(['g']);
+		});
+
+		// The row it was tapped on becomes a fact, in place, and the reader keeps
+		// the card and the node they were reading.
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-peek-definer="gravity"]')).toHaveAttribute(
+				'data-peek-definer-state',
+				'confirmed'
+			);
+		});
+		expect(canvasElement.querySelector('[data-peek-path=""]')).toBeInTheDocument();
+		await expectFocusOn(canvasElement, 'reader');
+
+		// And a confirmed output against a confirmed input is an edge.
+		within(canvasElement).getByRole('button', { name: 'Close node focus' }).click();
+		await waitForLayout();
+		await waitFor(() => {
+			expect(
+				canvasElement.querySelector('[data-edge-derived="true"][data-target-node-id="reader"]')
+			).toBeInTheDocument();
+		});
+	}}
+/>
+
+<Story
+	name="ConfirmingADefinerDoesNotCreateASecondNode"
+	args={{
+		multigraphData: CONFIRM_FROM_A_PEEK,
+		defaultPrimaryNodeId: 'reader',
+		layoutSettings: NO_REVEALS,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		await enterFocusOn(canvasElement, 'reader');
+		const card = await openPeekCard(canvasElement, 'g');
+
+		(card.querySelector('[data-peek-confirm="gravity"]') as HTMLElement).click();
+
+		await waitFor(() => {
+			expect(lastChangedGraph(args).nodes.map((node) => node.id)).toEqual(['reader', 'gravity']);
+		});
+
+		// The bug this replaced: the card said nothing defined g and offered to
+		// define it, so the repair for an unconfirmed equation was a duplicate node
+		// and a title editor. Confirming adds neither.
+		expect(canvasElement.querySelector('.title-input')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-create-defining-node]')).not.toBeInTheDocument();
 	}}
 />

@@ -17,6 +17,7 @@
 	const PROSE_ONLY = 'First line.\nSecond line.\n\nAfter a blank line.';
 
 	type JumpSpy = { mock: { calls: Array<[string]> } };
+	type ConfirmSpy = { mock: { calls: Array<[string, string]> } };
 	type CycleSpy = {
 		mock: { calls: Array<[QuantitySymbol, 'input' | 'output' | undefined]> };
 	};
@@ -36,6 +37,8 @@
 			{ nodeId: 'earth', bodyKey: 'earth-g', sourceTex: 'g = 9.8', displayMode: true },
 			{ nodeId: 'moon', bodyKey: 'moon-g', sourceTex: 'g = 1.6', displayMode: true }
 		],
+		textDefinerNodeIds: [],
+		textDefinitions: [],
 		consumerNodeIds: ['node-1']
 	};
 
@@ -44,14 +47,46 @@
 		symbol: symbolFor('g', null),
 		definerNodeIds: ['earth'],
 		definitions: [],
+		textDefinerNodeIds: [],
+		textDefinitions: [],
 		consumerNodeIds: ['node-1']
 	};
 
-	/** Confirmed as an input, and nothing anywhere answers it. */
+	/** Confirmed as an input, and nothing anywhere answers it — not even in text. */
 	const G_UNDEFINED: QuantityIndexEntry = {
 		symbol: symbolFor('g', null),
 		definerNodeIds: [],
 		definitions: [],
+		textDefinerNodeIds: [],
+		textDefinitions: [],
+		consumerNodeIds: ['node-1']
+	};
+
+	/**
+	 * Nobody has confirmed g, but `gravity` writes the equation down. The state
+	 * that used to read as "nothing defines g yet" — and offered to define it
+	 * again.
+	 */
+	const G_WRITTEN_BUT_UNCONFIRMED: QuantityIndexEntry = {
+		symbol: symbolFor('g', null),
+		definerNodeIds: [],
+		definitions: [],
+		textDefinerNodeIds: ['gravity'],
+		textDefinitions: [
+			{ nodeId: 'gravity', bodyKey: 'gravity-g', sourceTex: 'g = 9.8', displayMode: true }
+		],
+		consumerNodeIds: ['node-1']
+	};
+
+	/** One confirmed definer and one that has only written it down. */
+	const G_CONFIRMED_AND_WRITTEN: QuantityIndexEntry = {
+		symbol: symbolFor('g', null),
+		definerNodeIds: ['earth'],
+		definitions: [{ nodeId: 'earth', bodyKey: 'earth-g', sourceTex: 'g = 9.8', displayMode: true }],
+		textDefinerNodeIds: ['moon'],
+		textDefinitions: [
+			{ nodeId: 'moon', bodyKey: 'moon-g', sourceTex: 'g = 1.6', displayMode: true }
+		],
 		consumerNodeIds: ['node-1']
 	};
 
@@ -67,7 +102,39 @@
 			{ nodeId: 'node-1', bodyKey: 'node-1-w', sourceTex: 'w = m g', displayMode: true },
 			{ nodeId: 'scales', bodyKey: 'scales-w', sourceTex: 'w = 700', displayMode: true }
 		],
+		textDefinerNodeIds: [],
+		textDefinitions: [],
 		consumerNodeIds: []
+	};
+
+	/**
+	 * The reported bug at component scale: a node titled `$y = 1$` whose own text
+	 * is the only thing defining y, with nothing confirmed anywhere.
+	 */
+	const OWN_EQUATION_NODE: NodeData = {
+		id: 'node-1',
+		title: '$y = 1$',
+		description: '',
+		tags: []
+	};
+
+	const Y_WRITTEN_HERE: QuantityIndexEntry = {
+		symbol: symbolFor('y', null),
+		definerNodeIds: [],
+		definitions: [],
+		textDefinerNodeIds: ['node-1'],
+		textDefinitions: [
+			{ nodeId: 'node-1', bodyKey: 'node-1-y', sourceTex: 'y = 1', displayMode: false }
+		],
+		consumerNodeIds: []
+	};
+
+	const OWN_EQUATION_ARGS = {
+		node: OWN_EQUATION_NODE,
+		currentNodeId: 'node-1',
+		quantities: nodeQuantities(OWN_EQUATION_NODE),
+		quantityEntryFor: (key: string) => (key === 'y' ? Y_WRITTEN_HERE : undefined),
+		titleForNodeId: (nodeId: string) => nodeId
 	};
 
 	const wEntryLookup = (key: string) => (key === 'w' ? W_DEFINED_HERE_AND_ELSEWHERE : undefined);
@@ -202,9 +269,17 @@
 		});
 	}
 
+	/**
+	 * One index entry, from `[nodeId, sourceTex]` pairs — a null source standing
+	 * for a definer whose text no longer states the equation. `textDefiners` are
+	 * the same pairs for nodes that have written the definition without anyone
+	 * confirming it; they always carry a source, since that is what puts them on
+	 * the list.
+	 */
 	function entryOf(
 		label: string,
-		definers: ReadonlyArray<readonly [string, string | null]>
+		definers: ReadonlyArray<readonly [string, string | null]>,
+		textDefiners: ReadonlyArray<readonly [string, string]> = []
 	): [string, QuantityIndexEntry] {
 		const symbol = symbolOf(label);
 		return [
@@ -220,6 +295,13 @@
 						sourceTex,
 						displayMode: true
 					})),
+				textDefinerNodeIds: textDefiners.map(([nodeId]) => nodeId),
+				textDefinitions: textDefiners.map(([nodeId, sourceTex]) => ({
+					nodeId,
+					bodyKey: `${nodeId}-${symbol.key}`,
+					sourceTex,
+					displayMode: true
+				})),
 				consumerNodeIds: []
 			}
 		];
@@ -234,8 +316,10 @@
 	/**
 	 * A graph deep enough to drill through, with everything a cascade can hit:
 	 * three definers of one quantity (one of which consumes nothing), two of them
-	 * sharing an input, a chain back to the root quantity, and an unresolved
-	 * subscripted quantity two levels down.
+	 * sharing an input, a chain back to the root quantity, an unresolved
+	 * subscripted quantity two levels down, and — under `m` — a node that has
+	 * written a definition without confirming it, so a nested card has a row to
+	 * confirm.
 	 */
 	const CASCADE_ENTRIES = new Map<string, QuantityIndexEntry>([
 		entryOf('g', [
@@ -243,7 +327,7 @@
 			['earth', 'g = G m / r^2'],
 			['moon', 'g = 1.6']
 		]),
-		entryOf('m', [['mass', 'm = \\rho_0 V']]),
+		entryOf('m', [['mass', 'm = \\rho_0 V']], [['scales', 'm = 70']]),
 		entryOf('r', [['radius', 'r = 6371']]),
 		entryOf('rho_0', [['density', '\\rho_0 = 1000']])
 	]);
@@ -1231,6 +1315,207 @@
 		/>
 	{/snippet}
 </Story>
+
+<Story
+	name="PeekShowsAnUnconfirmedDefinerAsAGhostRow"
+	args={{
+		node: WEIGHT_NODE,
+		quantities: nodeQuantities(WEIGHT_NODE),
+		quantityEntryFor: entryLookup(G_WRITTEN_BUT_UNCONFIRMED),
+		titleForNodeId: (nodeId: string) => nodeId,
+		onJumpToNode: fn(),
+		onConfirmDefiner: fn()
+	}}
+	play={async ({ canvasElement }) => {
+		const card = await peekAtG(canvasElement);
+		const row = definerRow(card, 'gravity');
+
+		// Somebody has written what g is. Saying "nothing defines g" over that is
+		// false, so the equation shows — marked as the offer it is rather than as
+		// part of what the graph does.
+		expect(row).toHaveAttribute('data-peek-definer-state', 'unconfirmed');
+		expect(row.querySelector('math')).not.toBeNull();
+		expect(card).not.toHaveTextContent('Nothing defines g yet.');
+
+		// Both ways forward: read it where it lives, or agree with it from here.
+		expect(row.querySelector('[data-peek-goto="gravity"]')).toBeInTheDocument();
+		expect(row.querySelector('[data-peek-confirm="gravity"]')).toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="PeekOffersNoDefineWhenSomethingAlreadyWritesIt"
+	args={{
+		node: WEIGHT_NODE,
+		quantities: nodeQuantities(WEIGHT_NODE),
+		quantityEntryFor: entryLookup(G_WRITTEN_BUT_UNCONFIRMED),
+		titleForNodeId: (nodeId: string) => nodeId,
+		onCreateDefiningNode: fn(),
+		onConfirmDefiner: fn()
+	}}
+	play={async ({ canvasElement }) => {
+		const card = await peekAtG(canvasElement);
+
+		// The trap this closes: the empty state offered to define g, and taking the
+		// offer produced a second node saying exactly what `gravity` already says.
+		// Define belongs to the case where truly nothing states the quantity.
+		expect(card.querySelector('[data-create-defining-node="g"]')).not.toBeInTheDocument();
+		expect(card.querySelector('[data-peek-definer="gravity"]')).toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="TheNodesOwnUnconfirmedEquationAnswersItsOwnChip"
+	args={{ ...OWN_EQUATION_ARGS, onJumpToNode: fn(), onConfirmDefiner: fn() }}
+	play={async ({ canvasElement }) => {
+		// The reported bug: a node titled `$y = 1$` asked what defines y and was
+		// told nothing did — by the card hanging under its own equation.
+		const card = await peekAt(canvasElement, 'y');
+		const row = definerRow(card, 'node-1');
+
+		expect(card).not.toHaveTextContent('Nothing defines y yet.');
+		expect(row).toHaveAttribute('data-peek-definer-state', 'unconfirmed');
+		expect(row.querySelector('math')).not.toBeNull();
+		// Nowhere to go — the reader is already in the node that says it — but the
+		// one thing worth doing here is still offered.
+		expect(row.querySelector('[data-peek-goto]')).toBeNull();
+		expect(row.querySelector('[data-peek-confirm="node-1"]')).toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="ConfirmingFromThePeekNamesTheDefinerNotTheReader"
+	args={{
+		node: WEIGHT_NODE,
+		currentNodeId: 'node-1',
+		quantities: nodeQuantities(WEIGHT_NODE),
+		quantityEntryFor: entryLookup(G_WRITTEN_BUT_UNCONFIRMED),
+		titleForNodeId: (nodeId: string) => nodeId,
+		onJumpToNode: fn(),
+		onConfirmDefiner: fn()
+	}}
+	play={async ({ canvasElement, args }) => {
+		const card = await peekAtG(canvasElement);
+
+		(card.querySelector('[data-peek-confirm="gravity"]') as HTMLElement).click();
+
+		// The designation belongs to the node that wrote the equation, not to the
+		// node the reader happens to be standing in. Confirming on the reader would
+		// claim it defines a quantity it only consumes.
+		const confirmSpy = args.onConfirmDefiner as unknown as ConfirmSpy;
+		expect(confirmSpy.mock.calls.at(-1)).toEqual(['gravity', 'g']);
+	}}
+/>
+
+<Story
+	name="ConfirmingInANestedCardConfirmsThatCardsQuantity"
+	args={{ ...CASCADE_ARGS, onJumpToNode: fn(), onConfirmDefiner: fn() }}
+	play={async ({ canvasElement, args }) => {
+		const card = await peekAtG(canvasElement);
+		const underM = await drillInto(card, 'earth', 'm');
+
+		(underM.querySelector('[data-peek-confirm="scales"]') as HTMLElement).click();
+
+		// The offer belongs to the card that made it. Confirming g — the quantity
+		// the reader started from one level up — would look right and be wrong,
+		// exactly as Define at depth would.
+		const confirmSpy = args.onConfirmDefiner as unknown as ConfirmSpy;
+		expect(confirmSpy.mock.calls.at(-1)).toEqual(['scales', 'm']);
+	}}
+/>
+
+<Story
+	name="OpeningTheCardFocusesSomethingThatChangesNothing"
+	args={{ ...OWN_EQUATION_ARGS, onConfirmDefiner: fn() }}
+	play={async ({ canvasElement, args }) => {
+		const card = await peekAt(canvasElement, 'y');
+
+		// With no "Go to node" on a self row, the card's mount focus lands on the
+		// confirm button — which is fine, and only fine because focus is not
+		// activation. A card that committed a designation by opening would rewrite
+		// the graph every time somebody asked a question.
+		await waitFor(() => {
+			expect(card.contains(document.activeElement)).toBe(true);
+		});
+		expect(document.activeElement).toHaveAttribute('data-peek-confirm', 'node-1');
+		expect((args.onConfirmDefiner as unknown as ConfirmSpy).mock.calls).toHaveLength(0);
+	}}
+/>
+
+<Story
+	name="AnUnconfirmedRowReadsAsAnOfferNotAFact"
+	args={{
+		node: WEIGHT_NODE,
+		quantities: nodeQuantities(WEIGHT_NODE),
+		quantityEntryFor: entryLookup(G_CONFIRMED_AND_WRITTEN),
+		titleForNodeId: (nodeId: string) => nodeId,
+		onJumpToNode: fn(),
+		onConfirmDefiner: fn()
+	}}
+	play={async ({ canvasElement }) => {
+		const card = await peekAtG(canvasElement);
+		const confirmed = definerRow(card, 'earth').querySelector('.definition') as HTMLElement;
+		const offered = definerRow(card, 'moon').querySelector('.definition') as HTMLElement;
+		// The ghost chip the reader has already learned to read as "not decided yet".
+		const ghostChip = viewChip(canvasElement, 'm');
+
+		expect(definerRow(card, 'earth')).toHaveAttribute('data-peek-definer-state', 'confirmed');
+		expect(definerRow(card, 'moon')).toHaveAttribute('data-peek-definer-state', 'unconfirmed');
+
+		// Same visual language as the ghost chip, so nothing new has to be learned:
+		// faint means written down and not yet agreed to.
+		const offeredStyle = getComputedStyle(offered);
+		const ghostStyle = getComputedStyle(ghostChip);
+		expect(offeredStyle.opacity).toBe(ghostStyle.opacity);
+		expect(offeredStyle.color).toBe(ghostStyle.color);
+
+		// And a confirmed row is not faded, or the distinction says nothing.
+		const confirmedStyle = getComputedStyle(confirmed);
+		expect(confirmedStyle.opacity).not.toBe(offeredStyle.opacity);
+
+		// Opacity is not an accessible signal, so the control says it in words.
+		expect(card.querySelector('[data-peek-confirm="moon"]')).toHaveAttribute(
+			'aria-label',
+			'Confirm moon as where g is defined'
+		);
+		expect(card.querySelector('[data-peek-confirm="earth"]')).toBeNull();
+	}}
+/>
+
+<Story
+	name="SaysAQuantityIsWrittenButUnconfirmed"
+	args={{
+		node: makeNode('Weight is $$w = m g$$.'),
+		diagnostics: {
+			items: [{ key: 'g', label: 'g', state: 'unconfirmed', nodeIds: ['gravity'] }],
+			cycleNodeIds: []
+		},
+		titleForNodeId: () => 'Gravity',
+		onJumpToNode: fn(),
+		onCreateDefiningNode: fn(),
+		onConfirmDefiner: fn()
+	}}
+	play={async ({ canvasElement, args }) => {
+		const content = focusContent(canvasElement);
+		const item = content.querySelector('[data-diagnostic-quantity="g"]') as HTMLElement;
+
+		// "is not defined anywhere" was wrong here, and the Define button beside it
+		// was worse: the graph already contains the answer and needs one tap, not a
+		// second node saying the same thing.
+		expect(item).toHaveAttribute('data-diagnostic-state', 'unconfirmed');
+		expect(item).toHaveTextContent('is defined in text but not confirmed by');
+		expect(content.querySelector('[data-create-defining-node="g"]')).not.toBeInTheDocument();
+
+		// The node that wrote it is named, so the reader can go read it — and
+		// agreed with in place, so they do not have to.
+		expect(item.querySelector('[data-reveal-node="gravity"]')).toHaveTextContent('Gravity');
+		(item.querySelector('[data-confirm-definer="gravity"]') as HTMLElement).click();
+		expect((args.onConfirmDefiner as unknown as ConfirmSpy).mock.calls.at(-1)).toEqual([
+			'gravity',
+			'g'
+		]);
+	}}
+/>
 
 <Story
 	name="TheChipKeepsFocusAfterItChangesColumn"

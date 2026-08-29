@@ -23,7 +23,7 @@
 	import NavBreadcrumbs from './NavBreadcrumbs.svelte';
 	import { mathPlainText } from '../MathText/lib/mathPlainText';
 	import type { QuantitySymbol } from '../MathText/lib/mathSymbols';
-	import { cycleDesignation } from './lib/quantityDesignations.js';
+	import { cycleDesignation, designateAs } from './lib/quantityDesignations.js';
 	import NodeEditSheet from './NodeEditSheet.svelte';
 	import DeepZoomStack, { type StackFrameArgs, type LayerBaseSize } from './DeepZoomStack.svelte';
 	import Stage from './Stage.svelte';
@@ -1562,6 +1562,40 @@
 		);
 		commitContentGraph(setNodeDesignations(graph, nodeId, next));
 	}
+
+	/**
+	 * Confirm that some node defines a quantity — the one tap an unconfirmed peek
+	 * row and an unconfirmed diagnostic both offer.
+	 *
+	 * The first affordance here that edits a node the reader is *not* focused on.
+	 * That is the point: the answer to "who defines g?" is a row about another
+	 * node, and making the reader travel there to agree with what it already says
+	 * costs them their place for a tap that changes nothing else.
+	 *
+	 * `designateAs` rather than `cycleNodeDesignation`: the cycle's next stop from
+	 * the input column is unassigned, so confirming a node that had this quantity
+	 * confirmed as an input — reachable in two taps from any ghost chip — would
+	 * take the designation away instead of moving it.
+	 *
+	 * Confirming can immediately surface a conflict diagnostic, when another node
+	 * already claims the quantity with a different body. That is correct: the
+	 * disagreement was always there, and confirming is what makes the graph state
+	 * it.
+	 */
+	function confirmDefinerOutput(nodeId: string, quantityKey: string) {
+		const node = nodeById[nodeId];
+		// Read off the index rather than rebuilding from the key: keys are opaque
+		// here, and the entry holds the symbol as the author's math produced it.
+		const symbol = dataflow.index.entries.get(quantityKey)?.symbol;
+		if (!node || !symbol) return;
+		commitContentGraph(
+			setNodeDesignations(
+				graph,
+				nodeId,
+				designateAs({ inputs: node.inputs, outputs: node.outputs }, symbol, 'output')
+			)
+		);
+	}
 </script>
 
 <div
@@ -2116,6 +2150,7 @@
 								cycleNodeDesignation(detailsNode.id, symbol, suggestedRole)}
 							onCreateDefiningNode={(quantityLabel, quantityKey, consumerNodeId) =>
 								createDefiningNode(consumerNodeId ?? detailsNode.id, quantityLabel, quantityKey)}
+							onConfirmDefiner={confirmDefinerOutput}
 							onJumpToNode={(nodeId) => jumpToNode(detailsNode.id, nodeId)}
 						/>
 					</NodeDetailsLayer>

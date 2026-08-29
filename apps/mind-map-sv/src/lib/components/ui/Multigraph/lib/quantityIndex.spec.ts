@@ -315,6 +315,159 @@ describe('definition records', () => {
 	});
 });
 
+/**
+ * The state between "nobody writes this down" and "someone confirmed it". A
+ * symbol whose only definers are unconfirmed used to read as undefined, which
+ * invited the reader to write a second node saying what the first already said.
+ */
+describe('text definers', () => {
+	function textDefinersOf(index: QuantityIndex, label: string): string[] {
+		return entryFor(index, label)?.textDefinerNodeIds ?? [];
+	}
+
+	it('records a node whose text defines a quantity nobody confirmed', () => {
+		const index = buildQuantityIndex([undesignated('a', '$$y = 1$$')]);
+		expect(textDefinersOf(index, 'y')).toEqual(['a']);
+	});
+
+	it('carries the source and display mode, so the equation can be rendered', () => {
+		const index = buildQuantityIndex([undesignated('a', '$$y = 1$$')]);
+		expect(entryFor(index, 'y')?.textDefinitions).toEqual([
+			{ nodeId: 'a', bodyKey: '1', sourceTex: 'y = 1', displayMode: true }
+		]);
+	});
+
+	it('marks an inline text definition as not display mode', () => {
+		const index = buildQuantityIndex([undesignated('a', 'the value $y = 1$ here')]);
+		expect(entryFor(index, 'y')?.textDefinitions[0]).toMatchObject({
+			sourceTex: 'y = 1',
+			displayMode: false
+		});
+	});
+
+	// Confirming is what the unconfirmed row offers, and the row has to move
+	// rather than double: one node, one answer to "who defines this?".
+	it('drops a node from the text list once its output is confirmed', () => {
+		const index = buildQuantityIndex([node('a', '$$y = 1$$')]);
+		expect(definersOf(index, 'y')).toEqual(['a']);
+		expect(textDefinersOf(index, 'y')).toEqual([]);
+		expect(entryFor(index, 'y')?.textDefinitions).toEqual([]);
+	});
+
+	it('sorts several unconfirmed definers by node id', () => {
+		const index = buildQuantityIndex([
+			undesignated('zeta', '$$y = 3$$'),
+			undesignated('alpha', '$$y = 1$$'),
+			undesignated('mu', '$$y = 2$$')
+		]);
+		expect(textDefinersOf(index, 'y')).toEqual(['alpha', 'mu', 'zeta']);
+	});
+
+	it('keeps both statements when one node writes the quantity two ways', () => {
+		const index = buildQuantityIndex([undesignated('a', '$$y = 1$$ and also $$y = 2$$')]);
+		expect(entryFor(index, 'y')?.textDefinitions.map((record) => record.sourceTex)).toEqual([
+			'y = 1',
+			'y = 2'
+		]);
+	});
+
+	it('names that node once, however many statements it made', () => {
+		const index = buildQuantityIndex([undesignated('a', '$$y = 1$$ and also $$y = 2$$')]);
+		expect(textDefinersOf(index, 'y')).toEqual(['a']);
+	});
+
+	it('contributes nothing from an opted-out node', () => {
+		const index = buildQuantityIndex([undesignated('a', '$$y = 1$$', ['no-dataflow'])]);
+		expect(index.entries.size).toBe(0);
+	});
+
+	it('contributes nothing from a node opted out by a custom tag', () => {
+		const index = buildQuantityIndex([undesignated('a', '$$y = 1$$', ['scratch'])], {
+			optOutTag: 'scratch'
+		});
+		expect(index.entries.size).toBe(0);
+	});
+
+	it('records no text definition for a stale confirmed definer', () => {
+		const index = buildQuantityIndex([
+			{
+				id: 'a',
+				description: 'Prose only, the equation was rewritten away.',
+				tags: [],
+				outputs: [{ base: 'g', subscript: null }]
+			}
+		]);
+		expect(definersOf(index, 'g')).toEqual(['a']);
+		expect(entryFor(index, 'g')?.textDefinitions).toEqual([]);
+		expect(textDefinersOf(index, 'g')).toEqual([]);
+	});
+
+	// The state the one-tap confirm has to be idempotent about: a node whose text
+	// defines the symbol while the *input* column is what got confirmed. It is
+	// still writing the definition down, so it is still a text definer.
+	it('still names a node whose text defines a symbol it confirmed as an input', () => {
+		const index = buildQuantityIndex([
+			{ ...undesignated('a', '$$y = 1$$'), inputs: [{ base: 'y', subscript: null }] }
+		]);
+		expect(definersOf(index, 'y')).toEqual([]);
+		expect(consumersOf(index, 'y')).toEqual(['a']);
+		expect(textDefinersOf(index, 'y')).toEqual(['a']);
+	});
+
+	it('names exactly the distinct nodes its records mention', () => {
+		const index = buildQuantityIndex([
+			undesignated('b', '$$y = 1$$ and also $$y = 2$$'),
+			undesignated('a', '$$y = 3$$'),
+			node('c', '$$y = 4$$')
+		]);
+		const entry = entryFor(index, 'y');
+		expect(entry?.textDefinerNodeIds).toEqual([
+			...new Set(entry?.textDefinitions.map((record) => record.nodeId))
+		]);
+	});
+
+	// Text-defined-only is not tracked: an equation nobody confirmed draws no
+	// chip on the canvas and no edge, which is the rule the whole layer turns on.
+	it('leaves a text-defined-only quantity untracked', () => {
+		const index = buildQuantityIndex([undesignated('a', '$$y = 1$$')]);
+		const y = entryFor(index, 'y');
+		expect(y && isTracked(y)).toBe(false);
+		expect(trackedQuantities(index)).toEqual([]);
+	});
+
+	it('draws no edge from a text definer to a confirmed consumer', () => {
+		const edges = deriveDataflowEdges(
+			buildQuantityIndex([
+				undesignated('a', '$$g = 9.8$$'),
+				{ ...undesignated('b', '$$w = m g$$'), inputs: [{ base: 'g', subscript: null }] }
+			])
+		);
+		expect(edges).toEqual([]);
+	});
+
+	// The facet is a pure function of (extraction, confirmed outputs), both of
+	// which the existing signatures already cover — so it must not cost a re-parse.
+	it('does not re-extract when a designation confirms a text definer', () => {
+		const extract = vi.fn((candidate: { description: string; tags: string[] }) =>
+			nodeQuantities(candidate)
+		);
+		const build = createQuantityIndexer({ extract });
+		const before = undesignated('a', '$$y = 1$$');
+		build([before]);
+		extract.mockClear();
+		const after = build([{ ...before, outputs: [{ base: 'y', subscript: null }] }]);
+		expect(extract).not.toHaveBeenCalled();
+		expect(after.entries.get('y')?.textDefinerNodeIds).toEqual([]);
+		expect(after.entries.get('y')?.definerNodeIds).toEqual(['a']);
+	});
+
+	it('returns the identical index when nothing about the text definer changed', () => {
+		const build = createQuantityIndexer();
+		const nodes = [undesignated('a', '$$y = 1$$')];
+		expect(build(nodes)).toBe(build(nodes.map((each) => ({ ...each }))));
+	});
+});
+
 describe('promotion rule', () => {
 	it('does not track a symbol nobody defines', () => {
 		const index = buildQuantityIndex([node('solo', '$$E = m c^2$$')]);

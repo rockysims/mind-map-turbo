@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { cycleDesignation, designationView, type DesignationChip } from './quantityDesignations';
+import {
+	cycleDesignation,
+	designateAs,
+	designationView,
+	type DesignationChip
+} from './quantityDesignations';
 import { nodeQuantities, type NodeQuantities } from './nodeQuantities';
 import { symbolFor } from '../../MathText/lib/mathSymbols';
 import type { QuantityDesignation } from '../../types/node';
@@ -139,6 +144,94 @@ describe('designationView', () => {
 		const view = designationView(parse('$$F = m a$$', ['no-dataflow']), undefined, undefined);
 
 		expect(view.suggestions).toEqual([]);
+	});
+});
+
+describe('designateAs', () => {
+	it('assigns an unassigned quantity to the named column', () => {
+		const next = designateAs({}, symbolFor('g', null), 'output');
+
+		expect(next.outputs).toEqual([designation('g')]);
+		expect(next.inputs).toEqual([]);
+	});
+
+	it('moves a confirmed input into the output column', () => {
+		const next = designateAs({ inputs: [designation('g')] }, symbolFor('g', null), 'output');
+
+		expect(next.inputs).toEqual([]);
+		expect(next.outputs).toEqual([designation('g')]);
+	});
+
+	it('moves a confirmed output into the input column', () => {
+		const next = designateAs({ outputs: [designation('g')] }, symbolFor('g', null), 'input');
+
+		expect(next.outputs).toEqual([]);
+		expect(next.inputs).toEqual([designation('g')]);
+	});
+
+	/**
+	 * The reason this function exists rather than a call to the cycle. "Confirm
+	 * this node as the definer" has to mean the same thing however the node got
+	 * where it is — and from an input, which is two taps away from any ghost chip,
+	 * the cycle's next stop is unassigned. A confirm built on it would sometimes
+	 * unconfirm the thing it was pointed at.
+	 */
+	it('is idempotent exactly where the cycle would unassign', () => {
+		const fromInput = { inputs: [designation('g')], outputs: [] };
+
+		expect(designateAs(fromInput, symbolFor('g', null), 'output').outputs).toEqual([
+			designation('g')
+		]);
+		expect(cycleDesignation(fromInput, symbolFor('g', null), 'output').outputs).toEqual([]);
+	});
+
+	it('says the same thing twice when pressed twice', () => {
+		const once = designateAs({}, symbolFor('g', null), 'output');
+		const twice = designateAs(once, symbolFor('g', null), 'output');
+
+		expect(twice).toEqual(once);
+	});
+
+	it('collapses a quantity designated both ways into the named column', () => {
+		const next = designateAs(
+			{ inputs: [designation('x')], outputs: [designation('x')] },
+			symbolFor('x', null),
+			'output'
+		);
+
+		expect(next.inputs).toEqual([]);
+		expect(next.outputs).toEqual([designation('x')]);
+	});
+
+	it('collapses a repeated designation into one entry', () => {
+		const next = designateAs(
+			{ outputs: [designation('x'), designation('x')] },
+			symbolFor('x', null),
+			'output'
+		);
+
+		expect(next.outputs).toEqual([designation('x')]);
+	});
+
+	it('leaves untouched entries in their order', () => {
+		const next = designateAs(
+			{
+				inputs: [designation('a'), designation('m'), designation('t')],
+				outputs: [designation('F')]
+			},
+			symbolFor('m', null),
+			'output'
+		);
+
+		expect(next.inputs).toEqual([designation('a'), designation('t')]);
+		expect(next.outputs).toEqual([designation('F'), designation('m')]);
+	});
+
+	it('confirms a subscripted quantity by its structural identity', () => {
+		const next = designateAs({ inputs: [designation('v', '0')] }, symbolFor('v', '0'), 'output');
+
+		expect(next.inputs).toEqual([]);
+		expect(next.outputs).toEqual([designation('v', '0')]);
 	});
 });
 

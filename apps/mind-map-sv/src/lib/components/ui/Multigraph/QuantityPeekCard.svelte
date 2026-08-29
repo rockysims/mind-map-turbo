@@ -16,6 +16,13 @@
 	 * text no longer states it. It is still a real answer to "who defines this", so
 	 * hiding it would make the peek disagree with the edge on screen.
 	 *
+	 * A node whose text states the definition without anyone having confirmed it is
+	 * an answer too, and the most important one: saying "nothing defines this" over
+	 * an equation someone has already written invites the reader to write it a
+	 * second time. Those rows are drawn as ghosts — the same treatment a ghost chip
+	 * gets, an offer rather than a fact — and each carries the one tap that makes it
+	 * a fact.
+	 *
 	 * The next question is almost always "and what is *that* symbol?", so each
 	 * definer row also offers that node's own confirmed inputs as chips, and a
 	 * chip opens another card of exactly this kind underneath. The card is
@@ -29,7 +36,7 @@
 	import PeekCard from './QuantityPeekCard.svelte';
 	import QuantityChip from './QuantityChip.svelte';
 	import type { QuantityDesignation } from '../types/node';
-	import type { QuantityIndexEntry } from './lib/quantityIndex';
+	import type { QuantityDefinitionRecord, QuantityIndexEntry } from './lib/quantityIndex';
 	import {
 		isBranchOpen,
 		isLoop,
@@ -66,6 +73,7 @@
 		onToggleBranch,
 		onJumpToNode,
 		onCreateDefiningNode,
+		onConfirmDefiner,
 		onClose
 	}: {
 		/** The index entry for this card's quantity, or undefined when nothing knows it. */
@@ -112,6 +120,15 @@
 			quantityKey: string,
 			consumerNodeId?: string
 		) => void;
+		/**
+		 * Designate this card's quantity as the named node's output — the one tap
+		 * that turns an unconfirmed row into a confirmed one. The *key* rather than
+		 * the symbol, matching `onCreateDefiningNode`, so the diagnostics list can
+		 * hand the same callback the key it already has. Absent means no control is
+		 * offered, exactly as with Define: a surface with no graph behind it reads
+		 * and changes nothing.
+		 */
+		onConfirmDefiner?: (definerNodeId: string, quantityKey: string) => void;
 		/** Root card only: dismiss the whole cascade. */
 		onClose?: () => void;
 	} = $props();
@@ -119,12 +136,37 @@
 	let card = $state<HTMLDivElement | null>(null);
 
 	const selfPath = $derived(serializePath(path));
-	const definerNodeIds = $derived(entry?.definerNodeIds ?? []);
 	const indentRem = $derived(Math.min(path.length, MAX_INDENT_LEVELS) * INDENT_REM_PER_LEVEL);
 
-	function definitionsFor(nodeId: string) {
-		return (entry?.definitions ?? []).filter((definition) => definition.nodeId === nodeId);
+	/** One node that defines this quantity, and whether it has said so. */
+	interface DefinerRow {
+		nodeId: string;
+		/** Confirmed as an output. An unconfirmed row is an offer, not a fact. */
+		confirmed: boolean;
+		definitions: QuantityDefinitionRecord[];
 	}
+
+	function recordsFor(records: readonly QuantityDefinitionRecord[], nodeId: string) {
+		return records.filter((record) => record.nodeId === nodeId);
+	}
+
+	/**
+	 * Confirmed rows first, then the ones only the text claims. The two lists are
+	 * disjoint by construction — the index subtracts the confirmed definers out of
+	 * the text ones — so a node appears at most once and `row.nodeId` is a key.
+	 */
+	const rows = $derived<DefinerRow[]>([
+		...(entry?.definerNodeIds ?? []).map((nodeId) => ({
+			nodeId,
+			confirmed: true,
+			definitions: recordsFor(entry?.definitions ?? [], nodeId)
+		})),
+		...(entry?.textDefinerNodeIds ?? []).map((nodeId) => ({
+			nodeId,
+			confirmed: false,
+			definitions: recordsFor(entry?.textDefinitions ?? [], nodeId)
+		}))
+	]);
 
 	/** One drill chip: the quantity it names, where opening it would land, and its state. */
 	interface DrillChip {
@@ -203,7 +245,10 @@
 </script>
 
 {#snippet cardBody()}
-	{#if definerNodeIds.length === 0}
+	{#if rows.length === 0}
+		<!-- Nothing confirmed AND nothing written down: only here is "define it" the
+		     right offer. Making it when someone has already written the equation is
+		     how a reader ends up with two nodes saying the same thing. -->
 		<p class="note">Nothing defines {label} yet.</p>
 		{#if onCreateDefiningNode}
 			<button
@@ -217,16 +262,27 @@
 		{/if}
 	{:else}
 		<ul>
-			{#each definerNodeIds as definerId (definerId)}
-				{@const definitions = definitionsFor(definerId)}
+			<!--
+				Keyed on the node alone, never on the node and its state. Confirming a row
+				has to MOVE it from the unconfirmed half of the list to the confirmed one;
+				a composite key would tear the `<li>` down and rebuild it, taking any
+				nested cascade, scroll position and focus underneath it with it.
+			-->
+			{#each rows as row (row.nodeId)}
+				{@const definerId = row.nodeId}
 				{@const drills = drillChipsFor(definerId)}
-				<li data-peek-definer={definerId}>
+				<li
+					data-peek-definer={definerId}
+					data-peek-definer-state={row.confirmed ? 'confirmed' : 'unconfirmed'}
+				>
 					<div class="definition-row">
-						<span class="definition">
-							{#if definitions.length === 0}
+						<span class="definition" class:unconfirmed={!row.confirmed}>
+							{#if row.definitions.length === 0}
+								<!-- Confirmed-only by construction: a text definer is on the list
+								     because its text defines the symbol, so it always has a body. -->
 								{titleForNodeId(definerId)}
 							{:else}
-								{#each definitions as definition (definition.bodyKey)}
+								{#each row.definitions as definition (definition.bodyKey)}
 									<MathText text={texOf(definition)} />
 								{/each}
 							{/if}
@@ -239,6 +295,21 @@
 								onclick={() => onJumpToNode?.(definerId)}
 							>
 								Go to node
+							</button>
+						{/if}
+						{#if !row.confirmed && onConfirmDefiner}
+							<!-- After "Go to node" in the DOM so the card's mount focus lands on
+							     a control that reads rather than one that writes, wherever there
+							     is one. The accessible name carries what the ghost styling says
+							     to the eye: this is an offer, and the node it belongs to. -->
+							<button
+								type="button"
+								class="confirm"
+								data-peek-confirm={definerId}
+								aria-label={`Confirm ${titleForNodeId(definerId)} as where ${label} is defined`}
+								onclick={() => onConfirmDefiner?.(definerId, quantityKey)}
+							>
+								Confirm
 							</button>
 						{/if}
 					</div>
@@ -280,6 +351,7 @@
 								{onToggleBranch}
 								{onJumpToNode}
 								{onCreateDefiningNode}
+								{onConfirmDefiner}
 							/>
 						{/if}
 					{/each}
@@ -394,6 +466,17 @@
 		overflow-x: auto;
 	}
 
+	/*
+	 * The same treatment a ghost chip gets, and for the same reason: this equation
+	 * is written down but nobody has confirmed it, so it reads as an offer rather
+	 * than as part of what the graph does. Opacity is not an accessible signal on
+	 * its own — the confirm control's name carries the meaning too.
+	 */
+	.definition.unconfirmed {
+		color: #475569;
+		opacity: 0.65;
+	}
+
 	.drill {
 		display: flex;
 		flex-wrap: wrap;
@@ -432,5 +515,15 @@
 		justify-self: start;
 		border-color: #f59e0b;
 		background: #fffbeb;
+	}
+
+	/* Filled rather than outlined: it is the row's own answer, and leaving it in
+	   the same quiet grey as "Go to node" beside it would make the offer look like
+	   a second way to navigate. Amber belongs to Define, which extends the graph —
+	   this only confirms what is already written. */
+	button.confirm {
+		border-color: #94a3b8;
+		background: #e2e8f0;
+		color: #0f172a;
 	}
 </style>
