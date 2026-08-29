@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import type { EdgeData } from '../types/edge';
 	import type { GraphAssetMetadata } from '../types/multigraph';
 	import type { NodeData, NodeImageContent, QuantityDesignation } from '../types/node';
@@ -11,7 +12,14 @@
 	import { normalizeNodeTitle, type EdgePatch } from './lib/graph';
 	import { normalizeTagList } from './lib/titleSyntax';
 	import { nodeQuantities } from './lib/nodeQuantities';
-	import { cycleDesignation, designationView } from './lib/quantityDesignations';
+	import { cycleDesignation, designateAs, designationView } from './lib/quantityDesignations';
+	import {
+		applyInsertion,
+		insertionFor,
+		serializeSymbol,
+		type TextSelection
+	} from './lib/quantityTextInsertion';
+	import { symbolFor } from '../MathText/lib/mathSymbols';
 	import QuantityDesignationChips from './QuantityDesignationChips.svelte';
 
 	type ActiveTab = 'node' | 'edges';
@@ -66,7 +74,38 @@
 	let imageDraftByAssetId = $state<Record<string, { alt: string; caption: string }>>({});
 	let imageStatus = $state('');
 	let titleInput = $state<HTMLInputElement | null>(null);
+	let descriptionInput = $state<HTMLTextAreaElement | null>(null);
 	let imageInput = $state<HTMLInputElement | null>(null);
+	let insertStatus = $state('');
+
+	type TextField = 'title' | 'description';
+
+	/**
+	 * Where a written quantity goes: the field the author last had a cursor in, and
+	 * where in it. One record, not one per field — an insertion only ever targets
+	 * the last active field, so remembering both would be storing an answer nobody
+	 * asks for.
+	 *
+	 * Starts at the end of the title because that is where the sheet puts focus on
+	 * open, so a session that touches neither field still has a real target rather
+	 * than a guess.
+	 */
+	let caret = $state<{ field: TextField; selection: TextSelection }>({
+		field: 'title',
+		selection: { start: 0, end: 0 }
+	});
+
+	/**
+	 * The quantities whose role this authoring session has already settled, by
+	 * inferring one or by the author cycling the chip themselves.
+	 *
+	 * Nothing renders from it, so its reactivity is incidental — `SvelteSet` is
+	 * here because the house rule bans a mutable plain `Set` in a component, and
+	 * being reactive costs nothing when no template reads it. Not saved either: one
+	 * edit-sheet opening is one session, so unmounting discards it and Save,
+	 * Cancel, Close, and a node change all start fresh with no reset callback.
+	 */
+	let roleSettled = new SvelteSet<string>();
 	let reduceMotion = $derived(prefersReducedMotion());
 	// Only surface the preview once the draft actually contains math, so nodes
 	// without any keep the compact form the sheet has today.
@@ -100,6 +139,13 @@
 		nodeTags = node.tags.join(' ');
 		draftInputs = node.inputs ?? [];
 		draftOutputs = node.outputs ?? [];
+		// `node.title`, never the `title` draft this effect just wrote: reading the
+		// draft would make the effect depend on it, so every keystroke would re-run
+		// the reset and throw the edit away.
+		const end = node.title.length;
+		caret = { field: 'title', selection: { start: end, end } };
+		roleSettled = new SvelteSet();
+		insertStatus = '';
 		requestAnimationFrame(() => titleInput?.focus());
 	});
 
@@ -131,6 +177,10 @@
 	}
 
 	function cycle(symbol: QuantitySymbol, suggestedRole?: 'input' | 'output') {
+		// The author has stated a preference, so nothing inferred later may argue
+		// with it. Recorded before the change, since what matters is that they acted
+		// on this quantity at all, not where the cycle happened to land it.
+		roleSettled.add(symbol.key);
 		const next = cycleDesignation(
 			{ inputs: draftInputs, outputs: draftOutputs },
 			symbol,
@@ -138,6 +188,163 @@
 		);
 		draftInputs = next.inputs;
 		draftOutputs = next.outputs;
+	}
+
+	function fieldElement(field: TextField): HTMLInputElement | HTMLTextAreaElement | null {
+		return field === 'title' ? titleInput : descriptionInput;
+	}
+
+	/** Where this field's cursor is now, so a later insertion can go back to it. */
+	function rememberCaret(field: TextField, event: Event) {
+		// Bound to the field itself, so `currentTarget` is that control; TS only
+		// knows it as an EventTarget.
+		const element = event.currentTarget as HTMLInputElement | HTMLTextAreaElement;
+		caret = {
+			field,
+			selection: {
+				start: element.selectionStart ?? element.value.length,
+				end: element.selectionEnd ?? element.value.length
+			}
+		};
+	}
+
+	/**
+	 * Every event that can move a cursor without going through the others. `focus`
+	 * covers arriving, `select` a drag or a select-all, `keyup` the arrow keys, and
+	 * `pointerup` a click that places the caret mid-word.
+	 */
+	function caretHandlers(field: TextField) {
+		const remember = (event: Event) => rememberCaret(field, event);
+		return {
+			onfocus: remember,
+			onselect: remember,
+			oninput: remember,
+			onkeyup: remember,
+			onpointerup: remember
+		};
+	}
+
+	function keyOf(designation: QuantityDesignation): string {
+		return symbolFor(designation.base, designation.subscript).key;
+	}
+
+	/**
+	 * The role the parser would now give this quantity, having just been handed the
+	 * insertion.
+	 *
+	 * Deliberately the same question `designationView` asks to place a ghost, and
+	 * the same one a tap enters the cycle at — asked of the whole draft rather than
+	 * of the equation the symbol landed in. A second reading of "which side of the
+	 * equals is it on" could disagree with the chip the author is looking at, and
+	 * an automatic decision that contradicts the visible suggestion is worse than
+	 * no decision at all.
+	 */
+	function roleAfterInsertion(
+		symbol: QuantitySymbol,
+		nextTitle: string,
+		nextDescription: string
+	): 'input' | 'output' | null {
+		const parsed = nodeQuantities({
+			title: normalizeNodeTitle(nextTitle),
+			description: nextDescription,
+			tags: normalizeTagList(nodeTags)
+		});
+		if (parsed.defines.some((definition) => definition.symbol.key === symbol.key)) return 'output';
+		if (parsed.references.some((reference) => reference.key === symbol.key)) return 'input';
+		return null;
+	}
+
+	/**
+	 * Accept the parser's suggestion for a quantity nobody has decided about yet.
+	 *
+	 * Three conditions, and the middle one is the important one: a symbol already
+	 * sitting in either column has been confirmed, and re-deciding it would let
+	 * "write this symbol" quietly move a designation the author asked for — taking
+	 * its dataflow edge with it. A stale chip needs no help here anyway, since the
+	 * insertion alone puts its symbol back in the text and clears the flag.
+	 */
+	function settleRole(symbol: QuantitySymbol, nextTitle: string, nextDescription: string) {
+		if (roleSettled.has(symbol.key)) return;
+		const decided = [...draftInputs, ...draftOutputs].some(
+			(designation) => keyOf(designation) === symbol.key
+		);
+		if (decided) return;
+		const role = roleAfterInsertion(symbol, nextTitle, nextDescription);
+		// No role means nothing was learned, so the opportunity is not spent: the
+		// next insertion of this symbol into a real equation still gets its chance.
+		if (role === null) return;
+		const next = designateAs({ inputs: draftInputs, outputs: draftOutputs }, symbol, role);
+		draftInputs = next.inputs;
+		draftOutputs = next.outputs;
+		roleSettled.add(symbol.key);
+	}
+
+	/**
+	 * Write one quantity into the field the author last had a cursor in.
+	 *
+	 * Through the field's own editing command rather than by assigning the bound
+	 * state: an assignment wipes that control's native undo stack, so Cmd/Ctrl+Z
+	 * after an insertion would do nothing or jump back to a much older value, and
+	 * the author's only recovery would be deleting it by hand or cancelling the
+	 * whole edit. `insertText` also places the caret for us and fires the `input`
+	 * event the binding listens for.
+	 */
+	function insertQuantity(symbol: QuantitySymbol) {
+		const source = serializeSymbol(symbol);
+		if (source === null) {
+			// Better to decline than to write source the parser reads back as a
+			// different quantity, which the author has no way of noticing.
+			insertStatus = `${symbol.label} cannot be written as text.`;
+			return;
+		}
+
+		const field = caret.field;
+		const element = fieldElement(field);
+		if (element === null) return;
+
+		const text = element.value;
+		const selection = {
+			start: Math.min(caret.selection.start, text.length),
+			end: Math.min(caret.selection.end, text.length)
+		};
+		const { insert } = insertionFor(text, selection, source);
+
+		const expected = applyInsertion(text, selection, insert);
+		element.focus();
+		element.setSelectionRange(selection.start, selection.end);
+		try {
+			document.execCommand('insertText', false, insert);
+		} catch {
+			// Fall through to the check below, which is the real test either way.
+		}
+		// The return value is not trustworthy: the command reports success and then
+		// does nothing when the browsing context is not the focused one, which is
+		// the norm in a headless test run and happens in a background tab. So the
+		// text itself is what decides whether the fallback is needed.
+		if (element.value !== expected.text) {
+			// Undo is lost on this path, which is the whole reason it is the fallback.
+			element.value = expected.text;
+			element.dispatchEvent(new Event('input', { bubbles: true }));
+			element.setSelectionRange(expected.caret, expected.caret);
+		}
+
+		caret = {
+			field,
+			selection: {
+				start: element.selectionStart ?? element.value.length,
+				end: element.selectionEnd ?? element.value.length
+			}
+		};
+
+		// Read off the element rather than the bound state: this is the value that
+		// definitely reflects the insertion, whatever the binding has done yet.
+		settleRole(
+			symbol,
+			field === 'title' ? element.value : title,
+			field === 'description' ? element.value : description
+		);
+
+		insertStatus = `Wrote ${symbol.label} into the ${field}.`;
 	}
 
 	function saveEdgeTags(edge: EdgeData) {
@@ -289,12 +496,23 @@
 			>
 				<label>
 					Title
-					<input bind:this={titleInput} bind:value={title} name="title" />
+					<input
+						bind:this={titleInput}
+						bind:value={title}
+						name="title"
+						{...caretHandlers('title')}
+					/>
 				</label>
 
 				<label>
 					Description
-					<textarea bind:value={description} name="description" rows="6"></textarea>
+					<textarea
+						bind:this={descriptionInput}
+						bind:value={description}
+						name="description"
+						rows="6"
+						{...caretHandlers('description')}
+					></textarea>
 				</label>
 
 				{#if descriptionHasMath}
@@ -304,7 +522,19 @@
 					</section>
 				{/if}
 
-				<QuantityDesignationChips mode="edit" view={designations} onCycle={cycle} />
+				<QuantityDesignationChips
+					mode="edit"
+					view={designations}
+					onCycle={cycle}
+					onInsert={insertQuantity}
+				/>
+
+				<!--
+					Focus has just moved into the text field, so a screen reader that only
+					announces the newly focused control would say nothing about what was
+					written or where.
+				-->
+				<p class="visually-hidden" role="status" data-insert-status>{insertStatus}</p>
 
 				<label>
 					Node tags
@@ -538,7 +768,14 @@
 		background: #ffffff;
 		box-shadow: 0 -12px 40px rgb(0 0 0 / 22%);
 		animation: sheet-in 160ms ease-out;
-		touch-action: none;
+		/*
+		 * `pan-y`, not the blanket `none` every other overlay here uses. Those are
+		 * surfaces that must swallow the gesture whole; this one is a scroll
+		 * container, and `none` meant a finger could not reach the fields below the
+		 * fold at all. Horizontal panning and pinch stay disabled, so the canvas
+		 * underneath is no more reachable than it was.
+		 */
+		touch-action: pan-y;
 	}
 
 	header,
@@ -640,6 +877,8 @@
 		max-height: min(60vh, 28rem);
 		overflow: auto;
 		padding-right: 0.125rem;
+		/* Its own scroll container nested in the sheet's, so it needs the rule too. */
+		touch-action: pan-y;
 	}
 
 	.edge-row {
@@ -697,7 +936,8 @@
 		cursor: pointer;
 	}
 
-	.image-upload input {
+	.image-upload input,
+	.visually-hidden {
 		position: absolute;
 		width: 1px;
 		height: 1px;
