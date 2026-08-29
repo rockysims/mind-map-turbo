@@ -146,7 +146,20 @@
 		caret = { field: 'title', selection: { start: end, end } };
 		roleSettled = new SvelteSet();
 		insertStatus = '';
-		requestAnimationFrame(() => titleInput?.focus());
+		requestAnimationFrame(() => {
+			// Placed, not assumed, and in both places it is recorded. Focusing fires
+			// the handler that reads the cursor back, which overwrites the assignment
+			// above with wherever the browser chose to put it — the end of the value
+			// in Chromium, but that is a default rather than a promise, and
+			// `setSelectionRange` fires no event to correct the record. Setting the
+			// selection and then restating it is what makes "a session that touches
+			// neither field appends to the title" true rather than lucky.
+			const field = titleInput;
+			if (field === null) return;
+			field.focus();
+			field.setSelectionRange(end, end);
+			caret = { field: 'title', selection: { start: end, end } };
+		});
 	});
 
 	$effect(() => {
