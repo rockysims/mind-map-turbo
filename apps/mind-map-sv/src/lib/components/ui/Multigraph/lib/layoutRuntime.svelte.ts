@@ -303,18 +303,25 @@ export class LayoutRuntime {
 	 * both edgeless once the hidden nodes are gone — keeps the distance it was
 	 * actually measured at. Beacons stay unanchored: overlap resolution and
 	 * (bounded) hop repulsion must be able to move them off other clusters.
+	 *
+	 * Required, and the one member of this bag that is not an override: the only
+	 * map it could have fallen back to is a fresh BFS over `layoutGraph`, which is
+	 * the measurement the paragraph above rules out. A caller with no hop map to
+	 * hand does not want a quietly worse one computed for it — it wants the type
+	 * error. `GraphLayoutOptions` has required this all along; this is the last
+	 * place that was manufacturing a value to satisfy it.
 	 */
 	layoutOptions(
 		layoutGraph: MultigraphData,
 		overrides: {
-			hopsByNodeId?: Record<string, number>;
+			hopsByNodeId: Record<string, number>;
 			activeDragNodeId?: string | null;
 			relaxIterations?: number;
 			scaleByNodeId?: Record<string, number>;
 			scaleAnchoredNodeIds?: readonly string[];
 			participatingNodeIds?: ReadonlySet<string>;
 			mobilityByNodeId?: Record<string, number>;
-		} = {}
+		}
 	): GraphLayoutOptions {
 		const nodeIds = layoutGraph.nodes.map((node) => node.id);
 		const relayoutParticipating =
@@ -324,7 +331,7 @@ export class LayoutRuntime {
 			settings: this.#options.getLayoutSettings(),
 			activeDragNodeId: overrides.activeDragNodeId ?? this.#options.getActiveDragNodeId(),
 			scaleAnchoredNodeIds: overrides.scaleAnchoredNodeIds ?? this.scaleAnchoredNodeIds,
-			hopsByNodeId: overrides.hopsByNodeId ?? this.#hopsFor(layoutGraph),
+			hopsByNodeId: overrides.hopsByNodeId,
 			relaxIterations: overrides.relaxIterations,
 			scaleByNodeId: overrides.scaleByNodeId ?? this.animatedScaleByNodeId,
 			participatingNodeIds: relayoutParticipating,
