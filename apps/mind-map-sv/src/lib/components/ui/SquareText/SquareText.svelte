@@ -1,6 +1,7 @@
 <script lang="ts">
 	import MathText from '../MathText/MathText.svelte';
 	import { hasMath as containsMath } from '../MathText/lib/mathSegments';
+	import { mathPlainText } from '../MathText/lib/mathPlainText';
 
 	const { text = 'SquareText fallback text.', classList = [] } = $props<{
 		text: string;
@@ -17,6 +18,19 @@
 	 * path and gain a wrapper it does not need.
 	 */
 	const hasMath = $derived(text.includes('$') && containsMath(text));
+
+	/**
+	 * What the plain path draws. Not `text`: an escaped dollar is unescaped by the
+	 * segmenter, so `\$5` is math-free text that still must not be drawn verbatim.
+	 * Every other surface a title reaches — the details heading, the edit sheet,
+	 * the breadcrumbs, the accessible names, search — resolves the escape, and
+	 * drawing the backslash here made the canvas the one place it showed through.
+	 *
+	 * Free for the overwhelmingly common case: `mathPlainText` returns its input
+	 * by identity when there is no `$` at all, and this is read once per visible
+	 * node.
+	 */
+	const plainText = $derived(mathPlainText(text));
 
 	function checkOverflow(el: HTMLElement) {
 		const oldOverflow = el.style.overflow;
@@ -114,7 +128,7 @@
 <div class="squareTextContainer">
 	<div bind:this={squareTextRef} class={['squareText', ...classList]}>
 		<!-- prettier-ignore -->
-		{#if hasMath}<MathText {text} singleLine />{:else}{text}{/if}
+		{#if hasMath}<MathText {text} singleLine />{:else}{plainText}{/if}
 	</div>
 </div>
 

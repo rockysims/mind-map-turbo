@@ -84,6 +84,23 @@
 />
 
 <Story
+	args={{ text: 'Costs \\$5 today', classList: ['title'] }}
+	name="Test:AnEscapedDollarLosesItsBackslashOnThePlainPath"
+	play={async (context) => {
+		// `\$` is the escape for a literal dollar and the segmenter resolves it, so
+		// every other surface a title reaches — the details heading, the edit sheet,
+		// the breadcrumbs, the accessible names, search — reads `$5`. The canvas is
+		// the surface the escape exists for, and it drew the backslash: text with no
+		// math stays on the plain path, but what that path draws is the projection
+		// rather than the source.
+		await expect(context.canvasElement.textContent).toContain('Costs $5 today');
+		await expect(context.canvasElement.textContent).not.toContain('\\');
+		// Still the plain path: no math means no wrapper and no change to the fit.
+		await expect(context.canvasElement.querySelector('[data-math-text]')).toBeNull();
+	}}
+/>
+
+<Story
 	args={{ text: '$E = mc^2$', classList: ['title'] }}
 	name="Test:MathTitleRendersAsMath"
 	play={async (context) => {
