@@ -77,7 +77,41 @@
 		const found = canvasElement.querySelector('[data-math-preview]');
 		return found instanceof HTMLElement ? found : null;
 	}
+
+	/**
+	 * `touch-action` decides what the browser's own gesture handling does, which a
+	 * synthetic PointerEvent sequence cannot exercise — dispatched events scroll
+	 * nothing, and `scrollTop = n` works whatever the rule says. The computed value
+	 * is the assertion that actually means something here.
+	 */
+	function touchActionOf(canvasElement: HTMLElement, selector: string): string {
+		const found = canvasElement.querySelector(selector);
+		if (!(found instanceof HTMLElement)) {
+			throw new Error(`no element for ${selector}`);
+		}
+		return getComputedStyle(found).touchAction;
+	}
 </script>
+
+<Story
+	name="LetsBothScrollContainersPanVerticallyOnTouch"
+	play={async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+
+		// The sheet is taller than the viewport on a phone, so a blanket `none` here
+		// meant the fields below the fold could not be reached by finger at all.
+		expect(touchActionOf(canvasElement, '.node-edit-sheet')).toBe('pan-y');
+
+		// The backdrop is not a scroll container and must still swallow the gesture
+		// whole, or the canvas pans behind an open sheet.
+		expect(touchActionOf(canvasElement, '.sheet-backdrop')).toBe('none');
+
+		// The edges tab is its own nested scroll container and needs the rule too.
+		canvas.getByRole('tab', { name: 'Edges' }).click();
+		await settle();
+		expect(touchActionOf(canvasElement, '.edges-tab')).toBe('pan-y');
+	}}
+/>
 
 <Story
 	name="ShowsNoPreviewForADraftWithoutMath"

@@ -538,7 +538,14 @@
 		background: #ffffff;
 		box-shadow: 0 -12px 40px rgb(0 0 0 / 22%);
 		animation: sheet-in 160ms ease-out;
-		touch-action: none;
+		/*
+		 * `pan-y`, not the blanket `none` every other overlay here uses. Those are
+		 * surfaces that must swallow the gesture whole; this one is a scroll
+		 * container, and `none` meant a finger could not reach the fields below the
+		 * fold at all. Horizontal panning and pinch stay disabled, so the canvas
+		 * underneath is no more reachable than it was.
+		 */
+		touch-action: pan-y;
 	}
 
 	header,
@@ -640,6 +647,8 @@
 		max-height: min(60vh, 28rem);
 		overflow: auto;
 		padding-right: 0.125rem;
+		/* Its own scroll container nested in the sheet's, so it needs the rule too. */
+		touch-action: pan-y;
 	}
 
 	.edge-row {
