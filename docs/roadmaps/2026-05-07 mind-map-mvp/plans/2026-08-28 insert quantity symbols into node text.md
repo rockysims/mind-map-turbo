@@ -534,3 +534,25 @@ needs.
   away. And the mount-time `requestAnimationFrame` focus can steal a caret placed
   within that same frame, which no author can hit but every story can — so the
   story helpers wait a frame before placing one.
+- 2026-08-28: User confirmed undo by hand — two insertions, two undos, both
+  reverted. So `execCommand` is the path taken in a real browser and the field's
+  native undo stack survives, which is exactly what the automated suite could not
+  show: headless, the command reports success and does nothing, so the stories
+  exercise the fallback instead. The one item the plan left to a manual smoke is
+  therefore settled.
+
+- 2026-08-28: A serializer that wrote commands (`\epsilon`, `\mathbf{v}`) was
+  built and then reverted. It was motivated by keeping untypeable characters out
+  of an author's text, but the premise it rested on was wrong: `\epsilon` and `ϵ`
+  are the same quantity to this app, because identity comes off the rendered
+  MathML and Temml collapses both spellings to one `mi` before anything here
+  looks at them. With nothing at stake but appearance, the character wins — a
+  chip writes what it shows, which is one rule rather than a table to keep in
+  sync with the engine.
+
+  Two findings from that work are worth keeping if it ever returns. The `var`
+  pairs are traps: `\epsilon` is U+03F5 and `\varepsilon` is U+03B5, `\phi` is
+  U+03D5 and `\varphi` is U+03C6, so a map written from memory transposes them
+  and silently names a different quantity. And compatibility decomposition
+  recovers the ASCII base for all 416 styled letters with no exceptions, which is
+  why the styled alphabets needed no lookup table.
