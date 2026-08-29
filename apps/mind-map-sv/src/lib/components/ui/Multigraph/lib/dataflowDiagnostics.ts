@@ -50,9 +50,15 @@ export interface ReferenceDiagnostic {
 export interface ConflictDiagnostic {
 	symbol: QuantitySymbol;
 	/**
-	 * The nodes claiming this quantity as an output. Usually two or more, but
+	 * The nodes whose disagreement this is, sorted. Usually two or more, but
 	 * exactly one when a single node defines it two different ways — it
 	 * contradicts itself, with no second node involved.
+	 *
+	 * Read off the definitions rather than off the entry's confirmed definers:
+	 * a definer whose text no longer states the equation is a stale designation,
+	 * not a party to the disagreement, and naming it would send the reader to a
+	 * node with nothing to reconcile. Callers that want everyone claiming the
+	 * output — the edges, the peek card's rows — read the index directly.
 	 */
 	definerNodeIds: string[];
 	/**
@@ -213,6 +219,15 @@ function cyclesFrom(edges: readonly DerivedEdge[]): CycleDiagnostic[] {
 		.sort((left, right) => left.nodeIds[0].localeCompare(right.nodeIds[0]));
 }
 
+/**
+ * The nodes a conflict is actually between: those whose text states one of the
+ * competing definitions. Distinct and sorted, so a node that says the same thing
+ * twice is named once and the order depends on nothing but the content.
+ */
+function conflictingNodeIdsOf(definitions: readonly QuantityDefinitionRecord[]): string[] {
+	return [...new Set(definitions.map((definition) => definition.nodeId))].sort();
+}
+
 function selfContradictingNodeIdsOf(definitions: readonly QuantityDefinitionRecord[]): string[] {
 	const bodiesByNodeId = new Map<string, Set<string>>();
 	for (const definition of definitions) {
@@ -275,7 +290,7 @@ export function computeDataflowDiagnostics(
 		.filter((entry) => new Set(entry.definitions.map((each) => each.bodyKey)).size > 1)
 		.map((entry) => ({
 			symbol: entry.symbol,
-			definerNodeIds: [...entry.definerNodeIds],
+			definerNodeIds: conflictingNodeIdsOf(entry.definitions),
 			selfContradictingNodeIds: selfContradictingNodeIdsOf(entry.definitions)
 		}))
 		.sort((left, right) => left.symbol.key.localeCompare(right.symbol.key));

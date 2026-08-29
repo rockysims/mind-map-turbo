@@ -245,6 +245,43 @@ describe('conflicts', () => {
 		expect(diagnostics.conflicts).toEqual([]);
 	});
 
+	/**
+	 * A designation outlives the equation that suggested it — that is the whole
+	 * point of confirming one — so a definer whose text has been reworded still
+	 * draws its edge. It has stated nothing to disagree with, though, and naming
+	 * it as a party to the conflict sends the reader to a node with no equation
+	 * on it and nothing to reconcile.
+	 */
+	it('does not name a definer whose text no longer states the quantity', () => {
+		const stale: IndexableNode = {
+			id: 'stale',
+			description: 'Reworded into prose.',
+			tags: [],
+			outputs: [{ base: 'g', subscript: null }]
+		};
+		const diagnostics = diagnose([node('one', '$$g = 9.8$$'), node('two', '$$g = 10$$'), stale]);
+
+		expect(diagnostics.conflicts[0].definerNodeIds).toEqual(['one', 'two']);
+	});
+
+	// The stale designation is still a designation: it keeps drawing its edge, and
+	// the peek card still lists it as a definer. Only the conflict narrows.
+	it('leaves a stale definer claiming the output everywhere else', () => {
+		const stale: IndexableNode = {
+			id: 'stale',
+			description: 'Reworded into prose.',
+			tags: [],
+			outputs: [{ base: 'g', subscript: null }]
+		};
+		const index = buildQuantityIndex([
+			node('one', '$$g = 9.8$$'),
+			node('two', '$$g = 10$$'),
+			stale
+		]);
+
+		expect(index.entries.get('g')?.definerNodeIds).toEqual(['one', 'stale', 'two']);
+	});
+
 	it('does not flag a quantity referenced by many but defined once', () => {
 		expect(
 			diagnose([node('def', '$$g = 9.8$$'), node('a', '$$x = g$$'), node('b', '$$y = g$$')])
