@@ -27,10 +27,11 @@ const DEFAULT_POSITION: Point = { x: 0, y: 0 };
 
 /**
  * Clear space left between the host's right edge and the import's left edge.
- * Positions are node centers, so two radii of this go under the nodes
- * themselves; the rest is the visible seam that says "this arrived separately".
+ * Positions are node centers, so this is exactly the two radii of a
+ * full-size pair: the components start out touching, and physics opens the
+ * seam that says "this arrived separately" without carrying the import away.
  */
-const IMPORT_GAP_PX = APP_CONFIG.multigraph.nodeRadiusPx * 4;
+const IMPORT_GAP_PX = APP_CONFIG.multigraph.nodeRadiusPx * 2;
 
 export interface GraphImportResult {
 	/** The host graph with the incoming graph folded in. */

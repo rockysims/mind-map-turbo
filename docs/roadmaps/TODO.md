@@ -98,7 +98,6 @@ folded into the 08/09/10 math and dataflow milestones:
 - Consider allowing deep zoom to show iframe (with url configured by node) so third party websites can be accessed smoothly via deep zoom
 
 TODO: make long press work too even if its not a mobile device
-TODO: allow nodes from disconnected graph components to be as close as r1+r2 where r1 and r2 are the radii of the nodes. Currently they are forced relatively far apart.
 
 - Scrape from website after (establishing the pattern)
   Maybe we need a built in AI assistant that can be given a url to scrape from?

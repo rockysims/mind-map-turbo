@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { APP_CONFIG } from '../../../../appConfig';
 import type { GraphAssetMetadata, MultigraphData } from '../../types/multigraph';
 import { importGraphData } from './graphImport';
 import { makeGraph, makeRandomEdges } from './testFixtures';
@@ -204,6 +205,9 @@ describe('importGraphData', () => {
 			const hostMaxX = Math.max(next.posByNodeId.n0.x, next.posByNodeId.n1.x);
 			const importedXs = [...nodeIdMap.values()].map((id) => next.posByNodeId[id].x);
 			expect(Math.min(...importedXs)).toBeGreaterThan(hostMaxX);
+			// Two radii, so the two components start out touching. Physics no longer
+			// drives disconnected parts apart, so the parked gap is the gap.
+			expect(Math.min(...importedXs) - hostMaxX).toBe(APP_CONFIG.multigraph.nodeRadiusPx * 2);
 		});
 
 		it('translates the incoming graph rigidly, preserving its internal geometry', () => {
