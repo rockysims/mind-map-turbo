@@ -5,7 +5,7 @@
 **Milestone:** none — closes the two backlog lines at
 [TODO.md:121-122](../../TODO.md) ("Import another graph into current graph (as a
 disconnected beacon node) / Maybe need a way to merge nodes?")
-**Status:** executing
+**Status:** done
 **Total estimated effort:** L
 
 ## Summary
