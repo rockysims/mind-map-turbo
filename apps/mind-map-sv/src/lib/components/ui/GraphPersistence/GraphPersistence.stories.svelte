@@ -170,7 +170,9 @@
 
 		await waitForHarnessData(canvasElement, 'loadedGraphId', 'saved');
 		await expect(harness.dataset.primaryTitle).toBe('Saved Graph');
-		await expect(harness.dataset.notice).toBe('Draft saved locally. Download needed.');
+		await waitFor(() =>
+			expect(harness.dataset.notice).toBe('Draft saved in this browser. Download needed.')
+		);
 	}}
 />
 
@@ -191,7 +193,7 @@
 
 		await waitFor(() => expect(harness.dataset.primaryTitle).toBe('Changed Node'));
 		await waitFor(() =>
-			expect(harness.dataset.notice).toBe('Draft saved locally. Download needed.')
+			expect(harness.dataset.notice).toBe('Draft saved in this browser. Download needed.')
 		);
 		await expect(harness.dataset.graphIds).toContain('editable');
 	}}

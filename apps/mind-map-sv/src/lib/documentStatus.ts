@@ -43,14 +43,45 @@ export function documentStatusForGraph(
 	return options.recoveredDraft ? 'file-recovered-draft' : 'file-dirty';
 }
 
-export function documentStatusNotice(status: DocumentStatus): string {
+/**
+ * User-facing wording for a document status.
+ *
+ * `draftSaved` must reflect whether the current graph actually reached storage:
+ * a dirty document whose draft has not been written is never described as
+ * saved, because that is the message that costs people their work. It defaults
+ * to true so status-only callers still read naturally.
+ */
+export function documentStatusNotice(
+	status: DocumentStatus,
+	options: { draftSaved?: boolean } = {}
+): string {
+	const draftSaved = options.draftSaved ?? true;
+
 	if (status === 'new-clean') return 'New graph.';
-	if (status === 'new-dirty') return 'Draft saved locally. Download needed.';
 	if (status === 'file-clean') return 'Matches opened file.';
-	if (status === 'file-recovered-draft') return 'Recovered local edits. Download needed.';
 	if (status === 'download-clean') return 'Matches downloaded file.';
-	if (status === 'download-dirty') return 'Draft differs from downloaded file. Download needed.';
-	return 'Draft differs from opened file. Download needed.';
+
+	if (status === 'new-dirty') {
+		return draftSaved
+			? 'Draft saved in this browser. Download needed.'
+			: 'Not saved in this browser. Download to keep your work.';
+	}
+
+	if (status === 'file-recovered-draft') {
+		return draftSaved
+			? 'Recovered local edits. Download needed.'
+			: 'Recovered local edits. Not saved in this browser — download to keep your work.';
+	}
+
+	if (status === 'download-dirty') {
+		return draftSaved
+			? 'Draft differs from downloaded file. Download needed.'
+			: 'Draft differs from downloaded file. Not saved in this browser — download to keep your work.';
+	}
+
+	return draftSaved
+		? 'Draft differs from opened file. Download needed.'
+		: 'Draft differs from opened file. Not saved in this browser — download to keep your work.';
 }
 
 export function documentStatusHasUndownloadedChanges(status: DocumentStatus): boolean {

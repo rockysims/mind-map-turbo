@@ -7,6 +7,7 @@ import {
 	documentStatusForGraph,
 	documentStatusNotice,
 	graphDataEquals,
+	graphFingerprint,
 	type DocumentBaseline,
 	type DocumentStatus
 } from './documentStatus';
@@ -26,6 +27,10 @@ import {
 	type Persistence
 } from './persistence';
 import type { SaveStatus } from './saveScheduler';
+import type { StorageDurability } from './storageAvailability';
+
+export const MEMORY_ONLY_STORAGE_NOTICE =
+	"This browser is blocking site data, so drafts can't be saved here. Download to keep your work.";
 
 export type ImportGraphResult =
 	| 'imported'
@@ -52,6 +57,11 @@ export type ControllerView = {
 	loadedGraphId: string;
 	documentId: string | null;
 	documentStatus: DocumentStatus;
+	/** True only when the graph now in memory is byte-for-byte what storage holds. */
+	draftSaved: boolean;
+	/** A save is scheduled or in flight, so "not saved" is premature rather than true. */
+	savePending: boolean;
+	durability: StorageDurability;
 	graphGeneration: number;
 	status: ControllerStatus;
 };
@@ -76,6 +86,8 @@ export type GraphPersistenceControllerDeps = {
 	createDefaultGraph: () => MultigraphData;
 	navigate: (graphId: string) => void | Promise<void>;
 	storageNamespace: string;
+	/** 'memory-only' when the browser blocks site data; defaults to 'durable'. */
+	durability?: StorageDurability;
 	confirmGraphImportReplace?: (context: {
 		loadedGraphId: string;
 		currentGraph: MultigraphData;
@@ -106,6 +118,10 @@ export class GraphPersistenceController {
 	private graphGeneration = 0;
 	private baseline: DocumentBaseline;
 	private recoveredDraft = false;
+	/** Fingerprint of the graph data storage last accepted; null when nothing has been written. */
+	private lastPersistedFingerprint: string | null = null;
+	/** A save has been scheduled and has not reported back yet. */
+	private savePending = false;
 
 	constructor(private readonly deps: GraphPersistenceControllerDeps) {
 		const defaultGraph = deps.createDefaultGraph();
@@ -118,6 +134,9 @@ export class GraphPersistenceController {
 			loadedGraphId: '',
 			documentId: null,
 			documentStatus: documentStatusForGraph(defaultGraph, this.baseline),
+			draftSaved: false,
+			savePending: false,
+			durability: deps.durability ?? 'durable',
 			graphGeneration: 0,
 			status: { state: 'loading', graphId: DEFAULT_GRAPH_ID }
 		};
@@ -135,6 +154,8 @@ export class GraphPersistenceController {
 		return {
 			...this.view,
 			documentStatus: this.currentDocumentStatus(),
+			draftSaved: this.currentDraftSaved(),
+			savePending: this.savePending,
 			graphSummaries: [...this.view.graphSummaries]
 		};
 	}
@@ -157,6 +178,9 @@ export class GraphPersistenceController {
 			graph: defaultGraph
 		};
 		this.recoveredDraft = false;
+		// A graph read back out of storage IS what storage holds; a missing one has
+		// not been written yet and only counts once its save reports success.
+		this.lastPersistedFingerprint = savedGraph === null ? null : graphFingerprint(savedGraph.data);
 		this.graphGeneration += 1;
 		this.update({
 			graph: nextGraph,
@@ -169,7 +193,7 @@ export class GraphPersistenceController {
 		});
 
 		if (savedGraph === null) {
-			this.scheduler.schedule(graphId, nextGraph, nextViewState);
+			this.scheduleSave(graphId, nextGraph, nextViewState);
 			await this.flushPendingSave();
 			await this.refreshGraphList();
 			return { createdDefaultGraph: true };
@@ -211,6 +235,10 @@ export class GraphPersistenceController {
 
 		this.baseline = { kind: 'file', graph: doc.data };
 		this.recoveredDraft = recoveredDraft;
+		// Only the recovered draft came out of storage. The file payload is not in
+		// storage until the save scheduled below reports success.
+		this.lastPersistedFingerprint =
+			shouldRecoverDraft && savedDraft !== null ? graphFingerprint(savedDraft.data) : null;
 		this.graphGeneration += 1;
 		this.update({
 			graph: nextGraph,
@@ -225,7 +253,7 @@ export class GraphPersistenceController {
 
 		if (savedDraft === null) await this.refreshGraphList();
 		if (savedDraft !== null && shouldOpenFile) {
-			this.scheduler.schedule(graphId, doc.data, doc.viewState);
+			this.scheduleSave(graphId, doc.data, doc.viewState);
 			await this.flushPendingSave();
 			await this.refreshGraphList();
 		}
@@ -243,7 +271,7 @@ export class GraphPersistenceController {
 
 	notifyGraphChanged(data: MultigraphData, options: { syncView?: boolean } = {}): void {
 		const graphId = this.view.loadedGraphId || DEFAULT_GRAPH_ID;
-		this.scheduler.schedule(graphId, data, this.view.viewState);
+		this.scheduleSave(graphId, data, this.view.viewState);
 		if (options.syncView) {
 			this.update({ graph: data, documentStatus: this.currentDocumentStatus(data) });
 		}
@@ -251,7 +279,7 @@ export class GraphPersistenceController {
 
 	notifyViewStateChanged(viewState: ViewState, options: { syncView?: boolean } = {}): void {
 		const graphId = this.view.loadedGraphId || DEFAULT_GRAPH_ID;
-		this.scheduler.schedule(graphId, this.view.graph, viewState);
+		this.scheduleSave(graphId, this.view.graph, viewState);
 		if (options.syncView) {
 			this.update({ viewState });
 		}
@@ -352,6 +380,7 @@ export class GraphPersistenceController {
 		this.graphGeneration += 1;
 		this.baseline = { kind: 'file', graph: imported.data };
 		this.recoveredDraft = false;
+		this.lastPersistedFingerprint = null;
 		this.update({
 			graph: imported.data,
 			viewState: imported.viewState,
@@ -359,7 +388,7 @@ export class GraphPersistenceController {
 			documentStatus: this.currentDocumentStatus(imported.data),
 			graphGeneration: this.graphGeneration
 		});
-		this.scheduler.schedule(graphId, imported.data, imported.viewState);
+		this.scheduleSave(graphId, imported.data, imported.viewState);
 		await this.hydrateEmbeddedAssets(graphId, imported);
 		await this.flushPendingSave();
 		await this.refreshGraphList();
@@ -409,6 +438,7 @@ export class GraphPersistenceController {
 		const nextGraph = this.deps.createDefaultGraph();
 		this.baseline = { kind: 'new', graph: nextGraph };
 		this.recoveredDraft = false;
+		this.lastPersistedFingerprint = null;
 		this.graphGeneration += 1;
 		this.update({
 			graph: nextGraph,
@@ -419,7 +449,7 @@ export class GraphPersistenceController {
 			graphGeneration: this.graphGeneration,
 			status: { state: 'loaded', graphId }
 		});
-		this.scheduler.schedule(graphId, nextGraph, { ...NEUTRAL_VIEW_STATE });
+		this.scheduleSave(graphId, nextGraph, { ...NEUTRAL_VIEW_STATE });
 		await this.flushPendingSave();
 		await this.refreshGraphList();
 		await this.deps.navigate(graphId);
@@ -469,6 +499,15 @@ export class GraphPersistenceController {
 		this.listeners.clear();
 	}
 
+	/**
+	 * Every scheduled save goes through here so `savePending` cannot drift from
+	 * what the scheduler was actually asked to do.
+	 */
+	private scheduleSave(id: string, data: MultigraphData, viewState: ViewState): void {
+		this.savePending = true;
+		this.scheduler.schedule(id, data, viewState);
+	}
+
 	private async flushPendingSave(): Promise<void> {
 		try {
 			await this.scheduler.flush();
@@ -478,6 +517,18 @@ export class GraphPersistenceController {
 	}
 
 	private handleSaveStatus(status: SaveStatus): void {
+		// A save error leaves the fingerprint alone: it still describes the last
+		// write that actually landed.
+		if (status.state === 'saved' || status.state === 'warning') {
+			this.lastPersistedFingerprint = status.fingerprint;
+		}
+
+		// The scheduler has reported back, so nothing is owed any more: a failure
+		// clears the pending flag too, which is what lets the warning surface.
+		if (status.state === 'saved' || status.state === 'warning' || status.state === 'error') {
+			this.savePending = false;
+		}
+
 		this.update({ status: saveStatusToControllerStatus(status) });
 
 		if (status.state === 'saved' || status.state === 'warning') {
@@ -541,13 +592,22 @@ export class GraphPersistenceController {
 		this.view = {
 			...this.view,
 			...patch,
-			documentStatus: patch.documentStatus ?? this.currentDocumentStatus(nextGraph)
+			documentStatus: patch.documentStatus ?? this.currentDocumentStatus(nextGraph),
+			draftSaved: this.currentDraftSaved(nextGraph),
+			savePending: this.savePending
 		};
 		this.emit();
 	}
 
 	private currentDocumentStatus(graph = this.view.graph): DocumentStatus {
 		return documentStatusForGraph(graph, this.baseline, { recoveredDraft: this.recoveredDraft });
+	}
+
+	private currentDraftSaved(graph = this.view.graph): boolean {
+		// Writing to memory-only storage is not saving: it dies with the tab.
+		if (this.view.durability === 'memory-only') return false;
+		if (this.lastPersistedFingerprint === null) return false;
+		return graphFingerprint(graph) === this.lastPersistedFingerprint;
 	}
 
 	private emit(): void {
@@ -578,10 +638,18 @@ export function statusToNotice(status: ControllerStatus): string {
 }
 
 export function controllerNotice(view: ControllerView): string {
+	if (view.status.state === 'error') return statusToNotice(view.status);
+	// Memory-only storage is a standing condition, not a transient status: it
+	// outranks 'Saving...' / 'Saved.' / 'Loaded "x".', which would otherwise
+	// reassure the user that work is being kept when nothing is.
+	if (view.durability === 'memory-only') return MEMORY_ONLY_STORAGE_NOTICE;
 	if (view.status.state === 'loading') return statusToNotice(view.status);
 	if (view.status.state === 'saving') return statusToNotice(view.status);
+	// A debounced save that has not fired yet is still a save in progress. Saying
+	// 'Saving...' beats flashing "not saved" between every keystroke and the
+	// write that follows it half a second later.
+	if (view.savePending) return statusToNotice({ state: 'saving' });
 	if (view.status.state === 'warning') return statusToNotice(view.status);
-	if (view.status.state === 'error') return statusToNotice(view.status);
 	if (
 		view.status.state === 'notice' &&
 		(view.status.message.includes('failed') ||
@@ -590,7 +658,29 @@ export function controllerNotice(view: ControllerView): string {
 	) {
 		return view.status.message;
 	}
-	return documentStatusNotice(view.documentStatus);
+	return documentStatusNotice(view.documentStatus, { draftSaved: view.draftSaved });
+}
+
+/**
+ * Severity of the notice `controllerNotice` would return, so the toolbar can
+ * escalate the ones that mean work is at risk. Kept beside the messages so the
+ * two cannot drift apart.
+ */
+export function controllerNoticeSeverity(view: ControllerView): 'info' | 'warning' {
+	if (view.status.state === 'error') return 'warning';
+	if (view.durability === 'memory-only') return 'warning';
+	// Mirrors controllerNotice's precedence exactly, so the styling always
+	// matches the text: a pending save renders 'Saving...' and must not be
+	// amber, even while a quota warning status is standing by.
+	if (view.status.state === 'loading' || view.status.state === 'saving') return 'info';
+	if (view.savePending) return 'info';
+	if (view.status.state === 'warning') return 'warning';
+	// Only escalate when the notice is the document-status one saying the work
+	// is not saved.
+	if (!view.draftSaved && documentStatusHasUndownloadedChanges(view.documentStatus)) {
+		return 'warning';
+	}
+	return 'info';
 }
 
 function saveStatusToControllerStatus(status: SaveStatus): ControllerStatus {

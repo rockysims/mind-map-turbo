@@ -19,6 +19,7 @@
 	import GraphToolbar from '$lib/components/ui/GraphToolbar/GraphToolbar.svelte';
 	import Multigraph from '$lib/components/ui/Multigraph/Multigraph.svelte';
 	import { createDefaultGraph, shouldEditInitialRootTitle } from '$lib/defaultGraph';
+	import { documentStatusHasUndownloadedChanges } from '$lib/documentStatus';
 	import type { EmbeddedDocumentConflictChoice } from '$lib/graphPersistenceController';
 	import {
 		GRAPH_HTML_PAYLOAD_SCRIPT_ID,
@@ -40,10 +41,15 @@
 	} from '$lib/htmlShell';
 	import { createPersistence, estimateNamespaceUsageBytes } from '$lib/persistence';
 	import { SaveScheduler } from '$lib/saveScheduler';
+	import { resolveGraphStorage, type StorageDurability } from '$lib/storageAvailability';
 
 	const EDIT_ROOT_PARAM = 'editRoot';
+	const STARTUP_ERROR_NOTICE =
+		'The app could not start in this browser, so your work cannot be saved here. Try reloading, or open it in another browser.';
 
 	let persisted = $state<PersistedGraph | null>(null);
+	let storageDurability = $state<StorageDurability>('durable');
+	let startupError = $state<string | null>(null);
 	let graphAssetStore = $state<IndexedDbGraphAssetStore | null>(null);
 	let selectedGraphId = $state(graphIdFromUrl(page.url));
 	let initialTitleEditNodeId = $state<string | null>(null);
@@ -54,98 +60,130 @@
 	const defaultPrimaryNodeId = $derived(persisted?.graph.nodes[0]?.id ?? '');
 
 	onMount(() => {
-		selectedGraphId = graphIdFromUrl(
-			new URL(window.location.href),
-			graphRouteModeForProtocol(window.location.protocol)
-		);
+		try {
+			selectedGraphId = graphIdFromUrl(
+				new URL(window.location.href),
+				graphRouteModeForProtocol(window.location.protocol)
+			);
 
-		const persistence = createPersistence('local', {
-			storage: localStorage,
-			namespace: APP_CONFIG.persistence.storageNamespace
-		});
-		const assetStore = new IndexedDbGraphAssetStore();
-		graphAssetStore = assetStore;
+			// Reading window.localStorage throws outright in browsers configured to
+			// block site data, so the app never touches it directly: it runs on
+			// whatever storage this resolves to, in memory if it has to.
+			const { storage, durability } = resolveGraphStorage();
+			storageDurability = durability;
 
-		const selectedGraphFileText = consumeOpenFileWindowName() ?? consumeOpenFileText();
-		const embeddedGraph =
-			readSelectedGraphDocument(selectedGraphFileText) ?? readEmbeddedGraphDocument();
-		const openedFromFilePicker = selectedGraphFileText !== null || consumeOpenFileFromPickerFlag();
+			const persistence = createPersistence('local', {
+				storage,
+				namespace: APP_CONFIG.persistence.storageNamespace
+			});
+			const assetStore = new IndexedDbGraphAssetStore();
+			graphAssetStore = assetStore;
 
-		const persistedGraph = usePersistedGraph({
-			persistence,
-			createScheduler: (onStatus) =>
-				new SaveScheduler({
-					persistence,
-					debounceMs: APP_CONFIG.persistence.saveDebounceMs,
-					estimateUsageBytes: () =>
-						estimateNamespaceUsageBytes(localStorage, APP_CONFIG.persistence.storageNamespace),
-					quotaBudgetBytes: APP_CONFIG.persistence.quotaBudgetBytes,
-					quotaWarningRatio: APP_CONFIG.persistence.quotaWarningRatio,
-					onStatus
-				}),
-			createDefaultGraph,
-			navigate: async (graphId) => {
-				selectedGraphId = graphId;
-				const routeMode = graphRouteModeForProtocol(window.location.protocol);
-				if (routeMode === 'hash') {
+			const selectedGraphFileText = consumeOpenFileWindowName() ?? consumeOpenFileText();
+			const embeddedGraph =
+				readSelectedGraphDocument(selectedGraphFileText) ?? readEmbeddedGraphDocument();
+			const openedFromFilePicker =
+				selectedGraphFileText !== null || consumeOpenFileFromPickerFlag();
+
+			const persistedGraph = usePersistedGraph({
+				persistence,
+				createScheduler: (onStatus) =>
+					new SaveScheduler({
+						persistence,
+						debounceMs: APP_CONFIG.persistence.saveDebounceMs,
+						estimateUsageBytes: () =>
+							estimateNamespaceUsageBytes(storage, APP_CONFIG.persistence.storageNamespace),
+						quotaBudgetBytes: APP_CONFIG.persistence.quotaBudgetBytes,
+						quotaWarningRatio: APP_CONFIG.persistence.quotaWarningRatio,
+						onStatus
+					}),
+				createDefaultGraph,
+				navigate: async (graphId) => {
+					selectedGraphId = graphId;
+					const routeMode = graphRouteModeForProtocol(window.location.protocol);
+					if (routeMode === 'hash') {
+						window.history.pushState(
+							window.history.state,
+							'',
+							`${window.location.href.split('#')[0]}${graphHash(graphId)}`
+						);
+						return;
+					}
+
+					const currentWithoutHash = window.location.href.split('#')[0];
+					const currentPath = currentWithoutHash.split('?')[0];
 					window.history.pushState(
 						window.history.state,
 						'',
-						`${window.location.href.split('#')[0]}${graphHash(graphId)}`
+						`${currentPath}${graphId === DEFAULT_GRAPH_ID ? '' : graphSearch(graphId)}`
 					);
-					return;
-				}
+				},
+				storageNamespace: APP_CONFIG.persistence.storageNamespace,
+				durability,
+				confirmGraphImportReplace: ({ loadedGraphId }) =>
+					window.confirm(
+						`Replace the current graph "${loadedGraphId}" with the imported graph? This cannot be undone.`
+					),
+				minScale: APP_CONFIG.multigraph.zoom.minScale,
+				maxScale: APP_CONFIG.multigraph.zoom.maxScale,
+				assetStore,
+				createDocumentId: () =>
+					typeof crypto.randomUUID === 'function'
+						? crypto.randomUUID()
+						: `doc-${Date.now().toString(36)}`,
+				openUnsupportedHtmlFile: openHtmlTextInNewTab,
+				chooseEmbeddedDocumentConflict: ({ documentId }) =>
+					new Promise<EmbeddedDocumentConflictChoice>((resolve) => {
+						embeddedDocumentConflict = { documentId, resolve };
+					})
+			});
+			persisted = persistedGraph;
+			void loadRouteGraph(persistedGraph, embeddedGraph, {
+				flushCurrent: false,
+				openedFromPicker: openedFromFilePicker
+			});
 
-				const currentWithoutHash = window.location.href.split('#')[0];
-				const currentPath = currentWithoutHash.split('?')[0];
-				window.history.pushState(
-					window.history.state,
-					'',
-					`${currentPath}${graphId === DEFAULT_GRAPH_ID ? '' : graphSearch(graphId)}`
-				);
-			},
-			storageNamespace: APP_CONFIG.persistence.storageNamespace,
-			confirmGraphImportReplace: ({ loadedGraphId }) =>
-				window.confirm(
-					`Replace the current graph "${loadedGraphId}" with the imported graph? This cannot be undone.`
-				),
-			minScale: APP_CONFIG.multigraph.zoom.minScale,
-			maxScale: APP_CONFIG.multigraph.zoom.maxScale,
-			assetStore,
-			createDocumentId: () =>
-				typeof crypto.randomUUID === 'function'
-					? crypto.randomUUID()
-					: `doc-${Date.now().toString(36)}`,
-			openUnsupportedHtmlFile: openHtmlTextInNewTab,
-			chooseEmbeddedDocumentConflict: ({ documentId }) =>
-				new Promise<EmbeddedDocumentConflictChoice>((resolve) => {
-					embeddedDocumentConflict = { documentId, resolve };
-				})
-		});
-		persisted = persistedGraph;
-		void loadRouteGraph(persistedGraph, embeddedGraph, {
-			flushCurrent: false,
-			openedFromPicker: openedFromFilePicker
-		});
+			const onStorage = (event: StorageEvent) => {
+				void persistedGraph.handleStorageEvent({ key: event.key });
+			};
+			const onRouteChange = () => {
+				void loadRouteGraph(persistedGraph, embeddedGraph, { flushCurrent: true });
+			};
+			const onBeforeUnload = (event: BeforeUnloadEvent) => {
+				if (!hasUnsafeUnsavedChanges()) return;
+				event.preventDefault();
+				event.returnValue = '';
+			};
 
-		const onStorage = (event: StorageEvent) => {
-			void persistedGraph.handleStorageEvent({ key: event.key });
-		};
-		const onRouteChange = () => {
-			void loadRouteGraph(persistedGraph, embeddedGraph, { flushCurrent: true });
-		};
+			window.addEventListener('storage', onStorage);
+			window.addEventListener('hashchange', onRouteChange);
+			window.addEventListener('popstate', onRouteChange);
+			window.addEventListener('beforeunload', onBeforeUnload);
 
-		window.addEventListener('storage', onStorage);
-		window.addEventListener('hashchange', onRouteChange);
-		window.addEventListener('popstate', onRouteChange);
-
-		return () => {
-			persistedGraph.dispose();
-			window.removeEventListener('storage', onStorage);
-			window.removeEventListener('hashchange', onRouteChange);
-			window.removeEventListener('popstate', onRouteChange);
-		};
+			return () => {
+				persistedGraph.dispose();
+				window.removeEventListener('storage', onStorage);
+				window.removeEventListener('hashchange', onRouteChange);
+				window.removeEventListener('popstate', onRouteChange);
+				window.removeEventListener('beforeunload', onBeforeUnload);
+			};
+		} catch {
+			// Startup itself failed. Say so instead of leaving a blank page that
+			// looks like it is still loading.
+			startupError = STARTUP_ERROR_NOTICE;
+			return undefined;
+		}
 	});
+
+	/**
+	 * True only when leaving would lose work: undownloaded changes that are not
+	 * safely in durable storage. Refreshing a saved draft must stay silent.
+	 */
+	function hasUnsafeUnsavedChanges(): boolean {
+		if (persisted === null) return false;
+		if (!documentStatusHasUndownloadedChanges(persisted.documentStatus)) return false;
+		return !persisted.draftSaved || storageDurability === 'memory-only';
+	}
 
 	function createNewGraph(): void {
 		openNewGraphInNewTab();
@@ -378,7 +416,8 @@
 
 <div class="page-shell">
 	<GraphToolbar
-		notice={persisted?.notice ?? 'Loading graph...'}
+		notice={startupError ?? persisted?.notice ?? 'Loading graph...'}
+		severity={startupError !== null ? 'warning' : (persisted?.noticeSeverity ?? 'info')}
 		onNewGraph={createNewGraph}
 		onOpenGraphFilePicker={openGraphFilePicker}
 		onDownload={() => void handleDownload()}

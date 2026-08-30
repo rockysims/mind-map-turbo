@@ -9,6 +9,7 @@
 		tags: [],
 		argTypes: {
 			notice: { control: 'text' },
+			severity: { control: 'radio', options: ['info', 'warning'] },
 			onNewGraph: { control: false },
 			onOpenGraphFilePicker: { control: false },
 			onDownload: { control: false }
@@ -28,6 +29,7 @@
 		canvasElement: HTMLElement;
 		args: {
 			notice?: string;
+			severity?: 'info' | 'warning';
 			onNewGraph?: () => void;
 			onOpenGraphFilePicker?: () => void;
 			onDownload?: () => void;
@@ -94,6 +96,30 @@
 		canvas.getByRole('button', { name: 'Open' }).click();
 
 		expect(spyFor(args.onOpenGraphFilePicker).mock.calls).toHaveLength(1);
+	}}
+/>
+
+<Story
+	name="UserSeesUnsavedWorkWarning"
+	args={{
+		notice:
+			"This browser is blocking site data, so drafts can't be saved here. Download to keep your work.",
+		severity: 'warning',
+		onNewGraph: fn(),
+		onOpenGraphFilePicker: fn(),
+		onDownload: fn()
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const canvas = within(canvasElement);
+
+		const alert = canvas.getByRole('alert');
+		await expect(alert).toHaveTextContent(
+			"This browser is blocking site data, so drafts can't be saved here. Download to keep your work."
+		);
+		await expect(alert).toHaveAttribute('aria-live', 'assertive');
+		// The warning is longer than a status line, so it must be allowed to wrap.
+		await expect(getComputedStyle(alert).whiteSpace).toBe('normal');
+		await expect(canvas.queryByRole('status')).not.toBeInTheDocument();
 	}}
 />
 

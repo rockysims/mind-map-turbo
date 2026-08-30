@@ -72,10 +72,10 @@ describe('documentStatus', () => {
 		).toBe('download-dirty');
 	});
 
-	it('maps statuses to concise user-facing notices', () => {
+	it('maps statuses to concise user-facing notices when the draft is saved', () => {
 		const cases: Array<[DocumentStatus, string]> = [
 			['new-clean', 'New graph.'],
-			['new-dirty', 'Draft saved locally. Download needed.'],
+			['new-dirty', 'Draft saved in this browser. Download needed.'],
 			['file-clean', 'Matches opened file.'],
 			['file-dirty', 'Draft differs from opened file. Download needed.'],
 			['file-recovered-draft', 'Recovered local edits. Download needed.'],
@@ -85,6 +85,37 @@ describe('documentStatus', () => {
 
 		for (const [status, notice] of cases) {
 			expect(documentStatusNotice(status)).toBe(notice);
+			expect(documentStatusNotice(status, { draftSaved: true })).toBe(notice);
+		}
+	});
+
+	it('never claims a draft is saved when nothing reached storage', () => {
+		const cases: Array<[DocumentStatus, string]> = [
+			['new-dirty', 'Not saved in this browser. Download to keep your work.'],
+			[
+				'file-dirty',
+				'Draft differs from opened file. Not saved in this browser — download to keep your work.'
+			],
+			[
+				'file-recovered-draft',
+				'Recovered local edits. Not saved in this browser — download to keep your work.'
+			],
+			[
+				'download-dirty',
+				'Draft differs from downloaded file. Not saved in this browser — download to keep your work.'
+			]
+		];
+
+		for (const [status, notice] of cases) {
+			expect(documentStatusNotice(status, { draftSaved: false })).toBe(notice);
+		}
+	});
+
+	it('leaves clean statuses unchanged when nothing is pending a save', () => {
+		for (const status of ['new-clean', 'file-clean', 'download-clean'] as const) {
+			expect(documentStatusNotice(status, { draftSaved: false })).toBe(
+				documentStatusNotice(status, { draftSaved: true })
+			);
 		}
 	});
 

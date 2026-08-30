@@ -4,6 +4,7 @@ import type { ViewState } from '$lib/migrations';
 import {
 	GraphPersistenceController,
 	controllerNotice,
+	controllerNoticeSeverity,
 	type GraphPersistenceControllerDeps
 } from '$lib/graphPersistenceController';
 
@@ -14,7 +15,9 @@ export type PersistedGraph = {
 	readonly graphSummaries: ReturnType<GraphPersistenceController['getView']>['graphSummaries'];
 	readonly loadedGraphId: string;
 	readonly documentStatus: DocumentStatus;
+	readonly draftSaved: boolean;
 	readonly notice: string;
+	readonly noticeSeverity: 'info' | 'warning';
 	load: GraphPersistenceController['load'];
 	loadEmbeddedDocument: GraphPersistenceController['loadEmbeddedDocument'];
 	notifyGraphChanged: (data: MultigraphData, options?: { syncView?: boolean }) => void;
@@ -56,8 +59,14 @@ export function usePersistedGraph(deps: GraphPersistenceControllerDeps): Persist
 		get documentStatus() {
 			return view.documentStatus;
 		},
+		get draftSaved() {
+			return view.draftSaved;
+		},
 		get notice() {
 			return controllerNotice(view);
+		},
+		get noticeSeverity() {
+			return controllerNoticeSeverity(view);
 		},
 		load: controller.load.bind(controller),
 		loadEmbeddedDocument: controller.loadEmbeddedDocument.bind(controller),

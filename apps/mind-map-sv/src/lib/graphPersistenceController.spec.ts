@@ -2,9 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { makeGraph } from './components/ui/Multigraph/lib/testFixtures';
 import type { MultigraphData } from './components/ui/types/multigraph';
 import { GRAPH_HTML_READER_VERSION, parseGraphFileText, serializeGraphHtmlFile } from './graphFile';
+import { graphFingerprint } from './documentStatus';
 import { CURRENT_SCHEMA_VERSION, NEUTRAL_VIEW_STATE, type ViewState } from './migrations';
 import {
 	GraphPersistenceController,
+	MEMORY_ONLY_STORAGE_NOTICE,
+	controllerNotice,
+	controllerNoticeSeverity,
 	statusToNotice,
 	type ControllerStatus,
 	type EmbeddedDocumentConflictChoice,
@@ -47,6 +51,7 @@ class MemoryPersistence implements Persistence {
 class TestScheduler implements GraphSaveScheduler {
 	private pending: { id: string; graph: PersistedGraphRecord } | null = null;
 	failFlushOnce = false;
+	warnOnFlush = false;
 	dispose = vi.fn();
 
 	constructor(
@@ -72,7 +77,17 @@ class TestScheduler implements GraphSaveScheduler {
 		this.events.push('save');
 		await this.persistence.save(save.id, save.graph);
 		this.pending = null;
-		this.onStatus({ state: 'saved', savedAt: 123 });
+		const fingerprint = graphFingerprint(save.graph.data);
+		if (this.warnOnFlush) {
+			this.onStatus({
+				state: 'warning',
+				savedAt: 123,
+				fingerprint,
+				message: 'Stored graphs use 85% of the local budget.'
+			});
+			return;
+		}
+		this.onStatus({ state: 'saved', savedAt: 123, fingerprint });
 	});
 }
 
@@ -100,6 +115,7 @@ function setup(
 			draftGraph: MultigraphData;
 			fileGraph: MultigraphData;
 		}) => EmbeddedDocumentConflictChoice | Promise<EmbeddedDocumentConflictChoice>;
+		durability?: 'durable' | 'memory-only';
 	} = {}
 ) {
 	const persistence = new MemoryPersistence();
@@ -117,6 +133,7 @@ function setup(
 		createDefaultGraph,
 		navigate,
 		storageNamespace: 'test',
+		durability: options.durability,
 		confirmGraphImportReplace: options.confirmGraphImportReplace,
 		confirmNewGraphReplace: options.confirmNewGraphReplace,
 		chooseEmbeddedDocumentConflict: options.chooseEmbeddedDocumentConflict,
@@ -713,6 +730,105 @@ describe('GraphPersistenceController', () => {
 			state: 'notice',
 			message: 'Import failed: unable to read file.'
 		});
+	});
+
+	it('treats a graph read back from storage as already saved', async () => {
+		const { controller, persistence } = setup();
+		const graph = makeGraph({ nodeCount: 2 });
+		await persistence.save('saved', { data: graph, viewState: NEUTRAL_VIEW_STATE });
+
+		await controller.load('saved');
+
+		expect(controller.getView().draftSaved).toBe(true);
+		expect(controllerNotice(controller.getView())).toBe(
+			'Draft saved in this browser. Download needed.'
+		);
+		expect(controllerNoticeSeverity(controller.getView())).toBe('info');
+	});
+
+	it('calls an edit saved only once the write has landed', async () => {
+		const { controller, scheduler } = setup();
+		await controller.load('active');
+		expect(controller.getView().draftSaved).toBe(true);
+
+		controller.notifyGraphChanged(makeGraph({ nodeCount: 2 }), { syncView: true });
+
+		// Debounce window: the write is owed but not yet attempted, so the notice
+		// reads as in-flight rather than flashing an alarm between keystrokes.
+		expect(controller.getView()).toMatchObject({ draftSaved: false, savePending: true });
+		expect(controllerNotice(controller.getView())).toBe('Saving...');
+		expect(controllerNoticeSeverity(controller.getView())).toBe('info');
+
+		await scheduler.flush();
+
+		expect(controller.getView()).toMatchObject({ draftSaved: true, savePending: false });
+		expect(controllerNotice(controller.getView())).toBe(
+			'Draft saved in this browser. Download needed.'
+		);
+		expect(controllerNoticeSeverity(controller.getView())).toBe('info');
+	});
+
+	it('does not call a draft saved after the save fails', async () => {
+		const { controller, scheduler } = setup();
+		await controller.load('active');
+		controller.notifyGraphChanged(makeGraph({ nodeCount: 2 }), { syncView: true });
+		scheduler.failFlushOnce = true;
+
+		await controller.selectGraph('next');
+
+		// The failure clears the pending flag, which is what lets the warning
+		// through instead of leaving a permanent 'Saving...'.
+		expect(controller.getView()).toMatchObject({ draftSaved: false, savePending: false });
+		expect(controllerNotice(controller.getView())).toBe('Save failed: quota exceeded');
+		expect(controllerNoticeSeverity(controller.getView())).toBe('warning');
+	});
+
+	it('keeps a pending save calm while a quota warning is standing', async () => {
+		const { controller, scheduler } = setup();
+		await controller.load('active');
+		scheduler.warnOnFlush = true;
+		controller.notifyGraphChanged(makeGraph({ nodeCount: 2 }), { syncView: true });
+		await scheduler.flush();
+
+		expect(controllerNotice(controller.getView())).toBe(
+			'Stored graphs use 85% of the local budget.'
+		);
+		expect(controllerNoticeSeverity(controller.getView())).toBe('warning');
+
+		controller.notifyGraphChanged(makeGraph({ nodeCount: 3 }), { syncView: true });
+
+		// Text and styling must agree during the debounce window: 'Saving...' is
+		// not amber, even though the quota warning status is still standing by.
+		expect(controllerNotice(controller.getView())).toBe('Saving...');
+		expect(controllerNoticeSeverity(controller.getView())).toBe('info');
+	});
+
+	it('leads with the storage warning when the browser blocks site data', async () => {
+		const { controller, persistence } = setup({ durability: 'memory-only' });
+		await persistence.save('saved', {
+			data: makeGraph({ nodeCount: 2 }),
+			viewState: NEUTRAL_VIEW_STATE
+		});
+
+		await controller.load('saved');
+
+		// A write to tab-lifetime storage is not a save, and the warning outranks
+		// the transient 'Loaded "saved".' that would otherwise reassure the user.
+		expect(controller.getView().draftSaved).toBe(false);
+		expect(controllerNotice(controller.getView())).toBe(MEMORY_ONLY_STORAGE_NOTICE);
+		expect(controllerNoticeSeverity(controller.getView())).toBe('warning');
+	});
+
+	it('still surfaces save failures over the blocked-storage warning', async () => {
+		const { controller, scheduler } = setup({ durability: 'memory-only' });
+		await controller.load('active');
+		controller.notifyGraphChanged(makeGraph({ nodeCount: 2 }), { syncView: true });
+		scheduler.failFlushOnce = true;
+
+		await controller.selectGraph('next');
+
+		expect(controllerNotice(controller.getView())).toBe('Save failed: quota exceeded');
+		expect(controllerNoticeSeverity(controller.getView())).toBe('warning');
 	});
 
 	it('disposes the scheduler and stops future listener notifications', async () => {

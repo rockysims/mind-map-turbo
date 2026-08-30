@@ -427,6 +427,29 @@ test('browser back restores embedded graph after opened file hash route', async 
 	await expect(page.getByText('Root')).not.toBeVisible();
 });
 
+test('still renders the graph when the browser blocks site data', async ({ page }) => {
+	// Chrome's "Don't allow sites to save data" and Safari's "Block all cookies"
+	// make the window.localStorage GETTER itself throw, which used to abort the
+	// whole startup and leave a permanently blank "Loading graph..." page.
+	await page.addInitScript(() => {
+		Object.defineProperty(window, 'localStorage', {
+			configurable: true,
+			get() {
+				throw new Error('Access is denied for this document.');
+			}
+		});
+	});
+
+	await page.goto('/');
+
+	await expect(page.locator('.title-input')).toHaveValue('Root');
+	const alert = page.getByRole('alert');
+	await expect(alert).toHaveText(
+		"This browser is blocking site data, so drafts can't be saved here. Download to keep your work."
+	);
+	await expect(page.getByRole('button', { name: 'Download' })).toBeVisible();
+});
+
 test('single-document toolbar omits graph library controls', async ({ page }) => {
 	await page.goto('/');
 
