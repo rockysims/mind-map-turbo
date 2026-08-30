@@ -25,8 +25,11 @@
 	 *
 	 * The next question is almost always "and what is *that* symbol?", so each
 	 * definer row also offers that node's own confirmed inputs as chips, and a
-	 * chip opens another card of exactly this kind underneath. The card is
-	 * therefore recursive and entirely presentational: which branches are open,
+	 * chip opens another card of exactly this kind underneath — on a hold, a
+	 * right-click, or Shift+Enter, the same gesture that opened this card. These
+	 * chips have no tap of their own to compete with, but reading a cascade would
+	 * mean switching gestures at every level if they took a plain click. The card
+	 * is therefore recursive and entirely presentational: which branches are open,
 	 * where focus should land, and what Escape means all live in the one
 	 * controller above it, because N cards each holding a document listener would
 	 * race to close each other.
@@ -264,11 +267,17 @@
 				title: 'Already open in this chain'
 			};
 		}
+		// Names the gesture, because it is not the one a button advertises by being
+		// a button — and names the question this card is asking, so a downstream
+		// chip does not promise a definition it is not going to show.
+		const question = downstream
+			? `what uses ${chip.symbol.label}`
+			: `where ${chip.symbol.label} is defined`;
 		return {
 			'data-peek-drill': chip.symbol.key,
 			'data-peek-drill-path': chip.pathKey,
 			'aria-pressed': chip.open ? 'true' : 'false',
-			title: `Show where ${chip.symbol.label} is defined`
+			title: `Hold or right-click to see ${question}`
 		};
 	}
 
@@ -309,7 +318,7 @@
 					peeking={drill.open}
 					marker={drill.loop ? '↺' : undefined}
 					attributes={drillAttributes(drill)}
-					onclick={() => onToggleBranch?.(drill.path)}
+					onsecondary={() => onToggleBranch?.(drill.path)}
 				/>
 			{/each}
 		</div>

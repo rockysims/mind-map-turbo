@@ -329,7 +329,13 @@
 		return found;
 	}
 
-	/** Drill one of a definer's inputs and wait for the card it opens. */
+	/**
+	 * Drill one of a definer's inputs and wait for the card it opens.
+	 *
+	 * Right-clicked, not clicked: a drill chip takes the same gesture as the chip
+	 * that opened the card above it, so that reading down a cascade never asks the
+	 * reader to switch hands halfway.
+	 */
 	async function drillInto(
 		card: HTMLElement,
 		definerNodeId: string,
@@ -337,7 +343,7 @@
 	): Promise<HTMLElement> {
 		const chip = drillChip(definerRow(card, definerNodeId), key);
 		const pathKey = chip.getAttribute('data-peek-drill-path') ?? '';
-		chip.click();
+		rightClickChip(chip);
 
 		return await waitFor(() => {
 			const nested = card.querySelector(`[data-peek-path="${pathKey}"]`);
@@ -917,6 +923,33 @@
 />
 
 <Story
+	name="ADrillChipTakesTheChipGestureRatherThanAPlainClick"
+	args={{ ...CASCADE_ARGS, onJumpToNode: fn() }}
+	play={async ({ canvasElement }) => {
+		const card = await peekAtG(canvasElement);
+		const chip = drillChip(definerRow(card, 'earth'), 'm');
+
+		// A plain click opened these once, which meant a reader who had just held or
+		// right-clicked a chip to get this card had to left-click the chip inside it
+		// to go one level deeper — two identical-looking chips, two gestures.
+		chip.click();
+		// Long enough for the card a click used to open to have rendered. Asserting
+		// on the next line instead passes either way: the DOM has not caught up yet,
+		// so "nothing opened" and "something is about to" look identical.
+		await sleep(100);
+		expect(definerRow(card, 'earth').querySelector('[data-peek-path]')).toBeNull();
+
+		// The hold is the same recognizer the column chips use, so the touch path
+		// down a cascade is the touch path into it.
+		await holdChip(chip);
+
+		await waitFor(() => {
+			expect(definerRow(card, 'earth').querySelector('[data-peek-path]')).toBeInTheDocument();
+		});
+	}}
+/>
+
+<Story
 	name="TwoBranchesStayOpenUnderOneCard"
 	args={{ ...CASCADE_ARGS, onJumpToNode: fn() }}
 	play={async ({ canvasElement }) => {
@@ -943,7 +976,7 @@
 		const underRho = await drillInto(underM, 'mass', symbolOf('rho_0').key);
 		expect(underRho).toBeInTheDocument();
 
-		drillChip(definerRow(card, 'earth'), 'm').click();
+		rightClickChip(drillChip(definerRow(card, 'earth'), 'm'));
 
 		// The reader closed the question the deeper answers hang off; leaving them
 		// on screen would strand them under nothing.
@@ -994,7 +1027,7 @@
 		expect(definerRow(card, 'earth').contains(underEarth)).toBe(true);
 		expect(definerRow(card, 'moon').contains(underMoon)).toBe(true);
 
-		drillChip(definerRow(card, 'earth'), 'm').click();
+		rightClickChip(drillChip(definerRow(card, 'earth'), 'm'));
 
 		await waitFor(() => {
 			expect(underEarth).not.toBeInTheDocument();
