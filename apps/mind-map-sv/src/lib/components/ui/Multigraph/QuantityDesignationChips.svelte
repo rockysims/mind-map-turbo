@@ -35,8 +35,12 @@
 	/** Shared so a surface with no peek at all allocates nothing per render. */
 	const EMPTY_PEEK_KEYS: ReadonlySet<string> = new Set();
 
-	const PEEK_HOLD_MS = APP_CONFIG.multigraph.dataflow.chipPeekLongPressMs;
-	const INSERT_HOLD_MS = APP_CONFIG.multigraph.dataflow.chipInsertLongPressMs;
+	/**
+	 * Read per render, not captured at init: a config that can change at runtime
+	 * has to reach the chips without remounting the columns.
+	 */
+	const peekHoldMs = $derived(APP_CONFIG.multigraph.dataflow.chipPeekLongPressMs);
+	const insertHoldMs = $derived(APP_CONFIG.multigraph.dataflow.chipInsertLongPressMs);
 
 	let {
 		mode,
@@ -92,7 +96,7 @@
 	 * one opens a card to read, the other writes a character into a field — and a
 	 * reader who finds one hold too slow has no reason to want the other changed.
 	 */
-	const holdMs = $derived(canInsert ? INSERT_HOLD_MS : PEEK_HOLD_MS);
+	const holdMs = $derived(canInsert ? insertHoldMs : peekHoldMs);
 
 	/** The subtree the columns live in, for the focus scan and its activeElement guard. */
 	let section = $state<HTMLElement | null>(null);

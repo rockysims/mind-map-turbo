@@ -1,3 +1,13 @@
+/**
+ * Shipped defaults, frozen at import.
+ *
+ * These are the fallback a caller gets when it passes nothing — story fixtures,
+ * specs, and harnesses. They are deliberately NOT the path a rendering component
+ * takes to a tunable: a component reads its config per render (see `cfg` in
+ * `Multigraph.svelte`) and hands the value down as a parameter or prop, so a
+ * config that changes at runtime reaches the pixels. Adding a read of one of
+ * these inside a component re-freezes that value.
+ */
 import { APP_CONFIG } from './appConfig';
 
 export const DBL_CLICK_MS = APP_CONFIG.interaction.doubleClickMs;

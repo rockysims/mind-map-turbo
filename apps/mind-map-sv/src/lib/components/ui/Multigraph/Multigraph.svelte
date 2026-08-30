@@ -116,12 +116,6 @@
 		tagBorderBackground,
 		tagUsageCount
 	} from './lib/tagColors.js';
-	import {
-		EDGE_ARROW_HALF_HEIGHT,
-		EDGE_ARROW_LENGTH,
-		EDGE_STROKE_WIDTH,
-		MIN_NODE_HIT_RADIUS
-	} from '$lib/constants.js';
 	import type { ViewState } from '$lib/migrations.js';
 	import {
 		EMPTY_EXITING_BUFFER,
@@ -170,7 +164,6 @@
 	import { interpolateMorph } from './lib/morphGeometry.js';
 	import type { Rect } from './lib/zoomBoundary.js';
 	import type { StageRect } from './lib/stageCoordinates.js';
-	import { NODE_RADIUS, NODE_TEXT_FONT_SIZE } from '$lib/constants.js';
 
 	const CENTERED_POSITION: Point = { x: 0, y: 0 };
 
@@ -192,9 +185,7 @@
 		targetNodeId: 'creation-preview',
 		tags: []
 	};
-	const FOCUS_TRANSITION_MS = APP_CONFIG.multigraph.focus.entryTransitionMs;
 	const DETAILS_TITLE_ID = 'node-focus-title';
-	const NODE_DIAMETER_PX = NODE_RADIUS * 2;
 	/** Modest starting corner radius for an image frame's descend morph. */
 	const IMAGE_SOURCE_RADIUS_PX = 8;
 	/** Fixed logical size of the image level's compact (thumbnail) layer. */
@@ -241,6 +232,52 @@
 		/** Draw dataflow edges inferred from the math in node descriptions. */
 		dataflowEnabled?: boolean;
 	} = $props();
+
+	/**
+	 * The one place this component reads tunables.
+	 *
+	 * Every measurement, timing and threshold below is derived from `cfg` rather
+	 * than captured at import or at component init, and every child that needs one
+	 * is handed it explicitly — never left to its own prop default, which is
+	 * evaluated once and would silently swallow a change. So swapping the
+	 * expression here for a per-graph resolved config is a one-line edit that
+	 * reaches every pixel this component draws.
+	 */
+	const cfg = $derived(APP_CONFIG);
+
+	const focusTransitionMs = $derived(cfg.multigraph.focus.entryTransitionMs);
+	const focusEntryGestureIdleMs = $derived(cfg.multigraph.focus.entryGestureIdleMs);
+	const focusEntryGestureMaxMs = $derived(cfg.multigraph.focus.entryGestureMaxMs);
+	const focusDetailsCornerRadiusPx = $derived(cfg.multigraph.focus.detailsCornerRadiusPx);
+	const focusDetailsBorderWidthPx = $derived(cfg.multigraph.focus.detailsBorderWidthPx);
+	const nodeRadiusPx = $derived(cfg.multigraph.nodeRadiusPx);
+	const nodeDiameterPx = $derived(nodeRadiusPx * 2);
+	const nodeTextFontSizePx = $derived(cfg.multigraph.nodeTextFontSizePx);
+	const nodeBorderWidthPx = $derived(cfg.multigraph.nodeBorderWidthPx);
+	const pinnedNodeBorderWidthPx = $derived(cfg.multigraph.pinnedNodeBorderWidthPx);
+	const minNodeHitRadiusPx = $derived(cfg.multigraph.minNodeHitRadiusPx);
+	const arrowLengthPx = $derived(cfg.multigraph.edgeArrow.lengthPx);
+	const arrowHalfHeightPx = $derived(cfg.multigraph.edgeArrow.halfHeightPx);
+	const arrowReferenceNodeScale = $derived(cfg.multigraph.edgeArrow.referenceNodeScale);
+	const strokeWidthPx = $derived(cfg.multigraph.edgeStroke.widthPx);
+	const strokeReferenceNodeScale = $derived(cfg.multigraph.edgeStroke.referenceNodeScale);
+	const dataflowCfg = $derived(cfg.multigraph.dataflow);
+	/** Everything Stage needs; a prop default there is only a story's fallback. */
+	const stageTunables = $derived({
+		dragThreshold: cfg.interaction.dragThresholdPx,
+		doubleClickMs: cfg.interaction.doubleClickMs,
+		longPressMs: cfg.interaction.longPressMs,
+		longPressDistancePx: cfg.interaction.longPressDistancePx,
+		minScale: cfg.multigraph.zoom.minScale,
+		maxScale: cfg.multigraph.zoom.maxScale
+	});
+	/** Everything a rendered Node needs to size its chrome, for the same reason. */
+	const nodeChromeTunables = $derived({
+		radiusPx: nodeRadiusPx,
+		borderWidthPx: nodeBorderWidthPx,
+		pinnedBorderWidthPx: pinnedNodeBorderWidthPx,
+		fontSizePx: nodeTextFontSizePx
+	});
 
 	let graph = $state<MultigraphData>({
 		nodes: [],
@@ -320,10 +357,19 @@
 		getReduceMotion: () => reduceMotion,
 		armEntryGate: (direction) => armStageEntryGestureGate(direction),
 		closeOverlays: () => closeOverlays(),
+		// Getters, not values: the controller reads `config.*` when a gesture asks,
+		// so a plain object literal here would freeze three tunables into the
+		// controller for the lifetime of the component.
 		config: {
-			transitionMs: FOCUS_TRANSITION_MS,
-			entryGestureIdleMs: APP_CONFIG.multigraph.focus.entryGestureIdleMs,
-			entryGestureMaxMs: APP_CONFIG.multigraph.focus.entryGestureMaxMs
+			get transitionMs() {
+				return focusTransitionMs;
+			},
+			get entryGestureIdleMs() {
+				return focusEntryGestureIdleMs;
+			},
+			get entryGestureMaxMs() {
+				return focusEntryGestureMaxMs;
+			}
 		}
 	});
 
@@ -474,7 +520,7 @@
 				edge.id,
 				formatQuantityLabel(
 					edge.quantities.map((quantity) => quantity.label),
-					APP_CONFIG.multigraph.dataflow.labelMaxVisibleQuantities
+					dataflowCfg.labelMaxVisibleQuantities
 				)
 			])
 		)
@@ -543,10 +589,13 @@
 
 			const edge = visibility.edge;
 			const strokeHalfWidth =
-				(EDGE_STROKE_WIDTH * edgeStrokeScale(visibility, graphLayout.scaleByNodeId)) / 2;
+				(strokeWidthPx *
+					edgeStrokeScale(visibility, graphLayout.scaleByNodeId, strokeReferenceNodeScale)) /
+				2;
 			const arrowHalfHeight =
 				edge.directed === true
-					? EDGE_ARROW_HALF_HEIGHT * edgeArrowScale(visibility, graphLayout.scaleByNodeId)
+					? arrowHalfHeightPx *
+						edgeArrowScale(visibility, graphLayout.scaleByNodeId, arrowReferenceNodeScale)
 					: 0;
 			visibleEdges.push(edge);
 			visualHalfWidthByEdgeId[edge.id] = Math.max(strokeHalfWidth, arrowHalfHeight);
@@ -752,7 +801,7 @@
 			const radius = graphLayout.radiusByNodeId[node.id];
 			if (!position || radius === undefined) continue;
 			const circle = nodeScreenCircle(node.id, position, radius, rect, view);
-			const hitRadius = effectiveHitRadius(circle.radius, MIN_NODE_HIT_RADIUS);
+			const hitRadius = effectiveHitRadius(circle.radius, minNodeHitRadiusPx);
 			if (isPointInCircle(clientX, clientY, circle.center.x, circle.center.y, hitRadius)) {
 				return node;
 			}
@@ -944,8 +993,8 @@
 		stageEntryGestureGateRequest = {
 			id: stageEntryGestureGateRequestId,
 			direction,
-			idleMs: APP_CONFIG.multigraph.focus.entryGestureIdleMs,
-			maxMs: APP_CONFIG.multigraph.focus.entryGestureMaxMs
+			idleMs: focusEntryGestureIdleMs,
+			maxMs: focusEntryGestureMaxMs
 		};
 	}
 
@@ -1017,9 +1066,9 @@
 			// the viewport through the SAME interpolation used for node frames.
 			const morph = interpolateMorph(level.sourceRect, level.fillRect, level.morphProgress, {
 				sourceRadiusPx: IMAGE_SOURCE_RADIUS_PX,
-				targetRadiusPx: APP_CONFIG.multigraph.focus.detailsCornerRadiusPx,
+				targetRadiusPx: focusDetailsCornerRadiusPx,
 				sourceBorderWidthPx: 0,
-				targetBorderWidthPx: APP_CONFIG.multigraph.focus.detailsBorderWidthPx
+				targetBorderWidthPx: focusDetailsBorderWidthPx
 			});
 			return {
 				x: morph.x,
@@ -1039,11 +1088,18 @@
 				y: fill.top,
 				width: fill.width,
 				height: fill.height,
-				borderRadiusPx: APP_CONFIG.multigraph.focus.detailsCornerRadiusPx,
-				borderWidthPx: APP_CONFIG.multigraph.focus.detailsBorderWidthPx
+				borderRadiusPx: focusDetailsCornerRadiusPx,
+				borderWidthPx: focusDetailsBorderWidthPx
 			};
 		}
-		return frameGeometry(layout, view, fill, level.morphProgress);
+		// Passed rather than left to `frameGeometry`'s own fallbacks, which read the
+		// constants module and so would be frozen at import.
+		return frameGeometry(layout, view, fill, level.morphProgress, {
+			targetRadiusPx: focusDetailsCornerRadiusPx,
+			targetBorderWidthPx: focusDetailsBorderWidthPx,
+			nodeBorderWidthPx,
+			pinnedNodeBorderWidthPx
+		});
 	}
 
 	function baseSizeForFocusLevel(level: FocusLevel): LayerBaseSize {
@@ -1059,7 +1115,7 @@
 		}
 		const fill = focusFillRect();
 		return {
-			compactPx: NODE_DIAMETER_PX,
+			compactPx: nodeDiameterPx,
 			detailsWidthPx: fill.width,
 			detailsHeightPx: fill.height
 		};
@@ -1246,7 +1302,7 @@
 		const nextGraph = addNode(graph, {
 			title,
 			description: '',
-			position: { x: origin.x, y: origin.y + NODE_RADIUS * 2.5 },
+			position: { x: origin.x, y: origin.y + nodeRadiusPx * 2.5 },
 			outputs: symbol ? [{ base: symbol.base, subscript: symbol.subscript }] : undefined
 		});
 		const newNode = nextGraph.nodes[nextGraph.nodes.length - 1] ?? null;
@@ -1607,7 +1663,7 @@
 	class="graph"
 	class:focus-active={focus.committed && !focus.exiting}
 	bind:this={graphRef}
-	style={`--focus-transition-duration: ${FOCUS_TRANSITION_MS}ms;`}
+	style={`--focus-transition-duration: ${focusTransitionMs}ms;`}
 	data-settling={layoutRuntime.isSettling ? 'true' : undefined}
 	data-scale-change-focal={layoutRuntime.scaleAnchoredNodeIds[0]}
 	data-scale-animation-active={layoutRuntime.hasActiveScaleAnimations ? 'true' : undefined}
@@ -1654,6 +1710,7 @@
 	{/if}
 
 	<Stage
+		{...stageTunables}
 		{getNodeAt}
 		{fitViewRequest}
 		{viewStateRequest}
@@ -1728,8 +1785,16 @@
 									}
 								)
 							: []}
-					{@const arrowScale = edgeArrowScale(visibility, graphLayout.scaleByNodeId)}
-					{@const strokeScale = edgeStrokeScale(visibility, graphLayout.scaleByNodeId)}
+					{@const arrowScale = edgeArrowScale(
+						visibility,
+						graphLayout.scaleByNodeId,
+						arrowReferenceNodeScale
+					)}
+					{@const strokeScale = edgeStrokeScale(
+						visibility,
+						graphLayout.scaleByNodeId,
+						strokeReferenceNodeScale
+					)}
 					{@const edgeColor =
 						queryEdgeState?.role === 'spotlight' && queryEdgeState.spotlightColor
 							? queryEdgeState.spotlightColor
@@ -1747,8 +1812,8 @@
 						derivedQuantityLabel !== '' &&
 						visibility.kind === 'visible' &&
 						shouldRevealQuantityLabel(edgeLengthPx, stageScale, {
-							minStageScale: APP_CONFIG.multigraph.dataflow.labelMinStageScale,
-							minOnScreenLengthPx: APP_CONFIG.multigraph.dataflow.labelMinOnScreenLengthPx
+							minStageScale: dataflowCfg.labelMinStageScale,
+							minOnScreenLengthPx: dataflowCfg.labelMinOnScreenLengthPx
 						})}
 					<div
 						class="edge"
@@ -1803,11 +1868,11 @@
 							{
 								occlusionWindows: edgeOcclusionWindows,
 								edgeLengthPx,
-								edgeArrowLengthPx: EDGE_ARROW_LENGTH * arrowScale,
+								edgeArrowLengthPx: arrowLengthPx * arrowScale,
 								edgeOcclusionMinOpacity: resolvedLayoutSettings.edgeOcclusionMinOpacity,
 								boundaryFadeRadiusPx
 							}
-						)}; color: ${edgeColor}; --edge-spotlight-color: ${queryEdgeState?.spotlightColor ?? 'transparent'}; --edge-arrow-length: ${EDGE_ARROW_LENGTH * arrowScale}px; --edge-arrow-half-height: ${EDGE_ARROW_HALF_HEIGHT * arrowScale}px; --edge-stroke-width: ${EDGE_STROKE_WIDTH * strokeScale}px; opacity: ${edgeOpacity};`}
+						)}; color: ${edgeColor}; --edge-spotlight-color: ${queryEdgeState?.spotlightColor ?? 'transparent'}; --edge-arrow-length: ${arrowLengthPx * arrowScale}px; --edge-arrow-half-height: ${arrowHalfHeightPx * arrowScale}px; --edge-stroke-width: ${strokeWidthPx * strokeScale}px; opacity: ${edgeOpacity};`}
 					>
 						{#if showQuantityLabel}
 							<!-- Counter-rotated so the text stays upright on an edge at any angle. -->
@@ -1832,8 +1897,16 @@
 					visibility.kind === 'boundary'
 						? (combinedEdgeLayout.radiusByNodeId[visibility.visibleNodeId] ?? 0)
 						: undefined}
-				{@const arrowScale = edgeArrowScale(visibility, combinedScaleByNodeId)}
-				{@const strokeScale = edgeStrokeScale(visibility, combinedScaleByNodeId)}
+				{@const arrowScale = edgeArrowScale(
+					visibility,
+					combinedScaleByNodeId,
+					arrowReferenceNodeScale
+				)}
+				{@const strokeScale = edgeStrokeScale(
+					visibility,
+					combinedScaleByNodeId,
+					strokeReferenceNodeScale
+				)}
 				{@const edgeColor = edgeStrokeColor(edge, graph.tagColorConfig.edgeTags)}
 				{@const baseEdgeOpacity = edgeRenderOverrides?.[edge.id]?.opacity ?? 1}
 				{@const edgeOpacity = baseEdgeOpacity * (revealWaveEdgeOpacityByEdgeId[edge.id] ?? 1)}
@@ -1871,7 +1944,7 @@
 							edgeLengthPx,
 							boundaryFadeRadiusPx
 						}
-					)}; color: ${edgeColor}; --edge-arrow-length: ${EDGE_ARROW_LENGTH * arrowScale}px; --edge-arrow-half-height: ${EDGE_ARROW_HALF_HEIGHT * arrowScale}px; --edge-stroke-width: ${EDGE_STROKE_WIDTH * strokeScale}px; opacity: ${edgeOpacity}; pointer-events: none;`}
+					)}; color: ${edgeColor}; --edge-arrow-length: ${arrowLengthPx * arrowScale}px; --edge-arrow-half-height: ${arrowHalfHeightPx * arrowScale}px; --edge-stroke-width: ${strokeWidthPx * strokeScale}px; opacity: ${edgeOpacity}; pointer-events: none;`}
 				></div>
 			{/each}
 			{#each exitingOnlyEdges as [id, entry] (id)}
@@ -1889,7 +1962,7 @@
 						data-target-node-id={entry.edgeData.targetNodeId}
 						data-edge-exiting="true"
 						data-edge-opacity={edgeOpacity}
-						style={`${edgeStyle(sourcePos, targetPos)} --edge-background: ${edgeColor}; color: ${edgeColor}; --edge-stroke-width: ${EDGE_STROKE_WIDTH}px; opacity: ${edgeOpacity}; pointer-events: none;`}
+						style={`${edgeStyle(sourcePos, targetPos)} --edge-background: ${edgeColor}; color: ${edgeColor}; --edge-stroke-width: ${strokeWidthPx}px; opacity: ${edgeOpacity}; pointer-events: none;`}
 					></div>
 				{/if}
 			{/each}
@@ -1901,7 +1974,7 @@
 				<div
 					class="edge"
 					data-creation-preview-edge="true"
-					style={`${edgeStyle(creationPreviewEdgePoints.source, creationPreviewEdgePoints.target)} --edge-background: ${previewEdgeColor}; color: ${previewEdgeColor}; --edge-stroke-width: ${EDGE_STROKE_WIDTH}px; pointer-events: none;`}
+					style={`${edgeStyle(creationPreviewEdgePoints.source, creationPreviewEdgePoints.target)} --edge-background: ${previewEdgeColor}; color: ${previewEdgeColor}; --edge-stroke-width: ${strokeWidthPx}px; pointer-events: none;`}
 				></div>
 			{/if}
 		</div>
@@ -1920,11 +1993,11 @@
 					baseNodeOpacity *
 					(revealWaveNodeOpacityByNodeId[node.id] ?? 1) *
 					queryOpacity(queryNodeState)}
-				{@const nodeChips = shouldShowQuantityChips(NODE_RADIUS * 2, nodeScale, stageScale, {
-					minOnScreenDiameterPx: APP_CONFIG.multigraph.dataflow.chipMinOnScreenDiameterPx
+				{@const nodeChips = shouldShowQuantityChips(nodeDiameterPx, nodeScale, stageScale, {
+					minOnScreenDiameterPx: dataflowCfg.chipMinOnScreenDiameterPx
 				})
 					? quantityChips(definedQuantityLabelsByNodeId.get(node.id) ?? [], {
-							maxVisible: APP_CONFIG.multigraph.dataflow.chipMaxVisibleQuantities
+							maxVisible: dataflowCfg.chipMaxVisibleQuantities
 						})
 					: EMPTY_QUANTITY_CHIPS}
 				<div
@@ -1940,6 +2013,7 @@
 					style={`left: calc(50% + ${nodePos.x}px); top: calc(50% + ${nodePos.y}px); transform: translate(-50%, -50%) scale(${nodeScale}); opacity: ${nodeOpacity};`}
 				>
 					<Node
+						{...nodeChromeTunables}
 						nodeData={node}
 						isTitleEditing={titleEditContext?.nodeId === node.id}
 						titleCaretAt={titleEditContext?.nodeId === node.id
@@ -1991,6 +2065,7 @@
 					style={`left: calc(50% + ${nodePos.x}px); top: calc(50% + ${nodePos.y}px); transform: translate(-50%, -50%) scale(${nodeScale}); opacity: ${nodeOpacity}; pointer-events: none;`}
 				>
 					<Node
+						{...nodeChromeTunables}
 						nodeData={bufferedNode}
 						isTitleEditing={false}
 						borderSegments={nodeBorderSegments(bufferedNode, graph.tagColorConfig.nodeTags)}
@@ -2012,6 +2087,7 @@
 				style={`left: calc(50% + ${entry.x}px); top: calc(50% + ${entry.y}px); transform: translate(-50%, -50%) scale(${exitScale}); opacity: ${nodeOpacity}; pointer-events: none;`}
 			>
 				<Node
+					{...nodeChromeTunables}
 					nodeData={entry.nodeData}
 					isTitleEditing={false}
 					borderSegments={nodeBorderSegments(entry.nodeData, graph.tagColorConfig.nodeTags)}
@@ -2028,6 +2104,7 @@
 				style={`left: calc(50% + ${creationPreview.point.x}px); top: calc(50% + ${creationPreview.point.y}px); transform: translate(-50%, -50%) scale(${creationPreviewScale}); pointer-events: none;`}
 			>
 				<Node
+					{...nodeChromeTunables}
 					nodeData={CREATION_PREVIEW_NODE}
 					isTitleEditing={false}
 					borderSegments={nodeBorderSegments(CREATION_PREVIEW_NODE, graph.tagColorConfig.nodeTags)}
@@ -2090,7 +2167,7 @@
 			{#if frameNode}
 				{@const segments = nodeBorderSegments(frameNode, graph.tagColorConfig.nodeTags)}
 				<NodeChrome
-					diameterPx={NODE_DIAMETER_PX}
+					diameterPx={nodeDiameterPx}
 					{borderRadiusPx}
 					{borderWidthPx}
 					pinnedBorderWidthPx={borderWidthPx}
@@ -2117,8 +2194,8 @@
 				<div class="focus-compact-fill">
 					<NodeCompactContent
 						title={compactNode.title}
-						diameterPx={NODE_DIAMETER_PX}
-						fontSizePx={NODE_TEXT_FONT_SIZE}
+						diameterPx={nodeDiameterPx}
+						fontSizePx={nodeTextFontSizePx}
 						detailsMode
 					/>
 				</div>
@@ -2202,7 +2279,7 @@
 				levels={focus.levels}
 				{reduceMotion}
 				entryGestureIdleMs={focus.entryGestureIdleMs}
-				entryGestureMaxMs={APP_CONFIG.multigraph.focus.entryGestureMaxMs}
+				entryGestureMaxMs={focusEntryGestureMaxMs}
 				geometryForLevel={geometryForFocusLevel}
 				baseSizeForLevel={baseSizeForFocusLevel}
 				frame={focusFrame}

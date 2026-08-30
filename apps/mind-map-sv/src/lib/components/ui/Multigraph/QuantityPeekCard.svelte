@@ -34,6 +34,7 @@
 	 * controller above it, because N cards each holding a document listener would
 	 * race to close each other.
 	 */
+	import { APP_CONFIG } from '$lib/appConfig';
 	import MathText from '../MathText/MathText.svelte';
 	import { symbolFor, type QuantitySymbol } from '../MathText/lib/mathSymbols';
 	import PeekCard from './QuantityPeekCard.svelte';
@@ -58,6 +59,13 @@
 	 * cards' borders.
 	 */
 	const MAX_INDENT_LEVELS = 4;
+
+	/**
+	 * Passed to every drill chip rather than left to the chip's own prop default:
+	 * a default is evaluated once, so it can never be the path a config that
+	 * changes at runtime takes to the gesture.
+	 */
+	const drillHoldMs = $derived(APP_CONFIG.multigraph.dataflow.chipPeekLongPressMs);
 	const INDENT_REM_PER_LEVEL = 0.75;
 
 	let {
@@ -318,6 +326,7 @@
 					peeking={drill.open}
 					marker={drill.loop ? '↺' : undefined}
 					attributes={drillAttributes(drill)}
+					holdMs={drillHoldMs}
 					onsecondary={() => onToggleBranch?.(drill.path)}
 				/>
 			{/each}

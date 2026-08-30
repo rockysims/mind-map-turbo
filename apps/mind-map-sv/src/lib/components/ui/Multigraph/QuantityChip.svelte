@@ -72,7 +72,11 @@
 		 * browser's own menu as usual.
 		 */
 		onsecondary?: (anchor: HTMLElement) => void;
-		/** How long the hold is. Surfaces that ask different things may want different waits. */
+		/**
+		 * How long the hold is. Surfaces that ask different things may want
+		 * different waits, so every real caller passes this explicitly; the default
+		 * is only the fallback for a story or spec that mounts a bare chip.
+		 */
 		holdMs?: number;
 	} = $props();
 

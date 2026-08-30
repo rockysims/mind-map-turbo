@@ -89,6 +89,16 @@
 		initialPanY?: number;
 		/** Pixels of movement below which we treat as click rather than drag. */
 		dragThreshold?: number;
+		/** Gap within which a second press on the same node counts as a double-click. */
+		doubleClickMs?: number;
+		/** How long a touch must rest on a node before it counts as a hold. */
+		longPressMs?: number;
+		/** How far the pointer may wander during a hold before it stops being one. */
+		longPressDistancePx?: number;
+		/** Lower zoom clamp for every gesture, the mount seed, and fit. */
+		minScale?: number;
+		/** Upper zoom clamp for every gesture, the mount seed, and fit. */
+		maxScale?: number;
 		/** Callback when user single-click-drags a node and releases with a graph-local point. */
 		onNodeMoved?: (node: NodeData, point: Point) => void;
 		/** Callback when user starts dragging a node after crossing the drag threshold. */
@@ -155,7 +165,16 @@
 		initialScale = 1,
 		initialPanX = 0,
 		initialPanY = 0,
+		// Every tunable below defaults to the shipped constant so a story or spec
+		// can mount Stage with none of them. A parent that owns a live config
+		// (Multigraph) passes all of them explicitly instead — a prop default is
+		// evaluated once, so it must never be the path a changing value takes.
 		dragThreshold = DRAG_THRESHOLD,
+		doubleClickMs = DBL_CLICK_MS,
+		longPressMs = LONG_PRESS_MS,
+		longPressDistancePx = LONG_PRESS_DIST,
+		minScale = DEFAULT_MIN_SCALE,
+		maxScale = DEFAULT_MAX_SCALE,
 		onNodeMoved,
 		onNodeDragStart,
 		onNodeDragEnd,
@@ -207,7 +226,7 @@
 
 	// Zoom: mount-only seed from initialScale; user gestures own scale afterward.
 	// svelte-ignore state_referenced_locally
-	let scale = $state(clampScale(initialScale));
+	let scale = $state(clampScale(initialScale, minScale, maxScale));
 	let pinchStart = $state<{
 		distance: number;
 		scale: number;
@@ -252,8 +271,8 @@
 			{ width: stageRef.clientWidth, height: stageRef.clientHeight },
 			{
 				paddingPx: request.paddingPx,
-				minScale: DEFAULT_MIN_SCALE,
-				maxScale: DEFAULT_MAX_SCALE
+				minScale,
+				maxScale
 			}
 		);
 		panX = next.panX;
@@ -271,7 +290,7 @@
 		// The only adjustment: the same clamp the mount seed and every gesture go
 		// through, so a restore cannot leave the stage at a scale no gesture could
 		// have produced. Pan is reproduced verbatim — that is the whole point.
-		scale = clampScale(request.scale);
+		scale = clampScale(request.scale, minScale, maxScale);
 		onViewStateChange?.({ panX, panY, scale });
 	});
 
@@ -293,7 +312,7 @@
 	let dragCurrentPos = $state<{ x: number; y: number } | null>(null);
 	let isNodeDragActive = $state(false);
 
-	// Double-click: same node clicked twice within DBL_CLICK_MS
+	// Double-click: same node clicked twice within doubleClickMs
 	let lastClickNodeId = $state<string | null>(null);
 	let lastClickTime = $state(0);
 	let isDoubleClickSession = $state(false);
@@ -378,7 +397,7 @@
 			dragCurrentPos = dragStartPos;
 			longPressFired = false;
 			isDoubleClickSession =
-				lastClickNodeId === node.id && Date.now() - lastClickTime < DBL_CLICK_MS;
+				lastClickNodeId === node.id && Date.now() - lastClickTime < doubleClickMs;
 			if (e.pointerType === 'touch') startLongPressTimer(node);
 		} else {
 			panStart = { clientX: e.clientX, clientY: e.clientY, panX, panY };
@@ -403,15 +422,15 @@
 				recognizeLongPress({
 					duration: Date.now() - longPressStartTime,
 					distance,
-					minDuration: LONG_PRESS_MS,
-					maxDistance: LONG_PRESS_DIST
+					minDuration: longPressMs,
+					maxDistance: longPressDistancePx
 				})
 			) {
 				longPressFired = true;
 				onNodeLongPress?.(node, { x: dragCurrentPos.x, y: dragCurrentPos.y });
 			}
 			longPressTimeoutId = null;
-		}, LONG_PRESS_MS);
+		}, longPressMs);
 	}
 
 	function cancelLongPressTimer() {
@@ -468,7 +487,7 @@
 		} else if (dragNode && dragStartPos && !isDoubleClickSession) {
 			const dist = pointerDistance(dragStartPos.x, dragStartPos.y, e.clientX, e.clientY);
 			dragCurrentPos = { x: e.clientX, y: e.clientY };
-			if (dist > LONG_PRESS_DIST || getNodeAt(e.clientX, e.clientY)?.id !== dragNode.id) {
+			if (dist > longPressDistancePx || getNodeAt(e.clientX, e.clientY)?.id !== dragNode.id) {
 				cancelLongPressTimer();
 			}
 			if (dist >= dragThreshold) {
@@ -549,7 +568,7 @@
 			Number.NEGATIVE_INFINITY,
 			Number.POSITIVE_INFINITY
 		);
-		const clampedScale = clampScale(requestedScale, DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE);
+		const clampedScale = clampScale(requestedScale, minScale, maxScale);
 		if (
 			!applyZoomGesture({
 				focalPoint,
@@ -563,7 +582,7 @@
 			onViewStateChange?.({
 				panX,
 				panY,
-				scale: persistedScaleForFocusOverzoom(scale, DEFAULT_MAX_SCALE)
+				scale: persistedScaleForFocusOverzoom(scale, maxScale)
 			});
 		}
 	}
@@ -643,7 +662,7 @@
 				} else {
 					const factor = dist / pinchStart.distance;
 					const requestedScale = pinchStart.scale * factor;
-					const clampedScale = clampScale(requestedScale, DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE);
+					const clampedScale = clampScale(requestedScale, minScale, maxScale);
 					const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
 					if (
 						releaseFocusEntryBoundaryProgress(requestedScale < scale ? 1 : -1, pinchStart.centroid)
@@ -702,7 +721,7 @@
 			onViewStateChange?.({
 				panX,
 				panY,
-				scale: persistedScaleForFocusOverzoom(scale, DEFAULT_MAX_SCALE)
+				scale: persistedScaleForFocusOverzoom(scale, maxScale)
 			});
 		}
 	}
@@ -738,7 +757,7 @@
 			onViewStateChange?.({
 				panX,
 				panY,
-				scale: persistedScaleForFocusOverzoom(scale, DEFAULT_MAX_SCALE)
+				scale: persistedScaleForFocusOverzoom(scale, maxScale)
 			});
 			return true;
 		}
