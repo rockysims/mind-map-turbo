@@ -3,7 +3,9 @@ import { dirname } from 'node:path';
 import type { StorybookConfig } from '@storybook/sveltekit';
 
 const config: StorybookConfig = {
-	stories: ['../src/**/*.mdx', '../src/**/*.stories.@(js|ts|svelte)'],
+	// No `*.mdx` glob: there are no docs pages in this project, and listing the
+	// pattern made Storybook warn "No story files found" on every test run.
+	stories: ['../src/**/*.stories.@(js|ts|svelte)'],
 	addons: [
 		getAbsolutePath('@storybook/addon-svelte-csf'),
 		getAbsolutePath('@chromatic-com/storybook'),

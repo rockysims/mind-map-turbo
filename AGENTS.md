@@ -8,18 +8,21 @@
 
 ## How to run things
 
-| Goal                             | Command                                        |
-| -------------------------------- | ---------------------------------------------- |
-| Install                          | `pnpm install`                                 |
-| Dev server                       | `pnpm -w dev` (or `turbo run dev`)             |
-| Build                            | `pnpm -w build`                                |
-| Lint                             | `pnpm --filter mind-map-sv lint`               |
-| Type check                       | `pnpm --filter mind-map-sv check`              |
-| Unit + browser + storybook tests | `pnpm --filter mind-map-sv test:unit -- --run` |
-| E2E                              | `pnpm --filter mind-map-sv test:e2e`           |
-| Storybook (interactive)          | `pnpm --filter mind-map-sv storybook`          |
+| Goal                                  | Command                                        |
+| ------------------------------------- | ---------------------------------------------- |
+| Install                               | `pnpm install`                                 |
+| Dev server                            | `pnpm -w dev` (or `turbo run dev`)             |
+| Build                                 | `pnpm -w build`                                |
+| Lint                                  | `pnpm --filter mind-map-sv lint`               |
+| Type check                            | `pnpm --filter mind-map-sv check`              |
+| Unit + browser + storybook tests      | `pnpm --filter mind-map-sv test:unit -- --run` |
+| Dead code (unused files/exports/deps) | `pnpm --filter mind-map-sv knip`               |
+| E2E                                   | `pnpm --filter mind-map-sv test:e2e`           |
+| Storybook (interactive)               | `pnpm --filter mind-map-sv storybook`          |
 
-Node ≥ 20 and pnpm 9 are required.
+Node ≥ 20 is required; the pnpm version comes from `packageManager` in the
+root `package.json` (pnpm 11 at the time of writing) — run `corepack enable`
+and let it pick that up rather than pinning a version by hand.
 
 ## Architecture
 
@@ -43,9 +46,13 @@ Every change must satisfy these before being claimed complete:
 2. `pnpm --filter mind-map-sv lint` passes.
 3. `pnpm --filter mind-map-sv check` passes.
 4. `pnpm --filter mind-map-sv test:unit -- --run` passes.
-5. Commit messages follow Conventional Commits (`feat`, `fix`, `refactor`,
+5. `pnpm --filter mind-map-sv knip` passes — nothing is exported that nothing
+   imports, and no file or dependency is left unreferenced. Prefer deleting a
+   symbol over exporting it "just in case"; if it is genuinely internal, drop
+   the `export` keyword rather than adding it to an ignore list.
+6. Commit messages follow Conventional Commits (`feat`, `fix`, `refactor`,
    `test`, `docs`, `chore`, etc.).
-6. No tracked changes to `.svelte-kit/`, build outputs, or `*storybook*.log`.
+7. No tracked changes to `.svelte-kit/`, build outputs, or `*storybook*.log`.
 
 You must actually run those commands and report results. Do not claim done
 based on vibes.

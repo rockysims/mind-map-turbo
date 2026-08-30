@@ -20,10 +20,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # No `version:` input — `packageManager` in the root package.json is the
+      # single source of truth, and action-setup@v4 reads it. The pinned input
+      # was left at 9.0.0 when `packageManager` moved to pnpm 11, so the two
+      # disagreed about which pnpm this repo builds with.
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 9.0.0
 
       - name: Setup Node
         uses: actions/setup-node@v4
