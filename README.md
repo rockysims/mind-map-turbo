@@ -15,6 +15,17 @@ The active roadmap, milestones, and (when work is in flight) plans live under
 
 - [Roadmap: MindMap MVP](docs/roadmaps/2026-05-07%20mind-map-mvp/roadmap.md)
 
+## Finding your way around the canvas
+
+Zoom is anchored to the pointer, so zooming into empty space moves the graph
+away — far enough, and nothing is left in view. Press <kbd>F</kbd> to fit the
+whole visible graph back into the window. It is the only canvas shortcut, and
+when the graph really has gone off-view a hint saying so appears in the middle
+of the empty canvas, so it does not have to be remembered.
+
+Nodes are reachable from the keyboard: <kbd>Tab</kbd> moves between them and
+<kbd>Enter</kbd> opens the focused node's details.
+
 ## Writing math in node descriptions
 
 Node descriptions accept LaTeX between dollar delimiters: `$…$` renders inline
@@ -90,6 +101,11 @@ Run the app in docker:
 cd apps/mind-map-sv
 docker compose up
 ```
+
+The image builds from the repo root against the workspace lockfile — the same
+one CI installs from — and serves the static build. There is a `db` service
+alongside it for the server work that is planned; nothing talks to it yet, and
+`docker compose up app` skips it.
 
 Run tests:
 

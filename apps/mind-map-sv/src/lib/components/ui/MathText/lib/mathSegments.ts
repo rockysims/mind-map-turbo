@@ -20,8 +20,8 @@ export interface MathSegment {
 	source: string;
 }
 
-export const DISPLAY_DELIMITER = '$$';
-export const INLINE_DELIMITER = '$';
+const DISPLAY_DELIMITER = '$$';
+const INLINE_DELIMITER = '$';
 
 /**
  * A delimiter is escaped only when preceded by an odd number of backslashes, so

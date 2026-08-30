@@ -13,20 +13,20 @@ const OVERLAP_EPSILON = 0.001;
  */
 const CROSS_COMPONENT_EXTRA_GAP_RADIUS_FACTOR = 0.1;
 
-export interface EdgeDistanceSettings {
+interface EdgeDistanceSettings {
 	edgeGapMinRadiusFactor: number;
 	edgeGapMaxRadiusFactor: number;
 	edgeSpringStrength: number;
 }
 
-export interface HopRepulsionSettings {
+interface HopRepulsionSettings {
 	hopRepulsionStrength: number;
 	hopRepulsionMinHops: number;
 	hopRepulsionMaxHops: number;
 	hopRepulsionMaxExtraGapRadiusFactor: number;
 }
 
-export type GraphPhysicsSettings = EdgeDistanceSettings & HopRepulsionSettings;
+type GraphPhysicsSettings = EdgeDistanceSettings & HopRepulsionSettings;
 
 export interface EdgeEndpointIds {
 	sourceNodeId: string;
@@ -42,7 +42,7 @@ export interface EdgeEndpointIds {
 	springFactor?: number;
 }
 
-export function nodeMobility(
+function nodeMobility(
 	nodeId: string,
 	anchoredIds: Set<string>,
 	mobilityByNodeId?: Record<string, number>

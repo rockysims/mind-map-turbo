@@ -296,16 +296,30 @@
 	}
 
 	// One listener pair for every card on screen, registered from inside the click
-	// that opened the first, so that opening gesture's own pointerdown has been and
+	// that opened the first, so that opening gesture's own press has been and
 	// gone. One pair rather than one per card: N cards each stopping propagation
 	// would race, and the wrong one would close.
 	$effect(() => {
 		if (cascades.length === 0) return;
 
-		function onPointerDown(event: PointerEvent) {
+		/**
+		 * `click` rather than `pointerdown`, which is what this used to be.
+		 *
+		 * Dismissing on the press collapsed the cards while the reader's finger was
+		 * still down, and everything below them — the diagnostics list's "Define",
+		 * "Label as output" and node buttons — jumped up ~90px before the click was
+		 * dispatched. The press landed on the button, the click landed on empty
+		 * space, and the first tap on any of those controls did nothing.
+		 *
+		 * Capture phase, so this still runs before the button's own handler; the
+		 * event's target was fixed when the dispatch began, so the layout moving
+		 * during it cannot re-route the click. A drag that starts outside no longer
+		 * dismisses, which is the better behaviour anyway.
+		 */
+		function onOutsideClick(event: MouseEvent) {
 			const target = event.target;
 			// Inside means the whole designation section — every chip and every card,
-			// not just the pressed card and its own anchor. Scoped any tighter, a
+			// not just the clicked card and its own anchor. Scoped any tighter, a
 			// press on a third chip would count as outside the second card and close
 			// it on the way in, capping the reader at two cards forever.
 			if (target instanceof Node && peekSection?.contains(target)) return;
@@ -346,10 +360,10 @@
 			chip?.focus();
 		}
 
-		document.addEventListener('pointerdown', onPointerDown, true);
+		document.addEventListener('click', onOutsideClick, true);
 		document.addEventListener('keydown', onKeyDown, true);
 		return () => {
-			document.removeEventListener('pointerdown', onPointerDown, true);
+			document.removeEventListener('click', onOutsideClick, true);
 			document.removeEventListener('keydown', onKeyDown, true);
 		};
 	});

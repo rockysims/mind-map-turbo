@@ -1,0 +1,19 @@
+{
+	"$schema": "https://unpkg.com/knip@5/schema.json",
+	"entry": [
+		"src/routes/**/+*.{ts,js,svelte}",
+		"src/app.html",
+		"src/**/*.stories.svelte",
+		"src/**/*.spec.ts",
+		"e2e/**/*.test.ts",
+		"scripts/*.mjs",
+		".storybook/{main,preview,vitest.setup}.ts"
+	],
+	"project": ["src/**/*.{ts,js,svelte}", "scripts/*.mjs", ".storybook/*.ts"],
+	"ignoreDependencies": ["@sveltejs/adapter-auto", "@sveltejs/adapter-node"],
+	"paths": {
+		"$lib": ["./src/lib"],
+		"$lib/*": ["./src/lib/*"],
+		"$app/*": ["./.svelte-kit/runtime/app/*"]
+	}
+}

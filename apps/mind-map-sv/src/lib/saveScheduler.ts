@@ -1,15 +1,18 @@
 import type { MultigraphData } from './components/ui/types/multigraph';
+import { graphFingerprint } from './documentStatus';
 import type { ViewState } from './migrations';
 import type { Persistence } from './persistence';
 
 export type SaveStatus =
 	| { state: 'idle' }
 	| { state: 'saving' }
-	| { state: 'saved'; savedAt: number }
-	| { state: 'warning'; savedAt: number; message: string }
+	// `fingerprint` identifies the graph data that actually reached storage, so
+	// callers can tell "saved" from "not saved yet" instead of inferring it.
+	| { state: 'saved'; savedAt: number; fingerprint: string }
+	| { state: 'warning'; savedAt: number; fingerprint: string; message: string }
 	| { state: 'error'; message: string };
 
-export type QuotaWarning = {
+type QuotaWarning = {
 	usedBytes: number;
 	budgetBytes: number;
 	ratio: number;
@@ -24,6 +27,11 @@ type PendingSave = {
 	};
 };
 
+/**
+ * Debounced writer for the storage layer shared with the server backend, so its
+ * names stay generic ("save"). In UI vocabulary this layer *caches* the draft;
+ * "saved" is reserved for exporting the self-contained HTML file.
+ */
 export class SaveScheduler {
 	private pending: PendingSave | null = null;
 	private timer: ReturnType<typeof setTimeout> | null = null;
@@ -48,20 +56,23 @@ export class SaveScheduler {
 		this.clearPendingTimer();
 		this.timer = this.setTimer(() => {
 			this.timer = null;
+			// The debounced path has nobody to catch a rejection, so the failure is
+			// reported through onStatus and swallowed here rather than surfacing as
+			// an unhandled promise rejection on every failed autosave.
 			void this.persistPending();
 		}, this.options.debounceMs);
 	}
 
 	async flush(): Promise<void> {
 		this.clearPendingTimer();
-		await this.persistPending();
+		await this.persistPending({ rethrow: true });
 	}
 
 	dispose(): void {
 		this.clearPendingTimer();
 	}
 
-	private async persistPending(): Promise<void> {
+	private async persistPending(options: { rethrow?: boolean } = {}): Promise<void> {
 		if (this.pending === null || this.saving) return;
 
 		const save = this.pending;
@@ -72,6 +83,7 @@ export class SaveScheduler {
 			await this.options.persistence.save(save.id, save.graph);
 			if (this.pending === save) this.pending = null;
 			const savedAt = this.now();
+			const fingerprint = graphFingerprint(save.graph.data);
 			const warning = calculateQuotaWarning(
 				this.options.estimateUsageBytes?.() ?? 0,
 				this.options.quotaBudgetBytes ?? Number.POSITIVE_INFINITY,
@@ -82,14 +94,15 @@ export class SaveScheduler {
 				this.report({
 					state: 'warning',
 					savedAt,
-					message: `Stored graphs use ${Math.round(warning.ratio * 100)}% of the local budget.`
+					fingerprint,
+					message: `Cached graphs use ${Math.round(warning.ratio * 100)}% of the local budget.`
 				});
 			} else {
-				this.report({ state: 'saved', savedAt });
+				this.report({ state: 'saved', savedAt, fingerprint });
 			}
 		} catch (error) {
 			this.report({ state: 'error', message: errorMessage(error) });
-			throw error;
+			if (options.rethrow) throw error;
 		} finally {
 			this.saving = false;
 			if (this.pending !== null && this.pending !== save) {

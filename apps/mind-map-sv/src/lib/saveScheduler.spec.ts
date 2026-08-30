@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { makeGraph } from './components/ui/Multigraph/lib/testFixtures';
+import { graphFingerprint } from './documentStatus';
 import { NEUTRAL_VIEW_STATE } from './migrations';
 import { SaveScheduler, calculateQuotaWarning, type SaveStatus } from './saveScheduler';
 import type { Persistence } from './persistence';
@@ -75,6 +76,56 @@ describe('SaveScheduler', () => {
 		expect(statuses).toContainEqual({ state: 'error', message: 'quota exceeded' });
 	});
 
+	it('reports a failed debounced save without an unhandled rejection', async () => {
+		vi.useFakeTimers();
+		const statuses: SaveStatus[] = [];
+		const unhandled: unknown[] = [];
+		const pushUnhandled = (reason: unknown): void => {
+			unhandled.push(reason);
+		};
+		const persistence = makePersistence();
+		vi.mocked(persistence.save).mockRejectedValueOnce(new Error('quota exceeded'));
+		const scheduler = new SaveScheduler({
+			persistence,
+			debounceMs: 500,
+			onStatus: (status) => statuses.push(status)
+		});
+		process.on('unhandledRejection', pushUnhandled);
+
+		try {
+			scheduler.schedule('graph', makeGraph({ nodeCount: 1 }), NEUTRAL_VIEW_STATE);
+			await vi.advanceTimersByTimeAsync(500);
+			// Give any rejection that escaped the scheduler a turn to be reported.
+			vi.useRealTimers();
+			await new Promise((resolve) => setTimeout(resolve, 0));
+		} finally {
+			process.off('unhandledRejection', pushUnhandled);
+		}
+
+		expect(statuses).toContainEqual({ state: 'error', message: 'quota exceeded' });
+		expect(unhandled).toEqual([]);
+	});
+
+	it('reports the fingerprint of the graph data that was persisted', async () => {
+		const statuses: SaveStatus[] = [];
+		const scheduler = new SaveScheduler({
+			persistence: makePersistence(),
+			debounceMs: 0,
+			now: () => 7,
+			onStatus: (status) => statuses.push(status)
+		});
+		const graph = makeGraph({ nodeCount: 2 });
+
+		scheduler.schedule('graph', graph, NEUTRAL_VIEW_STATE);
+		await scheduler.flush();
+
+		expect(statuses).toContainEqual({
+			state: 'saved',
+			savedAt: 7,
+			fingerprint: graphFingerprint(graph)
+		});
+	});
+
 	it('reports quota warnings after successful saves', async () => {
 		const statuses: SaveStatus[] = [];
 		const scheduler = new SaveScheduler({
@@ -86,14 +137,16 @@ describe('SaveScheduler', () => {
 			quotaWarningRatio: 0.8,
 			onStatus: (status) => statuses.push(status)
 		});
+		const graph = makeGraph({ nodeCount: 1 });
 
-		scheduler.schedule('graph', makeGraph({ nodeCount: 1 }), NEUTRAL_VIEW_STATE);
+		scheduler.schedule('graph', graph, NEUTRAL_VIEW_STATE);
 		await scheduler.flush();
 
 		expect(statuses).toContainEqual({
 			state: 'warning',
 			savedAt: 42,
-			message: 'Stored graphs use 81% of the local budget.'
+			fingerprint: graphFingerprint(graph),
+			message: 'Cached graphs use 81% of the local budget.'
 		});
 	});
 });

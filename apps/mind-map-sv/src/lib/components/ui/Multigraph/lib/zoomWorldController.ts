@@ -35,7 +35,7 @@ export interface ZoomWorldBounds extends ViewportSize {
 	entryBoundaryZoneFraction?: number;
 }
 
-export interface ZoomWorldStep {
+interface ZoomWorldStep {
 	state: ZoomWorldState;
 	exitBoundaryDelta: number;
 	/**
@@ -201,7 +201,7 @@ function descendBoundaryDelta(
 	return clamp((pressed - maxScale) / (zoneEnd - maxScale), 0, 1);
 }
 
-export interface PinchZoomWorldStep {
+interface PinchZoomWorldStep {
 	state: ZoomWorldState;
 	entryProgress: number;
 	boundary: 'descend' | null;
@@ -247,7 +247,7 @@ export function pinchZoomWorld(
 	return zoomWorldAtPoint(state, startScale * distanceRatio, focalPoint, bounds);
 }
 
-export function zoomWorldScaleLimits(bounds: ZoomWorldBounds): {
+function zoomWorldScaleLimits(bounds: ZoomWorldBounds): {
 	minScale: number;
 	maxScale: number;
 } {

@@ -33,7 +33,7 @@ const DEFAULT_POSITION: Point = { x: 0, y: 0 };
  */
 const IMPORT_GAP_PX = APP_CONFIG.multigraph.nodeRadiusPx * 2;
 
-export interface GraphImportResult {
+interface GraphImportResult {
 	/** The host graph with the incoming graph folded in. */
 	next: MultigraphData;
 	/** Incoming node id → the id it was given in `next`. */

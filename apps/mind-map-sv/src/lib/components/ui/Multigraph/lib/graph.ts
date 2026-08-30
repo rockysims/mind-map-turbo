@@ -10,7 +10,7 @@ import { mathPlainText } from '../../MathText/lib/mathPlainText';
 import { symbolFor } from '../../MathText/lib/mathSymbols';
 import { parseTitleSyntax } from './titleSyntax';
 
-export interface AddNodeInput {
+interface AddNodeInput {
 	id?: string;
 	title?: string;
 	description?: string;
@@ -21,7 +21,7 @@ export interface AddNodeInput {
 	outputs?: QuantityDesignation[];
 }
 
-export interface AddEdgeInput {
+interface AddEdgeInput {
 	id?: string;
 	tags?: string[];
 	directed?: boolean;

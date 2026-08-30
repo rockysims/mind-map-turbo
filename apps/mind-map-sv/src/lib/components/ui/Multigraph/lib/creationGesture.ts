@@ -11,7 +11,7 @@
 /** Which mutation a drag-from-node gesture is aimed at. */
 export type NodeGestureMode = 'create' | 'merge';
 
-export type CreationDropAction =
+type CreationDropAction =
 	| { kind: 'create-node-and-edge' }
 	| { kind: 'connect-to-node'; targetNodeId: string }
 	| { kind: 'merge-into-node'; targetNodeId: string }

@@ -4,6 +4,7 @@ import type { ViewState } from '$lib/migrations';
 import {
 	GraphPersistenceController,
 	controllerNotice,
+	controllerNoticeSeverity,
 	type GraphPersistenceControllerDeps,
 	type SnapshotSummary
 } from '$lib/graphPersistenceController';
@@ -19,7 +20,9 @@ export type PersistedGraph = {
 	readonly documentStatus: DocumentStatus;
 	/** The revert offer standing over this graph, refreshed on load and by every revert path. */
 	readonly snapshot: SnapshotSummary | null;
+	readonly draftCached: boolean;
 	readonly notice: string;
+	readonly noticeSeverity: 'info' | 'warning';
 	load: GraphPersistenceController['load'];
 	loadEmbeddedDocument: GraphPersistenceController['loadEmbeddedDocument'];
 	notifyGraphChanged: (data: MultigraphData, options?: { syncView?: boolean }) => void;
@@ -71,8 +74,14 @@ export function usePersistedGraph(deps: GraphPersistenceControllerDeps): Persist
 		get snapshot() {
 			return view.snapshot;
 		},
+		get draftCached() {
+			return view.draftCached;
+		},
 		get notice() {
 			return controllerNotice(view);
+		},
+		get noticeSeverity() {
+			return controllerNoticeSeverity(view);
 		},
 		load: controller.load.bind(controller),
 		loadEmbeddedDocument: controller.loadEmbeddedDocument.bind(controller),

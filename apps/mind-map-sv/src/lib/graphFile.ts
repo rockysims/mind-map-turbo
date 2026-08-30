@@ -7,11 +7,11 @@ import {
 	type ViewState
 } from './migrations';
 
-export const GRAPH_HTML_DOCUMENT_VERSION = 1;
+const GRAPH_HTML_DOCUMENT_VERSION = 1;
 export const GRAPH_HTML_READER_VERSION = 2;
 export const GRAPH_HTML_PAYLOAD_SCRIPT_ID = 'mind-map-embedded-graph';
-export const GRAPH_HTML_ASSET_SCRIPT_TYPE = 'application/x-mind-map-asset';
-export const GRAPH_HTML_ASSET_ID_ATTRIBUTE = 'data-mind-map-asset-id';
+const GRAPH_HTML_ASSET_SCRIPT_TYPE = 'application/x-mind-map-asset';
+const GRAPH_HTML_ASSET_ID_ATTRIBUTE = 'data-mind-map-asset-id';
 
 /** The in-memory representation of a graph backup file. */
 export type GraphFileDocument = {

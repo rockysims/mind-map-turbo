@@ -81,7 +81,7 @@
 	import { deriveGraphLayout, withSettledGraphPositions } from './lib/graphLayout.js';
 	import { evaluateGraphQuery, type GraphQueryElementState } from './lib/graphQuery.js';
 	import { beaconNodeIds } from './lib/beacons.js';
-	import { hopsFromPinned } from './lib/layout.js';
+	import { severedComponentAfterMutation } from './lib/severedComponent.js';
 	import type { LayoutSettings } from './lib/layoutSettings.js';
 	import { withDefaultLayoutSettings } from './lib/layoutSettings.js';
 	import {
@@ -164,6 +164,7 @@
 		type NodeFocusCandidate,
 		type ViewTransform
 	} from './lib/nodeFocus.js';
+	import { graphIsLost } from './lib/graphOnScreen.js';
 	import {
 		frameGeometry,
 		type FrameGeometry,
@@ -657,6 +658,29 @@
 		});
 	});
 	const nodeById = $derived(Object.fromEntries(graph.nodes.map((node) => [node.id, node])));
+	/**
+	 * Every visible node's circle in screen space — the same projection the hit
+	 * test uses, so "off screen" here means the same thing as "not tappable".
+	 */
+	const visibleNodeScreenCircles = $derived.by(() => {
+		const rect = stageRect;
+		if (!rect) return [];
+		const view: ViewTransform = {
+			panX: stageViewState.panX,
+			panY: stageViewState.panY,
+			scale: stageViewState.scale
+		};
+		return visibleGraph.nodes.flatMap((node) => {
+			const position = graphLayout.posByNodeId[node.id];
+			const radius = graphLayout.radiusByNodeId[node.id];
+			if (!position || radius === undefined) return [];
+			return [nodeScreenCircle(node.id, position, radius, rect, view)];
+		});
+	});
+	/** True only when there is a graph and the reader has panned or zoomed away from all of it. */
+	const graphLost = $derived(
+		stageRect !== null && graphIsLost(visibleNodeScreenCircles, stageRect)
+	);
 	const revealWaveNodeOpacityByNodeId = $derived(layoutRuntime.revealWaveNodeOpacityByNodeId);
 	const revealWaveEdgeOpacityByEdgeId = $derived(layoutRuntime.revealWaveEdgeOpacityByEdgeId);
 	const revealWavePreviousScaleByNodeId = $derived(layoutRuntime.revealWavePreviousScaleByNodeId);
@@ -844,6 +868,19 @@
 		}
 	});
 
+	/**
+	 * True while the keyboard belongs to something that takes text, so a bare
+	 * letter shortcut cannot fire while an author is typing a node title, a
+	 * description, or a search.
+	 */
+	function keyboardIsInTextEntry(): boolean {
+		const active = document.activeElement;
+		if (!(active instanceof HTMLElement)) return false;
+		if (active.isContentEditable) return true;
+		const tag = active.tagName;
+		return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+	}
+
 	$effect(() => {
 		if (typeof window === 'undefined') return;
 		const onKeyDown = (event: KeyboardEvent) => {
@@ -851,10 +888,19 @@
 				focus.closeFocus();
 				return;
 			}
-			if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'k') return;
+			if (event.metaKey || event.ctrlKey || event.altKey) {
+				if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'k') return;
+				event.preventDefault();
+				closeOverlays();
+				graphQueryPanelOpen = true;
+				return;
+			}
+			// Bare `F` brings the graph back — see `fitVisibleGraph`. Guarded on text
+			// entry above all: `f` is a letter people type.
+			if (event.key.toLowerCase() !== 'f' || event.shiftKey) return;
+			if (keyboardIsInTextEntry() || focus.isFocused) return;
 			event.preventDefault();
-			closeOverlays();
-			graphQueryPanelOpen = true;
+			fitVisibleGraph();
 		};
 		window.addEventListener('keydown', onKeyDown);
 		return () => window.removeEventListener('keydown', onKeyDown);
@@ -931,11 +977,31 @@
 			return;
 		}
 
-		primaryNodeId =
-			graph.nodes.find((candidate) => candidate.pinned)?.id ??
-			graph.nodes.find((candidate) => candidate.id === defaultPrimaryNodeId)?.id ??
-			graph.nodes[0]?.id ??
-			'';
+		primaryNodeId = fallbackPrimaryNodeId();
+	}
+
+	/**
+	 * Who becomes primary when whoever held it stops being a candidate — the node
+	 * was unpinned, or deleted. Preference order is a pinned node, then the
+	 * caller's default, then whatever is left, then nothing at all for an empty
+	 * graph.
+	 *
+	 * One function because it was two identical copies, in `handleNodeMakePrimary`
+	 * and in the delete path, and a fallback order that disagrees with itself
+	 * between unpinning and deleting is a difference nobody would ever choose on
+	 * purpose.
+	 *
+	 * `source` defaults to the graph on screen; an adopted import passes the
+	 * arriving graph instead, because the primary is being re-pointed against a
+	 * graph this component has not committed yet.
+	 */
+	function fallbackPrimaryNodeId(source: MultigraphData = graph): string {
+		return (
+			source.nodes.find((candidate) => candidate.pinned)?.id ??
+			source.nodes.find((candidate) => candidate.id === defaultPrimaryNodeId)?.id ??
+			source.nodes[0]?.id ??
+			''
+		);
 	}
 
 	function handleNodeDoubleClickDropOntoNode(sourceNode: NodeData, targetNode: NodeData) {
@@ -1364,6 +1430,36 @@
 		layoutRuntime.settleAfterDrag();
 	}
 
+	/**
+	 * What a screen reader says a node is, and what the keyboard can do with it.
+	 *
+	 * The canvas used to be `aria-hidden` in its entirety, so there was no
+	 * accessible name to give and no way to reach a node without a pointer. The
+	 * name is the title as a person would read it aloud — `mathPlainText`, the
+	 * same projection the details heading and the breadcrumbs use — plus the one
+	 * piece of state that changes what the node is doing to the layout around it.
+	 */
+	function nodeAccessibleName(node: NodeData): string {
+		const title = mathPlainText(node.title);
+		return node.pinned === true ? `${title}, pinned` : title;
+	}
+
+	/**
+	 * Enter or Space on a focused node opens its details — the same commit the
+	 * action menu's Focus item makes, which is the move that gives a keyboard
+	 * reader everything else: the description, the quantity chips, the peek
+	 * cards, and the way on to other nodes.
+	 *
+	 * Ignored unless the wrapper itself is the target: the inline title input
+	 * lives inside it and Enter there means commit the title.
+	 */
+	function handleNodeKeyDown(event: KeyboardEvent, node: NodeData) {
+		if (event.target !== event.currentTarget) return;
+		if (event.key !== 'Enter' && event.key !== ' ') return;
+		event.preventDefault();
+		focus.openFocus(node);
+	}
+
 	/** Node titles are math; nothing outside a MathText renders the raw source. */
 	function titleForNodeId(nodeId: string): string {
 		return mathPlainText(nodeById[nodeId]?.title ?? nodeId);
@@ -1462,21 +1558,18 @@
 
 		const neighborIds = neighborsOf(graph, nodeId).map((neighbor) => neighbor.id);
 		const nextGraph = removeNode(graph, nodeId);
-		const nextHops = hopsFromPinned(nextGraph);
-		const survivorId = neighborIds.find((id) => Number.isFinite(nextHops[id]));
-		const seversComponent =
-			survivorId !== undefined && neighborIds.some((id) => !Number.isFinite(nextHops[id]));
+		const { survivorNodeId, severed } = severedComponentAfterMutation(nextGraph, neighborIds);
 		// Only a severing deletion creates a pinless component to hint about.
-		severedBeaconPreference = seversComponent ? neighborIds : [];
+		severedBeaconPreference = severed ? neighborIds : [];
 
-		if (seversComponent && survivorId !== undefined) {
+		if (severed && survivorNodeId !== null) {
 			// The deletion cut a component off from every pinned node. Play the reveal
 			// wave (as a severing edge removal does) so the orphaned side fades down to
 			// its beacon instead of popping. The deleted node and its edges keep using
 			// the exiting-buffer fade below: their live geometry is gone, so only the
 			// buffer can still place them (the wave's leftovers skip them, see
 			// revealWaveOnlyEdgeVisibility).
-			commitUserGraph(layoutRuntime.beginScaleChange(nextGraph, survivorId));
+			commitUserGraph(layoutRuntime.beginScaleChange(nextGraph, survivorNodeId));
 		} else {
 			commitUserGraph(layoutRuntime.relaxAfterMutation(nextGraph));
 		}
@@ -1532,18 +1625,7 @@
 	/** Re-points the primary node after `nodeId` was deleted (no-op otherwise). */
 	function restorePrimaryNodeAfterDelete(nodeId: string) {
 		if (primaryNodeId !== nodeId) return;
-
-		primaryNodeId = fallbackPrimaryNodeId(graph);
-	}
-
-	/** Who becomes primary when the node holding it is no longer in `source`. */
-	function fallbackPrimaryNodeId(source: MultigraphData): string {
-		return (
-			source.nodes.find((candidate) => candidate.pinned)?.id ??
-			source.nodes.find((candidate) => candidate.id === defaultPrimaryNodeId)?.id ??
-			source.nodes[0]?.id ??
-			''
-		);
+		primaryNodeId = fallbackPrimaryNodeId();
 	}
 
 	function saveNodeContent(
@@ -1676,6 +1758,56 @@
 		const bounds = boundsForNodeIds(region.nodeIds);
 		if (!bounds) return;
 		fitViewRequest = { id: (fitViewRequestId += 1), bounds };
+	}
+
+	/**
+	 * Bring the whole visible graph back into view.
+	 *
+	 * The remedy for an unbounded pan: zooming with the cursor away from the
+	 * graph translates the camera without limit, and it is entirely possible to
+	 * end up looking at empty canvas with no node on screen and no way back short
+	 * of a reload. Bound to a bare `F` rather than given a button, because the
+	 * canvas chrome is already three floating controls and this one is only
+	 * wanted in the moment it is needed.
+	 *
+	 * Over the visible set rather than every node: what is hidden past
+	 * `displayedLayers` is not what the reader lost, and fitting to it would zoom
+	 * out past everything they can actually see.
+	 */
+	function fitVisibleGraph() {
+		const bounds = boundsForNodeIds(visibleGraph.nodes.map((node) => node.id));
+		if (!bounds) return;
+		fitViewRequest = { id: (fitViewRequestId += 1), bounds };
+	}
+
+	/**
+	 * One of the three node renders that exist only to be looked at: the reveal
+	 * wave's leftovers, the exit fade of something just deleted, and the creation
+	 * preview. All three place a `<Node>` at a graph point at some scale with
+	 * pointer events off, and all three used to write the same wrapper out by
+	 * hand.
+	 *
+	 * The live node loop deliberately stays separate — it carries the query role,
+	 * the quantity chips, the inline title editor and the pin classes, and folding
+	 * it in here would cost more in parameters than the duplication saves in
+	 * lines.
+	 */
+	interface PassiveNodeRender {
+		/** `data-node-id`, or null for the preview, which is not a node in the graph. */
+		nodeId: string | null;
+		nodeData: NodeData;
+		x: number;
+		y: number;
+		scale: number;
+		/** Null leaves the wrapper's opacity unset, which is what the preview wants. */
+		opacity: number | null;
+		/** The one data attribute that says which of the three this is. */
+		marker: 'data-node-reveal-buffer' | 'data-node-exiting' | 'data-creation-preview-node';
+	}
+
+	function passiveNodeStyle(entry: PassiveNodeRender): string {
+		const opacity = entry.opacity === null ? '' : ` opacity: ${entry.opacity};`;
+		return `left: calc(50% + ${entry.x}px); top: calc(50% + ${entry.y}px); transform: translate(-50%, -50%) scale(${entry.scale});${opacity} pointer-events: none;`;
 	}
 
 	function boundsForNodeIds(nodeIds: string[]) {
@@ -1948,6 +2080,26 @@
 	}
 </script>
 
+{#snippet passiveNode(entry: PassiveNodeRender)}
+	<div
+		class="node-wrapper"
+		aria-hidden="true"
+		data-node-id={entry.nodeId ?? undefined}
+		data-scale={entry.scale}
+		data-node-opacity={entry.opacity ?? undefined}
+		data-x={entry.x}
+		data-y={entry.y}
+		{...{ [entry.marker]: 'true' }}
+		style={passiveNodeStyle(entry)}
+	>
+		<Node
+			nodeData={entry.nodeData}
+			isTitleEditing={false}
+			borderSegments={nodeBorderSegments(entry.nodeData, graph.tagColorConfig.nodeTags)}
+		/>
+	</div>
+{/snippet}
+
 <div
 	class="graph"
 	class:focus-active={focus.committed && !focus.exiting}
@@ -1980,6 +2132,19 @@
 	>
 		Find / Filter
 	</button>
+
+	{#if graphLost && !focus.isFocused}
+		<!--
+			The only affordance for Fit, and it appears exactly when Fit is the
+			answer: the canvas is blank because the graph is somewhere off-view, and
+			nothing else on screen would tell the reader that. A permanent button
+			would be a fourth floating control paid for every session to solve a
+			problem that happens in a few of them.
+		-->
+		<button type="button" class="lost-graph-hint" onclick={fitVisibleGraph}>
+			Nothing in view — press <kbd>F</kbd> to fit the graph
+		</button>
+	{/if}
 
 	{#if transientReveal.top && !focus.isFocused}
 		{@const backEntry = transientReveal.top}
@@ -2277,11 +2442,21 @@
 							maxVisible: APP_CONFIG.multigraph.dataflow.chipMaxVisibleQuantities
 						})
 					: EMPTY_QUANTITY_CHIPS}
+				<!--
+					Focusable and named, so the graph is reachable without a pointer.
+					`.stage-content` sets `pointer-events: none` and hit testing stays
+					geometric on the Stage, so nothing here competes with the pointer
+					gestures — `onclick` is the handler this role owes its own contract,
+					not a second path a mouse can take.
+				-->
 				<div
 					class="node-wrapper"
 					class:primary={primaryNodeId === node.id}
 					class:focus-owned={focus.focusedNodeId === node.id}
 					class:merge-target={mergeTargetNodeId === node.id}
+					role="button"
+					tabindex="0"
+					aria-label={nodeAccessibleName(node)}
 					data-node-id={node.id}
 					data-merge-target={mergeTargetNodeId === node.id ? 'true' : undefined}
 					data-query-role={queryNodeState?.role}
@@ -2289,6 +2464,8 @@
 					data-node-opacity={nodeOpacity}
 					data-x={nodePos.x}
 					data-y={nodePos.y}
+					onkeydown={(event) => handleNodeKeyDown(event, node)}
+					onclick={() => focus.openFocus(node)}
 					style={`left: calc(50% + ${nodePos.x}px); top: calc(50% + ${nodePos.y}px); transform: translate(-50%, -50%) scale(${nodeScale}); opacity: ${nodeOpacity};`}
 				>
 					<Node
@@ -2328,63 +2505,40 @@
 			{@const bufferedNode = nodeById[nodeId]}
 			{#if bufferedNode}
 				{@const nodePos = graph.posByNodeId[nodeId] ?? CENTERED_POSITION}
-				{@const nodeScale =
-					revealWavePreviousScaleByNodeId[nodeId] ?? resolvedLayoutSettings.minScale}
-				{@const baseNodeOpacity = nodeRenderOverrides?.[nodeId]?.opacity ?? 1}
-				{@const nodeOpacity = baseNodeOpacity * (revealWaveNodeOpacityByNodeId[nodeId] ?? 1)}
-				<div
-					class="node-wrapper"
-					data-node-id={nodeId}
-					data-scale={nodeScale}
-					data-node-opacity={nodeOpacity}
-					data-node-reveal-buffer="true"
-					data-x={nodePos.x}
-					data-y={nodePos.y}
-					style={`left: calc(50% + ${nodePos.x}px); top: calc(50% + ${nodePos.y}px); transform: translate(-50%, -50%) scale(${nodeScale}); opacity: ${nodeOpacity}; pointer-events: none;`}
-				>
-					<Node
-						nodeData={bufferedNode}
-						isTitleEditing={false}
-						borderSegments={nodeBorderSegments(bufferedNode, graph.tagColorConfig.nodeTags)}
-					/>
-				</div>
+				{@render passiveNode({
+					nodeId,
+					nodeData: bufferedNode,
+					x: nodePos.x,
+					y: nodePos.y,
+					scale: revealWavePreviousScaleByNodeId[nodeId] ?? resolvedLayoutSettings.minScale,
+					opacity:
+						(nodeRenderOverrides?.[nodeId]?.opacity ?? 1) *
+						(revealWaveNodeOpacityByNodeId[nodeId] ?? 1),
+					marker: 'data-node-reveal-buffer'
+				})}
 			{/if}
 		{/each}
 		{#each exitingOnlyNodes as [id, entry] (id)}
-			{@const exitScale = exitingNodeScaleAt(entry, layoutRuntime.animationNowMs)}
-			{@const nodeOpacity = nodeRenderOverrides?.[id]?.opacity ?? 1}
-			<div
-				class="node-wrapper"
-				data-node-id={id}
-				data-scale={exitScale}
-				data-node-opacity={nodeOpacity}
-				data-node-exiting="true"
-				data-x={entry.x}
-				data-y={entry.y}
-				style={`left: calc(50% + ${entry.x}px); top: calc(50% + ${entry.y}px); transform: translate(-50%, -50%) scale(${exitScale}); opacity: ${nodeOpacity}; pointer-events: none;`}
-			>
-				<Node
-					nodeData={entry.nodeData}
-					isTitleEditing={false}
-					borderSegments={nodeBorderSegments(entry.nodeData, graph.tagColorConfig.nodeTags)}
-				/>
-			</div>
+			{@render passiveNode({
+				nodeId: id,
+				nodeData: entry.nodeData,
+				x: entry.x,
+				y: entry.y,
+				scale: exitingNodeScaleAt(entry, layoutRuntime.animationNowMs),
+				opacity: nodeRenderOverrides?.[id]?.opacity ?? 1,
+				marker: 'data-node-exiting'
+			})}
 		{/each}
 		{#if creationPreview && creationPreviewSourcePos && creationPreviewScale > 0}
-			<div
-				class="node-wrapper"
-				data-creation-preview-node="true"
-				data-scale={creationPreviewScale}
-				data-x={creationPreview.point.x}
-				data-y={creationPreview.point.y}
-				style={`left: calc(50% + ${creationPreview.point.x}px); top: calc(50% + ${creationPreview.point.y}px); transform: translate(-50%, -50%) scale(${creationPreviewScale}); pointer-events: none;`}
-			>
-				<Node
-					nodeData={CREATION_PREVIEW_NODE}
-					isTitleEditing={false}
-					borderSegments={nodeBorderSegments(CREATION_PREVIEW_NODE, graph.tagColorConfig.nodeTags)}
-				/>
-			</div>
+			{@render passiveNode({
+				nodeId: null,
+				nodeData: CREATION_PREVIEW_NODE,
+				x: creationPreview.point.x,
+				y: creationPreview.point.y,
+				scale: creationPreviewScale,
+				opacity: null,
+				marker: 'data-creation-preview-node'
+			})}
 		{/if}
 	</Stage>
 
@@ -2575,17 +2729,14 @@
 			onConfirm={() => {
 				const removedEdge = graph.edges.find((e) => e.id === confirmEdgeId) ?? null;
 				const nextGraph = removeEdge(graph, confirmEdgeId);
-				const nextHops = hopsFromPinned(nextGraph);
 				const endpointIds = removedEdge ? [removedEdge.sourceNodeId, removedEdge.targetNodeId] : [];
-				const survivorId = endpointIds.find((id) => Number.isFinite(nextHops[id]));
-				const seversComponent =
-					survivorId !== undefined && endpointIds.some((id) => !Number.isFinite(nextHops[id]));
+				const { survivorNodeId, severed } = severedComponentAfterMutation(nextGraph, endpointIds);
 				// Only a severing removal creates a pinless component to hint about;
 				// keeping a stale hint would steer a later beacon election (e.g. after
 				// removing one of two parallel edges, which severs nothing).
-				severedBeaconPreference = seversComponent ? endpointIds : [];
+				severedBeaconPreference = severed ? endpointIds : [];
 
-				if (seversComponent && survivorId !== undefined) {
+				if (severed && survivorNodeId !== null) {
 					// The removal cut a component off from every pinned node. Play the
 					// reveal wave (as unpinning does) so the severed side fades down to
 					// its beacon; the wave also renders the removed edge fading out, so
@@ -2595,7 +2746,7 @@
 						Object.entries(edgeEnterAnimations).filter(([k]) => k !== confirmEdgeId)
 					);
 					internalExitingBuffer = cancelExitingEdge(internalExitingBuffer, confirmEdgeId);
-					commitUserGraph(layoutRuntime.beginScaleChange(nextGraph, survivorId));
+					commitUserGraph(layoutRuntime.beginScaleChange(nextGraph, survivorNodeId));
 					duplicateEdgeConfirm = null;
 					return;
 				}
@@ -2693,6 +2844,14 @@
 			0 0 18px color-mix(in srgb, #b45309 45%, transparent);
 	}
 
+	/* The wrapper carries a scale transform, so the ring is drawn on the wrapper
+	   itself with an offset rather than inherited from the chrome inside it. */
+	.node-wrapper:focus-visible {
+		outline: 3px solid #2563eb;
+		outline-offset: 4px;
+		border-radius: 50%;
+	}
+
 	.focus-root {
 		position: fixed;
 		inset: 0;
@@ -2784,6 +2943,35 @@
 		font: inherit;
 		cursor: pointer;
 		pointer-events: auto;
+	}
+
+	/* Centred in the empty canvas it is explaining, because there is nothing else
+	   on screen for the eye to have gone to. Also a real button: the reader who
+	   reaches for the pointer should not have to find the keyboard. */
+	.lost-graph-hint {
+		position: absolute;
+		z-index: 25;
+		top: 50%;
+		left: 50%;
+		border: 1px solid #cbd5e1;
+		border-radius: 999px;
+		padding: 0.625rem 1rem;
+		background: #f8fafc;
+		color: #475569;
+		font: inherit;
+		box-shadow: 0 8px 24px rgb(15 23 42 / 12%);
+		cursor: pointer;
+		transform: translate(-50%, -50%);
+	}
+
+	.lost-graph-hint kbd {
+		border: 1px solid #cbd5e1;
+		border-radius: 0.25rem;
+		padding: 0 0.3rem;
+		background: #ffffff;
+		color: #0f172a;
+		font: inherit;
+		font-size: 0.85em;
 	}
 
 	.toolbar-button {
@@ -2895,7 +3083,9 @@
 		top: 50%;
 		padding: 0 0.25em;
 		border-radius: 0.25em;
-		background: var(--color-surface, #fff);
+		/* The literal every other surface in this component uses. `--color-surface`
+		   was never defined anywhere, so this only ever rendered its fallback. */
+		background: #ffffff;
 		color: currentColor;
 		font-size: 0.75rem;
 		font-style: italic;

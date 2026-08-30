@@ -151,7 +151,7 @@
 		};
 	}
 
-	async function handleDownload(): Promise<void> {
+	async function handleSave(): Promise<void> {
 		lastDownload = (await persisted.exportGraphDocument()).content;
 	}
 
@@ -197,7 +197,7 @@
 		notice={persisted.notice}
 		onNewGraph={() => void persisted.createGraph()}
 		onImportGraphFile={(file) => void handleImportFileIntoCurrent(file)}
-		onDownload={() => void handleDownload()}
+		onSave={() => void handleSave()}
 	/>
 
 	{#if persisted.snapshot !== null}

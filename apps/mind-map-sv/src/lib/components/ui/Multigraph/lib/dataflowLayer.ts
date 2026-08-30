@@ -14,7 +14,7 @@ import {
 	type QuantityIndexerOptions
 } from './quantityIndex';
 
-export interface DataflowModel {
+interface DataflowModel {
 	index: QuantityIndex;
 	edges: DerivedEdge[];
 }

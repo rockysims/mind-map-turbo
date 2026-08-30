@@ -9,10 +9,11 @@
 		tags: [],
 		argTypes: {
 			notice: { control: 'text' },
+			severity: { control: 'radio', options: ['info', 'warning'] },
 			onNewGraph: { control: false },
 			onOpenGraphFilePicker: { control: false },
 			onImportGraphFile: { control: false },
-			onDownload: { control: false }
+			onSave: { control: false }
 		},
 		parameters: {
 			viewport: {
@@ -29,10 +30,11 @@
 		canvasElement: HTMLElement;
 		args: {
 			notice?: string;
+			severity?: 'info' | 'warning';
 			onNewGraph?: () => void;
 			onOpenGraphFilePicker?: () => void;
 			onImportGraphFile?: (file: File) => void;
-			onDownload?: () => void;
+			onSave?: () => void;
 		};
 	};
 
@@ -48,11 +50,11 @@
 <Story
 	name="UserSeesDocumentControlsOnly"
 	args={{
-		notice: 'Draft differs from opened file. Download needed.',
+		notice: 'Draft differs from the opened file. Save to keep the changes.',
 		onNewGraph: fn(),
 		onOpenGraphFilePicker: fn(),
 		onImportGraphFile: fn(),
-		onDownload: fn()
+		onSave: fn()
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		const canvas = within(canvasElement);
@@ -60,30 +62,30 @@
 		await expect(canvas.getByRole('button', { name: 'New' })).toBeInTheDocument();
 		await expect(canvas.getByText('Open')).toBeInTheDocument();
 		await expect(canvas.getByRole('button', { name: 'Import…' })).toBeInTheDocument();
-		await expect(canvas.getByRole('button', { name: 'Download' })).toBeInTheDocument();
+		await expect(canvas.getByRole('button', { name: 'Save' })).toBeInTheDocument();
 		await expect(canvas.getByRole('status')).toHaveTextContent(
-			'Draft differs from opened file. Download needed.'
+			'Draft differs from the opened file. Save to keep the changes.'
 		);
 		await expect(canvas.queryByRole('button', { name: 'Delete graph' })).not.toBeInTheDocument();
 	}}
 />
 
 <Story
-	name="UserClicksNewAndDownload"
+	name="UserClicksNewAndSave"
 	args={{
-		notice: 'Matches downloaded file.',
+		notice: 'Matches saved file.',
 		onNewGraph: fn(),
 		onOpenGraphFilePicker: fn(),
-		onDownload: fn()
+		onSave: fn()
 	}}
 	play={async ({ canvasElement, args }: PlayContext) => {
 		const canvas = within(canvasElement);
 
 		canvas.getByRole('button', { name: 'New' }).click();
-		canvas.getByRole('button', { name: 'Download' }).click();
+		canvas.getByRole('button', { name: 'Save' }).click();
 
 		expect(spyFor(args.onNewGraph).mock.calls).toHaveLength(1);
-		expect(spyFor(args.onDownload).mock.calls).toHaveLength(1);
+		expect(spyFor(args.onSave).mock.calls).toHaveLength(1);
 	}}
 />
 
@@ -93,7 +95,7 @@
 		notice: 'Matches opened file.',
 		onNewGraph: fn(),
 		onOpenGraphFilePicker: fn(),
-		onDownload: fn()
+		onSave: fn()
 	}}
 	play={async ({ canvasElement, args }: PlayContext) => {
 		const canvas = within(canvasElement);
@@ -111,7 +113,7 @@
 		onNewGraph: fn(),
 		onOpenGraphFilePicker: fn(),
 		onImportGraphFile: fn(),
-		onDownload: fn()
+		onSave: fn()
 	}}
 	play={async ({ canvasElement, args }: PlayContext) => {
 		const canvas = within(canvasElement);
@@ -128,6 +130,30 @@
 		expect((spyFor(args.onImportGraphFile).mock.calls[0][0] as File).name).toBe('other-graph.html');
 		// Reset on change, so picking the same file again is picked up again.
 		expect(input.value).toBe('');
+	}}
+/>
+
+<Story
+	name="UserSeesUnsavedWorkWarning"
+	args={{
+		notice:
+			'This browser is blocking site data, so nothing is cached here. Save to a file to keep your work.',
+		severity: 'warning',
+		onNewGraph: fn(),
+		onOpenGraphFilePicker: fn(),
+		onSave: fn()
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const canvas = within(canvasElement);
+
+		const alert = canvas.getByRole('alert');
+		await expect(alert).toHaveTextContent(
+			'This browser is blocking site data, so nothing is cached here. Save to a file to keep your work.'
+		);
+		await expect(alert).toHaveAttribute('aria-live', 'assertive');
+		// The warning is longer than a status line, so it must be allowed to wrap.
+		await expect(getComputedStyle(alert).whiteSpace).toBe('normal');
+		await expect(canvas.queryByRole('status')).not.toBeInTheDocument();
 	}}
 />
 

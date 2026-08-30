@@ -3,17 +3,20 @@
 
 	let {
 		notice = '',
+		severity = 'info',
 		onNewGraph,
 		onOpenGraphFilePicker,
 		onImportGraphFile,
-		onDownload
+		onSave
 	}: {
 		notice?: string;
+		/** 'warning' announces assertively and wraps: the work is at risk. */
+		severity?: 'info' | 'warning';
 		onNewGraph?: () => void;
 		onOpenGraphFilePicker?: () => void;
 		/** Given the chosen file, to fold into the graph already on screen. */
 		onImportGraphFile?: (file: File) => void;
-		onDownload?: () => void;
+		onSave?: () => void;
 	} = $props();
 
 	let importInput = $state<HTMLInputElement | null>(null);
@@ -49,8 +52,12 @@
 		aria-label="Graph file to import"
 		onchange={handleImportFileChange}
 	/>
-	<button type="button" onclick={() => onDownload?.()}>Download</button>
-	<p role="status">{notice}</p>
+	<button type="button" onclick={() => onSave?.()}>Save</button>
+	{#if severity === 'warning'}
+		<p class="warning" role="alert" aria-live="assertive">{notice}</p>
+	{:else}
+		<p role="status">{notice}</p>
+	{/if}
 </div>
 
 <style>
@@ -103,6 +110,14 @@
 		color: #475569;
 		font-size: 0.8125rem;
 		white-space: nowrap;
+	}
+
+	.graph-toolbar p.warning {
+		max-width: 22rem;
+		color: #b45309;
+		font-weight: 600;
+		/* Warnings are longer than a status line and must not be clipped. */
+		white-space: normal;
 	}
 
 	@media (max-width: 640px) {

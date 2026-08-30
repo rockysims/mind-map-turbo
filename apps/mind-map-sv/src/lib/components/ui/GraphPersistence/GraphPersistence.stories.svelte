@@ -115,12 +115,12 @@
 		return canvasElement.querySelector('.revert-banner');
 	}
 
-	/** Import the graph the harness just downloaded, as the toolbar's Import does. */
+	/** Import the graph the harness just saved, as the toolbar's Import does. */
 	async function importDownloadIntoCurrent(canvasElement: HTMLElement): Promise<void> {
 		const canvas = within(canvasElement);
 		const harness = getHarness(canvasElement);
 
-		await userEvent.click(canvas.getByRole('button', { name: 'Download' }));
+		await userEvent.click(canvas.getByRole('button', { name: 'Save' }));
 		await waitFor(() => expect(harness.dataset.lastDownload).toBeTruthy());
 		await userEvent.upload(
 			canvas.getByLabelText('Graph file to import'),
@@ -246,7 +246,9 @@
 
 		await waitForHarnessData(canvasElement, 'loadedGraphId', 'saved');
 		await expect(harness.dataset.primaryTitle).toBe('Saved Graph');
-		await expect(harness.dataset.notice).toBe('Draft saved locally. Download needed.');
+		await waitFor(() =>
+			expect(harness.dataset.notice).toBe('Draft cached in this browser. Save to keep it.')
+		);
 	}}
 />
 
@@ -267,7 +269,7 @@
 
 		await waitFor(() => expect(harness.dataset.primaryTitle).toBe('Changed Node'));
 		await waitFor(() =>
-			expect(harness.dataset.notice).toBe('Draft saved locally. Download needed.')
+			expect(harness.dataset.notice).toBe('Draft cached in this browser. Save to keep it.')
 		);
 		await expect(harness.dataset.graphIds).toContain('editable');
 	}}
@@ -379,14 +381,14 @@
 		await userEvent.click(canvas.getByRole('button', { name: 'Simulate external reload' }));
 
 		await waitFor(() =>
-			expect(harness.dataset.notice).toBe('Kept local draft; another tab changed this document.')
+			expect(harness.dataset.notice).toBe('Kept cached draft; another tab changed this document.')
 		);
 		await expect(harness.dataset.primaryTitle).toBe('Original Graph');
 	}}
 />
 
 <Story
-	name="DownloadAndImportRoundTrip"
+	name="SaveAndImportRoundTrip"
 	args={{
 		initialGraphId: 'export-graph',
 		graphs: {
@@ -400,10 +402,10 @@
 		await waitForHarnessData(canvasElement, 'loadedGraphId', 'export-graph');
 		await expect(harness.dataset.primaryTitle).toBe('Export Me');
 
-		// Download captures HTML into data-last-download without a real browser download.
-		await userEvent.click(canvas.getByRole('button', { name: 'Download' }));
+		// Save captures HTML into data-last-download without a real browser download.
+		await userEvent.click(canvas.getByRole('button', { name: 'Save' }));
 		await waitFor(() => expect(harness.dataset.lastDownload).toBeTruthy());
-		await expect(harness.dataset.notice).toBe('Matches downloaded file.');
+		await expect(harness.dataset.notice).toBe('Saved export-graph.html to your downloads.');
 
 		const exportedHtml = harness.dataset.lastDownload!;
 		const parsed = parseGraphFileText(exportedHtml);
@@ -471,8 +473,8 @@
 		await waitForHarnessData(canvasElement, 'loadedGraphId', 'nonempty');
 		await expect(harness.dataset.nodeCount).toBe('3');
 
-		// Download so we have a valid payload to import.
-		await userEvent.click(canvas.getByRole('button', { name: 'Download' }));
+		// Save so we have a valid payload to import.
+		await userEvent.click(canvas.getByRole('button', { name: 'Save' }));
 		await waitFor(() => expect(harness.dataset.lastDownload).toBeTruthy());
 
 		// Import with confirmResponse=true; replacement is confirmed.
@@ -500,8 +502,8 @@
 		await expect(harness.dataset.nodeCount).toBe('3');
 		await waitFor(() => expect(renderedNodeIds(canvasElement)).toHaveLength(3));
 
-		// Download so the import has a real graph file to fold in.
-		await userEvent.click(canvas.getByRole('button', { name: 'Download' }));
+		// Save so the import has a real graph file to fold in.
+		await userEvent.click(canvas.getByRole('button', { name: 'Save' }));
 		await waitFor(() => expect(harness.dataset.lastDownload).toBeTruthy());
 		const exportedHtml = harness.dataset.lastDownload!;
 		const generationBeforeImport = harness.dataset.graphGeneration;

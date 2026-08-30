@@ -5,6 +5,7 @@
 	import type { Point } from '../types/multigraph';
 	import {
 		scaleFromWheelDelta,
+		wheelDeltaPixels,
 		clampScale,
 		DEFAULT_MIN_SCALE,
 		DEFAULT_MAX_SCALE,
@@ -557,18 +558,25 @@
 
 	function onWheel(e: WheelEvent) {
 		e.preventDefault();
-		if (shouldSwallowEntryGesture(e.deltaY < 0 ? 'in' : 'out')) return;
+		// Normalized once, here at the DOM boundary: everything downstream reads a
+		// pixel delta, and Firefox reports a mouse wheel in lines — which through
+		// the zoom sensitivity is a 0.6% step where Chrome's notch is 18%.
+		const deltaY = wheelDeltaPixels(
+			e,
+			typeof window === 'undefined' ? undefined : window.innerHeight
+		);
+		if (shouldSwallowEntryGesture(deltaY < 0 ? 'in' : 'out')) return;
 		const stage = e.currentTarget as HTMLElement;
 		const rect = stage.getBoundingClientRect();
 		const focalPoint = { x: e.clientX, y: e.clientY };
-		if (releaseFocusEntryBoundaryProgress(e.deltaY, focalPoint)) return;
 		const requestedScale = scaleFromWheelDelta(
 			scale,
-			e.deltaY,
+			deltaY,
 			undefined,
 			Number.NEGATIVE_INFINITY,
 			Number.POSITIVE_INFINITY
 		);
+		if (releaseFocusEntryBoundaryProgress(requestedScale, focalPoint)) return;
 		const clampedScale = clampScale(requestedScale, DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE);
 		if (
 			!applyZoomGesture({
@@ -665,9 +673,10 @@
 					const requestedScale = pinchStart.scale * factor;
 					const clampedScale = clampScale(requestedScale, DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE);
 					const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-					if (
-						releaseFocusEntryBoundaryProgress(requestedScale < scale ? 1 : -1, pinchStart.centroid)
-					) {
+					// The pinch's own requested scale, not a stand-in for one: how far the
+					// fingers moved is exactly what should decide how much of the
+					// boundary is given back.
+					if (releaseFocusEntryBoundaryProgress(requestedScale, pinchStart.centroid)) {
 						pinchStart = { distance: dist, scale, centroid: pinchStart.centroid, panX, panY };
 						return;
 					}
@@ -854,15 +863,21 @@
 		return true;
 	}
 
-	function releaseFocusEntryBoundaryProgress(deltaY: number, focalPoint: Point): boolean {
-		if (!focusEntryBoundaryProgress || deltaY <= 0) return false;
-		const requestedScale = scaleFromWheelDelta(
-			scale,
-			deltaY,
-			undefined,
-			Number.NEGATIVE_INFINITY,
-			Number.POSITIVE_INFINITY
-		);
+	/**
+	 * Back away from a focus-entry boundary, by however much the gesture asked
+	 * for.
+	 *
+	 * Takes the requested scale rather than a wheel delta. The pinch path used to
+	 * hand this a synthetic delta of ±1 — a stand-in for "the fingers moved
+	 * inward" — which was then run back through `scaleFromWheelDelta` as if it
+	 * were a real wheel. That produced a fixed ~0.2% release per pointermove no
+	 * matter how far the fingers actually travelled, while a wheel released in
+	 * proportion to its delta. The magnitude was being thrown away at the call
+	 * site, so the call sites now do the conversion each already knows how to do
+	 * and pass a scale.
+	 */
+	function releaseFocusEntryBoundaryProgress(requestedScale: number, focalPoint: Point): boolean {
+		if (!focusEntryBoundaryProgress || requestedScale >= scale) return false;
 		const releaseDelta = boundaryReleaseDelta(requestedScale, scale);
 		const nextProgress = Math.max(0, focusEntryBoundaryProgress.progress - releaseDelta);
 		const nodeId = focusEntryBoundaryProgress.nodeId;
@@ -891,11 +906,13 @@
 	onwheel={onWheel}
 	role="presentation"
 >
-	<div
-		class="stage-content"
-		style="transform: {transformStyle}; transform-origin: 50% 50%;"
-		aria-hidden="true"
-	>
+	<!--
+		Deliberately NOT `aria-hidden`. It was, which put the entire graph — every
+		node, every title — outside the accessibility tree, so the canvas offered a
+		screen reader nothing at all. The parts that really are decoration say so
+		themselves: the edge layer, and the buffered/exiting/preview node renders.
+	-->
+	<div class="stage-content" style="transform: {transformStyle}; transform-origin: 50% 50%;">
 		{#if children}
 			{@render children()}
 		{/if}

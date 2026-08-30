@@ -26,7 +26,7 @@ import type { StorageLike } from './persistence';
  */
 export const SNAPSHOT_ENVELOPE_VERSION = 1;
 
-export type GraphSnapshotInput = {
+type GraphSnapshotInput = {
 	/** The pre-operation graph, serialized as-is. */
 	data: MultigraphData;
 	/** Pan/zoom to restore alongside the graph, when the caller has one. */
@@ -35,7 +35,7 @@ export type GraphSnapshotInput = {
 	label: string;
 };
 
-export type GraphSnapshot = GraphSnapshotInput & {
+type GraphSnapshot = GraphSnapshotInput & {
 	/** Epoch ms the snapshot was written, so a reader can state its age. */
 	createdAt: number;
 };

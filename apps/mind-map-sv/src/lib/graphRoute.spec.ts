@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+	appUrlWithoutGraphRoute,
 	DEFAULT_GRAPH_ID,
 	graphHash,
 	graphHref,
 	graphIdFromUrl,
 	graphRouteModeForProtocol,
 	graphSearch,
-	resolveGraphHref
+	resolveGraphHref,
+	urlWithoutHash
 } from './graphRoute';
 
 describe('graph route helpers', () => {
@@ -60,5 +62,27 @@ describe('graph route helpers', () => {
 		);
 		expect(graphIdFromUrl(new URL('file:///tmp/mind-map.html#graph=hash'), 'hash')).toBe('hash');
 		expect(graphIdFromUrl(new URL('file:///tmp/mind-map.html'), 'hash')).toBe(DEFAULT_GRAPH_ID);
+	});
+});
+
+describe('urlWithoutHash', () => {
+	it('drops a hash route and keeps the query', () => {
+		expect(urlWithoutHash('https://example.test/app?graph=q#/?graph=h')).toBe(
+			'https://example.test/app?graph=q'
+		);
+	});
+	it('returns an href with no hash unchanged', () => {
+		expect(urlWithoutHash('file:///tmp/mind-map.html')).toBe('file:///tmp/mind-map.html');
+	});
+});
+
+describe('appUrlWithoutGraphRoute', () => {
+	it('drops both route forms, whichever the document is served under', () => {
+		expect(appUrlWithoutGraphRoute('https://example.test/app?graph=q#/?graph=h')).toBe(
+			'https://example.test/app'
+		);
+	});
+	it('leaves a bare app url alone', () => {
+		expect(appUrlWithoutGraphRoute('https://example.test/app')).toBe('https://example.test/app');
 	});
 });

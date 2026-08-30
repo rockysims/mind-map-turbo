@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 
-	const {
+	let {
 		diameterPx,
 		borderRadiusPx,
 		borderWidthPx,
@@ -14,7 +14,7 @@
 		spotlightColor = 'transparent',
 		surfaceBackground,
 		children
-	} = $props<{
+	}: {
 		diameterPx: number;
 		borderRadiusPx: number;
 		borderWidthPx: number;
@@ -27,7 +27,7 @@
 		spotlightColor?: string;
 		surfaceBackground?: string;
 		children?: Snippet;
-	}>();
+	} = $props();
 </script>
 
 <div

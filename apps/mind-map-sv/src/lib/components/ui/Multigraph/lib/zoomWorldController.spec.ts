@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { wheelDeltaForZoomFactor } from './graphMath';
 import {
 	clampZoomWorldState,
 	pinchZoomWorld,
@@ -49,9 +50,13 @@ describe('zoom world controller', () => {
 		expect(shrinking.exitBoundaryDelta).toBe(0);
 		expect(shrinking.state.scale).toBeGreaterThan(1);
 
+		// Said as a factor rather than as a delta: what this case is about is a
+		// request for 0.75x from a fit scale of 1, which is halfway into a
+		// half-width exit zone. A raw delta would only mean that under one
+		// particular zoom curve — which is how the linear one used to be pinned here.
 		const boundary = wheelZoomWorld(
 			{ panX: 0, panY: 0, scale: 1 },
-			125,
+			wheelDeltaForZoomFactor(0.75, bounds.wheelSensitivity),
 			{ x: 400, y: 300 },
 			{ ...bounds, exitZoneFraction: 0.5 }
 		);

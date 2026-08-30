@@ -35,7 +35,7 @@ export interface RevealCircle {
 	radius: number;
 }
 
-export interface MinimalRevealViewInput {
+interface MinimalRevealViewInput {
 	/** World rect the reader can see right now (see `viewportWorldRect`). */
 	viewport: WorldRect;
 	/** The circle that has to become visible. */
@@ -152,7 +152,7 @@ export function minimalRevealView(input: MinimalRevealViewInput): CameraViewStat
  * layout is still moving, keeping `from` and `startedAtMs` fixed so the easing
  * stays one continuous flight rather than restarting under the reader.
  */
-export interface CameraTween {
+interface CameraTween {
 	from: CameraViewState;
 	to: CameraViewState;
 	startedAtMs: number;
@@ -203,7 +203,7 @@ export interface RevealPursuit {
 	instant?: boolean;
 }
 
-export interface RevealPursuitInput {
+interface RevealPursuitInput {
 	pursuit: RevealPursuit;
 	/** Where the arrival is drawn right now. */
 	target: RevealCircle;
@@ -214,7 +214,7 @@ export interface RevealPursuitInput {
 	restEpsilon: number;
 }
 
-export interface RevealPursuitStep {
+interface RevealPursuitStep {
 	/** The camera to apply this frame. Null means leave the camera alone. */
 	view: CameraViewState | null;
 	/** Where the camera belongs once the chase is over. Null when no reveal is owed. */

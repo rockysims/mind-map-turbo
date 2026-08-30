@@ -33,6 +33,19 @@ export function clampScale(
 /**
  * Compute new scale from wheel deltaY (e.g. from WheelEvent).
  * Positive deltaY = zoom out, negative = zoom in.
+ *
+ * Exponential, because zoom is multiplicative. Under the linear
+ * `1 - deltaY * sensitivity` this used to be, the factor for `+d` was not the
+ * reciprocal of the factor for `-d` — 0.8 out then 1.2 back in lands at 0.96 —
+ * so rocking the wheel back and forth shrank the canvas about 4% per round
+ * trip, measured at 0.665x after ten notches each way, until the graph was lost
+ * off-screen. The linear form also crossed zero at `deltaY = 1/sensitivity`
+ * (500 at the default), so one fast trackpad flick asked for a zero or negative
+ * scale; `exp` cannot.
+ *
+ * The two agree to first order, so the sensitivity constant keeps its meaning.
+ * `wheelDeltaForZoomFactor` is the exact inverse — use it rather than a magic
+ * delta wherever a test needs a specific factor.
  */
 export function scaleFromWheelDelta(
 	currentScale: number,
@@ -41,8 +54,49 @@ export function scaleFromWheelDelta(
 	min: number = DEFAULT_MIN_SCALE,
 	max: number = DEFAULT_MAX_SCALE
 ): number {
-	const factor = 1 - deltaY * sensitivity;
+	const factor = Math.exp(-deltaY * sensitivity);
 	return clampScale(currentScale * factor, min, max);
+}
+
+/**
+ * The wheel delta that asks to multiply the current scale by `factor`.
+ *
+ * The exact inverse of `scaleFromWheelDelta`'s factor, so a test can say what it
+ * means — "zoom in 2x", not `-346.57` — and keep meaning it if the curve is ever
+ * retuned. Stories used to hard-code deltas derived from the old linear form,
+ * which is precisely why fixing that form broke them.
+ */
+export function wheelDeltaForZoomFactor(
+	factor: number,
+	sensitivity: number = DEFAULT_ZOOM_SENSITIVITY
+): number {
+	return -Math.log(factor) / sensitivity;
+}
+
+/** Pixels per line, for wheel events reported in `DOM_DELTA_LINE` units. */
+const WHEEL_LINE_HEIGHT_PX = 16;
+
+/**
+ * A wheel event's deltaY in pixels, whatever unit the browser reported it in.
+ *
+ * `WheelEvent.deltaY` is only in pixels when `deltaMode` is `DOM_DELTA_PIXEL`.
+ * Firefox reports a mouse wheel in *lines* (`deltaY` ≈ 3 per notch), which
+ * through the zoom sensitivity above is a 0.6% step — the same notch that moves
+ * a Chrome user 18%. Pages (`DOM_DELTA_PAGE`) are rarer still but cost nothing
+ * to handle.
+ *
+ * The viewport height is a parameter rather than read from `window` so this
+ * stays pure; callers that have no viewport can leave it at the default.
+ */
+export function wheelDeltaPixels(
+	event: { deltaY: number; deltaMode?: number },
+	viewportHeightPx = 800
+): number {
+	const DOM_DELTA_LINE = 1;
+	const DOM_DELTA_PAGE = 2;
+	if (event.deltaMode === DOM_DELTA_LINE) return event.deltaY * WHEEL_LINE_HEIGHT_PX;
+	if (event.deltaMode === DOM_DELTA_PAGE) return event.deltaY * viewportHeightPx;
+	return event.deltaY;
 }
 
 /**

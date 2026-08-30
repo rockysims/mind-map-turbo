@@ -3,17 +3,17 @@
 	import MathText from '../MathText/MathText.svelte';
 	import { mathPlainText } from '../MathText/lib/mathPlainText';
 
-	const {
+	let {
 		title,
 		detailsTitleId,
 		detailsMode = false,
 		children
-	} = $props<{
+	}: {
 		title: string;
 		detailsTitleId?: string;
 		detailsMode?: boolean;
 		children?: Snippet;
-	}>();
+	} = $props();
 
 	/**
 	 * This heading names the focus dialog, so its accessible name is stated
