@@ -3,7 +3,7 @@
 
 	let titleInputRef = $state<HTMLInputElement | null>(null);
 
-	const {
+	let {
 		title,
 		isTitleEditing = false,
 		titleCaretAt,
@@ -13,7 +13,7 @@
 		quantityLabels = [],
 		quantityOverflowCount = 0,
 		onTitleCommit
-	} = $props<{
+	}: {
 		title: string;
 		isTitleEditing?: boolean;
 		/**
@@ -33,7 +33,7 @@
 		/** Quantities beyond those named, or zero when they all fit. */
 		quantityOverflowCount?: number;
 		onTitleCommit?: (title: string) => void;
-	}>();
+	} = $props();
 
 	$effect(() => {
 		if (!isTitleEditing || !titleInputRef) return;

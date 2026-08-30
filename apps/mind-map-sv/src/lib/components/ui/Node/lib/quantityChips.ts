@@ -7,7 +7,7 @@
  * chips are unreadable across most of that range.
  */
 
-export interface QuantityChipVisibilityOptions {
+interface QuantityChipVisibilityOptions {
 	/** On-screen node diameter below which chips are hidden, in CSS pixels. */
 	minOnScreenDiameterPx?: number;
 	/** Chips named before the rest collapse into a count. */
