@@ -1,8 +1,10 @@
 import type { MultigraphData } from './components/ui/types/multigraph';
+import { sanitizeOverrides, type ConfigOverrides } from './config/configOverrides';
 import {
 	CURRENT_SCHEMA_VERSION,
 	NEUTRAL_VIEW_STATE,
 	PersistedGraphError,
+	hasConfigOverrides,
 	unwrapPersistedGraph,
 	type ViewState
 } from './migrations';
@@ -17,6 +19,8 @@ export const GRAPH_HTML_ASSET_ID_ATTRIBUTE = 'data-mind-map-asset-id';
 export type GraphFileDocument = {
 	data: MultigraphData;
 	viewState: ViewState;
+	/** The graph's sparse config overrides; absent when it has none. */
+	settings?: ConfigOverrides;
 	documentId?: string;
 	exportedAt?: number;
 	embeddedAssets?: GraphFileEmbeddedAsset[];
@@ -40,6 +44,7 @@ type GraphFilePayload = {
 	schemaVersion: typeof CURRENT_SCHEMA_VERSION;
 	data: MultigraphData;
 	viewState: ViewState;
+	settings?: ConfigOverrides;
 	documentId?: string;
 	exportedAt?: number;
 	htmlDocumentVersion?: number;
@@ -183,6 +188,7 @@ function parseGraphFilePayload(
 	return {
 		data,
 		viewState,
+		settings: readSettings(raw),
 		documentId: readOptionalString(raw, 'documentId'),
 		exportedAt: readOptionalNumber(raw, 'exportedAt')
 	};
@@ -193,6 +199,9 @@ function graphFilePayload(doc: GraphFileDocument): GraphFilePayload {
 		schemaVersion: CURRENT_SCHEMA_VERSION,
 		data: doc.data,
 		viewState: doc.viewState,
+		// Omitted rather than written as `{}` so an untuned graph serializes
+		// byte-for-byte the way it did before settings existed.
+		settings: hasConfigOverrides(doc.settings) ? doc.settings : undefined,
 		documentId: doc.documentId,
 		exportedAt: doc.exportedAt
 	};
@@ -374,6 +383,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isFiniteNumber(value: unknown): value is number {
 	return typeof value === 'number' && Number.isFinite(value);
+}
+
+/**
+ * Lifts a file's `settings` blob through `sanitizeOverrides` — a file is
+ * untrusted input, so unknown paths and wrong types are dropped rather than
+ * trusted or thrown on. The warnings are discarded here; T09's dedicated
+ * settings read path is what surfaces them to the user.
+ */
+function readSettings(raw: unknown): ConfigOverrides | undefined {
+	if (!isRecord(raw) || raw.settings === undefined) return undefined;
+	const { overrides } = sanitizeOverrides(raw.settings);
+	return hasConfigOverrides(overrides) ? overrides : undefined;
 }
 
 function readOptionalString(raw: unknown, key: string): string | undefined {

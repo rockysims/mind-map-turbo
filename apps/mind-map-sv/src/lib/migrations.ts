@@ -7,6 +7,7 @@ import type {
 	TagColorConfig
 } from './components/ui/types/multigraph';
 import type { NodeContentBlock, NodeData, QuantityDesignation } from './components/ui/types/node';
+import type { ConfigOverrides } from './config/configOverrides';
 
 export const CURRENT_SCHEMA_VERSION = 6;
 
@@ -27,7 +28,21 @@ export type PersistedGraphPayload = {
 	schemaVersion: typeof CURRENT_SCHEMA_VERSION;
 	data: MultigraphData;
 	viewState?: ViewState;
+	/**
+	 * A graph's sparse config overrides. Deliberately no schema bump: the
+	 * envelope check below only validates `payload.data`, so a v6 payload that
+	 * carries this key loads in every build and one that omits it loads here.
+	 * Absent and empty mean the same thing, so an untuned graph omits the key.
+	 */
+	settings?: ConfigOverrides;
 };
+
+/** Whether an override map actually carries anything worth persisting. */
+export function hasConfigOverrides(
+	settings: ConfigOverrides | undefined
+): settings is ConfigOverrides {
+	return settings !== undefined && Object.keys(settings).length > 0;
+}
 
 export class PersistedGraphError extends Error {
 	constructor(
@@ -39,11 +54,16 @@ export class PersistedGraphError extends Error {
 	}
 }
 
-export function wrapPersistedGraph(data: MultigraphData): PersistedGraphPayload {
-	return {
+export function wrapPersistedGraph(
+	data: MultigraphData,
+	settings?: ConfigOverrides
+): PersistedGraphPayload {
+	const payload: PersistedGraphPayload = {
 		schemaVersion: CURRENT_SCHEMA_VERSION,
 		data
 	};
+	if (hasConfigOverrides(settings)) payload.settings = settings;
+	return payload;
 }
 
 export function unwrapPersistedGraph(payload: unknown): MultigraphData {

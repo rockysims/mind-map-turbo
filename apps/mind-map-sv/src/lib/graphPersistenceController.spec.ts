@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { makeGraph } from './components/ui/Multigraph/lib/testFixtures';
 import type { MultigraphData } from './components/ui/types/multigraph';
 import { GRAPH_HTML_READER_VERSION, parseGraphFileText, serializeGraphHtmlFile } from './graphFile';
+import type { ConfigOverrides } from './config/configOverrides';
 import { CURRENT_SCHEMA_VERSION, NEUTRAL_VIEW_STATE, type ViewState } from './migrations';
 import {
 	GraphPersistenceController,
@@ -55,9 +56,11 @@ class TestScheduler implements GraphSaveScheduler {
 		private readonly events: string[]
 	) {}
 
-	schedule = vi.fn((id: string, data: MultigraphData, viewState: ViewState): void => {
-		this.pending = { id, graph: { data, viewState } };
-	});
+	schedule = vi.fn(
+		(id: string, data: MultigraphData, viewState: ViewState, settings?: ConfigOverrides): void => {
+			this.pending = { id, graph: { data, viewState, settings } };
+		}
+	);
 
 	flush = vi.fn(async (): Promise<void> => {
 		if (this.failFlushOnce) {
@@ -712,6 +715,92 @@ describe('GraphPersistenceController', () => {
 		expect(controller.getView().status).toEqual({
 			state: 'notice',
 			message: 'Import failed: unable to read file.'
+		});
+	});
+
+	it("loads a graph's settings and carries them through export and import", async () => {
+		const settings = {
+			'multigraph.layout.scaleFalloff': 0.5,
+			'multigraph.layout.normalizeRelaxationRotation': false
+		} satisfies ConfigOverrides;
+		const source = setup();
+		await source.persistence.save('active', {
+			data: createDefaultGraph(),
+			viewState: nonNeutralViewState(),
+			settings
+		});
+		await source.controller.load('active');
+
+		expect(source.controller.getView().settings).toEqual(settings);
+
+		const artifact = await source.controller.exportGraphDocument();
+		const target = setup();
+		await target.controller.load('other');
+		const result = await target.controller.importGraphDocument(artifact.content);
+
+		expect(result).toBe('imported');
+		expect(target.controller.getView().settings).toEqual(settings);
+		await expect(target.persistence.load('other')).resolves.toMatchObject({ settings });
+	});
+
+	it('starts a new graph untuned and stores no settings for it', async () => {
+		const { controller, persistence } = setup();
+		await controller.load('active');
+
+		await controller.createGraph('graph-new');
+
+		expect(controller.getView().settings).toEqual({});
+		expect((await persistence.load('graph-new'))?.settings).toBeUndefined();
+	});
+
+	it('autosaves settings changes without remounting the canvas', async () => {
+		const { controller, persistence, scheduler } = setup();
+		await controller.load('active');
+		const before = controller.getView();
+		const settings = { 'multigraph.layout.scaleFalloff': 0.5 } satisfies ConfigOverrides;
+
+		controller.notifySettingsChanged(settings, { syncView: true });
+		await scheduler.flush();
+
+		const after = controller.getView();
+		expect(after.settings).toEqual(settings);
+		// The {#key} in +page.svelte is keyed on graphGeneration, and everything
+		// derived from the graph is keyed on its identity: neither may move here.
+		expect(after.graphGeneration).toBe(before.graphGeneration);
+		expect(after.graph).toBe(before.graph);
+		expect(persistence.save).toHaveBeenLastCalledWith('active', {
+			data: before.graph,
+			viewState: before.viewState,
+			settings
+		});
+	});
+
+	it('keeps the loaded settings on later graph and view state saves', async () => {
+		const settings = { 'multigraph.layout.scaleFalloff': 0.5 } satisfies ConfigOverrides;
+		const { controller, persistence, scheduler } = setup();
+		await persistence.save('active', {
+			data: createDefaultGraph(),
+			viewState: NEUTRAL_VIEW_STATE,
+			settings
+		});
+		await controller.load('active');
+
+		const edited = makeGraph({ nodeCount: 3 });
+		controller.notifyGraphChanged(edited, { syncView: true });
+		await scheduler.flush();
+		expect(persistence.save).toHaveBeenLastCalledWith('active', {
+			data: edited,
+			viewState: NEUTRAL_VIEW_STATE,
+			settings
+		});
+
+		const viewState = nonNeutralViewState();
+		controller.notifyViewStateChanged(viewState, { syncView: true });
+		await scheduler.flush();
+		expect(persistence.save).toHaveBeenLastCalledWith('active', {
+			data: edited,
+			viewState,
+			settings
 		});
 	});
 

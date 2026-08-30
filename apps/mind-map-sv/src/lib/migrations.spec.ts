@@ -7,6 +7,7 @@ import {
 	wrapPersistedGraph
 } from './migrations';
 import { makeGraph } from './components/ui/Multigraph/lib/testFixtures';
+import type { ConfigOverrides } from './config/configOverrides';
 
 describe('persisted graph migrations', () => {
 	it('wraps current graph data in the schema envelope', () => {
@@ -16,6 +17,36 @@ describe('persisted graph migrations', () => {
 			schemaVersion: CURRENT_SCHEMA_VERSION,
 			data: graph
 		});
+	});
+
+	it('carries sparse settings in the envelope and omits an empty map', () => {
+		const graph = makeGraph({ nodeCount: 2, edges: [[0, 1]] });
+		const settings = { 'multigraph.layout.scaleFalloff': 0.5 } satisfies ConfigOverrides;
+
+		expect(wrapPersistedGraph(graph, settings)).toEqual({
+			schemaVersion: CURRENT_SCHEMA_VERSION,
+			data: graph,
+			settings
+		});
+		// Absent and empty mean the same thing, so an untuned graph is byte-identical
+		// to one saved before settings existed.
+		expect(wrapPersistedGraph(graph, {})).not.toHaveProperty('settings');
+		expect(wrapPersistedGraph(graph)).not.toHaveProperty('settings');
+	});
+
+	it('reads a current-version payload the same way with or without settings', () => {
+		const data = makeGraph({ nodeCount: 2, edges: [[0, 1]], pinned: [0] });
+
+		// No version bump and no migration path: only `data` is validated, so the
+		// extra key rides along untouched.
+		expect(unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toEqual(data);
+		expect(
+			unwrapPersistedGraph({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data,
+				settings: { 'multigraph.layout.scaleFalloff': 0.5 }
+			})
+		).toEqual(data);
 	});
 
 	it('reads version 1 payloads', () => {

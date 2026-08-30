@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { makeGraph } from './components/ui/Multigraph/lib/testFixtures';
+import type { ConfigOverrides } from './config/configOverrides';
 import { NEUTRAL_VIEW_STATE } from './migrations';
 import { SaveScheduler, calculateQuotaWarning, type SaveStatus } from './saveScheduler';
 import type { Persistence } from './persistence';
@@ -53,6 +54,22 @@ describe('SaveScheduler', () => {
 		expect(persistence.save).toHaveBeenCalledWith('graph', {
 			data: graph,
 			viewState: NEUTRAL_VIEW_STATE
+		});
+	});
+
+	it("carries a graph's settings into the persisted record", async () => {
+		const persistence = makePersistence();
+		const scheduler = new SaveScheduler({ persistence, debounceMs: 500 });
+		const graph = makeGraph({ nodeCount: 1 });
+		const settings = { 'multigraph.layout.scaleFalloff': 0.5 } satisfies ConfigOverrides;
+
+		scheduler.schedule('graph', graph, NEUTRAL_VIEW_STATE, settings);
+		await scheduler.flush();
+
+		expect(persistence.save).toHaveBeenCalledWith('graph', {
+			data: graph,
+			viewState: NEUTRAL_VIEW_STATE,
+			settings
 		});
 	});
 

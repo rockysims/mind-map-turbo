@@ -13,6 +13,7 @@ import {
 	serializeGraphHtmlFile,
 	type GraphFileDocument
 } from './graphFile';
+import type { ConfigOverrides } from './config/configOverrides';
 import { CURRENT_SCHEMA_VERSION, NEUTRAL_VIEW_STATE, PersistedGraphError } from './migrations';
 
 const NEUTRAL = NEUTRAL_VIEW_STATE;
@@ -343,5 +344,55 @@ describe('parseGraphFile: error cases', () => {
 		}
 		// result was never assigned, so no caller-visible replacement occurred
 		expect(result).toBeUndefined();
+	});
+});
+
+describe('graph file settings', () => {
+	const SETTINGS = {
+		'multigraph.layout.scaleFalloff': 0.5,
+		'multigraph.layout.normalizeRelaxationRotation': false
+	} satisfies ConfigOverrides;
+
+	function settingsPayload(settings: unknown): string {
+		return JSON.stringify({
+			schemaVersion: CURRENT_SCHEMA_VERSION,
+			data: makeDoc().data,
+			viewState: NEUTRAL,
+			settings
+		});
+	}
+
+	it('round-trips sparse settings through JSON and HTML', () => {
+		const doc = makeDoc({ settings: SETTINGS });
+
+		expect(parseGraphFile(serializeGraphFile(doc)).settings).toEqual(SETTINGS);
+		expect(parseGraphFileText(serializeGraphHtmlFile(doc)).settings).toEqual(SETTINGS);
+	});
+
+	it('omits the settings key entirely for a graph with no overrides', () => {
+		const untuned = serializeGraphFile(makeDoc({ settings: {} }));
+
+		expect(untuned).not.toContain('settings');
+		// Byte-identical to a document that predates settings altogether.
+		expect(untuned).toBe(serializeGraphFile(makeDoc()));
+		expect(parseGraphFile(untuned).settings).toBeUndefined();
+	});
+
+	it('drops unusable settings from a file rather than throwing', () => {
+		const parsed = parseGraphFile(
+			settingsPayload({
+				'multigraph.layout.scaleFalloff': 0.5,
+				'not.a.real.setting': 3,
+				'multigraph.layout.normalizeRelaxationRotation': 'yes'
+			})
+		);
+
+		expect(parsed.settings).toEqual({ 'multigraph.layout.scaleFalloff': 0.5 });
+		expect(parsed.data).toEqual(makeDoc().data);
+	});
+
+	it('reads a wholly unusable settings blob as no settings at all', () => {
+		expect(parseGraphFile(settingsPayload('nope')).settings).toBeUndefined();
+		expect(parseGraphFile(settingsPayload({ 'not.a.real.setting': 3 })).settings).toBeUndefined();
 	});
 });

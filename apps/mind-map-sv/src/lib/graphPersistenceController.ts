@@ -2,6 +2,7 @@ import type { MultigraphData } from './components/ui/types/multigraph';
 import { base64ToBlob, blobToBase64 } from './assets/assetEncoding';
 import type { GraphAssetStore } from './assets/assetStore';
 import { referencedAssetIds } from './components/ui/Multigraph/lib/graph';
+import type { ConfigOverrides } from './config/configOverrides';
 import {
 	documentStatusHasUndownloadedChanges,
 	documentStatusForGraph,
@@ -18,7 +19,12 @@ import {
 	type GraphFileArtifact
 } from './graphFile';
 import { DEFAULT_GRAPH_ID } from './graphRoute';
-import { NEUTRAL_VIEW_STATE, PersistedGraphError, type ViewState } from './migrations';
+import {
+	NEUTRAL_VIEW_STATE,
+	PersistedGraphError,
+	hasConfigOverrides,
+	type ViewState
+} from './migrations';
 import {
 	documentDraftGraphId,
 	graphIdFromStorageKey,
@@ -48,6 +54,12 @@ export type ControllerStatus =
 export type ControllerView = {
 	graph: MultigraphData;
 	viewState: ViewState;
+	/**
+	 * This graph's sparse config overrides. Presentation, like `viewState`, so
+	 * it lives beside the graph rather than inside it: changing a setting must
+	 * not re-run anything derived from `MultigraphData`.
+	 */
+	settings: ConfigOverrides;
 	graphSummaries: GraphSummary[];
 	loadedGraphId: string;
 	documentId: string | null;
@@ -57,7 +69,12 @@ export type ControllerView = {
 };
 
 export type GraphSaveScheduler = {
-	schedule(id: string, data: MultigraphData, viewState: ViewState): void;
+	schedule(
+		id: string,
+		data: MultigraphData,
+		viewState: ViewState,
+		settings?: ConfigOverrides
+	): void;
 	flush(): Promise<void>;
 	dispose(): void;
 };
@@ -114,6 +131,7 @@ export class GraphPersistenceController {
 		this.view = {
 			graph: defaultGraph,
 			viewState: { ...NEUTRAL_VIEW_STATE },
+			settings: {},
 			graphSummaries: [],
 			loadedGraphId: '',
 			documentId: null,
@@ -152,6 +170,7 @@ export class GraphPersistenceController {
 		const defaultGraph = this.deps.createDefaultGraph();
 		const nextGraph = savedGraph?.data ?? defaultGraph;
 		const nextViewState = savedGraph?.viewState ?? { ...NEUTRAL_VIEW_STATE };
+		const nextSettings = savedGraph?.settings ?? {};
 		this.baseline = {
 			kind: 'new',
 			graph: defaultGraph
@@ -161,6 +180,7 @@ export class GraphPersistenceController {
 		this.update({
 			graph: nextGraph,
 			viewState: nextViewState,
+			settings: nextSettings,
 			loadedGraphId: graphId,
 			documentId: options.documentId ?? null,
 			documentStatus: this.currentDocumentStatus(),
@@ -169,7 +189,7 @@ export class GraphPersistenceController {
 		});
 
 		if (savedGraph === null) {
-			this.scheduler.schedule(graphId, nextGraph, nextViewState);
+			this.scheduleSave(graphId, nextGraph, nextViewState, nextSettings);
 			await this.flushPendingSave();
 			await this.refreshGraphList();
 			return { createdDefaultGraph: true };
@@ -205,6 +225,7 @@ export class GraphPersistenceController {
 		const recoveredDraft = shouldRecoverDraft && !graphDataEquals(savedDraft.data, doc.data);
 		const nextGraph = shouldRecoverDraft ? savedDraft.data : doc.data;
 		const nextViewState = shouldRecoverDraft ? savedDraft.viewState : doc.viewState;
+		const nextSettings = (shouldRecoverDraft ? savedDraft.settings : doc.settings) ?? {};
 		if (shouldOpenFile) {
 			await this.hydrateEmbeddedAssets(graphId, doc);
 		}
@@ -215,6 +236,7 @@ export class GraphPersistenceController {
 		this.update({
 			graph: nextGraph,
 			viewState: nextViewState,
+			settings: nextSettings,
 			loadedGraphId: graphId,
 			documentId: doc.documentId,
 			documentStatus: this.currentDocumentStatus(),
@@ -225,7 +247,7 @@ export class GraphPersistenceController {
 
 		if (savedDraft === null) await this.refreshGraphList();
 		if (savedDraft !== null && shouldOpenFile) {
-			this.scheduler.schedule(graphId, doc.data, doc.viewState);
+			this.scheduleSave(graphId, doc.data, doc.viewState, doc.settings ?? {});
 			await this.flushPendingSave();
 			await this.refreshGraphList();
 		}
@@ -243,7 +265,7 @@ export class GraphPersistenceController {
 
 	notifyGraphChanged(data: MultigraphData, options: { syncView?: boolean } = {}): void {
 		const graphId = this.view.loadedGraphId || DEFAULT_GRAPH_ID;
-		this.scheduler.schedule(graphId, data, this.view.viewState);
+		this.scheduleSave(graphId, data, this.view.viewState, this.view.settings);
 		if (options.syncView) {
 			this.update({ graph: data, documentStatus: this.currentDocumentStatus(data) });
 		}
@@ -251,9 +273,24 @@ export class GraphPersistenceController {
 
 	notifyViewStateChanged(viewState: ViewState, options: { syncView?: boolean } = {}): void {
 		const graphId = this.view.loadedGraphId || DEFAULT_GRAPH_ID;
-		this.scheduler.schedule(graphId, this.view.graph, viewState);
+		this.scheduleSave(graphId, this.view.graph, viewState, this.view.settings);
 		if (options.syncView) {
 			this.update({ viewState });
+		}
+	}
+
+	/**
+	 * Records a settings change, mirroring `notifyViewStateChanged`. It
+	 * deliberately leaves `graphGeneration` alone — bumping it would remount the
+	 * canvas through the `{#key}` in `+page.svelte` on every committed slider —
+	 * and never rewrites `view.graph`, whose identity everything derived from
+	 * `MultigraphData` is keyed on.
+	 */
+	notifySettingsChanged(settings: ConfigOverrides, options: { syncView?: boolean } = {}): void {
+		const graphId = this.view.loadedGraphId || DEFAULT_GRAPH_ID;
+		this.scheduleSave(graphId, this.view.graph, this.view.viewState, settings);
+		if (options.syncView) {
+			this.update({ settings });
 		}
 	}
 
@@ -272,6 +309,7 @@ export class GraphPersistenceController {
 			{
 				data: this.view.graph,
 				viewState: this.view.viewState,
+				settings: this.view.settings,
 				documentId,
 				exportedAt: this.deps.now?.() ?? Date.now(),
 				embeddedAssets
@@ -355,11 +393,12 @@ export class GraphPersistenceController {
 		this.update({
 			graph: imported.data,
 			viewState: imported.viewState,
+			settings: imported.settings ?? {},
 			documentId: imported.documentId ?? this.view.documentId,
 			documentStatus: this.currentDocumentStatus(imported.data),
 			graphGeneration: this.graphGeneration
 		});
-		this.scheduler.schedule(graphId, imported.data, imported.viewState);
+		this.scheduleSave(graphId, imported.data, imported.viewState, imported.settings ?? {});
 		await this.hydrateEmbeddedAssets(graphId, imported);
 		await this.flushPendingSave();
 		await this.refreshGraphList();
@@ -413,13 +452,15 @@ export class GraphPersistenceController {
 		this.update({
 			graph: nextGraph,
 			viewState: { ...NEUTRAL_VIEW_STATE },
+			// A new graph starts untuned; T09 stamps the saved seed in here.
+			settings: {},
 			loadedGraphId: graphId,
 			documentId: null,
 			documentStatus: this.currentDocumentStatus(nextGraph),
 			graphGeneration: this.graphGeneration,
 			status: { state: 'loaded', graphId }
 		});
-		this.scheduler.schedule(graphId, nextGraph, { ...NEUTRAL_VIEW_STATE });
+		this.scheduleSave(graphId, nextGraph, { ...NEUTRAL_VIEW_STATE }, {});
 		await this.flushPendingSave();
 		await this.refreshGraphList();
 		await this.deps.navigate(graphId);
@@ -467,6 +508,25 @@ export class GraphPersistenceController {
 	dispose(): void {
 		this.scheduler.dispose();
 		this.listeners.clear();
+	}
+
+	/**
+	 * Schedules a save, passing `settings` only when the graph has some. Empty
+	 * and absent mean the same thing everywhere below — the stored record and
+	 * the exported file both omit the key — so an untuned graph keeps the exact
+	 * call it made before settings existed.
+	 */
+	private scheduleSave(
+		id: string,
+		data: MultigraphData,
+		viewState: ViewState,
+		settings: ConfigOverrides
+	): void {
+		if (hasConfigOverrides(settings)) {
+			this.scheduler.schedule(id, data, viewState, settings);
+			return;
+		}
+		this.scheduler.schedule(id, data, viewState);
 	}
 
 	private async flushPendingSave(): Promise<void> {

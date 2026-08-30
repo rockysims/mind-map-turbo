@@ -1,4 +1,5 @@
 import type { MultigraphData } from '$lib/components/ui/types/multigraph';
+import type { ConfigOverrides } from '$lib/config/configOverrides';
 import type { DocumentStatus } from '$lib/documentStatus';
 import type { ViewState } from '$lib/migrations';
 import {
@@ -10,6 +11,7 @@ import {
 export type PersistedGraph = {
 	readonly graph: MultigraphData;
 	readonly viewState: ViewState;
+	readonly settings: ConfigOverrides;
 	readonly graphGeneration: number;
 	readonly graphSummaries: ReturnType<GraphPersistenceController['getView']>['graphSummaries'];
 	readonly loadedGraphId: string;
@@ -19,6 +21,7 @@ export type PersistedGraph = {
 	loadEmbeddedDocument: GraphPersistenceController['loadEmbeddedDocument'];
 	notifyGraphChanged: (data: MultigraphData, options?: { syncView?: boolean }) => void;
 	notifyViewStateChanged: (viewState: ViewState, options?: { syncView?: boolean }) => void;
+	notifySettingsChanged: (settings: ConfigOverrides, options?: { syncView?: boolean }) => void;
 	exportGraphDocument: GraphPersistenceController['exportGraphDocument'];
 	importGraphDocument: GraphPersistenceController['importGraphDocument'];
 	importGraphDocumentFromReader: GraphPersistenceController['importGraphDocumentFromReader'];
@@ -44,6 +47,9 @@ export function usePersistedGraph(deps: GraphPersistenceControllerDeps): Persist
 		get viewState() {
 			return view.viewState;
 		},
+		get settings() {
+			return view.settings;
+		},
 		get graphGeneration() {
 			return view.graphGeneration;
 		},
@@ -63,6 +69,7 @@ export function usePersistedGraph(deps: GraphPersistenceControllerDeps): Persist
 		loadEmbeddedDocument: controller.loadEmbeddedDocument.bind(controller),
 		notifyGraphChanged: controller.notifyGraphChanged.bind(controller),
 		notifyViewStateChanged: controller.notifyViewStateChanged.bind(controller),
+		notifySettingsChanged: controller.notifySettingsChanged.bind(controller),
 		exportGraphDocument: controller.exportGraphDocument.bind(controller),
 		importGraphDocument: controller.importGraphDocument.bind(controller),
 		importGraphDocumentFromReader: controller.importGraphDocumentFromReader.bind(controller),

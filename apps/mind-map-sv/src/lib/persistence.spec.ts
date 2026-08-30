@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { APP_CONFIG } from './appConfig';
 import { makeGraph } from './components/ui/Multigraph/lib/testFixtures';
+import type { ConfigOverrides } from './config/configOverrides';
 import { CURRENT_SCHEMA_VERSION, NEUTRAL_VIEW_STATE } from './migrations';
 import {
 	LocalStoragePersistence,
@@ -62,6 +63,42 @@ describe('LocalStoragePersistence', () => {
 				updatedAt: 123
 			}
 		);
+	});
+
+	it('round-trips sparse settings and stores no key for an untuned graph', async () => {
+		const storage = new MemoryStorage();
+		const persistence = new LocalStoragePersistence(storage, 'test', () => 123);
+		const graph = makeGraph({ nodeCount: 1, pinned: [0] });
+		const settings = { 'multigraph.layout.scaleFalloff': 0.5 } satisfies ConfigOverrides;
+
+		await persistence.save('tuned', { data: graph, viewState: NEUTRAL_VIEW_STATE, settings });
+		await persistence.save('untuned', { data: graph, viewState: NEUTRAL_VIEW_STATE });
+
+		await expect(persistence.load('tuned')).resolves.toEqual({
+			data: graph,
+			viewState: NEUTRAL_VIEW_STATE,
+			settings
+		});
+		expect(storage.getItem(graphStorageKey('test', 'untuned'))).not.toContain('settings');
+		expect((await persistence.load('untuned'))?.settings).toBeUndefined();
+	});
+
+	it('drops unusable stored settings instead of failing the load', async () => {
+		const storage = new MemoryStorage();
+		storage.setItem(
+			graphStorageKey('test', 'hand-edited'),
+			JSON.stringify({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data: makeGraph({ nodeCount: 1, pinned: [0] }),
+				settings: { 'multigraph.layout.scaleFalloff': 0.5, 'not.a.real.setting': 3 },
+				updatedAt: 1
+			})
+		);
+		const persistence = new LocalStoragePersistence(storage, 'test');
+
+		await expect(persistence.load('hand-edited')).resolves.toMatchObject({
+			settings: { 'multigraph.layout.scaleFalloff': 0.5 }
+		});
 	});
 
 	it('returns null for a missing graph', async () => {
@@ -167,6 +204,27 @@ describe('ServerPersistence', () => {
 			method: 'PUT',
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify({ schemaVersion: CURRENT_SCHEMA_VERSION, data: graph, viewState })
+		});
+	});
+
+	it('sends sparse settings in the envelope body', async () => {
+		const graph = makeGraph({ nodeCount: 1 });
+		const viewState = { panX: 0, panY: 0, scale: 0.9 };
+		const settings = { 'multigraph.layout.scaleFalloff': 0.5 } satisfies ConfigOverrides;
+		const fetchGraph = vi.fn(async () => new Response(null, { status: 204 }));
+		const persistence = new ServerPersistence(fetchGraph);
+
+		await persistence.save('graph', { data: graph, viewState, settings });
+
+		expect(fetchGraph).toHaveBeenCalledWith('/api/graphs/graph', {
+			method: 'PUT',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data: graph,
+				settings,
+				viewState
+			})
 		});
 	});
 
