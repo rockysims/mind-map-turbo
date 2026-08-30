@@ -7,6 +7,7 @@
 		node,
 		position,
 		onAddNodeEdge,
+		onMergeNode,
 		onTogglePinned,
 		onFocus,
 		onEdit,
@@ -17,6 +18,8 @@
 		node: NodeData;
 		position: Point;
 		onAddNodeEdge: () => void;
+		/** Arm the merge gesture: drag this node onto the one that should survive. */
+		onMergeNode: () => void;
 		onTogglePinned: () => void;
 		onFocus: () => void;
 		onEdit: () => void;
@@ -43,6 +46,9 @@
 
 	const items = $derived([
 		{ label: 'Add node/edge', activate: onAddNodeEdge },
+		// Sits next to Add node/edge because it is the same drag, aimed the other
+		// way: one grows the graph from this node, the other folds it away.
+		{ label: 'Merge', activate: onMergeNode },
 		{ label: node.pinned ? 'Unpin' : 'Pin', activate: onTogglePinned },
 		{ label: 'Focus', activate: onFocus },
 		{ label: 'Edit', activate: onEdit },

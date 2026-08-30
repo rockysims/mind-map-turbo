@@ -153,6 +153,8 @@
 		updateCreationPreview,
 		type CreationPreviewState
 	} from './lib/creationPreview.js';
+	import type { NodeGestureMode } from './lib/creationGesture.js';
+	import { planNodeMerge } from './lib/nodeMerge.js';
 	import { computeParallelEdgeOffsets } from './lib/parallelEdges.js';
 	import type { FocusLevel } from './lib/focusRuntime.svelte.js';
 	import { FocusController } from './lib/focusController.svelte.js';
@@ -192,6 +194,13 @@
 		targetNodeId: 'creation-preview',
 		tags: []
 	};
+	/**
+	 * The merge gesture's own colour, for both the preview line and the ring on
+	 * the node about to absorb — nothing else on the canvas is this amber, so
+	 * "absorb into" never reads as "connect to". Kept in sync with the
+	 * `.node-wrapper.merge-target` ring in the style block below.
+	 */
+	const MERGE_PREVIEW_COLOR = '#b45309';
 	const FOCUS_TRANSITION_MS = APP_CONFIG.multigraph.focus.entryTransitionMs;
 	const DETAILS_TITLE_ID = 'node-focus-title';
 	const NODE_DIAMETER_PX = NODE_RADIUS * 2;
@@ -254,7 +263,11 @@
 	let editNodeId = $state<string | null>(null);
 	let actionMenu = $state<{ nodeId: string; position: Point } | null>(null);
 	let creationPreview = $state<CreationPreviewState | null>(null);
-	let creationArmRequest = $state<{ id: number; sourceNode: NodeData } | null>(null);
+	let creationArmRequest = $state<{
+		id: number;
+		sourceNode: NodeData;
+		mode: NodeGestureMode;
+	} | null>(null);
 	let creationArmRequestId = $state(0);
 	let duplicateEdgeConfirm = $state<{ edgeId: string } | null>(null);
 	let titleEditContext = $state<{
@@ -590,18 +603,36 @@
 		creationPreview ? creationPreviewScaleAt(creationPreview, layoutRuntime.animationNowMs) : 0
 	);
 	/**
+	 * The node a merge gesture is currently poised to absorb into, or null while
+	 * it is over background or back on its own source (both of which cancel).
+	 */
+	const mergeTargetNodeId = $derived.by(() => {
+		const preview = creationPreview;
+		if (!preview || preview.mode !== 'merge' || preview.ending) return null;
+		const hoverNodeId = preview.hoverNodeId;
+		if (!hoverNodeId || hoverNodeId === preview.sourceNodeId) return null;
+		return graphLayout.posByNodeId[hoverNodeId] ? hoverNodeId : null;
+	});
+	/**
 	 * Preview edge trimmed to the node borders exactly like a real edge (source by
 	 * its layout radius, target by the preview node's animated radius) so the
 	 * handoff to the committed edge does not snap shorter.
+	 *
+	 * A merge aims at a whole node rather than a point, so once it is over its
+	 * target the line snaps to that node's centre and trims to its border — the
+	 * same reading as an edge already drawn between them.
 	 */
 	const creationPreviewEdgePoints = $derived.by(() => {
 		const preview = creationPreview;
 		if (!preview || preview.ending || !creationPreviewSourcePos) return null;
+		const mergeTargetPos = mergeTargetNodeId ? graphLayout.posByNodeId[mergeTargetNodeId] : null;
 		return trimSegmentToNodeBorders(
 			creationPreviewSourcePos,
-			preview.point,
+			mergeTargetPos ?? preview.point,
 			graphLayout.radiusByNodeId[preview.sourceNodeId] ?? 0,
-			resolvedLayoutSettings.baseRadius * creationPreviewScale
+			mergeTargetNodeId
+				? (graphLayout.radiusByNodeId[mergeTargetNodeId] ?? 0)
+				: resolvedLayoutSettings.baseRadius * creationPreviewScale
 		);
 	});
 	const editNode = $derived(graph.nodes.find((node) => node.id === editNodeId) ?? null);
@@ -923,15 +954,36 @@
 		if (creationPreview) layoutRuntime.start();
 	}
 
-	function armCreationGesture(node: NodeData) {
+	function armCreationGesture(node: NodeData, mode: NodeGestureMode = 'create') {
 		actionMenu = null;
 		creationArmRequestId += 1;
-		creationArmRequest = { id: creationArmRequestId, sourceNode: node };
+		creationArmRequest = { id: creationArmRequestId, sourceNode: node, mode };
 		creationPreview = beginCreationPreview(
 			node.id,
 			graphLayout.posByNodeId[node.id] ?? CENTERED_POSITION,
-			layoutRuntime.now()
+			layoutRuntime.now(),
+			mode
 		);
+	}
+
+	function handleNodeMergeDropOntoNode(absorbedNode: NodeData, survivorNode: NodeData) {
+		closeOverlays();
+		commitNodeMerge(absorbedNode.id, survivorNode.id);
+	}
+
+	/**
+	 * The one place a merge reaches the graph. `planNodeMerge` is a dry run and
+	 * the commit in one call, so the confirmation T03 hangs off
+	 * `plan.directionConflicts` here will show exactly the `next` it goes on to
+	 * commit — the dialog and the mutation cannot drift apart.
+	 */
+	function commitNodeMerge(absorbedId: string, survivorId: string) {
+		const plan = planNodeMerge(graph, absorbedId, survivorId);
+		// A mis-aimed merge (unknown or identical ids) returns the graph itself.
+		if (plan.next === graph) return;
+		// The absorbed node is gone; leaving it primary would strand the pointer.
+		if (primaryNodeId === absorbedId) primaryNodeId = survivorId;
+		commitUserGraph(layoutRuntime.relaxAfterMutation(plan.next));
 	}
 
 	function openEditSheet(nodeId: string) {
@@ -1673,6 +1725,7 @@
 		{creationArmRequest}
 		onCreationDragUpdate={handleCreationDragUpdate}
 		onCreationCancel={handleCreationCancel}
+		onNodeMergeDropOntoNode={handleNodeMergeDropOntoNode}
 		onViewStateLiveChange={(state) => {
 			stageViewState = state;
 		}}
@@ -1894,13 +1947,15 @@
 				{/if}
 			{/each}
 			{#if creationPreviewEdgePoints}
-				{@const previewEdgeColor = edgeStrokeColor(
-					CREATION_PREVIEW_EDGE,
-					graph.tagColorConfig.edgeTags
-				)}
+				{@const isMergePreview = creationPreview?.mode === 'merge'}
+				{@const previewEdgeColor = isMergePreview
+					? MERGE_PREVIEW_COLOR
+					: edgeStrokeColor(CREATION_PREVIEW_EDGE, graph.tagColorConfig.edgeTags)}
 				<div
 					class="edge"
+					class:merge-preview={isMergePreview}
 					data-creation-preview-edge="true"
+					data-creation-preview-mode={creationPreview?.mode ?? 'create'}
 					style={`${edgeStyle(creationPreviewEdgePoints.source, creationPreviewEdgePoints.target)} --edge-background: ${previewEdgeColor}; color: ${previewEdgeColor}; --edge-stroke-width: ${EDGE_STROKE_WIDTH}px; pointer-events: none;`}
 				></div>
 			{/if}
@@ -1931,7 +1986,9 @@
 					class="node-wrapper"
 					class:primary={primaryNodeId === node.id}
 					class:focus-owned={focus.focusedNodeId === node.id}
+					class:merge-target={mergeTargetNodeId === node.id}
 					data-node-id={node.id}
+					data-merge-target={mergeTargetNodeId === node.id ? 'true' : undefined}
 					data-query-role={queryNodeState?.role}
 					data-scale={nodeScale}
 					data-node-opacity={nodeOpacity}
@@ -2041,6 +2098,7 @@
 			node={actionMenuNode}
 			position={actionMenu.position}
 			onAddNodeEdge={() => armCreationGesture(actionMenuNode)}
+			onMergeNode={() => armCreationGesture(actionMenuNode, 'merge')}
 			onTogglePinned={() => {
 				toggleNodePinned(actionMenuNode.id);
 				closeOverlays();
@@ -2317,6 +2375,14 @@
 		visibility: hidden;
 	}
 
+	/* The node a merge is poised to absorb into, ringed in the merge colour
+	   (kept in sync with MERGE_PREVIEW_COLOR above). */
+	.node-wrapper.merge-target :global(.circle) {
+		box-shadow:
+			0 0 0 4px color-mix(in srgb, #b45309 62%, transparent),
+			0 0 18px color-mix(in srgb, #b45309 45%, transparent);
+	}
+
 	.focus-root {
 		position: fixed;
 		inset: 0;
@@ -2473,6 +2539,22 @@
 	.edge.boundary::before {
 		--edge-dash-length: 8px;
 		--edge-dash-gap: 6px;
+
+		mask-image: repeating-linear-gradient(
+			to right,
+			#000 0 var(--edge-dash-length),
+			transparent var(--edge-dash-length) calc(var(--edge-dash-length) + var(--edge-dash-gap))
+		);
+	}
+
+	/*
+	 * The merge preview reads as a pull rather than a connection: a long dash,
+	 * spaced wider than either the boundary or the derived stroke so it is never
+	 * mistaken for an edge that is about to exist.
+	 */
+	.edge.merge-preview::before {
+		--edge-dash-length: 12px;
+		--edge-dash-gap: 8px;
 
 		mask-image: repeating-linear-gradient(
 			to right,

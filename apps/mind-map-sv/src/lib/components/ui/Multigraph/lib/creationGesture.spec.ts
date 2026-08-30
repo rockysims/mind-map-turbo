@@ -17,6 +17,21 @@ describe('resolveCreationDrop', () => {
 			targetNodeId: 'n1'
 		});
 	});
+
+	it('merges into the target when a merge gesture is released on another node', () => {
+		expect(resolveCreationDrop('n0', 'n1', 'merge')).toEqual({
+			kind: 'merge-into-node',
+			targetNodeId: 'n1'
+		});
+	});
+
+	it('cancels a merge released on background, where there is nothing to absorb into', () => {
+		expect(resolveCreationDrop('n0', null, 'merge')).toEqual({ kind: 'cancel' });
+	});
+
+	it('cancels a merge released back on its own source node', () => {
+		expect(resolveCreationDrop('n0', 'n0', 'merge')).toEqual({ kind: 'cancel' });
+	});
 });
 
 describe('shouldShowCreationPreviewNode', () => {
@@ -30,5 +45,10 @@ describe('shouldShowCreationPreviewNode', () => {
 
 	it('hides the preview node over any other node', () => {
 		expect(shouldShowCreationPreviewNode('n1')).toBe(false);
+	});
+
+	it('never shows a preview node for a merge, which creates nothing', () => {
+		expect(shouldShowCreationPreviewNode(null, 'merge')).toBe(false);
+		expect(shouldShowCreationPreviewNode('n1', 'merge')).toBe(false);
 	});
 });
