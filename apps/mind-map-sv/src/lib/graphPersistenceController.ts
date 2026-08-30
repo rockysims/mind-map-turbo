@@ -1,6 +1,6 @@
 import type { MultigraphData } from './components/ui/types/multigraph';
 import { base64ToBlob, blobToBase64 } from './assets/assetEncoding';
-import type { GraphAssetStore } from './assets/assetStore';
+import type { GraphAssetStore, StoredGraphAsset } from './assets/assetStore';
 import { referencedAssetIds } from './components/ui/Multigraph/lib/graph';
 import {
 	documentStatusHasUndownloadedChanges,
@@ -15,7 +15,8 @@ import {
 	isUnsupportedHtmlGraphFile,
 	parseGraphFileText,
 	type GraphFileDocument,
-	type GraphFileArtifact
+	type GraphFileArtifact,
+	type GraphFileEmbeddedAsset
 } from './graphFile';
 import { DEFAULT_GRAPH_ID } from './graphRoute';
 import { NEUTRAL_VIEW_STATE, PersistedGraphError, type ViewState } from './migrations';
@@ -389,6 +390,27 @@ export class GraphPersistenceController {
 		}
 	}
 
+	/**
+	 * Copy an imported document's embedded assets into a scope that is already in
+	 * use, for an additive import.
+	 *
+	 * Deliberately unlike the replacing `hydrateEmbeddedAssets`: it never sweeps,
+	 * because the incoming document's referenced ids say nothing about the host
+	 * graph's own images — sweeping against them would delete every host asset.
+	 * An incoming asset whose id is already stored in the scope is skipped rather
+	 * than overwritten, so the host's copy stays authoritative. Assets left
+	 * orphaned by later edits are collected by the next replacing load or import.
+	 */
+	async hydrateImportedAssets(scope: string, doc: GraphFileDocument): Promise<void> {
+		const store = this.deps.assetStore;
+		if (!store) return;
+		for (const asset of doc.embeddedAssets ?? []) {
+			const existing = await store.get(scope, asset.assetId);
+			if (existing.ok) continue;
+			await store.put(this.storedAsset(scope, asset));
+		}
+	}
+
 	async selectGraph(graphId: string): Promise<void> {
 		if (graphId === this.view.loadedGraphId) return;
 		await this.flushPendingSave();
@@ -519,21 +541,26 @@ export class GraphPersistenceController {
 		return embeddedAssets;
 	}
 
+	/** Replace a scope's assets with the document's, sweeping whatever it no longer references. */
 	private async hydrateEmbeddedAssets(scope: string, doc: GraphFileDocument): Promise<void> {
 		const store = this.deps.assetStore;
 		if (!store) return;
 		for (const asset of doc.embeddedAssets ?? []) {
-			await store.put({
-				scope,
-				assetId: asset.assetId,
-				blob: base64ToBlob(asset.base64, asset.mimeType),
-				mimeType: asset.mimeType,
-				name: asset.name,
-				size: asset.size,
-				updatedAt: this.deps.now?.() ?? Date.now()
-			});
+			await store.put(this.storedAsset(scope, asset));
 		}
 		await store.deleteUnreferenced(scope, referencedAssetIds(doc.data));
+	}
+
+	private storedAsset(scope: string, asset: GraphFileEmbeddedAsset): StoredGraphAsset {
+		return {
+			scope,
+			assetId: asset.assetId,
+			blob: base64ToBlob(asset.base64, asset.mimeType),
+			mimeType: asset.mimeType,
+			name: asset.name,
+			size: asset.size,
+			updatedAt: this.deps.now?.() ?? Date.now()
+		};
 	}
 
 	private update(patch: Partial<ControllerView>): void {

@@ -1,7 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
+import { blobToBase64 } from './assets/assetEncoding';
+import { MemoryGraphAssetStore } from './assets/assetStore';
+import type { GraphAssetStore } from './assets/assetStore';
 import { makeGraph } from './components/ui/Multigraph/lib/testFixtures';
 import type { MultigraphData } from './components/ui/types/multigraph';
-import { GRAPH_HTML_READER_VERSION, parseGraphFileText, serializeGraphHtmlFile } from './graphFile';
+import {
+	GRAPH_HTML_READER_VERSION,
+	parseGraphFileText,
+	serializeGraphHtmlFile,
+	type GraphFileEmbeddedAsset
+} from './graphFile';
 import { CURRENT_SCHEMA_VERSION, NEUTRAL_VIEW_STATE, type ViewState } from './migrations';
 import {
 	GraphPersistenceController,
@@ -84,6 +92,51 @@ function nonNeutralViewState(): ViewState {
 	return { panX: 120, panY: -80, scale: 1.5 };
 }
 
+/** A graph whose nodes each carry one image block, so the asset ids are referenced. */
+function imageGraph(assetIds: string[]): MultigraphData {
+	return makeGraph({
+		nodes: assetIds.map((assetId, index) => ({
+			id: `n${index}`,
+			title: `Image ${index}`,
+			description: '',
+			content: [{ type: 'image' as const, assetId, alt: '' }]
+		}))
+	});
+}
+
+async function embeddedAsset(assetId: string, body: string): Promise<GraphFileEmbeddedAsset> {
+	const blob = new Blob([body], { type: 'image/png' });
+	return {
+		assetId,
+		mimeType: 'image/png',
+		name: `${assetId}.png`,
+		size: blob.size,
+		base64: await blobToBase64(blob)
+	};
+}
+
+async function storeAsset(store: GraphAssetStore, scope: string, assetId: string, body: string) {
+	const blob = new Blob([body], { type: 'image/png' });
+	await store.put({
+		scope,
+		assetId,
+		blob,
+		mimeType: 'image/png',
+		name: `${assetId}.png`,
+		size: blob.size,
+		updatedAt: 1
+	});
+}
+
+async function readAsset(
+	store: GraphAssetStore,
+	scope: string,
+	assetId: string
+): Promise<string | null> {
+	const result = await store.get(scope, assetId);
+	return result.ok ? await result.value.blob.text() : null;
+}
+
 function setup(
 	options: {
 		confirmGraphImportReplace?: (context: {
@@ -100,6 +153,7 @@ function setup(
 			draftGraph: MultigraphData;
 			fileGraph: MultigraphData;
 		}) => EmbeddedDocumentConflictChoice | Promise<EmbeddedDocumentConflictChoice>;
+		assetStore?: GraphAssetStore;
 	} = {}
 ) {
 	const persistence = new MemoryPersistence();
@@ -120,6 +174,7 @@ function setup(
 		confirmGraphImportReplace: options.confirmGraphImportReplace,
 		confirmNewGraphReplace: options.confirmNewGraphReplace,
 		chooseEmbeddedDocumentConflict: options.chooseEmbeddedDocumentConflict,
+		assetStore: options.assetStore,
 		createDocumentId: () => 'doc-new',
 		now: () => 456,
 		createGraphId: () => 'graph-new'
@@ -725,6 +780,89 @@ describe('GraphPersistenceController', () => {
 
 		expect(scheduler.dispose).toHaveBeenCalled();
 		expect(listener).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe('GraphPersistenceController embedded assets', () => {
+	it('keeps the host scope assets when hydrating an imported document', async () => {
+		const assetStore = new MemoryGraphAssetStore();
+		const { controller } = setup({ assetStore });
+		await controller.load('host');
+		await storeAsset(assetStore, 'host', 'host-asset', 'host bytes');
+
+		await controller.hydrateImportedAssets('host', {
+			data: imageGraph(['incoming-asset']),
+			viewState: NEUTRAL_VIEW_STATE,
+			embeddedAssets: [await embeddedAsset('incoming-asset', 'incoming bytes')]
+		});
+
+		expect(await readAsset(assetStore, 'host', 'host-asset')).toBe('host bytes');
+		expect(await readAsset(assetStore, 'host', 'incoming-asset')).toBe('incoming bytes');
+	});
+
+	it('keeps the host asset when an imported asset reuses its id', async () => {
+		const assetStore = new MemoryGraphAssetStore();
+		const { controller } = setup({ assetStore });
+		await controller.load('host');
+		await storeAsset(assetStore, 'host', 'shared-asset', 'host bytes');
+
+		await controller.hydrateImportedAssets('host', {
+			data: imageGraph(['shared-asset']),
+			viewState: NEUTRAL_VIEW_STATE,
+			embeddedAssets: [await embeddedAsset('shared-asset', 'incoming bytes')]
+		});
+
+		expect(await readAsset(assetStore, 'host', 'shared-asset')).toBe('host bytes');
+	});
+
+	it('sweeps unreferenced scope assets when a replacing document load hydrates', async () => {
+		const assetStore = new MemoryGraphAssetStore();
+		const { controller } = setup({ assetStore });
+		const scope = documentDraftGraphId('doc-sweep');
+		await storeAsset(assetStore, scope, 'stale-asset', 'stale bytes');
+
+		await controller.loadEmbeddedDocument({
+			documentId: 'doc-sweep',
+			data: imageGraph(['kept-asset']),
+			viewState: NEUTRAL_VIEW_STATE,
+			embeddedAssets: [await embeddedAsset('kept-asset', 'kept bytes')]
+		});
+
+		expect(await readAsset(assetStore, scope, 'stale-asset')).toBeNull();
+		expect(await readAsset(assetStore, scope, 'kept-asset')).toBe('kept bytes');
+	});
+
+	it('sweeps unreferenced scope assets when a replacing file import hydrates', async () => {
+		const assetStore = new MemoryGraphAssetStore();
+		const { controller } = setup({ assetStore });
+		await controller.load('active');
+		await storeAsset(assetStore, 'active', 'stale-asset', 'stale bytes');
+
+		const result = await controller.importGraphDocument(
+			serializeGraphHtmlFile({
+				data: imageGraph(['kept-asset']),
+				viewState: nonNeutralViewState(),
+				documentId: 'doc-import',
+				embeddedAssets: [await embeddedAsset('kept-asset', 'kept bytes')]
+			})
+		);
+
+		expect(result).toBe('imported');
+		expect(await readAsset(assetStore, 'active', 'stale-asset')).toBeNull();
+		expect(await readAsset(assetStore, 'active', 'kept-asset')).toBe('kept bytes');
+	});
+
+	it('leaves the scope untouched when no asset store is configured', async () => {
+		const { controller } = setup();
+		await controller.load('host');
+
+		await expect(
+			controller.hydrateImportedAssets('host', {
+				data: imageGraph(['incoming-asset']),
+				viewState: NEUTRAL_VIEW_STATE,
+				embeddedAssets: [await embeddedAsset('incoming-asset', 'incoming bytes')]
+			})
+		).resolves.toBeUndefined();
 	});
 });
 
