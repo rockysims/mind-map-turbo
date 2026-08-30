@@ -20,7 +20,12 @@ import {
 	type GraphFileEmbeddedAsset
 } from './graphFile';
 import { DEFAULT_GRAPH_ID } from './graphRoute';
-import { writeGraphSnapshot } from './graphSnapshot';
+import {
+	clearGraphSnapshot,
+	readGraphSnapshot,
+	writeGraphSnapshot,
+	type GraphSnapshotOptions
+} from './graphSnapshot';
 import { NEUTRAL_VIEW_STATE, PersistedGraphError, type ViewState } from './migrations';
 import {
 	documentDraftGraphId,
@@ -61,6 +66,21 @@ export type ControllerStatus =
 	| { state: 'notice'; message: string }
 	| { state: 'error'; message: string };
 
+/**
+ * What the revert offer knows about the snapshot standing behind the loaded
+ * graph. Deliberately not the snapshot itself: the banner only needs to say what
+ * happened and how long ago, and holding a second copy of the graph in the view
+ * would double every render's memory for a card the size of a sentence.
+ *
+ * `nodeCount` is the count *before* the operation, so the banner can name what
+ * the operation added by subtracting it from the graph on screen.
+ */
+export type SnapshotSummary = {
+	label: string;
+	createdAt: number;
+	nodeCount: number;
+};
+
 export type ControllerView = {
 	graph: MultigraphData;
 	viewState: ViewState;
@@ -69,6 +89,8 @@ export type ControllerView = {
 	documentId: string | null;
 	documentStatus: DocumentStatus;
 	graphGeneration: number;
+	/** The revertible snapshot for the loaded graph, or `null` when there is none. */
+	snapshot: SnapshotSummary | null;
 	status: ControllerStatus;
 };
 
@@ -140,6 +162,7 @@ export class GraphPersistenceController {
 			documentId: null,
 			documentStatus: documentStatusForGraph(defaultGraph, this.baseline),
 			graphGeneration: 0,
+			snapshot: null,
 			status: { state: 'loading', graphId: DEFAULT_GRAPH_ID }
 		};
 	}
@@ -186,6 +209,9 @@ export class GraphPersistenceController {
 			documentId: options.documentId ?? null,
 			documentStatus: this.currentDocumentStatus(),
 			graphGeneration: this.graphGeneration,
+			// Read from storage rather than carried in memory: a snapshot outlives a
+			// reload, so the revert offer has to be rediscovered on every load.
+			snapshot: this.readSnapshotSummary(graphId),
 			graphSummaries: await this.deps.persistence.list()
 		});
 
@@ -240,6 +266,7 @@ export class GraphPersistenceController {
 			documentId: doc.documentId,
 			documentStatus: this.currentDocumentStatus(),
 			graphGeneration: this.graphGeneration,
+			snapshot: this.readSnapshotSummary(graphId),
 			graphSummaries: await this.deps.persistence.list(),
 			status: { state: 'loaded', graphId }
 		});
@@ -410,18 +437,22 @@ export class GraphPersistenceController {
 		}
 
 		const graphId = this.view.loadedGraphId || DEFAULT_GRAPH_ID;
+		const snapshotNodeCount = this.view.graph.nodes.length;
+		const createdAt = this.deps.now?.() ?? Date.now();
 		const snapshotStored = writeGraphSnapshot(
 			graphId,
 			{ data: this.view.graph, viewState: this.view.viewState, label: 'import' },
-			{
-				storage: this.deps.snapshotStorage,
-				namespace: this.deps.storageNamespace,
-				...(this.deps.now === undefined ? {} : { now: this.deps.now })
-			}
+			{ ...this.snapshotOptions(), now: () => createdAt }
 		);
 
 		const { next, nodeIdMap } = importGraphData(this.view.graph, imported.data);
-		this.update({ graph: next, documentStatus: this.currentDocumentStatus(next) });
+		this.update({
+			graph: next,
+			documentStatus: this.currentDocumentStatus(next),
+			// Without a stored snapshot there is nothing to revert to, so the offer
+			// is not made — better silence than a button that cannot keep its word.
+			snapshot: snapshotStored ? { label: 'import', createdAt, nodeCount: snapshotNodeCount } : null
+		});
 		this.scheduler.schedule(graphId, next, this.view.viewState);
 		await this.hydrateImportedAssets(graphId, imported);
 		await this.flushPendingSave();
@@ -453,6 +484,84 @@ export class GraphPersistenceController {
 		}
 
 		return await this.importGraphIntoCurrent(text);
+	}
+
+	/**
+	 * Put the graph back the way the snapshot found it, and forget the snapshot.
+	 * Returns whether there was one to restore.
+	 *
+	 * This is a wholesale replacement of the document's contents, so unlike the
+	 * additive import it *does* bump `graphGeneration`: the canvas remounts around
+	 * the restored graph and its restored pan and zoom, the same way a replacing
+	 * import or a load does. Everything the reader did since the snapshot goes
+	 * with it, which is why the caller asks first.
+	 *
+	 * The baseline is left alone on purpose. Reverting does not change where this
+	 * document came from — it changes only how far it has drifted — so restoring
+	 * the graph a download was taken from correctly reads as "matches downloaded
+	 * file" again.
+	 *
+	 * Assets are deliberately untouched. Sweeping here would take the host graph's
+	 * own images with the imported ones, because the restored graph references
+	 * neither set by id it did not already know about; blobs the revert orphans
+	 * are collected by the next replacing load.
+	 */
+	async revertToSnapshot(): Promise<boolean> {
+		const graphId = this.view.loadedGraphId || DEFAULT_GRAPH_ID;
+		const snapshot = readGraphSnapshot(graphId, this.snapshotOptions());
+		if (snapshot === null) {
+			this.update({ snapshot: null });
+			return false;
+		}
+
+		const nextViewState = snapshot.viewState ?? this.view.viewState;
+		this.graphGeneration += 1;
+		this.update({
+			graph: snapshot.data,
+			viewState: nextViewState,
+			documentStatus: this.currentDocumentStatus(snapshot.data),
+			graphGeneration: this.graphGeneration,
+			snapshot: null
+		});
+		this.scheduler.schedule(graphId, snapshot.data, nextViewState);
+		clearGraphSnapshot(graphId, this.snapshotOptions());
+		await this.flushPendingSave();
+		await this.refreshGraphList();
+		this.update({
+			status: {
+				state: 'notice',
+				message:
+					snapshot.label === 'import'
+						? `Reverted the import into "${graphId}".`
+						: `Reverted "${graphId}".`
+			}
+		});
+		return true;
+	}
+
+	/** Turn down the revert offer, discarding the snapshot behind it. */
+	dismissSnapshot(): void {
+		const graphId = this.view.loadedGraphId || DEFAULT_GRAPH_ID;
+		clearGraphSnapshot(graphId, this.snapshotOptions());
+		this.update({ snapshot: null });
+	}
+
+	private snapshotOptions(): GraphSnapshotOptions {
+		return {
+			storage: this.deps.snapshotStorage,
+			namespace: this.deps.storageNamespace,
+			...(this.deps.now === undefined ? {} : { now: this.deps.now })
+		};
+	}
+
+	private readSnapshotSummary(graphId: string): SnapshotSummary | null {
+		const snapshot = readGraphSnapshot(graphId, this.snapshotOptions());
+		if (snapshot === null) return null;
+		return {
+			label: snapshot.label,
+			createdAt: snapshot.createdAt,
+			nodeCount: snapshot.data.nodes.length
+		};
 	}
 
 	/** Report a file that would not parse, in the words both import paths share. */
@@ -536,6 +645,7 @@ export class GraphPersistenceController {
 			documentId: null,
 			documentStatus: this.currentDocumentStatus(nextGraph),
 			graphGeneration: this.graphGeneration,
+			snapshot: this.readSnapshotSummary(graphId),
 			status: { state: 'loaded', graphId }
 		});
 		this.scheduler.schedule(graphId, nextGraph, { ...NEUTRAL_VIEW_STATE });

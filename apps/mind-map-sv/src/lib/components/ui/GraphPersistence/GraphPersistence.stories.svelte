@@ -105,6 +105,23 @@
 		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
 
+	function queryRevertBanner(canvasElement: HTMLElement): HTMLElement | null {
+		return canvasElement.querySelector('.revert-banner');
+	}
+
+	/** Import the graph the harness just downloaded, as the toolbar's Import does. */
+	async function importDownloadIntoCurrent(canvasElement: HTMLElement): Promise<void> {
+		const canvas = within(canvasElement);
+		const harness = getHarness(canvasElement);
+
+		await userEvent.click(canvas.getByRole('button', { name: 'Download' }));
+		await waitFor(() => expect(harness.dataset.lastDownload).toBeTruthy());
+		await userEvent.upload(
+			canvas.getByLabelText('Graph file to import'),
+			new File([harness.dataset.lastDownload!], 'other-graph.html', { type: 'text/html' })
+		);
+	}
+
 	function waitForFrames(count: number): Promise<void> {
 		return new Promise((resolve) => {
 			let remaining = count;
@@ -440,6 +457,122 @@
 		expect(harness.dataset.nodeCount).toBe('6');
 		expect(harness.dataset.graphGeneration).toBe(generationBeforeImport);
 		expect(harness.dataset.primaryTitle).toBe('Host Graph');
+	}}
+/>
+
+<Story
+	name="ImportOffersARevertNamingWhatArrived"
+	args={{
+		initialGraphId: 'revert-offer',
+		graphs: {
+			'revert-offer': graphWithTitle('Host Graph', 3)
+		}
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const harness = getHarness(canvasElement);
+
+		await waitForHarnessData(canvasElement, 'loadedGraphId', 'revert-offer');
+		expect(queryRevertBanner(canvasElement)).toBeNull();
+
+		await importDownloadIntoCurrent(canvasElement);
+		await waitFor(() => expect(harness.dataset.lastImportIntoCurrent).toBe('imported:3'));
+
+		const banner = queryRevertBanner(canvasElement);
+		expect(banner).toBeInTheDocument();
+		expect(banner).toHaveTextContent('Imported 3 nodes');
+		expect(banner).toHaveTextContent('from moments ago');
+		expect(harness.dataset.snapshotLabel).toBe('import');
+		expect(harness.dataset.snapshotNodeCount).toBe('3');
+	}}
+/>
+
+<Story
+	name="RevertConfirmedRestoresThePreImportGraph"
+	args={{
+		initialGraphId: 'revert-confirm',
+		graphs: {
+			'revert-confirm': graphWithTitle('Host Graph', 3)
+		}
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const canvas = within(canvasElement);
+		const harness = getHarness(canvasElement);
+
+		await waitForHarnessData(canvasElement, 'loadedGraphId', 'revert-confirm');
+		await importDownloadIntoCurrent(canvasElement);
+		await waitFor(() => expect(harness.dataset.nodeCount).toBe('6'));
+		const generationBeforeRevert = harness.dataset.graphGeneration;
+
+		await userEvent.click(canvas.getByRole('button', { name: 'Revert…' }));
+		const dialog = canvas.getByRole('dialog');
+		expect(dialog).toHaveTextContent('Revert to the graph from moments ago?');
+		expect(dialog).toHaveTextContent('Everything changed since then is lost too');
+		await userEvent.click(within(dialog).getByRole('button', { name: 'Revert' }));
+
+		await waitFor(() => expect(harness.dataset.nodeCount).toBe('3'));
+		expect(harness.dataset.primaryTitle).toBe('Host Graph');
+		expect(Number(harness.dataset.graphGeneration)).toBe(Number(generationBeforeRevert) + 1);
+		await waitFor(() => expect(queryRevertBanner(canvasElement)).toBeNull());
+		expect(harness.dataset.snapshotLabel).toBe('');
+	}}
+/>
+
+<Story
+	name="RevertCancelledChangesNothing"
+	args={{
+		initialGraphId: 'revert-cancel',
+		graphs: {
+			'revert-cancel': graphWithTitle('Host Graph', 3)
+		}
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const canvas = within(canvasElement);
+		const harness = getHarness(canvasElement);
+
+		await waitForHarnessData(canvasElement, 'loadedGraphId', 'revert-cancel');
+		await importDownloadIntoCurrent(canvasElement);
+		await waitFor(() => expect(harness.dataset.nodeCount).toBe('6'));
+		const generationBeforeCancel = harness.dataset.graphGeneration;
+
+		await userEvent.click(canvas.getByRole('button', { name: 'Revert…' }));
+		await userEvent.click(
+			within(canvas.getByRole('dialog')).getByRole('button', { name: 'Cancel' })
+		);
+
+		await waitFor(() => expect(canvas.queryByRole('dialog')).toBeNull());
+		expect(harness.dataset.nodeCount).toBe('6');
+		expect(harness.dataset.graphGeneration).toBe(generationBeforeCancel);
+		// The offer is still standing, so a cancel costs the reader nothing.
+		expect(queryRevertBanner(canvasElement)).toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="DismissedRevertOfferDoesNotComeBack"
+	args={{
+		initialGraphId: 'revert-dismiss',
+		graphs: {
+			'revert-dismiss': graphWithTitle('Host Graph', 3)
+		}
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const canvas = within(canvasElement);
+		const harness = getHarness(canvasElement);
+
+		await waitForHarnessData(canvasElement, 'loadedGraphId', 'revert-dismiss');
+		await importDownloadIntoCurrent(canvasElement);
+		await waitFor(() => expect(queryRevertBanner(canvasElement)).toBeInTheDocument());
+
+		await userEvent.click(canvas.getByRole('button', { name: 'Dismiss' }));
+
+		await waitFor(() => expect(queryRevertBanner(canvasElement)).toBeNull());
+		expect(harness.dataset.nodeCount).toBe('6');
+
+		// A later edit reloads nothing and re-offers nothing: the snapshot is gone.
+		await userEvent.click(canvas.getByRole('button', { name: 'Simulate graph change' }));
+		await waitFor(() => expect(harness.dataset.primaryTitle).toBe('Changed Node'));
+		expect(queryRevertBanner(canvasElement)).toBeNull();
+		expect(harness.dataset.snapshotLabel).toBe('');
 	}}
 />
 

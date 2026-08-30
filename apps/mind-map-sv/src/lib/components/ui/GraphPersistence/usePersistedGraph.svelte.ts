@@ -4,7 +4,8 @@ import type { ViewState } from '$lib/migrations';
 import {
 	GraphPersistenceController,
 	controllerNotice,
-	type GraphPersistenceControllerDeps
+	type GraphPersistenceControllerDeps,
+	type SnapshotSummary
 } from '$lib/graphPersistenceController';
 
 export type PersistedGraph = {
@@ -14,6 +15,8 @@ export type PersistedGraph = {
 	readonly graphSummaries: ReturnType<GraphPersistenceController['getView']>['graphSummaries'];
 	readonly loadedGraphId: string;
 	readonly documentStatus: DocumentStatus;
+	/** The revert offer standing over this graph, refreshed on load and by every revert path. */
+	readonly snapshot: SnapshotSummary | null;
 	readonly notice: string;
 	load: GraphPersistenceController['load'];
 	loadEmbeddedDocument: GraphPersistenceController['loadEmbeddedDocument'];
@@ -24,6 +27,8 @@ export type PersistedGraph = {
 	importGraphDocumentFromReader: GraphPersistenceController['importGraphDocumentFromReader'];
 	importGraphIntoCurrent: GraphPersistenceController['importGraphIntoCurrent'];
 	importGraphIntoCurrentFromReader: GraphPersistenceController['importGraphIntoCurrentFromReader'];
+	revertToSnapshot: GraphPersistenceController['revertToSnapshot'];
+	dismissSnapshot: GraphPersistenceController['dismissSnapshot'];
 	selectGraph: GraphPersistenceController['selectGraph'];
 	createGraph: GraphPersistenceController['createGraph'];
 	deleteGraph: GraphPersistenceController['deleteGraph'];
@@ -58,6 +63,9 @@ export function usePersistedGraph(deps: GraphPersistenceControllerDeps): Persist
 		get documentStatus() {
 			return view.documentStatus;
 		},
+		get snapshot() {
+			return view.snapshot;
+		},
 		get notice() {
 			return controllerNotice(view);
 		},
@@ -70,6 +78,8 @@ export function usePersistedGraph(deps: GraphPersistenceControllerDeps): Persist
 		importGraphDocumentFromReader: controller.importGraphDocumentFromReader.bind(controller),
 		importGraphIntoCurrent: controller.importGraphIntoCurrent.bind(controller),
 		importGraphIntoCurrentFromReader: controller.importGraphIntoCurrentFromReader.bind(controller),
+		revertToSnapshot: controller.revertToSnapshot.bind(controller),
+		dismissSnapshot: controller.dismissSnapshot.bind(controller),
 		selectGraph: controller.selectGraph.bind(controller),
 		createGraph: controller.createGraph.bind(controller),
 		deleteGraph: controller.deleteGraph.bind(controller),

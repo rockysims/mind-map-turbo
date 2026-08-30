@@ -19,6 +19,7 @@
 	} from '$lib/components/ui/GraphPersistence/usePersistedGraph.svelte';
 	import GraphToolbar from '$lib/components/ui/GraphToolbar/GraphToolbar.svelte';
 	import Multigraph from '$lib/components/ui/Multigraph/Multigraph.svelte';
+	import RevertBanner from '$lib/components/ui/RevertBanner/RevertBanner.svelte';
 	import { createDefaultGraph, shouldEditInitialRootTitle } from '$lib/defaultGraph';
 	import type { EmbeddedDocumentConflictChoice } from '$lib/graphPersistenceController';
 	import {
@@ -394,6 +395,17 @@
 		onImportGraphFile={(file) => void importGraphFile(file)}
 		onDownload={() => void handleDownload()}
 	/>
+
+	{#if persisted !== null && persisted.snapshot !== null}
+		<RevertBanner
+			label={persisted.snapshot.label}
+			createdAt={persisted.snapshot.createdAt}
+			snapshotNodeCount={persisted.snapshot.nodeCount}
+			currentNodeCount={persisted.graph.nodes.length}
+			onRevert={() => void persisted?.revertToSnapshot()}
+			onDismiss={() => persisted?.dismissSnapshot()}
+		/>
+	{/if}
 
 	{#if embeddedDocumentConflict !== null}
 		<div
