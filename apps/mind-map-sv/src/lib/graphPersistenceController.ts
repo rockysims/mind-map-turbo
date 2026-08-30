@@ -2,6 +2,7 @@ import type { MultigraphData } from './components/ui/types/multigraph';
 import { base64ToBlob, blobToBase64 } from './assets/assetEncoding';
 import type { GraphAssetStore, StoredGraphAsset } from './assets/assetStore';
 import { referencedAssetIds } from './components/ui/Multigraph/lib/graph';
+import { importGraphData } from './components/ui/Multigraph/lib/graphImport';
 import {
 	documentStatusHasUndownloadedChanges,
 	documentStatusForGraph,
@@ -19,12 +20,14 @@ import {
 	type GraphFileEmbeddedAsset
 } from './graphFile';
 import { DEFAULT_GRAPH_ID } from './graphRoute';
+import { writeGraphSnapshot } from './graphSnapshot';
 import { NEUTRAL_VIEW_STATE, PersistedGraphError, type ViewState } from './migrations';
 import {
 	documentDraftGraphId,
 	graphIdFromStorageKey,
 	type GraphSummary,
-	type Persistence
+	type Persistence,
+	type StorageLike
 } from './persistence';
 import type { SaveStatus } from './saveScheduler';
 
@@ -35,6 +38,18 @@ export type ImportGraphResult =
 	| 'unsupported'
 	| 'opened-in-new-tab'
 	| 'open-tab-blocked';
+
+/** Why an additive import did not parse. Shared with the replacing import path. */
+export type ImportGraphFailure = Exclude<ImportGraphResult, 'imported' | 'cancelled'>;
+
+/**
+ * Outcome of an additive import. Unlike the replacing path this reports how much
+ * arrived, because the revert offer names it ("Imported 14 nodes"), and whether a
+ * pre-import snapshot survived — without one there is nothing to revert to.
+ */
+export type ImportIntoCurrentResult =
+	| { outcome: 'imported'; importedNodeCount: number; snapshotStored: boolean }
+	| { outcome: ImportGraphFailure | 'read-failed' };
 
 export type ControllerStatus =
 	| { state: 'loading'; graphId: string }
@@ -93,6 +108,11 @@ export type GraphPersistenceControllerDeps = {
 	now?: () => number;
 	openUnsupportedHtmlFile?: (html: string) => boolean;
 	assetStore?: GraphAssetStore;
+	/**
+	 * Where pre-import snapshots live. Defaults to the ambient `localStorage`,
+	 * beside the saved graphs; `null` turns snapshotting off.
+	 */
+	snapshotStorage?: StorageLike | null;
 	chooseEmbeddedDocumentConflict?: (context: {
 		documentId: string;
 		draftGraph: MultigraphData;
@@ -297,34 +317,7 @@ export class GraphPersistenceController {
 				maxScale: this.deps.maxScale
 			});
 		} catch (error) {
-			if (isUnsupportedHtmlGraphFile(error)) {
-				const opened = this.deps.openUnsupportedHtmlFile?.(text) ?? false;
-				this.update({
-					status: {
-						state: 'notice',
-						message: opened
-							? 'Opened newer graph file in a new tab.'
-							: 'Import needs a newer app version. Open the file directly to continue.'
-					}
-				});
-				return opened ? 'opened-in-new-tab' : 'open-tab-blocked';
-			}
-			if (error instanceof PersistedGraphError && error.code === 'unsupported-version') {
-				this.update({
-					status: {
-						state: 'notice',
-						message: 'Import failed: unsupported graph file version.'
-					}
-				});
-				return 'unsupported';
-			}
-			this.update({
-				status: {
-					state: 'notice',
-					message: 'Import failed: invalid graph file.'
-				}
-			});
-			return 'invalid';
+			return this.reportImportFailure(error, text);
 		}
 
 		const confirmReplace = this.deps.confirmGraphImportReplace;
@@ -388,6 +381,110 @@ export class GraphPersistenceController {
 			});
 			return 'read-failed';
 		}
+	}
+
+	/**
+	 * Fold a graph file into the graph the reader is already looking at, as a
+	 * separate component, and leave a snapshot of the moment before.
+	 *
+	 * Deliberately unlike `importGraphDocument`, which swaps the document out:
+	 * this is an additive edit, so `graphGeneration` does not move and the view
+	 * state is never touched. Bumping either would remount the canvas and throw
+	 * away the reader's pan, zoom and focus for what is, to them, one more
+	 * component appearing beside their work.
+	 *
+	 * The incoming document's own view state and document id are discarded for
+	 * the same reason: the host document is still the document.
+	 */
+	async importGraphIntoCurrent(text: string): Promise<ImportIntoCurrentResult> {
+		let imported: GraphFileDocument;
+		try {
+			imported = parseGraphFileText(text, {
+				minScale: this.deps.minScale,
+				maxScale: this.deps.maxScale
+			});
+		} catch (error) {
+			// Nothing has been written yet, so a bad file leaves no snapshot behind
+			// and no revert offer pointing at a moment that never changed.
+			return { outcome: this.reportImportFailure(error, text) };
+		}
+
+		const graphId = this.view.loadedGraphId || DEFAULT_GRAPH_ID;
+		const snapshotStored = writeGraphSnapshot(
+			graphId,
+			{ data: this.view.graph, viewState: this.view.viewState, label: 'import' },
+			{
+				storage: this.deps.snapshotStorage,
+				namespace: this.deps.storageNamespace,
+				...(this.deps.now === undefined ? {} : { now: this.deps.now })
+			}
+		);
+
+		const { next, nodeIdMap } = importGraphData(this.view.graph, imported.data);
+		this.update({ graph: next, documentStatus: this.currentDocumentStatus(next) });
+		this.scheduler.schedule(graphId, next, this.view.viewState);
+		await this.hydrateImportedAssets(graphId, imported);
+		await this.flushPendingSave();
+		await this.refreshGraphList();
+		this.update({
+			status: {
+				state: 'notice',
+				message: `Imported ${nodeIdMap.size} ${nodeIdMap.size === 1 ? 'node' : 'nodes'} into "${graphId}".`
+			}
+		});
+
+		return { outcome: 'imported', importedNodeCount: nodeIdMap.size, snapshotStored };
+	}
+
+	async importGraphIntoCurrentFromReader(
+		readText: () => Promise<string>
+	): Promise<ImportIntoCurrentResult> {
+		let text: string;
+		try {
+			text = await readText();
+		} catch {
+			this.update({
+				status: {
+					state: 'notice',
+					message: 'Import failed: unable to read file.'
+				}
+			});
+			return { outcome: 'read-failed' };
+		}
+
+		return await this.importGraphIntoCurrent(text);
+	}
+
+	/** Report a file that would not parse, in the words both import paths share. */
+	private reportImportFailure(error: unknown, text: string): ImportGraphFailure {
+		if (isUnsupportedHtmlGraphFile(error)) {
+			const opened = this.deps.openUnsupportedHtmlFile?.(text) ?? false;
+			this.update({
+				status: {
+					state: 'notice',
+					message: opened
+						? 'Opened newer graph file in a new tab.'
+						: 'Import needs a newer app version. Open the file directly to continue.'
+				}
+			});
+			return opened ? 'opened-in-new-tab' : 'open-tab-blocked';
+		}
+		if (error instanceof PersistedGraphError && error.code === 'unsupported-version') {
+			this.update({
+				status: {
+					state: 'notice',
+					message: 'Import failed: unsupported graph file version.'
+				}
+			});
+			return 'unsupported';
+		}
+		this.update({
+			status: {
+				state: 'notice',
+				message: 'Import failed: invalid graph file.'
+			}
+		});
+		return 'invalid';
 	}
 
 	/**

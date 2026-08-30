@@ -22,6 +22,8 @@ export type PersistedGraph = {
 	exportGraphDocument: GraphPersistenceController['exportGraphDocument'];
 	importGraphDocument: GraphPersistenceController['importGraphDocument'];
 	importGraphDocumentFromReader: GraphPersistenceController['importGraphDocumentFromReader'];
+	importGraphIntoCurrent: GraphPersistenceController['importGraphIntoCurrent'];
+	importGraphIntoCurrentFromReader: GraphPersistenceController['importGraphIntoCurrentFromReader'];
 	selectGraph: GraphPersistenceController['selectGraph'];
 	createGraph: GraphPersistenceController['createGraph'];
 	deleteGraph: GraphPersistenceController['deleteGraph'];
@@ -66,6 +68,8 @@ export function usePersistedGraph(deps: GraphPersistenceControllerDeps): Persist
 		exportGraphDocument: controller.exportGraphDocument.bind(controller),
 		importGraphDocument: controller.importGraphDocument.bind(controller),
 		importGraphDocumentFromReader: controller.importGraphDocumentFromReader.bind(controller),
+		importGraphIntoCurrent: controller.importGraphIntoCurrent.bind(controller),
+		importGraphIntoCurrentFromReader: controller.importGraphIntoCurrentFromReader.bind(controller),
 		selectGraph: controller.selectGraph.bind(controller),
 		createGraph: controller.createGraph.bind(controller),
 		deleteGraph: controller.deleteGraph.bind(controller),

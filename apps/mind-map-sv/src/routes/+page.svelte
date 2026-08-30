@@ -10,7 +10,8 @@
 		OPEN_HTML_FILE_TEXT_SESSION_KEY,
 		OPEN_HTML_FILE_WINDOW_NAME_PREFIX,
 		openHtmlFilePickerInNewTab,
-		openHtmlTextInNewTab
+		openHtmlTextInNewTab,
+		readFileText
 	} from '$lib/browserGraphFile';
 	import {
 		usePersistedGraph,
@@ -153,6 +154,15 @@
 
 	function openGraphFilePicker(): void {
 		openHtmlFilePickerInNewTab(currentAppUrlWithoutGraphRoute());
+	}
+
+	/**
+	 * Fold a chosen file into the graph on screen. Read here rather than through
+	 * the picker tab Open uses: that tab reloads the app to hand the file over,
+	 * and this import is meant to keep the reader exactly where they are.
+	 */
+	async function importGraphFile(file: File): Promise<void> {
+		await persisted?.importGraphIntoCurrentFromReader(() => readFileText(file));
 	}
 
 	function consumeOpenFileFromPickerFlag(): boolean {
@@ -381,6 +391,7 @@
 		notice={persisted?.notice ?? 'Loading graph...'}
 		onNewGraph={createNewGraph}
 		onOpenGraphFilePicker={openGraphFilePicker}
+		onImportGraphFile={(file) => void importGraphFile(file)}
 		onDownload={() => void handleDownload()}
 	/>
 

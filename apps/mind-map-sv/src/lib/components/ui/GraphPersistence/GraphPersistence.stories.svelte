@@ -408,6 +408,41 @@
 	}}
 />
 
+<Story
+	name="ImportFileFoldsIntoCurrentGraphWithoutRemount"
+	args={{
+		initialGraphId: 'import-host',
+		graphs: {
+			'import-host': graphWithTitle('Host Graph', 3)
+		}
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const canvas = within(canvasElement);
+		const harness = getHarness(canvasElement);
+
+		await waitForHarnessData(canvasElement, 'loadedGraphId', 'import-host');
+		await expect(harness.dataset.nodeCount).toBe('3');
+
+		// Download so the import has a real graph file to fold in.
+		await userEvent.click(canvas.getByRole('button', { name: 'Download' }));
+		await waitFor(() => expect(harness.dataset.lastDownload).toBeTruthy());
+		const exportedHtml = harness.dataset.lastDownload!;
+		const generationBeforeImport = harness.dataset.graphGeneration;
+
+		await userEvent.upload(
+			canvas.getByLabelText('Graph file to import'),
+			new File([exportedHtml], 'other-graph.html', { type: 'text/html' })
+		);
+
+		await waitFor(() => expect(harness.dataset.lastImportIntoCurrent).toBe('imported:3'));
+
+		// Both components are present, and the canvas was never remounted.
+		expect(harness.dataset.nodeCount).toBe('6');
+		expect(harness.dataset.graphGeneration).toBe(generationBeforeImport);
+		expect(harness.dataset.primaryTitle).toBe('Host Graph');
+	}}
+/>
+
 <style>
 	:global(body) {
 		min-height: 100vh;

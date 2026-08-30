@@ -1,20 +1,54 @@
 <script lang="ts">
+	import { resetFileInput } from '$lib/browserGraphFile';
+
 	let {
 		notice = '',
 		onNewGraph,
 		onOpenGraphFilePicker,
+		onImportGraphFile,
 		onDownload
 	}: {
 		notice?: string;
 		onNewGraph?: () => void;
 		onOpenGraphFilePicker?: () => void;
+		/** Given the chosen file, to fold into the graph already on screen. */
+		onImportGraphFile?: (file: File) => void;
 		onDownload?: () => void;
 	} = $props();
+
+	let importInput = $state<HTMLInputElement | null>(null);
+
+	/**
+	 * Import picks its file in this page, not in the picker tab Open uses: that
+	 * tab hands the file over by reloading the app, which would remount the canvas
+	 * and cost the reader the pan, zoom and focus an additive import is meant to
+	 * leave alone.
+	 */
+	function chooseImportFile(): void {
+		importInput?.click();
+	}
+
+	function handleImportFileChange(event: Event): void {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0] ?? null;
+		// Reset first, so choosing the same file twice fires `change` both times.
+		resetFileInput(input);
+		if (file !== null) onImportGraphFile?.(file);
+	}
 </script>
 
 <div class="graph-toolbar" aria-label="Graph persistence controls">
 	<button type="button" onclick={() => onNewGraph?.()}>New</button>
 	<button type="button" onclick={() => onOpenGraphFilePicker?.()}>Open</button>
+	<button type="button" onclick={chooseImportFile}>Import…</button>
+	<input
+		bind:this={importInput}
+		class="import-input"
+		type="file"
+		accept=".html,.json,text/html,application/json"
+		aria-label="Graph file to import"
+		onchange={handleImportFileChange}
+	/>
 	<button type="button" onclick={() => onDownload?.()}>Download</button>
 	<p role="status">{notice}</p>
 </div>
@@ -49,6 +83,19 @@
 		color: #0f172a;
 		font: inherit;
 		cursor: pointer;
+	}
+
+	/* Kept in the layout but out of sight: the Import button is the visible control. */
+	.graph-toolbar .import-input {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		border: 0;
+		margin: -1px;
+		clip-path: inset(50%);
+		overflow: hidden;
+		white-space: nowrap;
 	}
 
 	.graph-toolbar p {

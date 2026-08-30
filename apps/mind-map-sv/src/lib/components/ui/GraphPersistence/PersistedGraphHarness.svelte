@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { APP_CONFIG } from '$lib/appConfig';
+	import { readFileText } from '$lib/browserGraphFile';
 	import Multigraph from '$lib/components/ui/Multigraph/Multigraph.svelte';
 	import GraphToolbar from '$lib/components/ui/GraphToolbar/GraphToolbar.svelte';
 	import type { LayoutSettings } from '$lib/components/ui/Multigraph/lib/layoutSettings';
@@ -41,6 +42,7 @@
 	let routedGraphId = $state(initialGraphIdAtMount());
 	let lastDownload = $state('');
 	let lastImportResult = $state('');
+	let lastImportIntoCurrent = $state('');
 	let initialTitleEditNodeId = $state<string | null>(null);
 	const persisted = usePersistedGraph({
 		persistence,
@@ -137,6 +139,13 @@
 	async function handleImportText(): Promise<void> {
 		lastImportResult = await persisted.importGraphDocument(simulateImportText);
 	}
+
+	/** The toolbar's additive Import, taking the file exactly as the route does. */
+	async function handleImportFileIntoCurrent(file: File): Promise<void> {
+		const result = await persisted.importGraphIntoCurrentFromReader(() => readFileText(file));
+		lastImportIntoCurrent =
+			result.outcome === 'imported' ? `imported:${result.importedNodeCount}` : result.outcome;
+	}
 </script>
 
 <div
@@ -152,6 +161,7 @@
 	data-scale-animation-duration-ms={layoutSettings.scaleAnimationDurationMs ?? ''}
 	data-last-download={lastDownload}
 	data-last-import-result={lastImportResult}
+	data-last-import-into-current={lastImportIntoCurrent}
 	data-view-pan-x={persisted.viewState.panX}
 	data-view-pan-y={persisted.viewState.panY}
 	data-view-scale={persisted.viewState.scale}
@@ -159,6 +169,7 @@
 	<GraphToolbar
 		notice={persisted.notice}
 		onNewGraph={() => void persisted.createGraph()}
+		onImportGraphFile={(file) => void handleImportFileIntoCurrent(file)}
 		onDownload={() => void handleDownload()}
 	/>
 

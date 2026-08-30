@@ -10,6 +10,7 @@ import {
 	serializeGraphHtmlFile,
 	type GraphFileEmbeddedAsset
 } from './graphFile';
+import { readGraphSnapshot } from './graphSnapshot';
 import { CURRENT_SCHEMA_VERSION, NEUTRAL_VIEW_STATE, type ViewState } from './migrations';
 import {
 	GraphPersistenceController,
@@ -24,7 +25,8 @@ import {
 	graphStorageKey,
 	type GraphSummary,
 	type PersistedGraphRecord,
-	type Persistence
+	type Persistence,
+	type StorageLike
 } from './persistence';
 import type { SaveStatus } from './saveScheduler';
 
@@ -82,6 +84,31 @@ class TestScheduler implements GraphSaveScheduler {
 		this.pending = null;
 		this.onStatus({ state: 'saved', savedAt: 123 });
 	});
+}
+
+/** Stands in for `localStorage`, which the node test environment does not have. */
+class MemoryStorage implements StorageLike {
+	private readonly items = new Map<string, string>();
+
+	get length(): number {
+		return this.items.size;
+	}
+
+	getItem(key: string): string | null {
+		return this.items.get(key) ?? null;
+	}
+
+	setItem(key: string, value: string): void {
+		this.items.set(key, value);
+	}
+
+	removeItem(key: string): void {
+		this.items.delete(key);
+	}
+
+	key(index: number): string | null {
+		return Array.from(this.items.keys())[index] ?? null;
+	}
 }
 
 function createDefaultGraph(): MultigraphData {
@@ -154,6 +181,7 @@ function setup(
 			fileGraph: MultigraphData;
 		}) => EmbeddedDocumentConflictChoice | Promise<EmbeddedDocumentConflictChoice>;
 		assetStore?: GraphAssetStore;
+		snapshotStorage?: StorageLike | null;
 	} = {}
 ) {
 	const persistence = new MemoryPersistence();
@@ -175,6 +203,7 @@ function setup(
 		confirmNewGraphReplace: options.confirmNewGraphReplace,
 		chooseEmbeddedDocumentConflict: options.chooseEmbeddedDocumentConflict,
 		assetStore: options.assetStore,
+		snapshotStorage: options.snapshotStorage ?? null,
 		createDocumentId: () => 'doc-new',
 		now: () => 456,
 		createGraphId: () => 'graph-new'
@@ -780,6 +809,189 @@ describe('GraphPersistenceController', () => {
 
 		expect(scheduler.dispose).toHaveBeenCalled();
 		expect(listener).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe('GraphPersistenceController additive import', () => {
+	const snapshotOptions = (storage: StorageLike) => ({ storage, namespace: 'test' });
+
+	/** A loaded 'active' graph of two nodes, viewed at a non-neutral pan and zoom. */
+	async function loadedHost(storage: StorageLike) {
+		const context = setup({ snapshotStorage: storage });
+		await context.persistence.save('active', {
+			data: makeGraph({ nodeCount: 2, edges: [[0, 1]] }),
+			viewState: NEUTRAL_VIEW_STATE
+		});
+		await context.controller.load('active');
+		context.controller.notifyViewStateChanged(nonNeutralViewState(), { syncView: true });
+		return { ...context, before: context.controller.getView() };
+	}
+
+	it('keeps every existing node and adds the incoming ones', async () => {
+		const storage = new MemoryStorage();
+		const { controller, persistence, before } = await loadedHost(storage);
+
+		const result = await controller.importGraphIntoCurrent(
+			serializeGraphHtmlFile({
+				documentId: 'doc-incoming',
+				data: makeGraph({ nodeCount: 3, edges: [[0, 1]] }),
+				viewState: { panX: 900, panY: 900, scale: 0.5 }
+			})
+		);
+
+		expect(result).toEqual({ outcome: 'imported', importedNodeCount: 3, snapshotStored: true });
+		const after = controller.getView();
+		expect(after.graph.nodes.slice(0, 2)).toEqual(before.graph.nodes);
+		expect(after.graph.nodes).toHaveLength(5);
+		expect(new Set(after.graph.nodes.map((node) => node.id)).size).toBe(5);
+		expect(after.graph.edges).toHaveLength(2);
+		expect(persistence.save).toHaveBeenLastCalledWith('active', {
+			data: after.graph,
+			viewState: nonNeutralViewState()
+		});
+	});
+
+	it('leaves the reader where they were: no remount, no view state change', async () => {
+		const storage = new MemoryStorage();
+		const { controller, before } = await loadedHost(storage);
+
+		await controller.importGraphIntoCurrent(
+			serializeGraphHtmlFile({
+				documentId: 'doc-incoming',
+				data: makeGraph({ nodeCount: 1 }),
+				viewState: { panX: 900, panY: 900, scale: 0.5 }
+			})
+		);
+
+		expect(controller.getView()).toMatchObject({
+			graphGeneration: before.graphGeneration,
+			viewState: nonNeutralViewState(),
+			documentId: before.documentId,
+			loadedGraphId: 'active'
+		});
+	});
+
+	it('snapshots the graph as it stood before the import', async () => {
+		const storage = new MemoryStorage();
+		const { controller, before } = await loadedHost(storage);
+
+		await controller.importGraphIntoCurrent(
+			serializeGraphHtmlFile({
+				data: makeGraph({ nodeCount: 1 }),
+				viewState: NEUTRAL_VIEW_STATE
+			})
+		);
+
+		expect(readGraphSnapshot('active', snapshotOptions(storage))).toEqual({
+			label: 'import',
+			createdAt: 456,
+			data: before.graph,
+			viewState: nonNeutralViewState()
+		});
+	});
+
+	it('imports a version 1 payload through the migration path', async () => {
+		const storage = new MemoryStorage();
+		const { controller, before } = await loadedHost(storage);
+
+		const result = await controller.importGraphIntoCurrent(
+			JSON.stringify({
+				schemaVersion: 1,
+				data: {
+					nodes: [{ id: 'n0', title: 'Ancient', description: 'From a version 1 file' }],
+					edges: [],
+					posByNodeId: { n0: { x: 0, y: 0 } }
+				}
+			})
+		);
+
+		expect(result).toEqual({ outcome: 'imported', importedNodeCount: 1, snapshotStored: true });
+		const titles = controller.getView().graph.nodes.map((node) => node.title);
+		expect(titles).toEqual([...before.graph.nodes.map((node) => node.title), 'Ancient']);
+	});
+
+	it('changes nothing and leaves no snapshot when the file will not parse', async () => {
+		const storage = new MemoryStorage();
+		const { controller, persistence, before } = await loadedHost(storage);
+		const saveCallsBefore = persistence.save.mock.calls.length;
+
+		const result = await controller.importGraphIntoCurrent(
+			JSON.stringify({ schemaVersion: CURRENT_SCHEMA_VERSION, data: { nodes: [] } })
+		);
+
+		expect(result).toEqual({ outcome: 'invalid' });
+		expect(controller.getView()).toMatchObject({
+			graph: before.graph,
+			viewState: before.viewState,
+			graphGeneration: before.graphGeneration,
+			status: { state: 'notice', message: 'Import failed: invalid graph file.' }
+		});
+		expect(readGraphSnapshot('active', snapshotOptions(storage))).toBeNull();
+		expect(persistence.save).toHaveBeenCalledTimes(saveCallsBefore);
+	});
+
+	it('reports an unsupported version without touching the graph', async () => {
+		const storage = new MemoryStorage();
+		const { controller, before } = await loadedHost(storage);
+
+		const result = await controller.importGraphIntoCurrent(
+			JSON.stringify({ schemaVersion: 999, data: makeGraph({ nodeCount: 1 }) })
+		);
+
+		expect(result).toEqual({ outcome: 'unsupported' });
+		expect(controller.getView()).toMatchObject({
+			graph: before.graph,
+			status: { state: 'notice', message: 'Import failed: unsupported graph file version.' }
+		});
+		expect(readGraphSnapshot('active', snapshotOptions(storage))).toBeNull();
+	});
+
+	it('reports a file it cannot read without touching the graph', async () => {
+		const storage = new MemoryStorage();
+		const { controller, before } = await loadedHost(storage);
+
+		const result = await controller.importGraphIntoCurrentFromReader(async () => {
+			throw new Error('read failed');
+		});
+
+		expect(result).toEqual({ outcome: 'read-failed' });
+		expect(controller.getView()).toMatchObject({
+			graph: before.graph,
+			status: { state: 'notice', message: 'Import failed: unable to read file.' }
+		});
+		expect(readGraphSnapshot('active', snapshotOptions(storage))).toBeNull();
+	});
+
+	it('copies the incoming assets in without sweeping the host graph own images', async () => {
+		const assetStore = new MemoryGraphAssetStore();
+		const { controller } = setup({ assetStore, snapshotStorage: new MemoryStorage() });
+		await controller.load('active');
+		controller.notifyGraphChanged(imageGraph(['host-asset']), { syncView: true });
+		await storeAsset(assetStore, 'active', 'host-asset', 'host bytes');
+
+		const result = await controller.importGraphIntoCurrent(
+			serializeGraphHtmlFile({
+				data: imageGraph(['incoming-asset']),
+				viewState: NEUTRAL_VIEW_STATE,
+				embeddedAssets: [await embeddedAsset('incoming-asset', 'incoming bytes')]
+			})
+		);
+
+		expect(result).toMatchObject({ outcome: 'imported' });
+		expect(await readAsset(assetStore, 'active', 'host-asset')).toBe('host bytes');
+		expect(await readAsset(assetStore, 'active', 'incoming-asset')).toBe('incoming bytes');
+	});
+
+	it('imports without a snapshot when storage will not take one', async () => {
+		const { controller } = setup({ snapshotStorage: null });
+		await controller.load('active');
+
+		const result = await controller.importGraphIntoCurrent(
+			serializeGraphHtmlFile({ data: makeGraph({ nodeCount: 2 }), viewState: NEUTRAL_VIEW_STATE })
+		);
+
+		expect(result).toEqual({ outcome: 'imported', importedNodeCount: 2, snapshotStored: false });
+		expect(controller.getView().graph.nodes).toHaveLength(3);
 	});
 });
 
