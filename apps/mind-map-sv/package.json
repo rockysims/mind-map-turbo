@@ -48,7 +48,6 @@
 		"playwright": "^1.58.1",
 		"prettier": "^3.8.1",
 		"prettier-plugin-svelte": "^3.4.1",
-		"semver": "^7.7.2",
 		"storybook": "^10.2.13",
 		"svelte": "^5.49.2",
 		"svelte-check": "^4.3.6",
