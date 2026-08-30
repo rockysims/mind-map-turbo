@@ -18,6 +18,7 @@
 	import NodeDetailsLayer from '$lib/components/ui/Node/NodeDetailsLayer.svelte';
 	import DuplicateEdgeDialog from './DuplicateEdgeDialog.svelte';
 	import GraphQueryPanel from './GraphQueryPanel.svelte';
+	import MergeConfirmDialog from './MergeConfirmDialog.svelte';
 	import NodeDetailsContent from './NodeDetailsContent.svelte';
 	import NodeActionMenu from './NodeActionMenu.svelte';
 	import NavBreadcrumbs from './NavBreadcrumbs.svelte';
@@ -154,7 +155,7 @@
 		type CreationPreviewState
 	} from './lib/creationPreview.js';
 	import type { NodeGestureMode } from './lib/creationGesture.js';
-	import { planNodeMerge } from './lib/nodeMerge.js';
+	import { planNodeMerge, type NodeMergePlan } from './lib/nodeMerge.js';
 	import { computeParallelEdgeOffsets } from './lib/parallelEdges.js';
 	import type { FocusLevel } from './lib/focusRuntime.svelte.js';
 	import { FocusController } from './lib/focusController.svelte.js';
@@ -270,6 +271,17 @@
 	} | null>(null);
 	let creationArmRequestId = $state(0);
 	let duplicateEdgeConfirm = $state<{ edgeId: string } | null>(null);
+	/**
+	 * A merge that has been planned but not committed, waiting on the direction
+	 * confirmation. Holding the whole plan (not the ids) is the point: confirming
+	 * commits this `next`, so the count the dialog showed cannot drift from what
+	 * lands.
+	 */
+	let pendingNodeMerge = $state<{
+		plan: NodeMergePlan;
+		absorbedId: string;
+		survivorId: string;
+	} | null>(null);
 	let titleEditContext = $state<{
 		nodeId: string;
 		edgeId?: string;
@@ -973,14 +985,26 @@
 
 	/**
 	 * The one place a merge reaches the graph. `planNodeMerge` is a dry run and
-	 * the commit in one call, so the confirmation T03 hangs off
-	 * `plan.directionConflicts` here will show exactly the `next` it goes on to
+	 * the commit in one call, so the confirmation hanging off
+	 * `plan.directionConflicts` here shows exactly the `next` it goes on to
 	 * commit — the dialog and the mutation cannot drift apart.
 	 */
 	function commitNodeMerge(absorbedId: string, survivorId: string) {
 		const plan = planNodeMerge(graph, absorbedId, survivorId);
 		// A mis-aimed merge (unknown or identical ids) returns the graph itself.
 		if (plan.next === graph) return;
+		// Overwriting an edge's direction is the only thing a merge does that the
+		// reader cannot undo in the edit sheet, so it is the only thing that asks.
+		// A merge that loses no direction commits with no dialog at all.
+		if (plan.directionConflicts.length > 0) {
+			pendingNodeMerge = { plan, absorbedId, survivorId };
+			return;
+		}
+		applyNodeMerge(plan, absorbedId, survivorId);
+	}
+
+	/** Commits an already-planned merge. Never re-plans: the dialog described this. */
+	function applyNodeMerge(plan: NodeMergePlan, absorbedId: string, survivorId: string) {
 		// The absorbed node is gone; leaving it primary would strand the pointer.
 		if (primaryNodeId === absorbedId) primaryNodeId = survivorId;
 		commitUserGraph(layoutRuntime.relaxAfterMutation(plan.next));
@@ -1006,6 +1030,8 @@
 		editNodeId = null;
 		creationPreview = null;
 		duplicateEdgeConfirm = null;
+		// Dropping the plan is the whole cancel: nothing was mutated to undo.
+		pendingNodeMerge = null;
 		titleEditContext = null;
 		tagColorLegendOpen = false;
 		graphQueryPanelOpen = false;
@@ -2324,6 +2350,21 @@
 				}
 				commitUserGraph(layoutRuntime.relaxAfterMutation(nextGraph));
 				duplicateEdgeConfirm = null;
+			}}
+		/>
+	{/if}
+
+	{#if pendingNodeMerge}
+		{@const heldMerge = pendingNodeMerge}
+		<MergeConfirmDialog
+			conflictCount={heldMerge.plan.directionConflicts.length}
+			onCancel={() => (pendingNodeMerge = null)}
+			onConfirm={() => {
+				// `heldMerge` tracks the state it came from, so read it out before
+				// clearing — afterwards it is null and the plan is gone.
+				const merge = heldMerge;
+				pendingNodeMerge = null;
+				applyNodeMerge(merge.plan, merge.absorbedId, merge.survivorId);
 			}}
 		/>
 	{/if}

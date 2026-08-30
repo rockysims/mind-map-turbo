@@ -2563,6 +2563,9 @@
 		await sleep();
 		await waitForLayout();
 
+		// Nothing lossy happened, so the merge committed without stopping to ask.
+		expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
+
 		const changedGraph = lastChangedGraph(args);
 		expect(changedGraph.nodes.map((node) => node.id)).toEqual(['n1']);
 		// The survivor keeps its own title and leads with its own tags.
@@ -2622,6 +2625,153 @@
 		expect(canvasElement.querySelector('[data-node-id="n1"]')).toBeInTheDocument();
 		const changeSpy = args.onMultigraphChange as ChangeSpy | undefined;
 		expect(changeSpy?.mock.calls).toHaveLength(0);
+	}}
+/>
+
+<Story
+	name="CancelingAMergeThatWouldOverwriteEdgeDirectionChangesNothing"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'n0', title: 'Node 0', description: '', tags: [] },
+				{ id: 'n1', title: 'Node 1', description: '', tags: [] },
+				{ id: 'n2', title: 'Node 2', description: '', tags: [] },
+				{ id: 'n3', title: 'Node 3', description: '', tags: [] }
+			],
+			// Both of n0's edges point the opposite way from n1's edge to the same
+			// neighbour, so folding n0 into n1 discards two direction assertions.
+			edges: [
+				{ id: 'e0', source: 'n0', target: 'n2', directed: true },
+				{ id: 'e1', source: 'n2', target: 'n1', directed: true },
+				{ id: 'e2', source: 'n0', target: 'n3', directed: true },
+				{ id: 'e3', source: 'n3', target: 'n1', directed: true }
+			],
+			pinned: ['n0', 'n1', 'n2', 'n3'],
+			posByNodeId: {
+				n0: { x: -160, y: 0 },
+				n1: { x: 160, y: 0 },
+				n2: { x: 0, y: -200 },
+				n3: { x: 0, y: 200 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { enterExitDurationMs: 0, relaxIterations: 1 },
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const absorbedCircle = getCircle(canvasElement, 'n0');
+		const absorbedCenter = getCenter(absorbedCircle);
+		const survivorCenter = getCenter(getCircle(canvasElement, 'n1'));
+
+		dispatchContextMenu(absorbedCircle, absorbedCenter.x, absorbedCenter.y);
+		await sleep();
+		within(canvasElement).getByRole('menuitem', { name: 'Merge' }).click();
+		await sleep();
+
+		dispatchPointer(stage, 'pointermove', survivorCenter.x, survivorCenter.y);
+		await sleep();
+		dispatchPointer(stage, 'pointerdown', survivorCenter.x, survivorCenter.y);
+		dispatchPointer(stage, 'pointerup', survivorCenter.x, survivorCenter.y);
+		await sleep();
+
+		// The count is the plan's own, so it is the number of edges a confirm
+		// would rewrite — not an estimate made separately from the merge.
+		const dialog = canvasElement.querySelector('[role="dialog"]');
+		expect(dialog).toBeInTheDocument();
+		expect(dialog?.querySelector('.merge-confirm-dialog-message')).toHaveTextContent(
+			'Merge nodes?'
+		);
+		expect(dialog?.querySelector('.merge-confirm-dialog-detail')).toHaveTextContent(
+			'2 edges will lose their direction.'
+		);
+		expect(
+			Array.from(dialog!.querySelectorAll('button')).map((button) => button.textContent?.trim())
+		).toEqual(['Cancel', 'Merge']);
+		expect(canvasElement.querySelector('[data-node-id="n0"]')).toBeInTheDocument();
+
+		(canvasElement.querySelector('.merge-confirm-dialog-cancel') as HTMLElement).click();
+		await sleep();
+		await waitForLayout();
+
+		// Cancel mutated nothing: the plan was only ever held, never committed.
+		expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-node-id="n0"]')).toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-edge-id="e0"]')).toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-edge-id="e2"]')).toBeInTheDocument();
+		const changeSpy = args.onMultigraphChange as ChangeSpy | undefined;
+		expect(changeSpy?.mock.calls ?? []).toHaveLength(0);
+	}}
+/>
+
+<Story
+	name="ConfirmingAMergeThatOverwritesEdgeDirectionCommitsTheMerge"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'n0', title: 'Node 0', description: '', tags: [] },
+				{ id: 'n1', title: 'Node 1', description: '', tags: [] },
+				{ id: 'n2', title: 'Node 2', description: '', tags: [] },
+				{ id: 'n3', title: 'Node 3', description: '', tags: [] }
+			],
+			edges: [
+				{ id: 'e0', source: 'n0', target: 'n2', directed: true },
+				{ id: 'e1', source: 'n2', target: 'n1', directed: true },
+				{ id: 'e2', source: 'n0', target: 'n3', directed: true },
+				{ id: 'e3', source: 'n3', target: 'n1', directed: true }
+			],
+			pinned: ['n0', 'n1', 'n2', 'n3'],
+			posByNodeId: {
+				n0: { x: -160, y: 0 },
+				n1: { x: 160, y: 0 },
+				n2: { x: 0, y: -200 },
+				n3: { x: 0, y: 200 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { enterExitDurationMs: 0, relaxIterations: 1 },
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const absorbedCircle = getCircle(canvasElement, 'n0');
+		const absorbedCenter = getCenter(absorbedCircle);
+		const survivorCenter = getCenter(getCircle(canvasElement, 'n1'));
+
+		dispatchContextMenu(absorbedCircle, absorbedCenter.x, absorbedCenter.y);
+		await sleep();
+		within(canvasElement).getByRole('menuitem', { name: 'Merge' }).click();
+		await sleep();
+
+		dispatchPointer(stage, 'pointermove', survivorCenter.x, survivorCenter.y);
+		await sleep();
+		dispatchPointer(stage, 'pointerdown', survivorCenter.x, survivorCenter.y);
+		dispatchPointer(stage, 'pointerup', survivorCenter.x, survivorCenter.y);
+		await sleep();
+
+		const dialog = canvasElement.querySelector('[role="dialog"]');
+		expect(dialog?.querySelector('.merge-confirm-dialog-detail')).toHaveTextContent(
+			'2 edges will lose their direction.'
+		);
+
+		(canvasElement.querySelector('.merge-confirm-dialog-confirm') as HTMLElement).click();
+		await sleep();
+		await waitForLayout();
+
+		expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
+		const changedGraph = lastChangedGraph(args);
+		expect(changedGraph.nodes.map((node) => node.id)).toEqual(['n1', 'n2', 'n3']);
+		// Exactly the two edges the dialog counted collapsed, and the survivor's
+		// direction is what remains on each.
+		expect(
+			changedGraph.edges.map((edge) => [edge.id, edge.sourceNodeId, edge.targetNodeId])
+		).toEqual([
+			['e1', 'n2', 'n1'],
+			['e3', 'n3', 'n1']
+		]);
+		expect(canvasElement.querySelector('[data-node-id="n0"]')).not.toBeInTheDocument();
 	}}
 />
 
