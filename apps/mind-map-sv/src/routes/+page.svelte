@@ -19,7 +19,7 @@
 	import GraphToolbar from '$lib/components/ui/GraphToolbar/GraphToolbar.svelte';
 	import Multigraph from '$lib/components/ui/Multigraph/Multigraph.svelte';
 	import { createDefaultGraph, shouldEditInitialRootTitle } from '$lib/defaultGraph';
-	import { documentStatusHasUndownloadedChanges } from '$lib/documentStatus';
+	import { documentStatusHasUnsavedChanges } from '$lib/documentStatus';
 	import type { EmbeddedDocumentConflictChoice } from '$lib/graphPersistenceController';
 	import {
 		GRAPH_HTML_PAYLOAD_SCRIPT_ID,
@@ -47,7 +47,7 @@
 
 	const EDIT_ROOT_PARAM = 'editRoot';
 	const STARTUP_ERROR_NOTICE =
-		'The app could not start in this browser, so your work cannot be saved here. Try reloading, or open it in another browser.';
+		'The app could not start in this browser. Try reloading, or open it in another browser.';
 
 	let persisted = $state<PersistedGraph | null>(null);
 	let storageDurability = $state<StorageDurability>('durable');
@@ -177,13 +177,13 @@
 	});
 
 	/**
-	 * True only when leaving would lose work: undownloaded changes that are not
-	 * safely in durable storage. Refreshing a saved draft must stay silent.
+	 * True only when leaving would lose work: unsaved changes that are not even
+	 * safely cached. Refreshing a cached draft must stay silent.
 	 */
 	function hasUnsafeUnsavedChanges(): boolean {
 		if (persisted === null) return false;
-		if (!documentStatusHasUndownloadedChanges(persisted.documentStatus)) return false;
-		return !persisted.draftSaved || storageDurability === 'memory-only';
+		if (!documentStatusHasUnsavedChanges(persisted.documentStatus)) return false;
+		return !persisted.draftCached || storageDurability === 'memory-only';
 	}
 
 	function createNewGraph(): void {
@@ -263,7 +263,7 @@
 		if (requestedRootEdit) removeEditRootTitleFlagFromUrl();
 	}
 
-	async function handleDownload(): Promise<void> {
+	async function handleSave(): Promise<void> {
 		if (!persisted) return;
 		downloadFileArtifact(await persisted.exportGraphDocument(await exportHtmlShell()));
 	}
@@ -421,7 +421,7 @@
 		severity={startupError !== null ? 'warning' : (persisted?.noticeSeverity ?? 'info')}
 		onNewGraph={createNewGraph}
 		onOpenGraphFilePicker={openGraphFilePicker}
-		onDownload={() => void handleDownload()}
+		onSave={() => void handleSave()}
 	/>
 
 	{#if embeddedDocumentConflict !== null}
@@ -432,11 +432,11 @@
 			aria-modal="true"
 		>
 			<section class="conflict-panel">
-				<h2 id="conflict-title">Local edits found</h2>
-				<p>This browser has local edits for this graph. What do you want to open?</p>
+				<h2 id="conflict-title">Cached edits found</h2>
+				<p>This browser has cached edits for this graph. What do you want to open?</p>
 				<div class="conflict-actions">
 					<button type="button" onclick={() => resolveEmbeddedDocumentConflict('recover-draft')}>
-						Recover local edits
+						Recover cached edits
 					</button>
 					<button
 						type="button"

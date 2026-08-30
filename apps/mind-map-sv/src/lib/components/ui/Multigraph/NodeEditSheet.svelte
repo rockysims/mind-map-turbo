@@ -674,7 +674,7 @@
 					</button>
 					<button type="button" class="danger" onclick={onDelete}>Delete</button>
 					<button type="button" class="secondary" onclick={onCancel}>Cancel</button>
-					<button type="button" class="primary" onclick={save}>Save</button>
+					<button type="button" class="primary" onclick={save}>Done</button>
 				</div>
 			</div>
 		{:else}

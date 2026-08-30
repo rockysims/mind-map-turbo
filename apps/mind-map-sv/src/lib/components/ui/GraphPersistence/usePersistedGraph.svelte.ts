@@ -15,7 +15,7 @@ export type PersistedGraph = {
 	readonly graphSummaries: ReturnType<GraphPersistenceController['getView']>['graphSummaries'];
 	readonly loadedGraphId: string;
 	readonly documentStatus: DocumentStatus;
-	readonly draftSaved: boolean;
+	readonly draftCached: boolean;
 	readonly notice: string;
 	readonly noticeSeverity: 'info' | 'warning';
 	load: GraphPersistenceController['load'];
@@ -59,8 +59,8 @@ export function usePersistedGraph(deps: GraphPersistenceControllerDeps): Persist
 		get documentStatus() {
 			return view.documentStatus;
 		},
-		get draftSaved() {
-			return view.draftSaved;
+		get draftCached() {
+			return view.draftCached;
 		},
 		get notice() {
 			return controllerNotice(view);

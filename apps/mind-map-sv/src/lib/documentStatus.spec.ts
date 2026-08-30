@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { makeGraph } from './components/ui/Multigraph/lib/testFixtures';
 import {
-	documentStatusHasUndownloadedChanges,
+	documentStatusHasUnsavedChanges,
 	documentStatusForGraph,
 	documentStatusNotice,
 	graphDataEquals,
@@ -39,7 +39,7 @@ describe('documentStatus', () => {
 		);
 	});
 
-	it('detects opened file drafts and recovered local edits', () => {
+	it('detects opened file drafts and recovered cached edits', () => {
 		const fileGraph = graphWithTitle('File Version');
 		const draftGraph = graphWithTitle('Draft Version');
 
@@ -58,74 +58,71 @@ describe('documentStatus', () => {
 		).toBe('file-recovered-draft');
 	});
 
-	it('tracks the just-downloaded graph as the clean baseline', () => {
-		const downloaded = graphWithTitle('Downloaded');
+	it('tracks the just-saved file as the clean baseline', () => {
+		const savedFile = graphWithTitle('Saved File');
 
-		expect(documentStatusForGraph(downloaded, { kind: 'download', graph: downloaded })).toBe(
-			'download-clean'
+		expect(documentStatusForGraph(savedFile, { kind: 'saved-file', graph: savedFile })).toBe(
+			'saved-file-clean'
 		);
 		expect(
-			documentStatusForGraph(graphWithTitle('Edited After Download'), {
-				kind: 'download',
-				graph: downloaded
+			documentStatusForGraph(graphWithTitle('Edited After Save'), {
+				kind: 'saved-file',
+				graph: savedFile
 			})
-		).toBe('download-dirty');
+		).toBe('saved-file-dirty');
 	});
 
-	it('maps statuses to concise user-facing notices when the draft is saved', () => {
+	it('maps statuses to concise user-facing notices when the draft is cached', () => {
 		const cases: Array<[DocumentStatus, string]> = [
 			['new-clean', 'New graph.'],
-			['new-dirty', 'Draft saved in this browser. Download needed.'],
+			['new-dirty', 'Draft cached in this browser. Save to keep it.'],
 			['file-clean', 'Matches opened file.'],
-			['file-dirty', 'Draft differs from opened file. Download needed.'],
-			['file-recovered-draft', 'Recovered local edits. Download needed.'],
-			['download-clean', 'Matches downloaded file.'],
-			['download-dirty', 'Draft differs from downloaded file. Download needed.']
+			['file-dirty', 'Draft differs from the opened file. Save to keep the changes.'],
+			['file-recovered-draft', 'Recovered cached edits. Save to keep them.'],
+			['saved-file-clean', 'Matches saved file.'],
+			['saved-file-dirty', 'Draft differs from your saved file. Save to keep the changes.']
 		];
 
 		for (const [status, notice] of cases) {
 			expect(documentStatusNotice(status)).toBe(notice);
-			expect(documentStatusNotice(status, { draftSaved: true })).toBe(notice);
+			expect(documentStatusNotice(status, { draftCached: true })).toBe(notice);
 		}
 	});
 
-	it('never claims a draft is saved when nothing reached storage', () => {
+	it('never claims a draft is cached when nothing reached storage', () => {
 		const cases: Array<[DocumentStatus, string]> = [
-			['new-dirty', 'Not saved in this browser. Download to keep your work.'],
+			['new-dirty', 'Draft not cached. Save now to keep your work.'],
 			[
 				'file-dirty',
-				'Draft differs from opened file. Not saved in this browser — download to keep your work.'
+				'Draft differs from the opened file and is not cached. Save now to keep the changes.'
 			],
+			['file-recovered-draft', 'Recovered edits are not cached. Save now to keep them.'],
 			[
-				'file-recovered-draft',
-				'Recovered local edits. Not saved in this browser — download to keep your work.'
-			],
-			[
-				'download-dirty',
-				'Draft differs from downloaded file. Not saved in this browser — download to keep your work.'
+				'saved-file-dirty',
+				'Draft differs from your saved file and is not cached. Save now to keep the changes.'
 			]
 		];
 
 		for (const [status, notice] of cases) {
-			expect(documentStatusNotice(status, { draftSaved: false })).toBe(notice);
+			expect(documentStatusNotice(status, { draftCached: false })).toBe(notice);
 		}
 	});
 
-	it('leaves clean statuses unchanged when nothing is pending a save', () => {
-		for (const status of ['new-clean', 'file-clean', 'download-clean'] as const) {
-			expect(documentStatusNotice(status, { draftSaved: false })).toBe(
-				documentStatusNotice(status, { draftSaved: true })
+	it('leaves clean statuses unchanged when nothing is pending a cache write', () => {
+		for (const status of ['new-clean', 'file-clean', 'saved-file-clean'] as const) {
+			expect(documentStatusNotice(status, { draftCached: false })).toBe(
+				documentStatusNotice(status, { draftCached: true })
 			);
 		}
 	});
 
-	it('prompts for New graph only when changes have not been downloaded', () => {
-		expect(documentStatusHasUndownloadedChanges('new-clean')).toBe(false);
-		expect(documentStatusHasUndownloadedChanges('file-clean')).toBe(false);
-		expect(documentStatusHasUndownloadedChanges('download-clean')).toBe(false);
-		expect(documentStatusHasUndownloadedChanges('new-dirty')).toBe(true);
-		expect(documentStatusHasUndownloadedChanges('file-dirty')).toBe(true);
-		expect(documentStatusHasUndownloadedChanges('file-recovered-draft')).toBe(true);
-		expect(documentStatusHasUndownloadedChanges('download-dirty')).toBe(true);
+	it('prompts for New graph only when changes have not been saved to a file', () => {
+		expect(documentStatusHasUnsavedChanges('new-clean')).toBe(false);
+		expect(documentStatusHasUnsavedChanges('file-clean')).toBe(false);
+		expect(documentStatusHasUnsavedChanges('saved-file-clean')).toBe(false);
+		expect(documentStatusHasUnsavedChanges('new-dirty')).toBe(true);
+		expect(documentStatusHasUnsavedChanges('file-dirty')).toBe(true);
+		expect(documentStatusHasUnsavedChanges('file-recovered-draft')).toBe(true);
+		expect(documentStatusHasUnsavedChanges('saved-file-dirty')).toBe(true);
 	});
 });

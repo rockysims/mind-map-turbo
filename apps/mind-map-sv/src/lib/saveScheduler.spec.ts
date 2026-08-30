@@ -146,7 +146,7 @@ describe('SaveScheduler', () => {
 			state: 'warning',
 			savedAt: 42,
 			fingerprint: graphFingerprint(graph),
-			message: 'Stored graphs use 81% of the local budget.'
+			message: 'Cached graphs use 81% of the local budget.'
 		});
 	});
 });

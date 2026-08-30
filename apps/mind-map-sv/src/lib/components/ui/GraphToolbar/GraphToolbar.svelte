@@ -4,21 +4,21 @@
 		severity = 'info',
 		onNewGraph,
 		onOpenGraphFilePicker,
-		onDownload
+		onSave
 	}: {
 		notice?: string;
 		/** 'warning' announces assertively and wraps: the work is at risk. */
 		severity?: 'info' | 'warning';
 		onNewGraph?: () => void;
 		onOpenGraphFilePicker?: () => void;
-		onDownload?: () => void;
+		onSave?: () => void;
 	} = $props();
 </script>
 
 <div class="graph-toolbar" aria-label="Graph persistence controls">
 	<button type="button" onclick={() => onNewGraph?.()}>New</button>
 	<button type="button" onclick={() => onOpenGraphFilePicker?.()}>Open</button>
-	<button type="button" onclick={() => onDownload?.()}>Download</button>
+	<button type="button" onclick={() => onSave?.()}>Save</button>
 	{#if severity === 'warning'}
 		<p class="warning" role="alert" aria-live="assertive">{notice}</p>
 	{:else}

@@ -1,6 +1,6 @@
 import type { MultigraphData } from './components/ui/types/multigraph';
 
-export type DocumentBaselineKind = 'new' | 'file' | 'download';
+export type DocumentBaselineKind = 'new' | 'file' | 'saved-file';
 
 export type DocumentBaseline = {
 	kind: DocumentBaselineKind;
@@ -13,8 +13,8 @@ export type DocumentStatus =
 	| 'file-clean'
 	| 'file-dirty'
 	| 'file-recovered-draft'
-	| 'download-clean'
-	| 'download-dirty';
+	| 'saved-file-clean'
+	| 'saved-file-dirty';
 
 export function graphFingerprint(graph: MultigraphData): string {
 	return JSON.stringify(graph);
@@ -35,8 +35,8 @@ export function documentStatusForGraph(
 		return clean ? 'new-clean' : 'new-dirty';
 	}
 
-	if (baseline.kind === 'download') {
-		return clean ? 'download-clean' : 'download-dirty';
+	if (baseline.kind === 'saved-file') {
+		return clean ? 'saved-file-clean' : 'saved-file-dirty';
 	}
 
 	if (clean) return 'file-clean';
@@ -46,49 +46,49 @@ export function documentStatusForGraph(
 /**
  * User-facing wording for a document status.
  *
- * `draftSaved` must reflect whether the current graph actually reached storage:
- * a dirty document whose draft has not been written is never described as
- * saved, because that is the message that costs people their work. It defaults
- * to true so status-only callers still read naturally.
+ * `draftCached` must reflect whether the current graph actually reached the
+ * browser's local cache: a dirty document whose draft has not been written is
+ * never described as cached, because that is the message that costs people
+ * their work. It defaults to true so status-only callers still read naturally.
  */
 export function documentStatusNotice(
 	status: DocumentStatus,
-	options: { draftSaved?: boolean } = {}
+	options: { draftCached?: boolean } = {}
 ): string {
-	const draftSaved = options.draftSaved ?? true;
+	const draftCached = options.draftCached ?? true;
 
 	if (status === 'new-clean') return 'New graph.';
 	if (status === 'file-clean') return 'Matches opened file.';
-	if (status === 'download-clean') return 'Matches downloaded file.';
+	if (status === 'saved-file-clean') return 'Matches saved file.';
 
 	if (status === 'new-dirty') {
-		return draftSaved
-			? 'Draft saved in this browser. Download needed.'
-			: 'Not saved in this browser. Download to keep your work.';
+		return draftCached
+			? 'Draft cached in this browser. Save to keep it.'
+			: 'Draft not cached. Save now to keep your work.';
 	}
 
 	if (status === 'file-recovered-draft') {
-		return draftSaved
-			? 'Recovered local edits. Download needed.'
-			: 'Recovered local edits. Not saved in this browser — download to keep your work.';
+		return draftCached
+			? 'Recovered cached edits. Save to keep them.'
+			: 'Recovered edits are not cached. Save now to keep them.';
 	}
 
-	if (status === 'download-dirty') {
-		return draftSaved
-			? 'Draft differs from downloaded file. Download needed.'
-			: 'Draft differs from downloaded file. Not saved in this browser — download to keep your work.';
+	if (status === 'saved-file-dirty') {
+		return draftCached
+			? 'Draft differs from your saved file. Save to keep the changes.'
+			: 'Draft differs from your saved file and is not cached. Save now to keep the changes.';
 	}
 
-	return draftSaved
-		? 'Draft differs from opened file. Download needed.'
-		: 'Draft differs from opened file. Not saved in this browser — download to keep your work.';
+	return draftCached
+		? 'Draft differs from the opened file. Save to keep the changes.'
+		: 'Draft differs from the opened file and is not cached. Save now to keep the changes.';
 }
 
-export function documentStatusHasUndownloadedChanges(status: DocumentStatus): boolean {
+export function documentStatusHasUnsavedChanges(status: DocumentStatus): boolean {
 	return (
 		status === 'new-dirty' ||
 		status === 'file-dirty' ||
 		status === 'file-recovered-draft' ||
-		status === 'download-dirty'
+		status === 'saved-file-dirty'
 	);
 }

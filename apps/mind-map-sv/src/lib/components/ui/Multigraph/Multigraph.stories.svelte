@@ -1023,7 +1023,7 @@
 		descriptionInput.dispatchEvent(new Event('input', { bubbles: true }));
 		await tick();
 		await designationStep?.(canvasElement);
-		canvas.getByRole('button', { name: 'Save' }).click();
+		canvas.getByRole('button', { name: 'Done' }).click();
 		// A microtask flush, not a frame: the settle kick has to be observable
 		// before the first animation frame could have consumed it.
 		await tick();
@@ -1875,7 +1875,7 @@
 		const nodeTagsInput = canvas.getByLabelText('Node tags') as HTMLInputElement;
 		nodeTagsInput.value = 'abc urgent';
 		nodeTagsInput.dispatchEvent(new Event('input', { bubbles: true }));
-		canvas.getByRole('button', { name: 'Save' }).click();
+		canvas.getByRole('button', { name: 'Done' }).click();
 		await sleep();
 
 		expect(canvas.getByText('Updated mobile title')).toBeInTheDocument();

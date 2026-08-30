@@ -83,7 +83,7 @@ class TestScheduler implements GraphSaveScheduler {
 				state: 'warning',
 				savedAt: 123,
 				fingerprint,
-				message: 'Stored graphs use 85% of the local budget.'
+				message: 'Cached graphs use 85% of the local budget.'
 			});
 			return;
 		}
@@ -254,7 +254,7 @@ describe('GraphPersistenceController', () => {
 		});
 	});
 
-	it('does not confirm before replacing a graph that matches the last download', async () => {
+	it('does not confirm before replacing a graph that matches the last saved file', async () => {
 		const confirmNewGraphReplace = vi.fn(() => true);
 		const { controller } = setup({ confirmNewGraphReplace });
 		await controller.load('active');
@@ -362,7 +362,7 @@ describe('GraphPersistenceController', () => {
 		});
 	});
 
-	it('loads embedded HTML documents when no local draft exists', async () => {
+	it('loads embedded HTML documents when no cached draft exists', async () => {
 		const { controller, persistence } = setup();
 		const graph = makeGraph({ nodeCount: 2 });
 		const viewState = nonNeutralViewState();
@@ -379,7 +379,7 @@ describe('GraphPersistenceController', () => {
 		expect(persistence.save).not.toHaveBeenCalled();
 	});
 
-	it('prefers a dirty local document draft over the embedded file payload', async () => {
+	it('prefers a dirty cached document draft over the embedded file payload', async () => {
 		const { controller, persistence } = setup();
 		const fileGraph = makeGraph({ nodeCount: 1 });
 		const draftGraph = makeGraph({ nodeCount: 3 });
@@ -404,7 +404,7 @@ describe('GraphPersistenceController', () => {
 		expect(persistence.save).toHaveBeenCalledTimes(1);
 	});
 
-	it('can prefer an opened embedded file over a dirty local document draft', async () => {
+	it('can prefer an opened embedded file over a dirty cached document draft', async () => {
 		const chooseEmbeddedDocumentConflict = vi.fn(() => 'open-file' as const);
 		const { controller, persistence, scheduler } = setup({ chooseEmbeddedDocumentConflict });
 		const fileGraph = makeGraph({ nodeCount: 1 });
@@ -447,7 +447,7 @@ describe('GraphPersistenceController', () => {
 		});
 	});
 
-	it('recovers a dirty local document draft when the opened file conflict is declined', async () => {
+	it('recovers a dirty cached document draft when the opened file conflict is declined', async () => {
 		const chooseEmbeddedDocumentConflict = vi.fn(() => 'recover-draft' as const);
 		const { controller, persistence, scheduler } = setup({ chooseEmbeddedDocumentConflict });
 		const fileGraph = makeGraph({ nodeCount: 1 });
@@ -505,7 +505,7 @@ describe('GraphPersistenceController', () => {
 			documentStatus: 'new-dirty',
 			status: {
 				state: 'notice',
-				message: 'Kept local draft; another tab changed this document.'
+				message: 'Kept cached draft; another tab changed this document.'
 			}
 		});
 	});
@@ -541,6 +541,31 @@ describe('GraphPersistenceController', () => {
 			documentId: 'doc-new',
 			exportedAt: 456
 		});
+	});
+
+	it('confirms the save by naming the file it wrote', async () => {
+		const { controller } = setup();
+		await controller.load('active');
+		controller.notifyGraphChanged(makeGraph({ nodeCount: 2 }), { syncView: true });
+
+		await controller.exportGraphDocument('<!doctype html><html><body></body></html>');
+
+		expect(controller.getView().status).toEqual({ state: 'exported', filename: 'active.html' });
+		expect(controllerNotice(controller.getView())).toBe('Saved active.html to your downloads.');
+		expect(controllerNoticeSeverity(controller.getView())).toBe('info');
+	});
+
+	it('keeps the blocked-storage warning above the save confirmation', async () => {
+		const { controller } = setup({ durability: 'memory-only' });
+		await controller.load('active');
+
+		await controller.exportGraphDocument('<!doctype html><html><body></body></html>');
+
+		// The file is safe, but this browser is still caching nothing: the standing
+		// condition outranks the confirmation.
+		expect(controller.getView().status).toEqual({ state: 'exported', filename: 'active.html' });
+		expect(controllerNotice(controller.getView())).toBe(MEMORY_ONLY_STORAGE_NOTICE);
+		expect(controllerNoticeSeverity(controller.getView())).toBe('warning');
 	});
 
 	it('imports a valid graph file into the active graph id and refreshes summaries', async () => {
@@ -732,43 +757,43 @@ describe('GraphPersistenceController', () => {
 		});
 	});
 
-	it('treats a graph read back from storage as already saved', async () => {
+	it('treats a graph read back from storage as already cached', async () => {
 		const { controller, persistence } = setup();
 		const graph = makeGraph({ nodeCount: 2 });
 		await persistence.save('saved', { data: graph, viewState: NEUTRAL_VIEW_STATE });
 
 		await controller.load('saved');
 
-		expect(controller.getView().draftSaved).toBe(true);
+		expect(controller.getView().draftCached).toBe(true);
 		expect(controllerNotice(controller.getView())).toBe(
-			'Draft saved in this browser. Download needed.'
+			'Draft cached in this browser. Save to keep it.'
 		);
 		expect(controllerNoticeSeverity(controller.getView())).toBe('info');
 	});
 
-	it('calls an edit saved only once the write has landed', async () => {
+	it('calls an edit cached only once the write has landed', async () => {
 		const { controller, scheduler } = setup();
 		await controller.load('active');
-		expect(controller.getView().draftSaved).toBe(true);
+		expect(controller.getView().draftCached).toBe(true);
 
 		controller.notifyGraphChanged(makeGraph({ nodeCount: 2 }), { syncView: true });
 
 		// Debounce window: the write is owed but not yet attempted, so the notice
 		// reads as in-flight rather than flashing an alarm between keystrokes.
-		expect(controller.getView()).toMatchObject({ draftSaved: false, savePending: true });
-		expect(controllerNotice(controller.getView())).toBe('Saving...');
+		expect(controller.getView()).toMatchObject({ draftCached: false, cachePending: true });
+		expect(controllerNotice(controller.getView())).toBe('Caching draft...');
 		expect(controllerNoticeSeverity(controller.getView())).toBe('info');
 
 		await scheduler.flush();
 
-		expect(controller.getView()).toMatchObject({ draftSaved: true, savePending: false });
+		expect(controller.getView()).toMatchObject({ draftCached: true, cachePending: false });
 		expect(controllerNotice(controller.getView())).toBe(
-			'Draft saved in this browser. Download needed.'
+			'Draft cached in this browser. Save to keep it.'
 		);
 		expect(controllerNoticeSeverity(controller.getView())).toBe('info');
 	});
 
-	it('does not call a draft saved after the save fails', async () => {
+	it('does not call a draft cached after the cache write fails', async () => {
 		const { controller, scheduler } = setup();
 		await controller.load('active');
 		controller.notifyGraphChanged(makeGraph({ nodeCount: 2 }), { syncView: true });
@@ -777,13 +802,13 @@ describe('GraphPersistenceController', () => {
 		await controller.selectGraph('next');
 
 		// The failure clears the pending flag, which is what lets the warning
-		// through instead of leaving a permanent 'Saving...'.
-		expect(controller.getView()).toMatchObject({ draftSaved: false, savePending: false });
-		expect(controllerNotice(controller.getView())).toBe('Save failed: quota exceeded');
+		// through instead of leaving a permanent 'Caching draft...'.
+		expect(controller.getView()).toMatchObject({ draftCached: false, cachePending: false });
+		expect(controllerNotice(controller.getView())).toBe('Could not cache draft: quota exceeded');
 		expect(controllerNoticeSeverity(controller.getView())).toBe('warning');
 	});
 
-	it('keeps a pending save calm while a quota warning is standing', async () => {
+	it('keeps a pending cache write calm while a quota warning is standing', async () => {
 		const { controller, scheduler } = setup();
 		await controller.load('active');
 		scheduler.warnOnFlush = true;
@@ -791,15 +816,15 @@ describe('GraphPersistenceController', () => {
 		await scheduler.flush();
 
 		expect(controllerNotice(controller.getView())).toBe(
-			'Stored graphs use 85% of the local budget.'
+			'Cached graphs use 85% of the local budget.'
 		);
 		expect(controllerNoticeSeverity(controller.getView())).toBe('warning');
 
 		controller.notifyGraphChanged(makeGraph({ nodeCount: 3 }), { syncView: true });
 
-		// Text and styling must agree during the debounce window: 'Saving...' is
-		// not amber, even though the quota warning status is still standing by.
-		expect(controllerNotice(controller.getView())).toBe('Saving...');
+		// Text and styling must agree during the debounce window: 'Caching draft...'
+		// is not amber, even though the quota warning status is still standing by.
+		expect(controllerNotice(controller.getView())).toBe('Caching draft...');
 		expect(controllerNoticeSeverity(controller.getView())).toBe('info');
 	});
 
@@ -812,14 +837,14 @@ describe('GraphPersistenceController', () => {
 
 		await controller.load('saved');
 
-		// A write to tab-lifetime storage is not a save, and the warning outranks
+		// A write to tab-lifetime storage is not caching, and the warning outranks
 		// the transient 'Loaded "saved".' that would otherwise reassure the user.
-		expect(controller.getView().draftSaved).toBe(false);
+		expect(controller.getView().draftCached).toBe(false);
 		expect(controllerNotice(controller.getView())).toBe(MEMORY_ONLY_STORAGE_NOTICE);
 		expect(controllerNoticeSeverity(controller.getView())).toBe('warning');
 	});
 
-	it('still surfaces save failures over the blocked-storage warning', async () => {
+	it('still surfaces cache failures over the blocked-storage warning', async () => {
 		const { controller, scheduler } = setup({ durability: 'memory-only' });
 		await controller.load('active');
 		controller.notifyGraphChanged(makeGraph({ nodeCount: 2 }), { syncView: true });
@@ -827,7 +852,7 @@ describe('GraphPersistenceController', () => {
 
 		await controller.selectGraph('next');
 
-		expect(controllerNotice(controller.getView())).toBe('Save failed: quota exceeded');
+		expect(controllerNotice(controller.getView())).toBe('Could not cache draft: quota exceeded');
 		expect(controllerNoticeSeverity(controller.getView())).toBe('warning');
 	});
 
@@ -850,14 +875,15 @@ describe('statusToNotice', () => {
 			[{ state: 'loading', graphId: 'graph' }, 'Loading graph...'],
 			[{ state: 'loaded', graphId: 'graph' }, 'Loaded "graph".'],
 			[{ state: 'reloaded', graphId: 'graph' }, 'Reloaded "graph" from another tab.'],
-			[{ state: 'saving' }, 'Saving...'],
-			[{ state: 'saved', savedAt: 1 }, 'Saved.'],
+			[{ state: 'saving' }, 'Caching draft...'],
+			[{ state: 'saved', savedAt: 1 }, 'Draft cached.'],
 			[
-				{ state: 'warning', savedAt: 1, message: 'Stored graphs use 81% of the local budget.' },
-				'Stored graphs use 81% of the local budget.'
+				{ state: 'warning', savedAt: 1, message: 'Cached graphs use 81% of the local budget.' },
+				'Cached graphs use 81% of the local budget.'
 			],
 			[{ state: 'notice', message: 'Import cancelled.' }, 'Import cancelled.'],
-			[{ state: 'error', message: 'quota exceeded' }, 'Save failed: quota exceeded']
+			[{ state: 'exported', filename: 'graph.html' }, 'Saved graph.html to your downloads.'],
+			[{ state: 'error', message: 'quota exceeded' }, 'Could not cache draft: quota exceeded']
 		];
 
 		for (const [status, notice] of cases) {

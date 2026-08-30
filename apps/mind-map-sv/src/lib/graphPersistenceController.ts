@@ -3,7 +3,7 @@ import { base64ToBlob, blobToBase64 } from './assets/assetEncoding';
 import type { GraphAssetStore } from './assets/assetStore';
 import { referencedAssetIds } from './components/ui/Multigraph/lib/graph';
 import {
-	documentStatusHasUndownloadedChanges,
+	documentStatusHasUnsavedChanges,
 	documentStatusForGraph,
 	documentStatusNotice,
 	graphDataEquals,
@@ -30,7 +30,7 @@ import type { SaveStatus } from './saveScheduler';
 import type { StorageDurability } from './storageAvailability';
 
 export const MEMORY_ONLY_STORAGE_NOTICE =
-	"This browser is blocking site data, so drafts can't be saved here. Download to keep your work.";
+	'This browser is blocking site data, so nothing is cached here. Save to a file to keep your work.';
 
 type ImportGraphResult =
 	| 'imported'
@@ -48,6 +48,7 @@ export type ControllerStatus =
 	| { state: 'saved'; savedAt: number }
 	| { state: 'warning'; savedAt: number; message: string }
 	| { state: 'notice'; message: string }
+	| { state: 'exported'; filename: string }
 	| { state: 'error'; message: string };
 
 type ControllerView = {
@@ -57,10 +58,10 @@ type ControllerView = {
 	loadedGraphId: string;
 	documentId: string | null;
 	documentStatus: DocumentStatus;
-	/** True only when the graph now in memory is byte-for-byte what storage holds. */
-	draftSaved: boolean;
-	/** A save is scheduled or in flight, so "not saved" is premature rather than true. */
-	savePending: boolean;
+	/** True only when the graph now in memory is byte-for-byte what the cache holds. */
+	draftCached: boolean;
+	/** A cache write is scheduled or in flight, so "not cached" is premature rather than true. */
+	cachePending: boolean;
 	durability: StorageDurability;
 	graphGeneration: number;
 	status: ControllerStatus;
@@ -120,8 +121,8 @@ export class GraphPersistenceController {
 	private recoveredDraft = false;
 	/** Fingerprint of the graph data storage last accepted; null when nothing has been written. */
 	private lastPersistedFingerprint: string | null = null;
-	/** A save has been scheduled and has not reported back yet. */
-	private savePending = false;
+	/** A cache write has been scheduled and has not reported back yet. */
+	private cachePending = false;
 
 	constructor(private readonly deps: GraphPersistenceControllerDeps) {
 		const defaultGraph = deps.createDefaultGraph();
@@ -134,8 +135,8 @@ export class GraphPersistenceController {
 			loadedGraphId: '',
 			documentId: null,
 			documentStatus: documentStatusForGraph(defaultGraph, this.baseline),
-			draftSaved: false,
-			savePending: false,
+			draftCached: false,
+			cachePending: false,
 			durability: deps.durability ?? 'durable',
 			graphGeneration: 0,
 			status: { state: 'loading', graphId: DEFAULT_GRAPH_ID }
@@ -154,8 +155,8 @@ export class GraphPersistenceController {
 		return {
 			...this.view,
 			documentStatus: this.currentDocumentStatus(),
-			draftSaved: this.currentDraftSaved(),
-			savePending: this.savePending,
+			draftCached: this.currentDraftCached(),
+			cachePending: this.cachePending,
 			graphSummaries: [...this.view.graphSummaries]
 		};
 	}
@@ -178,8 +179,8 @@ export class GraphPersistenceController {
 			graph: defaultGraph
 		};
 		this.recoveredDraft = false;
-		// A graph read back out of storage IS what storage holds; a missing one has
-		// not been written yet and only counts once its save reports success.
+		// A graph read back out of the cache IS what the cache holds; a missing one
+		// has not been written yet and only counts once its write reports success.
 		this.lastPersistedFingerprint = savedGraph === null ? null : graphFingerprint(savedGraph.data);
 		this.graphGeneration += 1;
 		this.update({
@@ -235,8 +236,8 @@ export class GraphPersistenceController {
 
 		this.baseline = { kind: 'file', graph: doc.data };
 		this.recoveredDraft = recoveredDraft;
-		// Only the recovered draft came out of storage. The file payload is not in
-		// storage until the save scheduled below reports success.
+		// Only the recovered draft came out of the cache. The file payload is not
+		// cached until the write scheduled below reports success.
 		this.lastPersistedFingerprint =
 			shouldRecoverDraft && savedDraft !== null ? graphFingerprint(savedDraft.data) : null;
 		this.graphGeneration += 1;
@@ -308,9 +309,13 @@ export class GraphPersistenceController {
 				htmlShell
 			}
 		);
-		this.baseline = { kind: 'download', graph: this.view.graph };
+		this.baseline = { kind: 'saved-file', graph: this.view.graph };
 		this.recoveredDraft = false;
-		this.update({ documentId, documentStatus: this.currentDocumentStatus() });
+		this.update({
+			documentId,
+			documentStatus: this.currentDocumentStatus(),
+			status: { state: 'exported', filename: artifact.filename }
+		});
 		return artifact;
 	}
 
@@ -425,7 +430,7 @@ export class GraphPersistenceController {
 	}
 
 	async createGraph(graphId = this.nextGraphId()): Promise<void> {
-		const shouldConfirm = documentStatusHasUndownloadedChanges(this.currentDocumentStatus());
+		const shouldConfirm = documentStatusHasUnsavedChanges(this.currentDocumentStatus());
 		const confirmed = !shouldConfirm
 			? true
 			: ((await this.deps.confirmNewGraphReplace?.({
@@ -480,12 +485,12 @@ export class GraphPersistenceController {
 		if (
 			documentStatus !== 'new-clean' &&
 			documentStatus !== 'file-clean' &&
-			documentStatus !== 'download-clean'
+			documentStatus !== 'saved-file-clean'
 		) {
 			this.update({
 				status: {
 					state: 'notice',
-					message: 'Kept local draft; another tab changed this document.'
+					message: 'Kept cached draft; another tab changed this document.'
 				}
 			});
 			return;
@@ -500,11 +505,11 @@ export class GraphPersistenceController {
 	}
 
 	/**
-	 * Every scheduled save goes through here so `savePending` cannot drift from
-	 * what the scheduler was actually asked to do.
+	 * Every scheduled cache write goes through here so `cachePending` cannot
+	 * drift from what the scheduler was actually asked to do.
 	 */
 	private scheduleSave(id: string, data: MultigraphData, viewState: ViewState): void {
-		this.savePending = true;
+		this.cachePending = true;
 		this.scheduler.schedule(id, data, viewState);
 	}
 
@@ -517,7 +522,7 @@ export class GraphPersistenceController {
 	}
 
 	private handleSaveStatus(status: SaveStatus): void {
-		// A save error leaves the fingerprint alone: it still describes the last
+		// A cache error leaves the fingerprint alone: it still describes the last
 		// write that actually landed.
 		if (status.state === 'saved' || status.state === 'warning') {
 			this.lastPersistedFingerprint = status.fingerprint;
@@ -526,7 +531,7 @@ export class GraphPersistenceController {
 		// The scheduler has reported back, so nothing is owed any more: a failure
 		// clears the pending flag too, which is what lets the warning surface.
 		if (status.state === 'saved' || status.state === 'warning' || status.state === 'error') {
-			this.savePending = false;
+			this.cachePending = false;
 		}
 
 		this.update({ status: saveStatusToControllerStatus(status) });
@@ -593,8 +598,8 @@ export class GraphPersistenceController {
 			...this.view,
 			...patch,
 			documentStatus: patch.documentStatus ?? this.currentDocumentStatus(nextGraph),
-			draftSaved: this.currentDraftSaved(nextGraph),
-			savePending: this.savePending
+			draftCached: this.currentDraftCached(nextGraph),
+			cachePending: this.cachePending
 		};
 		this.emit();
 	}
@@ -603,8 +608,8 @@ export class GraphPersistenceController {
 		return documentStatusForGraph(graph, this.baseline, { recoveredDraft: this.recoveredDraft });
 	}
 
-	private currentDraftSaved(graph = this.view.graph): boolean {
-		// Writing to memory-only storage is not saving: it dies with the tab.
+	private currentDraftCached(graph = this.view.graph): boolean {
+		// Writing to memory-only storage is not caching: it dies with the tab.
 		if (this.view.durability === 'memory-only') return false;
 		if (this.lastPersistedFingerprint === null) return false;
 		return graphFingerprint(graph) === this.lastPersistedFingerprint;
@@ -630,35 +635,39 @@ export function statusToNotice(status: ControllerStatus): string {
 	if (status.state === 'loading') return 'Loading graph...';
 	if (status.state === 'loaded') return `Loaded "${status.graphId}".`;
 	if (status.state === 'reloaded') return `Reloaded "${status.graphId}" from another tab.`;
-	if (status.state === 'saving') return 'Saving...';
-	if (status.state === 'saved') return 'Saved.';
+	if (status.state === 'saving') return 'Caching draft...';
+	if (status.state === 'saved') return 'Draft cached.';
 	if (status.state === 'warning') return status.message;
 	if (status.state === 'notice') return status.message;
-	return `Save failed: ${status.message}`;
+	if (status.state === 'exported') return `Saved ${status.filename} to your downloads.`;
+	return `Could not cache draft: ${status.message}`;
 }
 
 export function controllerNotice(view: ControllerView): string {
 	if (view.status.state === 'error') return statusToNotice(view.status);
 	// Memory-only storage is a standing condition, not a transient status: it
-	// outranks 'Saving...' / 'Saved.' / 'Loaded "x".', which would otherwise
-	// reassure the user that work is being kept when nothing is.
+	// outranks 'Caching draft...' / 'Draft cached.' / 'Loaded "x".', which would
+	// otherwise reassure the user that work is being kept when nothing is. It
+	// also outranks the post-save confirmation: the file is safe, but this
+	// browser still is not caching anything.
 	if (view.durability === 'memory-only') return MEMORY_ONLY_STORAGE_NOTICE;
+	if (view.status.state === 'exported') return statusToNotice(view.status);
 	if (view.status.state === 'loading') return statusToNotice(view.status);
 	if (view.status.state === 'saving') return statusToNotice(view.status);
-	// A debounced save that has not fired yet is still a save in progress. Saying
-	// 'Saving...' beats flashing "not saved" between every keystroke and the
-	// write that follows it half a second later.
-	if (view.savePending) return statusToNotice({ state: 'saving' });
+	// A debounced cache write that has not fired yet is still in progress. Saying
+	// 'Caching draft...' beats flashing "not cached" between every keystroke and
+	// the write that follows it half a second later.
+	if (view.cachePending) return statusToNotice({ state: 'saving' });
 	if (view.status.state === 'warning') return statusToNotice(view.status);
 	if (
 		view.status.state === 'notice' &&
 		(view.status.message.includes('failed') ||
 			view.status.message.includes('newer') ||
-			view.status.message.includes('Kept local draft'))
+			view.status.message.includes('Kept cached draft'))
 	) {
 		return view.status.message;
 	}
-	return documentStatusNotice(view.documentStatus, { draftSaved: view.draftSaved });
+	return documentStatusNotice(view.documentStatus, { draftCached: view.draftCached });
 }
 
 /**
@@ -670,14 +679,15 @@ export function controllerNoticeSeverity(view: ControllerView): 'info' | 'warnin
 	if (view.status.state === 'error') return 'warning';
 	if (view.durability === 'memory-only') return 'warning';
 	// Mirrors controllerNotice's precedence exactly, so the styling always
-	// matches the text: a pending save renders 'Saving...' and must not be
-	// amber, even while a quota warning status is standing by.
+	// matches the text: a pending cache write renders 'Caching draft...' and must
+	// not be amber, even while a quota warning status is standing by.
+	if (view.status.state === 'exported') return 'info';
 	if (view.status.state === 'loading' || view.status.state === 'saving') return 'info';
-	if (view.savePending) return 'info';
+	if (view.cachePending) return 'info';
 	if (view.status.state === 'warning') return 'warning';
 	// Only escalate when the notice is the document-status one saying the work
 	// is not saved.
-	if (!view.draftSaved && documentStatusHasUndownloadedChanges(view.documentStatus)) {
+	if (!view.draftCached && documentStatusHasUnsavedChanges(view.documentStatus)) {
 		return 'warning';
 	}
 	return 'info';

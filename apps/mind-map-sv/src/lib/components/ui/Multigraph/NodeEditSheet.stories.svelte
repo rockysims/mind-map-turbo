@@ -358,7 +358,7 @@
 
 		expect(preview(canvasElement)?.querySelector('.temml-error')).toBeTruthy();
 
-		canvas.getByRole('button', { name: 'Save' }).click();
+		canvas.getByRole('button', { name: 'Done' }).click();
 		const saveSpy = args.onSave as unknown as SaveSpy;
 		expect(saveSpy.mock.calls.at(-1)?.[0].description).toBe(draft);
 	}}
@@ -373,7 +373,7 @@
 		typeDescription(canvasElement, draft);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 
-		canvas.getByRole('button', { name: 'Save' }).click();
+		canvas.getByRole('button', { name: 'Done' }).click();
 		const saveSpy = args.onSave as unknown as SaveSpy;
 		expect(saveSpy.mock.calls.at(-1)?.[0].description).toBe(draft);
 	}}
@@ -461,7 +461,7 @@
 		chip(canvasElement, 'g').click();
 		await settle();
 
-		canvas.getByRole('button', { name: 'Save' }).click();
+		canvas.getByRole('button', { name: 'Done' }).click();
 
 		// Structured pairs, not symbol keys: a key embeds a NUL to separate base
 		// from subscript, which must never reach a save file.
@@ -524,7 +524,7 @@
 
 		expect(fieldOf(canvasElement, 'description').value).toBe('Weight is $w = w$ here.');
 
-		canvas.getByRole('button', { name: 'Save' }).click();
+		canvas.getByRole('button', { name: 'Done' }).click();
 		const saveSpy = args.onSave as unknown as SaveSpy;
 		expect(saveSpy.mock.calls.at(-1)?.[0].description).toBe('Weight is $w = w$ here.');
 	}}

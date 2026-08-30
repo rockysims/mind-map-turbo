@@ -27,6 +27,11 @@ type PendingSave = {
 	};
 };
 
+/**
+ * Debounced writer for the storage layer shared with the server backend, so its
+ * names stay generic ("save"). In UI vocabulary this layer *caches* the draft;
+ * "saved" is reserved for exporting the self-contained HTML file.
+ */
 export class SaveScheduler {
 	private pending: PendingSave | null = null;
 	private timer: ReturnType<typeof setTimeout> | null = null;
@@ -90,7 +95,7 @@ export class SaveScheduler {
 					state: 'warning',
 					savedAt,
 					fingerprint,
-					message: `Stored graphs use ${Math.round(warning.ratio * 100)}% of the local budget.`
+					message: `Cached graphs use ${Math.round(warning.ratio * 100)}% of the local budget.`
 				});
 			} else {
 				this.report({ state: 'saved', savedAt, fingerprint });
