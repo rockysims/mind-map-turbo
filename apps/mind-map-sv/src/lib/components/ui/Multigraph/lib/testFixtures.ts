@@ -20,12 +20,7 @@ type MakeEdgeInput =
 			target: number | string;
 	  });
 
-export const EMPTY_TAG_COLOR_CONFIG: TagColorConfig = {
-	nodeTags: {},
-	edgeTags: {}
-};
-
-export interface MakeGraphInput {
+interface MakeGraphInput {
 	/** Number of nodes to generate (with ids 'n0', 'n1', ...). Ignored if `nodes` is provided. */
 	nodeCount?: number;
 	/** Explicit nodes; takes precedence over nodeCount. */
@@ -105,7 +100,7 @@ export function designations(...labels: string[]): QuantityDesignation[] {
 }
 
 /** Inputs and outputs for one node, as labels. */
-export interface NodeDesignationInput {
+interface NodeDesignationInput {
 	inputs?: string[];
 	outputs?: string[];
 }
@@ -235,7 +230,7 @@ export const MIXED_DIRECTION_PARALLEL_EDGES_GRAPH = makeGraph({
 	]
 });
 
-export interface MakeRandomEdgesInput {
+interface MakeRandomEdgesInput {
 	nodeCount: number;
 	edgeCount: number;
 	/** Seed for deterministic pseudo-random endpoints. Default 42. */
@@ -293,7 +288,7 @@ export function makeRandomEdges({
 	return edges;
 }
 
-export interface AssignNodeGroupsInput {
+interface AssignNodeGroupsInput {
 	nodeCount: number;
 	groupCount: number;
 	/** Seed for deterministic group assignment. Default 42. */
@@ -320,7 +315,7 @@ export function assignNodeGroups({
 	return Array.from({ length: nodeCount }, () => Math.floor(next() * groupCount));
 }
 
-export interface MakeClusteredRandomEdgesInput {
+interface MakeClusteredRandomEdgesInput {
 	nodeCount: number;
 	edgeCount: number;
 	groupCount: number;
@@ -541,7 +536,7 @@ export function makeClusteredRandomEdges({
 	return edges;
 }
 
-export const DEFAULT_RANDOM_TAG_POOL = [
+const DEFAULT_RANDOM_TAG_POOL = [
 	'topic',
 	'urgent',
 	'idea',
@@ -559,7 +554,7 @@ export const DEFAULT_RANDOM_TAG_POOL = [
 	'done'
 ] as const;
 
-export interface WithRandomTagsAndDirectionsInput {
+interface WithRandomTagsAndDirectionsInput {
 	/** Seed for deterministic tag counts and edge directions. Default 42. */
 	seed?: number;
 	/** Inclusive min/max tag counts per node. Defaults 0 and 4. */

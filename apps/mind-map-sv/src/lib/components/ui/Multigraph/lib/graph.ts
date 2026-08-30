@@ -10,7 +10,7 @@ import { mathPlainText } from '../../MathText/lib/mathPlainText';
 import { symbolFor } from '../../MathText/lib/mathSymbols';
 import { parseTitleSyntax } from './titleSyntax';
 
-export interface AddNodeInput {
+interface AddNodeInput {
 	id?: string;
 	title?: string;
 	description?: string;
@@ -21,7 +21,7 @@ export interface AddNodeInput {
 	outputs?: QuantityDesignation[];
 }
 
-export interface AddEdgeInput {
+interface AddEdgeInput {
 	id?: string;
 	tags?: string[];
 	directed?: boolean;
@@ -238,7 +238,7 @@ export function setNodeDesignations(
 }
 
 /** A designation's canonical identity — the key of the symbol it designates. */
-export function designationKey(designation: QuantityDesignation): string {
+function designationKey(designation: QuantityDesignation): string {
 	return symbolFor(designation.base, designation.subscript).key;
 }
 

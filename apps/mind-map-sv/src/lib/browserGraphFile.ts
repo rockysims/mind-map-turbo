@@ -5,7 +5,7 @@
  * the rest of the app stays pure and tests can inject a fake adapter.
  */
 
-export type BrowserFileArtifact = {
+type BrowserFileArtifact = {
 	content: string;
 	filename: string;
 	mimeType: string;
@@ -16,11 +16,7 @@ export const OPEN_HTML_FILE_TEXT_SESSION_KEY = 'mind-map:open-file-text';
 export const OPEN_HTML_FILE_WINDOW_NAME_PREFIX = 'mind-map:open-file:';
 
 /** Trigger a file download with the given text content and suggested filename. */
-export function downloadTextFile(
-	content: string,
-	filename: string,
-	mimeType = 'application/json'
-): void {
+function downloadTextFile(content: string, filename: string, mimeType = 'application/json'): void {
 	const blob = new Blob([content], { type: mimeType });
 	const url = URL.createObjectURL(blob);
 	const anchor = document.createElement('a');
@@ -46,25 +42,8 @@ export function openHtmlTextInNewTab(html: string, urlSuffix = ''): boolean {
 	return true;
 }
 
-export function openBlankHtmlTab(): Window | null {
+function openBlankHtmlTab(): Window | null {
 	return window.open('about:blank', '_blank');
-}
-
-export function openHtmlFileInNewTab(file: File, opened = openBlankHtmlTab()): boolean {
-	if (opened === null) {
-		return false;
-	}
-	const reader = new FileReader();
-	reader.onload = () => {
-		opened.document.open();
-		opened.document.write(String(reader.result ?? ''));
-		opened.document.close();
-	};
-	reader.onerror = () => {
-		opened.close();
-	};
-	reader.readAsText(file);
-	return true;
 }
 
 export function openHtmlFilePickerInNewTab(appUrl: string): boolean {
@@ -186,27 +165,4 @@ function filePickerTabHtml(appUrl: string): string {
 
 function scriptCloseTag(): string {
 	return '</' + 'script>';
-}
-
-/**
- * Read the text content of a File object.
- *
- * Returns a promise that resolves to the file text, or rejects with an Error
- * if the read fails.
- */
-export function readFileText(file: File): Promise<string> {
-	return new Promise((resolve, reject) => {
-		const reader = new FileReader();
-		reader.onload = () => resolve(reader.result as string);
-		reader.onerror = () => reject(new Error(`Failed to read file: ${file.name}`));
-		reader.readAsText(file);
-	});
-}
-
-/**
- * Reset a file input element so that selecting the same file again will fire
- * another `change` event.
- */
-export function resetFileInput(input: HTMLInputElement): void {
-	input.value = '';
 }

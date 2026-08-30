@@ -15,7 +15,7 @@ export interface NodeFocusCandidate {
 	zIndex?: number;
 }
 
-export interface ScreenCircle {
+interface ScreenCircle {
 	nodeId: string;
 	center: Point;
 	radius: number;

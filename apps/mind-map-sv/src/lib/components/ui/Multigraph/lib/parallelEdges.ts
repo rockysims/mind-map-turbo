@@ -1,13 +1,13 @@
 import type { EdgeData } from '../../types/edge';
 import type { Point } from '../../types/multigraph';
 
-export const DEFAULT_PARALLEL_EDGE_SPACING_PX = 12;
-export const DEFAULT_PARALLEL_EDGE_MAX_OFFSET_RADIUS_FACTOR = 0.5;
-export const DEFAULT_PARALLEL_EDGE_CLEARANCE_PX = 4;
+const DEFAULT_PARALLEL_EDGE_SPACING_PX = 12;
+const DEFAULT_PARALLEL_EDGE_MAX_OFFSET_RADIUS_FACTOR = 0.5;
+const DEFAULT_PARALLEL_EDGE_CLEARANCE_PX = 4;
 
 const ZERO_OFFSET: Point = { x: 0, y: 0 };
 
-export interface ParallelEdgeOptions {
+interface ParallelEdgeOptions {
 	spacingPx?: number;
 	maxOffsetRadiusFactor?: number;
 	clearancePx?: number;

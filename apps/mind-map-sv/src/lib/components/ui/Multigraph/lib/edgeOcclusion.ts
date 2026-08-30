@@ -4,8 +4,8 @@ export const DEFAULT_EDGE_OCCLUSION_CLEARANCE_PX = 6;
 export const DEFAULT_EDGE_OCCLUSION_FADE_WIDTH_PX = 12;
 export const DEFAULT_EDGE_OCCLUSION_MIN_OPACITY = 0.16;
 export const DEFAULT_EDGE_OCCLUSION_ZOOM_SCALE_EXPONENT = 0.5;
-export const DEFAULT_EDGE_OCCLUSION_ZOOM_MIN_MULTIPLIER = 0.5;
-export const DEFAULT_EDGE_OCCLUSION_ZOOM_MAX_MULTIPLIER = 4;
+const DEFAULT_EDGE_OCCLUSION_ZOOM_MIN_MULTIPLIER = 0.5;
+const DEFAULT_EDGE_OCCLUSION_ZOOM_MAX_MULTIPLIER = 4;
 
 const MIN_EDGE_OCCLUSION_SEGMENT_LENGTH_PX = 1;
 const EDGE_OCCLUSION_TOUCH_EPSILON_PX = 1e-6;
@@ -24,19 +24,19 @@ export interface EdgeOcclusionNode {
 	radius: number;
 }
 
-export interface EdgeOcclusionOptions {
+interface EdgeOcclusionOptions {
 	edgeOcclusionClearancePx?: number;
 	edgeOcclusionFadeWidthPx?: number;
 	edgeOcclusionMinOpacity?: number;
 }
 
-export interface EdgeOcclusionZoomBaseParameters {
+interface EdgeOcclusionZoomBaseParameters {
 	clearancePx: number;
 	fadeWidthPx: number;
 	zoomScaleExponent?: number;
 }
 
-export interface EdgeOcclusionZoomParameters {
+interface EdgeOcclusionZoomParameters {
 	edgeOcclusionClearancePx: number;
 	edgeOcclusionFadeWidthPx: number;
 }

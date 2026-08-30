@@ -9,7 +9,7 @@ export type SaveStatus =
 	| { state: 'warning'; savedAt: number; message: string }
 	| { state: 'error'; message: string };
 
-export type QuotaWarning = {
+type QuotaWarning = {
 	usedBytes: number;
 	budgetBytes: number;
 	ratio: number;

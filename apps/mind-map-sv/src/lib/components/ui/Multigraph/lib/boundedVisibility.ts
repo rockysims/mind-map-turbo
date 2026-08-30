@@ -4,9 +4,9 @@ import { withBeaconHops } from './beacons';
 import { hopsFromPinned } from './layout';
 import type { EdgeEndpointIds } from './physics';
 
-export const DEFAULT_DISPLAYED_LAYERS = 10;
-export const DEFAULT_DATAFLOW_DISPLAYED_LAYERS = 1;
-export const DEFAULT_BOUNDARY_FADE_RATIO = 0.5;
+const DEFAULT_DISPLAYED_LAYERS = 10;
+const DEFAULT_DATAFLOW_DISPLAYED_LAYERS = 1;
+const DEFAULT_BOUNDARY_FADE_RATIO = 0.5;
 
 export type EdgeVisibility =
 	| {
@@ -27,7 +27,7 @@ export type EdgeVisibility =
 			edge: EdgeData;
 	  };
 
-export interface PinnedNeighborhoodVisibilityOptions {
+interface PinnedNeighborhoodVisibilityOptions {
 	displayedLayers?: number;
 	boundaryFadeRatio?: number;
 }

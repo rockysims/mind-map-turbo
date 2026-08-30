@@ -60,6 +60,12 @@ jobs:
       - name: Type check (svelte-check)
         run: pnpm --filter mind-map-sv check
 
+      # Unused files, exports, types and dependencies. ESLint cannot do this job
+      # here: its `no-unused-modules` rule does not follow imports out of
+      # `.svelte` files, and almost every consumer in this app is one.
+      - name: Dead code (knip)
+        run: pnpm --filter mind-map-sv knip
+
       - name: "Tests (vitest: server + client + storybook)"
         run: pnpm --filter mind-map-sv test:unit -- --run
 

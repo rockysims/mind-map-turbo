@@ -64,7 +64,7 @@ export interface LayoutRuntimeScheduler {
 	now(): number;
 }
 
-export interface LayoutRuntimeOptions {
+interface LayoutRuntimeOptions {
 	getGraph: () => MultigraphData;
 	getLayoutSettings: () => Partial<LayoutSettings>;
 	getActiveDragNodeId: () => string | null;

@@ -1,4 +1,4 @@
-export type ScaleChangeSettleState = {
+type ScaleChangeSettleState = {
 	pendingPostScaleSettle: boolean;
 	settleFramesRemaining: number;
 };

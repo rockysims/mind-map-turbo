@@ -11,7 +11,7 @@ import {
 	type ViewportSize
 } from './zoomBoundary';
 
-export type FocusEntryBoundaryPhase = 'free' | 'steering' | 'boundary';
+type FocusEntryBoundaryPhase = 'free' | 'steering' | 'boundary';
 export type FocusEntrySteeringAxis = 'horizontal' | 'vertical';
 export type FocusEntrySteeringSide = 'start' | 'end';
 
@@ -28,7 +28,7 @@ export interface FocusEntrySteeringState {
 	startScale: number;
 }
 
-export interface FocusEntryBoundaryStep {
+interface FocusEntryBoundaryStep {
 	view: ViewTransform;
 	projectedRect: Rect;
 	boundaryScale: number;
@@ -37,7 +37,7 @@ export interface FocusEntryBoundaryStep {
 	steeringState: FocusEntrySteeringState | null;
 }
 
-export interface FocusEntryBoundaryInput {
+interface FocusEntryBoundaryInput {
 	currentView: ViewTransform;
 	requestedScale: number;
 	focalPoint: Point;

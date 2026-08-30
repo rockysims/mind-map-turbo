@@ -27,7 +27,7 @@ import {
 } from './persistence';
 import type { SaveStatus } from './saveScheduler';
 
-export type ImportGraphResult =
+type ImportGraphResult =
 	| 'imported'
 	| 'cancelled'
 	| 'invalid'
@@ -45,7 +45,7 @@ export type ControllerStatus =
 	| { state: 'notice'; message: string }
 	| { state: 'error'; message: string };
 
-export type ControllerView = {
+type ControllerView = {
 	graph: MultigraphData;
 	viewState: ViewState;
 	graphSummaries: GraphSummary[];
@@ -62,7 +62,7 @@ export type GraphSaveScheduler = {
 	dispose(): void;
 };
 
-export type LoadGraphResult = {
+type LoadGraphResult = {
 	createdDefaultGraph: boolean;
 };
 

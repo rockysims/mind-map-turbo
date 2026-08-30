@@ -74,7 +74,7 @@ export function prunedNavStack(
 }
 
 /** What unwinding produced: the stack that remains, and where to go. */
-export interface NavStackUnwind {
+interface NavStackUnwind {
 	entries: NavStackEntry[];
 	target: NavStackEntry;
 }
