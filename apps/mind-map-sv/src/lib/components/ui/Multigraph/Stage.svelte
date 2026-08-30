@@ -886,11 +886,13 @@
 	onwheel={onWheel}
 	role="presentation"
 >
-	<div
-		class="stage-content"
-		style="transform: {transformStyle}; transform-origin: 50% 50%;"
-		aria-hidden="true"
-	>
+	<!--
+		Deliberately NOT `aria-hidden`. It was, which put the entire graph — every
+		node, every title — outside the accessibility tree, so the canvas offered a
+		screen reader nothing at all. The parts that really are decoration say so
+		themselves: the edge layer, and the buffered/exiting/preview node renders.
+	-->
+	<div class="stage-content" style="transform: {transformStyle}; transform-origin: 50% 50%;">
 		{#if children}
 			{@render children()}
 		{/if}
