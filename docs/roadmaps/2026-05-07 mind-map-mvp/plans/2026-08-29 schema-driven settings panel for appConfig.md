@@ -149,7 +149,7 @@ Every non-hidden key falls into one of four behaviors. This drives both the
 | **`none`** — nothing to see                                  | `interaction.*` (4), `math.*` (4), `dataflow.chip{Peek,Insert}LongPressMs`                                                                                                                                                                                                                                                                                  | Live-applied, no visual feedback                                                                                                                                                                |
 | **`hidden`** — not exposed                                   | `persistence.*` (4), `tagSyntax.*` (2), `nodeRadiusPx`                                                                                                                                                                                                                                                                                                      | Excluded, with reasons above                                                                                                                                                                    |
 
-76 keys total: 67 exposed, 9 hidden.
+76 keys total: 69 exposed (15 basic, 54 advanced), 7 hidden.
 
 ## Out of scope (for this plan)
 
@@ -537,7 +537,7 @@ every graph export already carries its settings, so the save side is free.
 | **Files**      | `routes/+page.svelte`, e2e                                     |
 | **PR title**   | `feat(settings): add a URL escape hatch for unusable settings` |
 
-With 67 live knobs it is possible to reach a state where the graph — and so the
+With 69 live knobs it is possible to reach a state where the graph — and so the
 button that opens the panel — is unusable. A `?resetSettings=1` query param
 clears the loaded graph's overrides before first render, then strips itself from
 the URL.
