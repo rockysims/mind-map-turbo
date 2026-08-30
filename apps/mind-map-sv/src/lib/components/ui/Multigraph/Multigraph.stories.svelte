@@ -1,6 +1,7 @@
 <script module lang="ts">
 	import { defineMeta } from '@storybook/addon-svelte-csf';
 	import Multigraph from '$lib/components/ui/Multigraph/Multigraph.svelte';
+	import MultigraphSettingsHarness from './MultigraphSettingsHarness.svelte';
 	import { expect, fn, waitFor, within } from 'storybook/test';
 	import { tick } from 'svelte';
 	import { APP_CONFIG } from '$lib/appConfig';
@@ -1013,6 +1014,94 @@
 		// before the first animation frame could have consumed it.
 		await tick();
 	}
+
+	/** Play context for the stories that render `MultigraphSettingsHarness`. */
+	type HarnessPlayContext = {
+		canvasElement: HTMLElement;
+	};
+
+	function getSettingsHarness(el: HTMLElement): HTMLElement {
+		const harness = el.querySelector('.harness');
+		if (!(harness instanceof HTMLElement)) throw new Error('Settings harness not found');
+		return harness;
+	}
+
+	function getGraphElement(el: HTMLElement): HTMLElement {
+		const graph = el.querySelector('.graph');
+		if (!(graph instanceof HTMLElement)) throw new Error('Graph element not found');
+		return graph;
+	}
+
+	function harnessSettings(el: HTMLElement): Record<string, unknown> {
+		return JSON.parse(getSettingsHarness(el).dataset.settings ?? '{}') as Record<string, unknown>;
+	}
+
+	function settingsSlider(el: HTMLElement, label: string): HTMLInputElement {
+		const slider = within(el).getByRole('slider', { name: label });
+		if (!(slider instanceof HTMLInputElement)) throw new Error(`Slider "${label}" not found`);
+		return slider;
+	}
+
+	/**
+	 * The event sequence a real pointer drag produces on a range input: one
+	 * `input` per movement, then a single `change` on release. Omitting the
+	 * release models a drag still under the finger, which is exactly the state
+	 * these stories are about.
+	 */
+	function dragSettingsSlider(slider: HTMLInputElement, steps: number[], release = true): void {
+		for (const step of steps) {
+			slider.value = String(step);
+			slider.dispatchEvent(new Event('input', { bubbles: true }));
+		}
+		if (release) slider.dispatchEvent(new Event('change', { bubbles: true }));
+	}
+
+	function nodeScale(el: HTMLElement, nodeId: string): number {
+		return Number(getNodeWrapper(el, nodeId).dataset.scale);
+	}
+
+	/** The node's rendered text size, straight off the custom property it is set through. */
+	function nodeTextFontSize(el: HTMLElement, nodeId: string): string {
+		const styled = el.querySelector(`[data-node-id="${nodeId}"] [style*="--node-text-font-size"]`);
+		if (!(styled instanceof HTMLElement)) throw new Error(`No sized content for ${nodeId}`);
+		return styled.style.getPropertyValue('--node-text-font-size').trim();
+	}
+
+	/** A pinned root with two hops off it, so hop scaling has something to show. */
+	const SETTINGS_HOP_CHAIN = makeGraph({
+		nodeCount: 3,
+		pinned: [0],
+		edges: chainEdges(3),
+		posByNodeId: {
+			n0: { x: -420, y: 0 },
+			n1: { x: 0, y: 0 },
+			n2: { x: 420, y: 0 }
+		}
+	});
+
+	/**
+	 * Two nodes far apart with the springs switched off in the graph's own
+	 * settings, so the ingest settle leaves them where they are put and the graph
+	 * is genuinely at rest before the story touches anything.
+	 */
+	const SETTINGS_SPRING_PAIR = makeGraph({
+		nodeCount: 2,
+		pinned: [0],
+		edges: [[0, 1]],
+		posByNodeId: {
+			n0: { x: -600, y: 0 },
+			n1: { x: 600, y: 0 }
+		}
+	});
+
+	const SETTINGS_SINGLE_NODE = makeGraph({ nodeCount: 1, pinned: [0] });
+
+	/** No physics at all: what moves in these stories is only what the story moved. */
+	const SETTINGS_STILL_LAYOUT = {
+		relaxIterations: 0,
+		hopRepulsionStrength: 0,
+		edgeSpringStrength: 0
+	};
 </script>
 
 <Story
@@ -5681,3 +5770,176 @@
 		expect(canvasElement.querySelector('[data-create-defining-node]')).not.toBeInTheDocument();
 	}}
 />
+
+<Story
+	name="DraggingScaleFalloffResizesNodesUnderTheFinger"
+	play={async ({ canvasElement }: HarnessPlayContext) => {
+		await waitForLayout();
+		const harness = getSettingsHarness(canvasElement);
+		const shippedFalloff = APP_CONFIG.multigraph.layout.scaleFalloff;
+
+		// One hop off the pin, so the node's size is exactly the falloff.
+		expect(nodeScale(canvasElement, 'n1')).toBeCloseTo(shippedFalloff, 5);
+
+		const slider = settingsSlider(canvasElement, 'Scale falloff per hop');
+		dragSettingsSlider(slider, [0.55, 0.4, 0.3], false);
+
+		// The point of the whole preview channel: the graph is already drawn at the
+		// new value while the pointer is still down, so the reader is choosing by
+		// looking rather than by releasing and undoing.
+		await waitFor(() => expect(nodeScale(canvasElement, 'n1')).toBeCloseTo(0.3, 5));
+		expect(getNodeWrapper(canvasElement, 'n1').style.transform).toContain('scale(0.3)');
+
+		// Nothing has been persisted yet: three moves, no save.
+		expect(harness.dataset.settingsChangeCount).toBe('0');
+		expect(harnessSettings(canvasElement)).toEqual({});
+
+		slider.dispatchEvent(new Event('change', { bubbles: true }));
+
+		await waitFor(() => expect(harness.dataset.settingsChangeCount).toBe('1'));
+		expect(harnessSettings(canvasElement)).toEqual({ 'multigraph.layout.scaleFalloff': 0.3 });
+		// The handoff from the transient preview to the committed override is
+		// invisible: the size the reader chose is the size that stays.
+		expect(nodeScale(canvasElement, 'n1')).toBeCloseTo(0.3, 5);
+	}}
+>
+	{#snippet template()}
+		<MultigraphSettingsHarness
+			multigraphData={SETTINGS_HOP_CHAIN}
+			defaultPrimaryNodeId="n0"
+			layoutSettings={SETTINGS_STILL_LAYOUT}
+			panelOpenAtMount
+		/>
+	{/snippet}
+</Story>
+
+<Story
+	name="DraggingEdgeSpringStrengthStartsTheFrameLoop"
+	play={async ({ canvasElement }: HarnessPlayContext) => {
+		await waitForLayout();
+		const harness = getSettingsHarness(canvasElement);
+		const graph = getGraphElement(canvasElement);
+		const nodeIds = ['n0', 'n1'];
+
+		// A physics setting shows nothing at rest, so the story has to establish
+		// that the graph really was at rest — otherwise the movement it asserts
+		// later could be a settle that was already running.
+		expect(graph.dataset.settling).toBeUndefined();
+		const before = nodePositions(canvasElement, nodeIds);
+		await waitForFrames(4);
+		expect(nodePositions(canvasElement, nodeIds)).toEqual(before);
+
+		const slider = settingsSlider(canvasElement, 'Edge spring strength');
+		dragSettingsSlider(slider, [1, 2], false);
+
+		// The settle kick: `physics` fields are read per frame, so without the loop
+		// running a change to one of them would be invisible until the next drag.
+		await waitFor(() => expect(graph.dataset.settling).toBe('true'));
+		await waitForFrames(20);
+
+		const after = nodePositions(canvasElement, nodeIds);
+		// n0 is pinned, so the spring can only pull the free end toward it.
+		expect(distanceBetween(before.n0, after.n0)).toBe(0);
+		expect(distanceBetween(before.n1, after.n1)).toBeGreaterThan(0);
+		// The spring pulls: whatever else moved, the two ends are closer.
+		expect(distanceBetween(after.n0, after.n1)).toBeLessThan(distanceBetween(before.n0, before.n1));
+
+		// Still nothing persisted — the pointer never came up.
+		expect(harness.dataset.settingsChangeCount).toBe('0');
+		expect(harnessSettings(canvasElement)).toEqual({
+			'multigraph.layout.edgeSpringStrength': 0
+		});
+	}}
+>
+	{#snippet template()}
+		<MultigraphSettingsHarness
+			multigraphData={SETTINGS_SPRING_PAIR}
+			defaultPrimaryNodeId="n0"
+			layoutSettings={{ hopRepulsionStrength: 0 }}
+			initialSettings={{ 'multigraph.layout.edgeSpringStrength': 0 }}
+			panelOpenAtMount
+		/>
+	{/snippet}
+</Story>
+
+<Story
+	name="ASliderDragPersistsOnceOnRelease"
+	play={async ({ canvasElement }: HarnessPlayContext) => {
+		await waitForLayout();
+		const harness = getSettingsHarness(canvasElement);
+		const slider = settingsSlider(canvasElement, 'Scale falloff per hop');
+
+		// Sixty of these a second reach the canvas; none of them may reach the save
+		// scheduler, which is the whole reason preview and commit are two channels.
+		dragSettingsSlider(slider, [0.65, 0.6, 0.55, 0.5, 0.45], false);
+		await waitFor(() => expect(nodeScale(canvasElement, 'n1')).toBeCloseTo(0.45, 5));
+		expect(harness.dataset.settingsChangeCount).toBe('0');
+
+		slider.dispatchEvent(new Event('change', { bubbles: true }));
+		await waitFor(() => expect(harness.dataset.settingsChangeCount).toBe('1'));
+
+		// `pointerup` after `change` is the other half of a real release, and the
+		// commit is idempotent across the pair.
+		slider.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+		await waitForFrames(2);
+		expect(harness.dataset.settingsChangeCount).toBe('1');
+		expect(harnessSettings(canvasElement)).toEqual({ 'multigraph.layout.scaleFalloff': 0.45 });
+	}}
+>
+	{#snippet template()}
+		<MultigraphSettingsHarness
+			multigraphData={SETTINGS_HOP_CHAIN}
+			defaultPrimaryNodeId="n0"
+			layoutSettings={SETTINGS_STILL_LAYOUT}
+			panelOpenAtMount
+		/>
+	{/snippet}
+</Story>
+
+<Story
+	name="ASettingsChangeDoesNotRemountTheCanvas"
+	play={async ({ canvasElement }: HarnessPlayContext) => {
+		await waitForLayout();
+		const harness = getSettingsHarness(canvasElement);
+		const stage = getStage(canvasElement);
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+		const moveToX = center.x + NODE_RADIUS + 20;
+		const moveToY = center.y - 40;
+
+		// Put the node somewhere only this reader would have put it, with the panel
+		// still closed so nothing overlays the canvas during the gesture.
+		dispatchPointer(circle, 'pointerdown', center.x, center.y);
+		dispatchPointer(stage, 'pointermove', moveToX, moveToY);
+		dispatchPointer(stage, 'pointerup', moveToX, moveToY);
+		await waitForFrames(4);
+
+		const graphBefore = getGraphElement(canvasElement);
+		const wrapperBefore = getNodeWrapper(canvasElement, 'n0');
+		const positionBefore = nodePosition(canvasElement, 'n0');
+		expect(positionBefore.x).toBeGreaterThan(0);
+
+		within(canvasElement).getByRole('button', { name: 'Settings' }).click();
+		await waitFor(() => expect(harness.dataset.settingsPanelOpen).toBe('true'));
+
+		dragSettingsSlider(settingsSlider(canvasElement, 'Node text size'), [72]);
+		await waitFor(() => expect(harness.dataset.settingsChangeCount).toBe('1'));
+		await waitFor(() => expect(nodeTextFontSize(canvasElement, 'n0')).toBe('72px'));
+
+		// Settings ride beside `viewState`, never inside `MultigraphData`, and
+		// `notifySettingsChanged` leaves `graphGeneration` alone — so the canvas
+		// this reader arranged is the same canvas, not a fresh one at a fresh
+		// layout. Element identity is the strongest available witness to that.
+		expect(getGraphElement(canvasElement)).toBe(graphBefore);
+		expect(getNodeWrapper(canvasElement, 'n0')).toBe(wrapperBefore);
+		expect(nodePosition(canvasElement, 'n0')).toEqual(positionBefore);
+	}}
+>
+	{#snippet template()}
+		<MultigraphSettingsHarness
+			multigraphData={SETTINGS_SINGLE_NODE}
+			defaultPrimaryNodeId="n0"
+			layoutSettings={SETTINGS_STILL_LAYOUT}
+		/>
+	{/snippet}
+</Story>

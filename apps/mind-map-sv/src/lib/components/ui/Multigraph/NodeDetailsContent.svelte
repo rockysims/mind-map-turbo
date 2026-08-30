@@ -27,6 +27,7 @@
 	} from './lib/peekCascade';
 	import QuantityDesignationChips from './QuantityDesignationChips.svelte';
 	import QuantityPeekCard from './QuantityPeekCard.svelte';
+	import { APP_CONFIG } from '$lib/appConfig';
 
 	const EMPTY_DIAGNOSTICS: NodeDiagnosticsView = { items: [], cycleNodeIds: [] };
 	const EMPTY_QUANTITIES: NodeQuantities = { defines: [], references: [] };
@@ -85,7 +86,8 @@
 		onCycleDesignation,
 		onCreateDefiningNode,
 		onConfirmDefiner,
-		onJumpToNode
+		onJumpToNode,
+		chipPeekHoldMs = APP_CONFIG.multigraph.dataflow.chipPeekLongPressMs
 	}: {
 		node: NodeData;
 		assets?: Record<string, GraphAssetMetadata>;
@@ -145,6 +147,13 @@
 		 * like a link.
 		 */
 		onJumpToNode?: (nodeId: string) => void;
+		/**
+		 * How long a hold has to last on a quantity chip here, and on the drill
+		 * chips inside every card it opens. Handed down from the graph's resolved
+		 * config rather than read here, so the setting reaches the gesture; the
+		 * default is the shipped constant, for the stories that pass nothing.
+		 */
+		chipPeekHoldMs?: number;
 	} = $props();
 
 	let imageUrls = $state<Record<string, string>>({});
@@ -404,6 +413,7 @@
 		}}
 		{onCreateDefiningNode}
 		{onConfirmDefiner}
+		drillHoldMs={chipPeekHoldMs}
 		onClose={() => closeCascade(cascade.id)}
 	/>
 {/snippet}
@@ -429,6 +439,7 @@
 				onCycle={onCycleDesignation}
 				onPeek={openPeek}
 				{peekKeys}
+				peekHoldMs={chipPeekHoldMs}
 			/>
 			{#if cascades.length > 0}
 				<!--

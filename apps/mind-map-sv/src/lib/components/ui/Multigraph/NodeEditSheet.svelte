@@ -21,6 +21,7 @@
 	} from './lib/quantityTextInsertion';
 	import { symbolFor } from '../MathText/lib/mathSymbols';
 	import QuantityDesignationChips from './QuantityDesignationChips.svelte';
+	import { APP_CONFIG } from '$lib/appConfig';
 
 	type ActiveTab = 'node' | 'edges';
 	type DirectionChoice = 'undirected' | 'outgoing' | 'incoming';
@@ -38,7 +39,8 @@
 		onSaveEdge,
 		onCancel,
 		onTogglePinned,
-		onDelete
+		onDelete,
+		chipInsertHoldMs = APP_CONFIG.multigraph.dataflow.chipInsertLongPressMs
 	}: {
 		node: NodeData;
 		nodes: NodeData[];
@@ -62,6 +64,13 @@
 		onCancel: () => void;
 		onTogglePinned: () => void;
 		onDelete: () => void;
+		/**
+		 * How long a hold on a quantity chip has to last before its symbol is
+		 * written into the text. Handed down from the graph's resolved config rather
+		 * than read here, so the setting reaches the gesture; the default is the
+		 * shipped constant, for the stories that pass nothing.
+		 */
+		chipInsertHoldMs?: number;
 	} = $props();
 
 	let activeTab = $state<ActiveTab>('node');
@@ -559,6 +568,7 @@
 					view={designations}
 					onCycle={cycle}
 					onInsert={insertQuantity}
+					insertHoldMs={chipInsertHoldMs}
 				/>
 
 				<!--

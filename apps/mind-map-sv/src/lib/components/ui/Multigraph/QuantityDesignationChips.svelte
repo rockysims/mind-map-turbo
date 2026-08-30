@@ -35,20 +35,15 @@
 	/** Shared so a surface with no peek at all allocates nothing per render. */
 	const EMPTY_PEEK_KEYS: ReadonlySet<string> = new Set();
 
-	/**
-	 * Read per render, not captured at init: a config that can change at runtime
-	 * has to reach the chips without remounting the columns.
-	 */
-	const peekHoldMs = $derived(APP_CONFIG.multigraph.dataflow.chipPeekLongPressMs);
-	const insertHoldMs = $derived(APP_CONFIG.multigraph.dataflow.chipInsertLongPressMs);
-
 	let {
 		mode,
 		view,
 		onCycle,
 		onPeek,
 		onInsert,
-		peekKeys = EMPTY_PEEK_KEYS
+		peekKeys = EMPTY_PEEK_KEYS,
+		peekHoldMs = APP_CONFIG.multigraph.dataflow.chipPeekLongPressMs,
+		insertHoldMs = APP_CONFIG.multigraph.dataflow.chipInsertLongPressMs
 	}: {
 		mode: 'edit' | 'view';
 		view: DesignationView;
@@ -70,6 +65,15 @@
 		 * quantity confirmed both ways has a card per column.
 		 */
 		peekKeys?: ReadonlySet<string>;
+		/**
+		 * How long a hold has to last, in each mode. Props rather than reads of
+		 * `APP_CONFIG`, because a per-graph setting only reaches the chips if the
+		 * parent hands it over — a value captured here would be the shipped default
+		 * forever. The defaults are the shipped constants, so a story or a spec that
+		 * passes nothing still gets the gesture it was written against.
+		 */
+		peekHoldMs?: number;
+		insertHoldMs?: number;
 	} = $props();
 
 	/**

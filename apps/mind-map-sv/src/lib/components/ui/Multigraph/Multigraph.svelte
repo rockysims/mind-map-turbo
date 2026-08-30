@@ -1,5 +1,8 @@
 <script module lang="ts">
 	import type { QuantityDesignation } from '../types/node';
+	import type { ConfigOverrides, ResolvedConfig } from '$lib/config/configOverrides';
+	import type { ConfigPath, ConfigValue } from '$lib/config/configPaths';
+	import { CONFIG_SCHEMA } from '$lib/config/configSchema';
 
 	/**
 	 * Shared so a node with no confirmed inputs allocates nothing. The peek
@@ -8,6 +11,63 @@
 	 * the cards' derived work for a graph that did not change.
 	 */
 	const EMPTY_DESIGNATIONS: readonly QuantityDesignation[] = [];
+
+	/**
+	 * Shared empty overrides, so a graph with no settings of its own hands the
+	 * same object to `resolveConfig` on every render and the derived config keeps
+	 * its identity. A fresh `{}` prop fallback would invalidate every measurement
+	 * this component derives, once per render.
+	 */
+	const NO_OVERRIDES: ConfigOverrides = {};
+
+	/**
+	 * The settings whose change the layout cannot show on its own.
+	 *
+	 * `resize-only` fields recompute radius and scale through a `$derived` layout
+	 * built with `relaxIterations: 0`, so nodes grow in place and overlap;
+	 * `physics` fields are read per frame, so they change nothing at all while the
+	 * loop is stopped. Both need the frame loop kicked. `instant`, `gesture` and
+	 * `none` fields either redraw themselves or are correct the moment the next
+	 * gesture asks, so kicking for them would settle the graph for nothing.
+	 *
+	 * Derived from the schema once, at module scope: the list follows
+	 * `CONFIG_SCHEMA`, so a field reclassified there needs no edit here.
+	 */
+	const SETTLE_KICK_PATHS: readonly ConfigPath[] = (
+		Object.entries(CONFIG_SCHEMA) as [ConfigPath, (typeof CONFIG_SCHEMA)[ConfigPath]][]
+	)
+		.filter(
+			([, spec]) =>
+				spec.control !== 'hidden' && (spec.preview === 'resize-only' || spec.preview === 'physics')
+		)
+		.map(([path]) => path);
+
+	/** Reads the leaf at a dotted path out of an already-resolved config. */
+	function readResolvedValue(config: ResolvedConfig, path: ConfigPath): ConfigValue | undefined {
+		let current: unknown = config;
+		for (const segment of path.split('.')) {
+			if (typeof current !== 'object' || current === null) return undefined;
+			current = (current as Record<string, unknown>)[segment];
+		}
+		if (
+			typeof current === 'number' ||
+			typeof current === 'boolean' ||
+			typeof current === 'string'
+		) {
+			return current;
+		}
+		return undefined;
+	}
+
+	/**
+	 * One string standing for every value that needs a settle kick, so the effect
+	 * that kicks depends on those values and nothing else — not on the override
+	 * map, whose identity changes on every preview tick regardless of which field
+	 * moved.
+	 */
+	function settleKickFingerprint(config: ResolvedConfig): string {
+		return SETTLE_KICK_PATHS.map((path) => String(readResolvedValue(config, path))).join('|');
+	}
 </script>
 
 <script lang="ts">
@@ -28,7 +88,8 @@
 	import DeepZoomStack, { type StackFrameArgs, type LayerBaseSize } from './DeepZoomStack.svelte';
 	import Stage from './Stage.svelte';
 	import TagColorLegend from './TagColorLegend.svelte';
-	import { APP_CONFIG } from '$lib/appConfig';
+	import SettingsPanel from '$lib/components/ui/SettingsPanel/SettingsPanel.svelte';
+	import { resolveConfig, setOverride } from '$lib/config/configOverrides';
 	import type { GraphAssetStore } from '$lib/assets/assetStore';
 	import { prefersReducedMotion } from '$lib/reducedMotion';
 	import type { NodeData } from '../types/node';
@@ -211,7 +272,11 @@
 		exitingBuffer,
 		assetStore = null,
 		assetScope = '',
-		dataflowEnabled = true
+		dataflowEnabled = true,
+		settings = NO_OVERRIDES,
+		settingsPanelOpen = false,
+		onSettingsChange,
+		onSettingsPanelClose
 	}: {
 		multigraphData: MultigraphData;
 		graphGeneration?: number;
@@ -231,19 +296,54 @@
 		assetScope?: string;
 		/** Draw dataflow edges inferred from the math in node descriptions. */
 		dataflowEnabled?: boolean;
+		/** This graph's persisted tunables, sparse: only what its author changed. */
+		settings?: ConfigOverrides;
+		/** Whether the settings panel is showing. Owned by the page, beside the toolbar button. */
+		settingsPanelOpen?: boolean;
+		/** A committed settings map, ready to persist. Never fired while a slider is moving. */
+		onSettingsChange?: (next: ConfigOverrides) => void;
+		/** The panel asked to close itself; the page owns whether it is open. */
+		onSettingsPanelClose?: () => void;
 	} = $props();
 
 	/**
-	 * The one place this component reads tunables.
+	 * The setting a slider is moving right now, if any. One is enough: a pointer
+	 * drags one slider at a time, and the panel's contract is that a preview is
+	 * transient by construction — it is replaced by the next preview and dropped
+	 * by the commit that ends the drag.
+	 */
+	let settingsPreview = $state<{ path: ConfigPath; value: ConfigValue } | null>(null);
+
+	/**
+	 * `settings` with the in-flight preview laid over it.
+	 *
+	 * Deliberately a plain write rather than `setOverride`: that function drops a
+	 * value equal to the shipped default, which is right for a commit (so saved
+	 * settings never accumulate no-ops) and wrong here — dragging a slider back
+	 * through its default must show the default, not the value underneath it.
+	 */
+	const previewedOverrides = $derived.by((): ConfigOverrides => {
+		const preview = settingsPreview;
+		if (preview === null) return settings;
+		const next: Partial<Record<ConfigPath, ConfigValue>> = { ...settings };
+		next[preview.path] = preview.value;
+		// Every key still holds the value of its own leaf; the widened map type is
+		// what forgets which key each value came from.
+		return next as ConfigOverrides;
+	});
+
+	/**
+	 * The one place this component reads tunables: the shipped defaults with this
+	 * graph's own settings merged over them, plus whatever slider is moving.
 	 *
 	 * Every measurement, timing and threshold below is derived from `cfg` rather
 	 * than captured at import or at component init, and every child that needs one
 	 * is handed it explicitly — never left to its own prop default, which is
-	 * evaluated once and would silently swallow a change. So swapping the
-	 * expression here for a per-graph resolved config is a one-line edit that
-	 * reaches every pixel this component draws.
+	 * evaluated once and would silently swallow a change. That is what makes a
+	 * slider visible while it is being dragged: the drag feeds `previewedOverrides`
+	 * and every pixel below re-derives from it.
 	 */
-	const cfg = $derived(APP_CONFIG);
+	const cfg = $derived(resolveConfig(previewedOverrides));
 
 	const focusTransitionMs = $derived(cfg.multigraph.focus.entryTransitionMs);
 	const focusEntryGestureIdleMs = $derived(cfg.multigraph.focus.entryGestureIdleMs);
@@ -262,6 +362,19 @@
 	const strokeWidthPx = $derived(cfg.multigraph.edgeStroke.widthPx);
 	const strokeReferenceNodeScale = $derived(cfg.multigraph.edgeStroke.referenceNodeScale);
 	const dataflowCfg = $derived(cfg.multigraph.dataflow);
+	/**
+	 * This graph's layout tunables, with the `layoutSettings` prop on top.
+	 *
+	 * Order matters and is not negotiable: ~40 stories pin layout values through
+	 * the prop to make a behavior reproducible, and a graph's saved settings must
+	 * not be able to overrule a test that pins one. So the config supplies the
+	 * base — which is what makes the panel's layout sliders live — and an explicit
+	 * prop still wins over it, exactly as it wins over `DEFAULT_LAYOUT_SETTINGS`.
+	 */
+	const layoutSettingsFromConfig = $derived<Partial<LayoutSettings>>({
+		...cfg.multigraph.layout,
+		...layoutSettings
+	});
 	/** Everything Stage needs; a prop default there is only a story's fallback. */
 	const stageTunables = $derived({
 		dragThreshold: cfg.interaction.dragThresholdPx,
@@ -408,7 +521,8 @@
 		getGraph: () => graph,
 		computeHops: (data) => hopsFor(data),
 		composeDerivedEdges: (data) => withSpringFactor(dataflowModel(data, dataflowEnabled).edges),
-		getLayoutSettings: () => layoutSettings,
+		// A getter, re-read every frame, so a physics slider is live while it moves.
+		getLayoutSettings: () => layoutSettingsFromConfig,
 		getActiveDragNodeId: () => activeDragNodeId,
 		getPreferredBeaconNodeIds: () => severedBeaconPreference,
 		applyGraph: (nextGraph) => {
@@ -433,7 +547,13 @@
 		}
 	});
 
-	const resolvedLayoutSettings = $derived(withDefaultLayoutSettings(layoutSettings));
+	/**
+	 * `withDefaultLayoutSettings` still runs, but only as a type completion: the
+	 * config already supplies every key, so `DEFAULT_LAYOUT_SETTINGS` is a
+	 * last-resort fallback for callers of the pure module, not a path this
+	 * component takes.
+	 */
+	const resolvedLayoutSettings = $derived(withDefaultLayoutSettings(layoutSettingsFromConfig));
 
 	/** Tags derived edges with how hard they pull. */
 	function withSpringFactor(edges: readonly DerivedEdge[]): DerivedEdge[] {
@@ -697,7 +817,7 @@
 		lastSyncedGeneration = generation;
 		const incoming = untrack(() => multigraphData);
 		const primary = untrack(() => defaultPrimaryNodeId);
-		const settings = untrack(() => layoutSettings);
+		const ingestLayoutSettings = untrack(() => layoutSettingsFromConfig);
 		layoutRuntime.reset();
 		// Cleared before the settle measures anything: a preference left over from
 		// the graph being replaced must not pick a beacon in the one arriving.
@@ -721,7 +841,7 @@
 		// sizes it is about to appear at rather than at a first guess.
 		const hopsByNodeIdForIngest = untrack(() => hopsFor(incoming));
 		const settledLayoutGraph = withSettledGraphPositions(layoutGraphForIngest, {
-			settings,
+			settings: ingestLayoutSettings,
 			hopsByNodeId: hopsByNodeIdForIngest
 		});
 		// Positions only: `settledLayoutGraph.edges` carries the derived edges, and
@@ -731,6 +851,47 @@
 		internalExitingBuffer = EMPTY_EXITING_BUFFER;
 		nodeEnterAnimations = {};
 		edgeEnterAnimations = {};
+	});
+
+	/**
+	 * Kicks the frame loop when a setting changes that the canvas cannot show on
+	 * its own — the `resize-only` and `physics` fields, and only those.
+	 *
+	 * It depends on a fingerprint of those resolved values rather than on the
+	 * override map, so a preview of an `instant` field (which redraws itself) does
+	 * not settle the graph, and a commit that merely re-shapes the map without
+	 * changing a value does nothing at all. The first run only records the
+	 * baseline: mounting is not a settings change, and the ingest settle above has
+	 * already put the graph where it belongs.
+	 */
+	const layoutSettleFingerprint = $derived(settleKickFingerprint(cfg));
+	let lastLayoutSettleFingerprint = $state<string | null>(null);
+
+	$effect(() => {
+		const fingerprint = layoutSettleFingerprint;
+		const previous = untrack(() => lastLayoutSettleFingerprint);
+		if (previous === fingerprint) return;
+		lastLayoutSettleFingerprint = fingerprint;
+		if (previous === null) return;
+		layoutRuntime.settleAfterSettingsChange();
+	});
+
+	/**
+	 * Opening the settings panel closes whatever else was open, mirroring
+	 * `toggleGraphQueryPanel` — the two panels share the same top-left corner, so
+	 * both on screen at once would stack one over the other.
+	 *
+	 * Guarded on the transition rather than the value: `closeOverlays` on every
+	 * render while the panel is open would make the panel impossible to edit a
+	 * node behind, and would fight the reader's own overlays for no reason.
+	 */
+	let settingsPanelWasOpen = $state(false);
+
+	$effect(() => {
+		const isOpen = settingsPanelOpen;
+		if (isOpen === untrack(() => settingsPanelWasOpen)) return;
+		settingsPanelWasOpen = isOpen;
+		if (isOpen) closeOverlays();
 	});
 
 	$effect(() => {
@@ -1130,6 +1291,9 @@
 	function toggleGraphQueryPanel() {
 		const shouldOpen = !graphQueryPanelOpen;
 		closeOverlays();
+		// The other half of the mutual exclusion: the settings panel is owned by the
+		// page, so closing it is a request rather than an assignment.
+		if (shouldOpen) onSettingsPanelClose?.();
 		graphQueryPanelOpen = shouldOpen;
 	}
 
@@ -2151,6 +2315,7 @@
 			onCancel={() => (editNodeId = null)}
 			onTogglePinned={() => toggleNodePinned(editNode.id)}
 			onDelete={() => deleteNode(editNode.id)}
+			chipInsertHoldMs={dataflowCfg.chipInsertLongPressMs}
 		/>
 	{/if}
 
@@ -2235,6 +2400,7 @@
 								createDefiningNode(consumerNodeId ?? detailsNode.id, quantityLabel, quantityKey)}
 							onConfirmDefiner={confirmDefinerOutput}
 							onJumpToNode={(nodeId) => jumpToNode(detailsNode.id, nodeId)}
+							chipPeekHoldMs={dataflowCfg.chipPeekLongPressMs}
 						/>
 					</NodeDetailsLayer>
 				</div>
@@ -2372,6 +2538,29 @@
 			onClose={() => {
 				graphQueryPanelOpen = false;
 				graphQueryPreviewText = null;
+			}}
+		/>
+	{/if}
+
+	{#if settingsPanelOpen}
+		<SettingsPanel
+			overrides={settings}
+			onPreview={(path, value) => (settingsPreview = { path, value })}
+			onCommit={(path, value) => {
+				// The preview goes first: `setOverride` may drop the key (a value equal
+				// to the default), and a preview left standing would keep showing the
+				// value the user just cleared.
+				settingsPreview = null;
+				onSettingsChange?.(setOverride(settings, path, value));
+			}}
+			onOverridesChange={(next) => {
+				settingsPreview = null;
+				onSettingsChange?.(next);
+			}}
+			onClose={() => {
+				// A preview belongs to a pointer that is no longer on a slider.
+				settingsPreview = null;
+				onSettingsPanelClose?.();
 			}}
 		/>
 	{/if}

@@ -44,6 +44,12 @@
 	const EDIT_ROOT_PARAM = 'editRoot';
 
 	let persisted = $state<PersistedGraph | null>(null);
+	/**
+	 * Owned here, beside the toolbar button that opens it, because the button and
+	 * the panel live in different components — `GraphToolbar` above the canvas and
+	 * `Multigraph` inside it.
+	 */
+	let settingsPanelOpen = $state(false);
 	let graphAssetStore = $state<IndexedDbGraphAssetStore | null>(null);
 	let selectedGraphId = $state(graphIdFromUrl(page.url));
 	let initialTitleEditNodeId = $state<string | null>(null);
@@ -109,6 +115,8 @@
 				window.confirm(
 					`Replace the current graph "${loadedGraphId}" with the imported graph? This cannot be undone.`
 				),
+			// Shipped defaults, not the graph's own settings: a file's zoom bounds
+			// cannot clamp the parse that loads them.
 			minScale: APP_CONFIG.multigraph.zoom.minScale,
 			maxScale: APP_CONFIG.multigraph.zoom.maxScale,
 			assetStore,
@@ -232,6 +240,8 @@
 	function readEmbeddedGraphDocument(): GraphFileDocument | null {
 		if (document.getElementById(GRAPH_HTML_PAYLOAD_SCRIPT_ID) === null) return null;
 		try {
+			// Shipped defaults, for the same reason: a file's own settings cannot
+			// clamp the parse that loads them.
 			return parseGraphFileText(currentHtmlShell(), {
 				minScale: APP_CONFIG.multigraph.zoom.minScale,
 				maxScale: APP_CONFIG.multigraph.zoom.maxScale
@@ -244,6 +254,8 @@
 	function readSelectedGraphDocument(text: string | null): GraphFileDocument | null {
 		if (text === null) return null;
 		try {
+			// Shipped defaults, for the same reason: a file's own settings cannot
+			// clamp the parse that loads them.
 			return parseGraphFileText(text, {
 				minScale: APP_CONFIG.multigraph.zoom.minScale,
 				maxScale: APP_CONFIG.multigraph.zoom.maxScale
@@ -382,6 +394,8 @@
 		onNewGraph={createNewGraph}
 		onOpenGraphFilePicker={openGraphFilePicker}
 		onDownload={() => void handleDownload()}
+		settingsOpen={settingsPanelOpen}
+		onOpenSettings={() => (settingsPanelOpen = !settingsPanelOpen)}
 	/>
 
 	{#if embeddedDocumentConflict !== null}
@@ -411,6 +425,11 @@
 	{/if}
 
 	{#if persisted !== null}
+		<!--
+			Settings are deliberately absent from this key. `notifySettingsChanged`
+			leaves `graphGeneration` alone precisely so a slider release cannot remount
+			the canvas and throw away the layout the reader was looking at.
+		-->
 		{#key `${persisted.loadedGraphId}:${persisted.graphGeneration}`}
 			<Multigraph
 				multigraphData={persisted.graph}
@@ -420,9 +439,13 @@
 				{defaultPrimaryNodeId}
 				assetStore={graphAssetStore}
 				assetScope={persisted.loadedGraphId}
+				settings={persisted.settings}
+				{settingsPanelOpen}
 				onMultigraphChange={(graph) => persisted?.notifyGraphChanged(graph, { syncView: true })}
 				onViewStateChange={(viewState) =>
 					persisted?.notifyViewStateChanged(viewState, { syncView: true })}
+				onSettingsChange={(next) => persisted?.notifySettingsChanged(next, { syncView: true })}
+				onSettingsPanelClose={() => (settingsPanelOpen = false)}
 			/>
 		{/key}
 	{/if}

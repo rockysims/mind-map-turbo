@@ -60,12 +60,6 @@
 	 */
 	const MAX_INDENT_LEVELS = 4;
 
-	/**
-	 * Passed to every drill chip rather than left to the chip's own prop default:
-	 * a default is evaluated once, so it can never be the path a config that
-	 * changes at runtime takes to the gesture.
-	 */
-	const drillHoldMs = $derived(APP_CONFIG.multigraph.dataflow.chipPeekLongPressMs);
 	const INDENT_REM_PER_LEVEL = 0.75;
 
 	let {
@@ -86,7 +80,8 @@
 		onJumpToNode,
 		onCreateDefiningNode,
 		onConfirmDefiner,
-		onClose
+		onClose,
+		drillHoldMs = APP_CONFIG.multigraph.dataflow.chipPeekLongPressMs
 	}: {
 		/** The index entry for this card's quantity, or undefined when nothing knows it. */
 		entry?: QuantityIndexEntry;
@@ -150,6 +145,13 @@
 		onConfirmDefiner?: (definerNodeId: string, quantityKey: string) => void;
 		/** Root card only: dismiss the whole cascade. */
 		onClose?: () => void;
+		/**
+		 * How long a hold on a drill chip has to last. A prop rather than a read of
+		 * `APP_CONFIG`, so a per-graph setting reaches the gesture; the default is
+		 * the shipped constant, which is what a story that passes nothing gets.
+		 * Passed down every recursion, or a cascade would change gesture with depth.
+		 */
+		drillHoldMs?: number;
 	} = $props();
 
 	let card = $state<HTMLDivElement | null>(null);
@@ -352,6 +354,7 @@
 				{onJumpToNode}
 				{onCreateDefiningNode}
 				{onConfirmDefiner}
+				{drillHoldMs}
 			/>
 		{/if}
 	{/each}
