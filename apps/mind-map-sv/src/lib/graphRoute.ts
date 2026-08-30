@@ -2,13 +2,13 @@ export const DEFAULT_GRAPH_ID = 'default';
 
 type ResolvePath = (path: '/') => string;
 
-export type GraphRouteMode = 'query' | 'hash';
+type GraphRouteMode = 'query' | 'hash';
 
 export function graphRouteModeForProtocol(protocol: string): GraphRouteMode {
 	return protocol === 'file:' || protocol === 'blob:' ? 'hash' : 'query';
 }
 
-export type GraphRouteOptions = {
+type GraphRouteOptions = {
 	editRoot?: boolean;
 };
 
@@ -55,6 +55,27 @@ export function graphIdFromUrl(url: URL, mode: GraphRouteMode = 'query'): string
 	}
 	const params = url.searchParams;
 	return params.get('graph') ?? DEFAULT_GRAPH_ID;
+}
+
+/**
+ * An href with its hash route stripped — everything before the `#`.
+ *
+ * Named rather than open-coded because `+page.svelte` was doing
+ * `href.split('#')[0]` in six places and `.split('?')[0]` after it in three of
+ * them, which is two different questions ("drop the hash route" and "drop every
+ * route") that looked identical at a glance.
+ */
+export function urlWithoutHash(href: string): string {
+	return href.split('#')[0];
+}
+
+/**
+ * The bare app URL: no hash route and no query route, whichever mode this
+ * document is being served under. What you want when you are about to append a
+ * fresh route of your own, or hand someone the app itself.
+ */
+export function appUrlWithoutGraphRoute(href: string): string {
+	return urlWithoutHash(href).split('?')[0];
 }
 
 function graphRouteParams(graphId: string, options: GraphRouteOptions): URLSearchParams {
