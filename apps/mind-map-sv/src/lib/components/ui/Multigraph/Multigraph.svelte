@@ -219,6 +219,7 @@
 			assets: {}
 		},
 		graphGeneration = 0,
+		graphRevision = 0,
 		defaultPrimaryNodeId = '',
 		initialTitleEditNodeId,
 		layoutSettings = {},
@@ -233,7 +234,14 @@
 		dataflowEnabled = true
 	}: {
 		multigraphData: MultigraphData;
+		/** Bumped when the document is swapped: this component is keyed on it and remounts. */
 		graphGeneration?: number;
+		/**
+		 * Bumped when the *same* document is mutated from outside this component (an
+		 * additive import). Not part of the caller's key: the canvas stays mounted
+		 * and adopts the incoming graph in place, keeping pan, zoom, focus and nav.
+		 */
+		graphRevision?: number;
 		defaultPrimaryNodeId?: string;
 		initialTitleEditNodeId?: string | null;
 		layoutSettings?: Partial<LayoutSettings>;
@@ -320,6 +328,15 @@
 	 */
 	let severedBeaconPreference = $state<string[]>([]);
 	let lastSyncedGeneration = $state(-1);
+	/**
+	 * Seeded from the incoming revision rather than from -1, which is the whole
+	 * difference between the two sync effects: mounting *is* the ingest, so the
+	 * generation effect must fire on mount and the revision effect must not.
+	 *
+	 * The initial value is all that is wanted here — `untrack` says so rather than
+	 * leaving the compiler to guess it was a mistake.
+	 */
+	let lastSyncedRevision = $state(untrack(() => graphRevision));
 	let lastInitialTitleEditKey = $state('');
 	let stageViewState = $state<ViewState>({ panX: 0, panY: 0, scale: 1 });
 	const stageScale = $derived(stageViewState.scale);
@@ -725,6 +742,28 @@
 		internalExitingBuffer = EMPTY_EXITING_BUFFER;
 		nodeEnterAnimations = {};
 		edgeEnterAnimations = {};
+		// This ingest has just adopted whatever the incoming graph holds, revision
+		// included, so the in-place effect below must not adopt it a second time.
+		lastSyncedRevision = untrack(() => graphRevision);
+	});
+
+	/**
+	 * Adopt a graph that changed under a *mounted* canvas — an additive import
+	 * folding a second component in beside the reader's work.
+	 *
+	 * Deliberately not the ingest above. Nothing here is replaced: no
+	 * `layoutRuntime.reset()`, no cleared reveal stack or beacon preference, no
+	 * re-settle of the whole graph. The incoming `posByNodeId` already places both
+	 * the host's nodes and the arriving ones, so this is exactly the treatment any
+	 * mutation made in this component gets — relax from where things are, commit,
+	 * and let the change save itself back through `onMultigraphChange`.
+	 */
+	$effect(() => {
+		const revision = graphRevision;
+		if (revision === lastSyncedRevision) return;
+
+		lastSyncedRevision = revision;
+		untrack(() => adoptGraphInPlace(multigraphData));
 	});
 
 	$effect(() => {
@@ -1437,11 +1476,17 @@
 	function restorePrimaryNodeAfterDelete(nodeId: string) {
 		if (primaryNodeId !== nodeId) return;
 
-		primaryNodeId =
-			graph.nodes.find((candidate) => candidate.pinned)?.id ??
-			graph.nodes.find((candidate) => candidate.id === defaultPrimaryNodeId)?.id ??
-			graph.nodes[0]?.id ??
-			'';
+		primaryNodeId = fallbackPrimaryNodeId(graph);
+	}
+
+	/** Who becomes primary when the node holding it is no longer in `source`. */
+	function fallbackPrimaryNodeId(source: MultigraphData): string {
+		return (
+			source.nodes.find((candidate) => candidate.pinned)?.id ??
+			source.nodes.find((candidate) => candidate.id === defaultPrimaryNodeId)?.id ??
+			source.nodes[0]?.id ??
+			''
+		);
 	}
 
 	function saveNodeContent(
@@ -1602,6 +1647,25 @@
 	function commitUserGraph(nextGraph: MultigraphData) {
 		graph = nextGraph;
 		onMultigraphChange?.(nextGraph);
+	}
+
+	/**
+	 * Take an externally mutated graph as this component's own, through the same
+	 * path an internal mutation uses, so the new elements settle and animate in
+	 * rather than snapping into place on the next reload.
+	 *
+	 * Committing here calls back out through `onMultigraphChange` — wanted, not
+	 * tolerated: the relaxed positions are the ones worth saving. It cannot loop,
+	 * because that callback never moves the revision this effect watches.
+	 */
+	function adoptGraphInPlace(incoming: MultigraphData) {
+		// Additive imports keep every host node, so the primary normally survives.
+		// This is the same last-resort re-point a deletion does, for the day some
+		// other in-place mutation does take it away.
+		if (!incoming.nodes.some((node) => node.id === primaryNodeId)) {
+			primaryNodeId = fallbackPrimaryNodeId(incoming);
+		}
+		commitUserGraph(layoutRuntime.relaxAfterMutation(incoming));
 	}
 
 	/**

@@ -181,6 +181,7 @@
 	data-node-count={persisted.graph.nodes.length}
 	data-primary-title={primaryTitle}
 	data-graph-generation={persisted.graphGeneration}
+	data-graph-revision={persisted.graphRevision}
 	data-document-status={persisted.documentStatus}
 	data-scale-animation-duration-ms={layoutSettings.scaleAnimationDurationMs ?? ''}
 	data-last-download={lastDownload}
@@ -227,6 +228,7 @@
 		<Multigraph
 			multigraphData={persisted.graph}
 			graphGeneration={persisted.graphGeneration}
+			graphRevision={persisted.graphRevision}
 			initialViewState={persisted.viewState}
 			{initialTitleEditNodeId}
 			{defaultPrimaryNodeId}

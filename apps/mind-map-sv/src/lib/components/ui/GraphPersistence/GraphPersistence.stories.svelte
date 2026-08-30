@@ -122,6 +122,19 @@
 		);
 	}
 
+	/**
+	 * Node ids the canvas has actually drawn — the wrappers only, since `Node`
+	 * repeats the id on its own root, and never the exiting or reveal-buffer
+	 * copies, which are leftovers rather than nodes in the graph.
+	 */
+	function renderedNodeIds(canvasElement: HTMLElement): string[] {
+		return Array.from(
+			canvasElement.querySelectorAll(
+				'.node-wrapper[data-node-id]:not([data-node-exiting]):not([data-node-reveal-buffer])'
+			)
+		).map((wrapper) => wrapper.getAttribute('data-node-id') ?? '');
+	}
+
 	function waitForFrames(count: number): Promise<void> {
 		return new Promise((resolve) => {
 			let remaining = count;
@@ -439,6 +452,7 @@
 
 		await waitForHarnessData(canvasElement, 'loadedGraphId', 'import-host');
 		await expect(harness.dataset.nodeCount).toBe('3');
+		await waitFor(() => expect(renderedNodeIds(canvasElement)).toHaveLength(3));
 
 		// Download so the import has a real graph file to fold in.
 		await userEvent.click(canvas.getByRole('button', { name: 'Download' }));
@@ -457,6 +471,13 @@
 		expect(harness.dataset.nodeCount).toBe('6');
 		expect(harness.dataset.graphGeneration).toBe(generationBeforeImport);
 		expect(harness.dataset.primaryTitle).toBe('Host Graph');
+
+		// The point of the whole exercise: the mounted canvas draws the arrivals,
+		// with no reload. Counting the harness's data attributes is not enough —
+		// they report what the controller holds, not what the reader can see.
+		await waitFor(() => expect(renderedNodeIds(canvasElement)).toHaveLength(6));
+		expect(new Set(renderedNodeIds(canvasElement)).size).toBe(6);
+		expect(Number(harness.dataset.graphRevision)).toBe(1);
 	}}
 />
 

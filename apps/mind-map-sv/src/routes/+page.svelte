@@ -438,6 +438,7 @@
 			<Multigraph
 				multigraphData={persisted.graph}
 				graphGeneration={persisted.graphGeneration}
+				graphRevision={persisted.graphRevision}
 				initialViewState={persisted.viewState}
 				{initialTitleEditNodeId}
 				{defaultPrimaryNodeId}

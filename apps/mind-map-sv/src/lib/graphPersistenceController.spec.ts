@@ -871,6 +871,58 @@ describe('GraphPersistenceController additive import', () => {
 		});
 	});
 
+	it('bumps the graph revision exactly once so the mounted canvas adopts the nodes', async () => {
+		const storage = new MemoryStorage();
+		const { controller, before } = await loadedHost(storage);
+		const revisions: number[] = [];
+		controller.subscribe((view) => revisions.push(view.graphRevision));
+
+		await controller.importGraphIntoCurrent(
+			serializeGraphHtmlFile({
+				data: makeGraph({ nodeCount: 2 }),
+				viewState: NEUTRAL_VIEW_STATE
+			})
+		);
+
+		const after = controller.getView();
+		expect(after.graphRevision).toBe(before.graphRevision + 1);
+		// One step, not a run of them: every emission is either the old value or the
+		// new one, so no listener ever saw the revision move twice for one import.
+		expect(new Set(revisions)).toEqual(new Set([before.graphRevision, before.graphRevision + 1]));
+		// The revision is what makes the import visible without a remount, so the
+		// generation must stay exactly where it was.
+		expect(after.graphGeneration).toBe(before.graphGeneration);
+	});
+
+	it('leaves the revision alone for loads, reverts and changes coming from the canvas', async () => {
+		const storage = new MemoryStorage();
+		const { controller, persistence } = await loadedHost(storage);
+		await controller.importGraphIntoCurrent(
+			serializeGraphHtmlFile({ data: makeGraph({ nodeCount: 2 }), viewState: NEUTRAL_VIEW_STATE })
+		);
+		const afterImport = controller.getView();
+
+		// From the canvas: echoing this back as a revision would tell the canvas to
+		// re-adopt what it just committed.
+		controller.notifyGraphChanged(makeGraph({ nodeCount: 4 }), { syncView: true });
+		expect(controller.getView().graphRevision).toBe(afterImport.graphRevision);
+
+		// A revert replaces the document wholesale; the remount it triggers
+		// supersedes any in-place adoption.
+		await controller.revertToSnapshot();
+		expect(controller.getView()).toMatchObject({
+			graphRevision: afterImport.graphRevision,
+			graphGeneration: afterImport.graphGeneration + 1
+		});
+
+		await persistence.save('other', {
+			data: makeGraph({ nodeCount: 1 }),
+			viewState: NEUTRAL_VIEW_STATE
+		});
+		await controller.load('other');
+		expect(controller.getView().graphRevision).toBe(afterImport.graphRevision);
+	});
+
 	it('snapshots the graph as it stood before the import', async () => {
 		const storage = new MemoryStorage();
 		const { controller, before } = await loadedHost(storage);

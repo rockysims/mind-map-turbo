@@ -12,6 +12,8 @@ export type PersistedGraph = {
 	readonly graph: MultigraphData;
 	readonly viewState: ViewState;
 	readonly graphGeneration: number;
+	/** Bumped when the loaded document is mutated in place; see `ControllerView`. */
+	readonly graphRevision: number;
 	readonly graphSummaries: ReturnType<GraphPersistenceController['getView']>['graphSummaries'];
 	readonly loadedGraphId: string;
 	readonly documentStatus: DocumentStatus;
@@ -53,6 +55,9 @@ export function usePersistedGraph(deps: GraphPersistenceControllerDeps): Persist
 		},
 		get graphGeneration() {
 			return view.graphGeneration;
+		},
+		get graphRevision() {
+			return view.graphRevision;
 		},
 		get graphSummaries() {
 			return view.graphSummaries;

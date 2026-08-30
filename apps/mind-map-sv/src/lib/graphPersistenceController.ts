@@ -88,7 +88,24 @@ export type ControllerView = {
 	loadedGraphId: string;
 	documentId: string | null;
 	documentStatus: DocumentStatus;
+	/**
+	 * Bumped when the document itself is swapped — a load, a replacing import, a
+	 * new graph, a revert. The canvas is keyed on it and remounts around the graph
+	 * that arrived, discarding pan, zoom, focus and nav along with the old
+	 * document, because none of it describes the new one.
+	 */
 	graphGeneration: number;
+	/**
+	 * Bumped when the *same* document is mutated from outside the canvas — today
+	 * only by an additive import. The canvas stays mounted and adopts the incoming
+	 * graph in place, exactly as it would a mutation of its own, so the reader
+	 * keeps where they were looking while new nodes settle in beside their work.
+	 *
+	 * Deliberately separate from `graphGeneration`: a bump there would remount and
+	 * throw that away. Never moved by `notifyGraphChanged`, which comes *from* the
+	 * canvas — echoing it back would be the canvas telling itself what it just did.
+	 */
+	graphRevision: number;
 	/** The revertible snapshot for the loaded graph, or `null` when there is none. */
 	snapshot: SnapshotSummary | null;
 	status: ControllerStatus;
@@ -147,6 +164,7 @@ export class GraphPersistenceController {
 	private readonly scheduler: GraphSaveScheduler;
 	private view: ControllerView;
 	private graphGeneration = 0;
+	private graphRevision = 0;
 	private baseline: DocumentBaseline;
 	private recoveredDraft = false;
 
@@ -162,6 +180,7 @@ export class GraphPersistenceController {
 			documentId: null,
 			documentStatus: documentStatusForGraph(defaultGraph, this.baseline),
 			graphGeneration: 0,
+			graphRevision: 0,
 			snapshot: null,
 			status: { state: 'loading', graphId: DEFAULT_GRAPH_ID }
 		};
@@ -446,9 +465,14 @@ export class GraphPersistenceController {
 		);
 
 		const { next, nodeIdMap } = importGraphData(this.view.graph, imported.data);
+		// The one bump in the codebase. `graphGeneration` stays put so the canvas
+		// stays mounted; the revision is how a mounted canvas is told that the graph
+		// under it grew, and without it the nodes only appear on the next reload.
+		this.graphRevision += 1;
 		this.update({
 			graph: next,
 			documentStatus: this.currentDocumentStatus(next),
+			graphRevision: this.graphRevision,
 			// Without a stored snapshot there is nothing to revert to, so the offer
 			// is not made — better silence than a button that cannot keep its word.
 			snapshot: snapshotStored ? { label: 'import', createdAt, nodeCount: snapshotNodeCount } : null
