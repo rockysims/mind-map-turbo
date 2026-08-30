@@ -3,6 +3,12 @@
 	import { expect, userEvent, waitFor, within } from 'storybook/test';
 	import { DBL_CLICK_MS } from '$lib/constants';
 	import { makeGraph } from '$lib/components/ui/Multigraph/lib/testFixtures';
+	import {
+		rectContainsRect,
+		viewportWorldRect,
+		type CameraViewState,
+		type StageSize
+	} from '$lib/components/ui/Multigraph/lib/revealCamera';
 	import type { MultigraphData } from '$lib/components/ui/types/multigraph';
 	import { parseGraphFileText } from '$lib/graphFile';
 	import { CURRENT_SCHEMA_VERSION } from '$lib/migrations';
@@ -133,6 +139,46 @@
 				'.node-wrapper[data-node-id]:not([data-node-exiting]):not([data-node-reveal-buffer])'
 			)
 		).map((wrapper) => wrapper.getAttribute('data-node-id') ?? '');
+	}
+
+	/** Multigraph's root element, which carries the reveal markers. */
+	function getGraphRoot(canvasElement: HTMLElement): HTMLElement {
+		const graph = canvasElement.querySelector('.graph');
+		if (!(graph instanceof HTMLElement)) throw new Error('Graph root not found');
+		return graph;
+	}
+
+	/** The pan/zoom surface — the rect the camera math calls the viewport. */
+	function getStage(canvasElement: HTMLElement): HTMLElement {
+		const stage = canvasElement.querySelector('.stage');
+		if (!(stage instanceof HTMLElement)) throw new Error('Stage not found');
+		return stage;
+	}
+
+	/** The live view state the canvas reported out and the controller persisted. */
+	function persistedViewState(harness: HTMLElement): CameraViewState {
+		return {
+			panX: Number(harness.dataset.viewPanX),
+			panY: Number(harness.dataset.viewPanY),
+			scale: Number(harness.dataset.viewScale)
+		};
+	}
+
+	function stageSize(canvasElement: HTMLElement): StageSize {
+		const rect = getStage(canvasElement).getBoundingClientRect();
+		return { width: rect.width, height: rect.height };
+	}
+
+	/** True when `inner`'s on-screen box sits wholly inside `outer`'s. */
+	function screenBoxContains(outer: HTMLElement, inner: HTMLElement): boolean {
+		const outerRect = outer.getBoundingClientRect();
+		const innerRect = inner.getBoundingClientRect();
+		return (
+			innerRect.left >= outerRect.left &&
+			innerRect.right <= outerRect.right &&
+			innerRect.top >= outerRect.top &&
+			innerRect.bottom <= outerRect.bottom
+		);
 	}
 
 	function waitForFrames(count: number): Promise<void> {
@@ -478,6 +524,76 @@
 		await waitFor(() => expect(renderedNodeIds(canvasElement)).toHaveLength(6));
 		expect(new Set(renderedNodeIds(canvasElement)).size).toBe(6);
 		expect(Number(harness.dataset.graphRevision)).toBe(1);
+	}}
+/>
+
+<Story
+	name="ImportedComponentIsRevealedByTheCamera"
+	args={{
+		initialGraphId: 'import-reveal',
+		graphs: {
+			'import-reveal': graphWithTitle('Host Graph', 3)
+		}
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const harness = getHarness(canvasElement);
+
+		await waitForHarnessData(canvasElement, 'loadedGraphId', 'import-reveal');
+		await waitFor(() => expect(renderedNodeIds(canvasElement)).toHaveLength(3));
+
+		// The camera the reader is looking at before anything arrives, and the world
+		// rect it shows them. Both are read off the canvas's own reported view state.
+		const stage = stageSize(canvasElement);
+		const viewBeforeImport = persistedViewState(harness);
+		const visibleBeforeImport = viewportWorldRect(viewBeforeImport, stage);
+		const hostNodeIds = new Set(renderedNodeIds(canvasElement));
+
+		await importDownloadIntoCurrent(canvasElement);
+		await waitFor(() => expect(harness.dataset.lastImportIntoCurrent).toBe('imported:3'));
+		await waitFor(() => expect(renderedNodeIds(canvasElement)).toHaveLength(6));
+
+		// The reveal aims at an arrival, never at something the reader already had.
+		const graphRoot = getGraphRoot(canvasElement);
+		const revealNodeId = graphRoot.dataset.importRevealNode ?? '';
+		expect(revealNodeId).not.toBe('');
+		expect(hostNodeIds.has(revealNodeId)).toBe(false);
+
+		// Reduced motion lands the camera synchronously; otherwise wait out the flight.
+		await waitFor(() => expect(graphRoot.dataset.importRevealActive).toBeUndefined(), {
+			timeout: 5000
+		});
+
+		// The landing camera reached the controller through the ordinary
+		// onViewStateChange path, so the persisted numbers are the final ones.
+		const viewAfterImport = persistedViewState(harness);
+		expect(viewAfterImport.scale).toBeLessThan(viewBeforeImport.scale);
+
+		// Minimal and anchored: everything the reader could see is still in frame.
+		expect(rectContainsRect(viewportWorldRect(viewAfterImport, stage), visibleBeforeImport)).toBe(
+			true
+		);
+
+		// And the point of the whole exercise — the arrival is on screen, drawn
+		// inside the stage by that very view state. Asserted directly rather than
+		// through waitFor: the reveal has declared itself finished, so anything
+		// still hanging off an edge here is a reveal that undershot.
+		expect(screenBoxContains(getStage(canvasElement), getCircle(canvasElement, revealNodeId))).toBe(
+			true
+		);
+
+		// Still true once the layout has completely stopped moving. This is the drift
+		// case: committing does not finish the settle, so a camera that aimed once at
+		// the position read after the commit lands short of where the node ends up.
+		// The reveal keeps re-framing the arrival until it comes to rest.
+		await waitFor(() => {
+			expect(graphRoot.dataset.settling).toBeUndefined();
+			expect(graphRoot.dataset.scaleAnimationActive).toBeUndefined();
+			expect(graphRoot.dataset.layeredRelayoutActive).toBeUndefined();
+		});
+		await waitForFrames(4);
+		expect(screenBoxContains(getStage(canvasElement), getCircle(canvasElement, revealNodeId))).toBe(
+			true
+		);
 	}}
 />
 

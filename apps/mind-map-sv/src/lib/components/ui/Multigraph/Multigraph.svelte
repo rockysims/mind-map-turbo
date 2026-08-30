@@ -171,11 +171,30 @@
 		type NodeFrameLayout
 	} from './lib/frameGeometry.js';
 	import { interpolateMorph } from './lib/morphGeometry.js';
+	import { importRevealTargetNodeId } from './lib/importRevealTarget.js';
+	import {
+		revealPursuitStep,
+		viewportWorldRect,
+		type CameraViewState,
+		type RevealCircle,
+		type RevealPursuit,
+		type StageSize
+	} from './lib/revealCamera.js';
+	import { DEFAULT_MAX_SCALE, DEFAULT_MIN_SCALE } from './lib/graphMath.js';
 	import type { Rect } from './lib/zoomBoundary.js';
 	import type { StageRect } from './lib/stageCoordinates.js';
 	import { NODE_RADIUS, NODE_TEXT_FONT_SIZE } from '$lib/constants.js';
 
 	const CENTERED_POSITION: Point = { x: 0, y: 0 };
+
+	/**
+	 * An in-flight import reveal: the pure chase state plus the two things only
+	 * this component can supply — who is being chased, and where it was last frame.
+	 */
+	type ImportRevealPursuit = RevealPursuit & {
+		nodeId: string;
+		lastTarget: RevealCircle;
+	};
 
 	/**
 	 * Stand-ins for the node/edge a finishing creation gesture would commit
@@ -203,6 +222,28 @@
 	 */
 	const MERGE_PREVIEW_COLOR = '#b45309';
 	const FOCUS_TRANSITION_MS = APP_CONFIG.multigraph.focus.entryTransitionMs;
+	/**
+	 * How long the camera takes to travel to an arriving import.
+	 *
+	 * The focus morph duration, not a new constant: it is the one length in the
+	 * config that already means "the view is travelling somewhere on its own", and
+	 * a second number would only invite the two to drift apart.
+	 */
+	const IMPORT_REVEAL_TRANSITION_MS = APP_CONFIG.multigraph.focus.entryTransitionMs;
+	/**
+	 * Breathing room around the revealed node, as a fraction of its own radius —
+	 * so the reveal frames a node rather than jamming it against the bezel, at
+	 * whatever size the layout drew it.
+	 */
+	const IMPORT_REVEAL_MARGIN_RADIUS_FACTOR = 0.5;
+	/**
+	 * Hard cap on how long the reveal may keep chasing a still-moving arrival.
+	 *
+	 * The pursuit normally ends the moment the node comes to rest, but physics can
+	 * jitter below its own settle epsilon indefinitely, and a camera that never
+	 * lets go of the reader is worse than one that stops a little early.
+	 */
+	const IMPORT_REVEAL_MAX_PURSUIT_MS = APP_CONFIG.multigraph.focus.entryTransitionMs * 3;
 	const DETAILS_TITLE_ID = 'node-focus-title';
 	const NODE_DIAMETER_PX = NODE_RADIUS * 2;
 	/** Modest starting corner radius for an image frame's descend morph. */
@@ -319,6 +360,21 @@
 		scale: number;
 	} | null>(null);
 	let viewStateRequestId = $state(0);
+	/**
+	 * The node the last adopted import is being revealed by. Session-only, and
+	 * kept after the camera lands so the story (and anyone debugging a reveal that
+	 * went to the wrong place) can name what was aimed at.
+	 */
+	let importRevealNodeId = $state<string | null>(null);
+	/** True exactly while the reveal camera is in flight or still tracking a settling arrival. */
+	let importRevealActive = $state(false);
+	/**
+	 * Deliberately not `$state`: the frame loop rewrites `lastTarget` on every
+	 * tick, and nothing renders from it. `importRevealActive` carries the one bit
+	 * the markup needs.
+	 */
+	let importRevealPursuit: ImportRevealPursuit | null = null;
+	let importRevealFrameId: number | null = null;
 	let graphRef = $state<HTMLElement | null>(null);
 	/**
 	 * Endpoints of the most recent severing mutation (edge removal / node
@@ -808,6 +864,7 @@
 		return () => {
 			focus.dispose();
 			layoutRuntime.stop();
+			cancelImportReveal();
 		};
 	});
 
@@ -1659,6 +1716,9 @@
 	 * because that callback never moves the revision this effect watches.
 	 */
 	function adoptGraphInPlace(incoming: MultigraphData) {
+		// Read before committing: once `graph` is the incoming one, there is nothing
+		// left to diff it against.
+		const revealNodeId = importRevealTargetNodeId(graph, incoming);
 		// Additive imports keep every host node, so the primary normally survives.
 		// This is the same last-resort re-point a deletion does, for the day some
 		// other in-place mutation does take it away.
@@ -1666,6 +1726,149 @@
 			primaryNodeId = fallbackPrimaryNodeId(incoming);
 		}
 		commitUserGraph(layoutRuntime.relaxAfterMutation(incoming));
+		if (revealNodeId) revealImportedNode(revealNodeId);
+	}
+
+	/**
+	 * Show the reader what just arrived, by the smallest camera move that does it.
+	 *
+	 * Only the revision-adopt path calls this. An import lands as its own
+	 * component beside the reader's work — off screen more often than not — so
+	 * without a camera the whole operation reads as nothing having happened. Every
+	 * other mutation is something the reader just did, at a place they are already
+	 * looking, and moving the camera for one would be taking the canvas away from
+	 * them.
+	 *
+	 * The camera *pursues* the arrival rather than aiming once. Committing does not
+	 * finish the layout: enter animations are still growing radii and the seam
+	 * forces are still pushing the new component clear of the host, so a camera
+	 * aimed at the position read one statement after the commit lands where the
+	 * node used to be — measured at 81px of a node hanging off the right edge in
+	 * the dev app. Each frame re-reads where the node is *now* and re-frames.
+	 *
+	 * The rect that has to stay visible is frozen at the reader's departing view.
+	 * That is what makes re-aiming safe: the goal only moves because the target
+	 * moved, never because the camera has already travelled — so the "keep what you
+	 * could see" guarantee cannot ratchet itself outward frame by frame.
+	 */
+	function revealImportedNode(nodeId: string) {
+		importRevealNodeId = nodeId;
+		cancelImportReveal();
+		const rect = stageRect;
+		if (!rect || rect.width <= 0 || rect.height <= 0) return;
+		const stage: StageSize = { width: rect.width, height: rect.height };
+		const target = importRevealCircle(nodeId);
+		if (!target) return;
+		const from: CameraViewState = {
+			panX: stageViewState.panX,
+			panY: stageViewState.panY,
+			scale: stageViewState.scale
+		};
+		const startedAtMs = Date.now();
+		const pursuit: ImportRevealPursuit = {
+			nodeId,
+			from,
+			viewport: viewportWorldRect(from, stage),
+			stage,
+			startedAtMs,
+			durationMs: IMPORT_REVEAL_TRANSITION_MS,
+			deadlineMs: startedAtMs + IMPORT_REVEAL_MAX_PURSUIT_MS,
+			marginRadiusFactor: IMPORT_REVEAL_MARGIN_RADIUS_FACTOR,
+			minScale: DEFAULT_MIN_SCALE,
+			maxScale: DEFAULT_MAX_SCALE,
+			// Reduced motion lands at once and then joins the pursuit as a silent
+			// observer: no per-frame camera, just one correction if the layout carries
+			// the node elsewhere while it settles.
+			instant: reduceMotion || typeof requestAnimationFrame !== 'function',
+			lastTarget: target
+		};
+		if (pursuit.instant === true) {
+			// Through the pursuit's own step, so the view motion lands on cannot be
+			// framed differently from the one the flight would have reached.
+			const landing = revealPursuitStep({
+				pursuit,
+				target,
+				previousTarget: target,
+				nowMs: startedAtMs,
+				restEpsilon: resolvedLayoutSettings.postDragSettleEpsilonPx
+			}).goal;
+			if (landing) applyCameraView(landing);
+		}
+		// No rAF (server render): the landing above is all the reveal there can be.
+		if (typeof requestAnimationFrame !== 'function') return;
+
+		importRevealPursuit = pursuit;
+		importRevealActive = true;
+		importRevealFrameId = requestAnimationFrame(stepImportReveal);
+	}
+
+	/**
+	 * One frame of the pursuit. All the deciding lives in `revealPursuitStep`; this
+	 * only supplies where the arrival is drawn now and moves the camera it asks for.
+	 */
+	function stepImportReveal() {
+		importRevealFrameId = null;
+		const pursuit = importRevealPursuit;
+		if (!pursuit) return;
+		const target = importRevealCircle(pursuit.nodeId);
+		// The node left the graph mid-flight. Nowhere left to aim; stop where we are.
+		if (!target) {
+			cancelImportReveal();
+			return;
+		}
+		const step = revealPursuitStep({
+			pursuit,
+			target,
+			previousTarget: pursuit.lastTarget,
+			nowMs: Date.now(),
+			// The same threshold the drag settle calls "at rest", so one idea of
+			// "stopped moving" serves the physics and the camera watching it.
+			restEpsilon: resolvedLayoutSettings.postDragSettleEpsilonPx
+		});
+		pursuit.lastTarget = target;
+		if (step.view) applyCameraView(step.view);
+		if (!step.done) {
+			importRevealFrameId = requestAnimationFrame(stepImportReveal);
+			return;
+		}
+		// The last word on where the camera belongs, from the position the node
+		// actually came to rest at. Idempotent when the flight already landed there,
+		// and the one correction the reduced-motion path gets.
+		if (step.goal) applyCameraView(step.goal);
+		cancelImportReveal();
+	}
+
+	/** Where the reveal target is drawn right now, off the live derived layout. */
+	function importRevealCircle(nodeId: string): RevealCircle | null {
+		const position = graphLayout.posByNodeId[nodeId] ?? graph.posByNodeId[nodeId];
+		if (!position) return null;
+		return {
+			center: position,
+			radius: graphLayout.radiusByNodeId[nodeId] ?? resolvedLayoutSettings.baseRadius
+		};
+	}
+
+	/**
+	 * Move the stage camera, through `viewStateRequest` — the same one-shot channel
+	 * a Back crumb restores an exact camera with. Stage owns pan/zoom and reports
+	 * every applied request out through `onViewStateChange`, so the landing view
+	 * persists by the ordinary route with nothing special wired for it.
+	 */
+	function applyCameraView(view: CameraViewState) {
+		viewStateRequest = {
+			id: (viewStateRequestId += 1),
+			panX: view.panX,
+			panY: view.panY,
+			scale: view.scale
+		};
+	}
+
+	function cancelImportReveal() {
+		importRevealPursuit = null;
+		importRevealActive = false;
+		if (importRevealFrameId === null) return;
+		if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(importRevealFrameId);
+		importRevealFrameId = null;
 	}
 
 	/**
@@ -1755,6 +1958,8 @@
 	data-scale-animation-active={layoutRuntime.hasActiveScaleAnimations ? 'true' : undefined}
 	data-layered-relayout-active={layoutRuntime.isLayeredRelayoutActive ? 'true' : undefined}
 	data-layered-relayout-state={layoutRuntime.relayoutStateKey ?? undefined}
+	data-import-reveal-node={importRevealNodeId ?? undefined}
+	data-import-reveal-active={importRevealActive ? 'true' : undefined}
 >
 	<button
 		type="button"
