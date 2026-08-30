@@ -22,7 +22,15 @@ const appInputs = [
 ];
 
 const repoInputs = ['pnpm-lock.yaml'];
-const ignoredDirectoryNames = new Set(['.svelte-kit', 'build', 'node_modules', 'test-results']);
+const ignoredDirectoryNames = new Set([
+	'.storybook',
+	'.svelte-kit',
+	'build',
+	'node_modules',
+	'test-results'
+]);
+// Test-only sources never reach the built shell, so they must not flip the fingerprint.
+const testOnlyFilePattern = /\.(spec|test|stories)\./;
 
 export async function offlineShellSourceFingerprint({
 	appRoot = defaultAppRoot,
@@ -84,6 +92,7 @@ async function hashPath(hash, root, input, labelRoot) {
 	if (!entryStat.isFile()) return;
 	const relativePath = relative(labelRoot, absolutePath).replaceAll('\\', '/');
 	if (relativePath === offlineShellPath) return;
+	if (testOnlyFilePattern.test(relativePath.split('/').at(-1) ?? '')) return;
 
 	hash.update(relativePath);
 	hash.update('\0');
