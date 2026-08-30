@@ -2342,6 +2342,34 @@
 />
 
 <Story
+	name="UserLeavesActionMenuWithTab"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1 }),
+		defaultPrimaryNodeId: 'n0'
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const toolbarButton = within(canvasElement).getByRole('button', { name: 'Tag colors' });
+		toolbarButton.focus();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+
+		dispatchContextMenu(circle, center.x, center.y);
+		await tick();
+		expect(activeElementText()).toBe('Add node/edge');
+
+		// Roving tabindex means the browser would otherwise tab clean out of the
+		// page, leaving the menu layer up: Tab must close the menu itself.
+		const event = dispatchKeydown(document.activeElement, 'Tab');
+		await tick();
+
+		expect(event.defaultPrevented).toBe(true);
+		expect(within(canvasElement).queryByRole('menu')).not.toBeInTheDocument();
+		expect(document.activeElement).toBe(toolbarButton);
+	}}
+/>
+
+<Story
 	name="UserRestoresFocusWhenActionMenuCloses"
 	args={{
 		multigraphData: makeGraph({ nodeCount: 1 }),

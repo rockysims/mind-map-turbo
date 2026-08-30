@@ -92,6 +92,15 @@
 				event.preventDefault();
 				onClose();
 				return;
+			// Roving tabindex leaves the other items out of the tab order, so an
+			// unhandled Tab walks straight past the menu — out of the page and into
+			// the browser chrome, with this viewport-covering layer still up. Per the
+			// menu pattern Tab leaves the menu: close it and let the teardown effect
+			// put focus back where it was, so the tab sequence resumes from there.
+			case 'Tab':
+				event.preventDefault();
+				onClose();
+				return;
 			// Horizontal pill, but the vertical arrows are accepted too so the menu
 			// answers to whichever pair the user reaches for.
 			case 'ArrowRight':
