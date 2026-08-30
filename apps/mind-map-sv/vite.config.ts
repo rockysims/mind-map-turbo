@@ -1,4 +1,3 @@
-import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vitest/config';
 import { playwright } from '@vitest/browser-playwright';
 import { sveltekit } from '@sveltejs/kit/vite';
@@ -10,7 +9,7 @@ const dirname =
 
 // More info at: https://storybook.js.org/docs/next/writing-tests/integrations/vitest-addon
 export default defineConfig({
-	plugins: [tailwindcss(), sveltekit()],
+	plugins: [sveltekit()],
 	build: {
 		// Temml's 9.4 KB woff2 must exceed the 4 KB default to be inlined, because
 		// the offline build inlines stylesheet text but deletes sibling asset files.
@@ -18,7 +17,11 @@ export default defineConfig({
 	},
 	server: {
 		fs: {
-			allow: [path.resolve(__dirname, '..'), path.resolve(__dirname, '../../node_modules/.pnpm')]
+			// `dirname` (computed above), not the bare `__dirname` this used to read:
+			// the guarded constant exists precisely because `__dirname` is not
+			// defined when this config is loaded as ESM, and using both left one of
+			// the two paths depending on how Vite happened to transpile the file.
+			allow: [path.resolve(dirname, '..'), path.resolve(dirname, '../../node_modules/.pnpm')]
 		}
 	},
 	test: {
@@ -74,6 +77,11 @@ export default defineConfig({
 							}
 						]
 					},
+					// Kept despite the "you can safely remove this" notice the addon
+					// prints on every run: the automatic provisioning it describes
+					// landed in Storybook 10.3, and dropping the file against the
+					// version pinned here loses `preview.ts` — which imports the global
+					// stylesheet — and fails every story test.
 					setupFiles: ['.storybook/vitest.setup.ts']
 				}
 			}

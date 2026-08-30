@@ -15,7 +15,7 @@ import { buildAdjacency } from './layout';
  */
 export const BEACON_HOP = 1;
 
-export interface BeaconOptions {
+interface BeaconOptions {
 	/**
 	 * Session-transient hint (e.g. the endpoints of a just-removed edge),
 	 * consulted only when a pinless component has no pin history at all.

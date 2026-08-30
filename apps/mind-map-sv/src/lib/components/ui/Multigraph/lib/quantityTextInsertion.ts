@@ -29,14 +29,14 @@ export interface TextSelection {
 	end: number;
 }
 
-export interface InsertionPlan {
+interface InsertionPlan {
 	/** Exactly what to put in the text, delimiters included when they are needed. */
 	insert: string;
 	/** Whether the caret sat inside existing math, so no delimiters were added. */
 	insideMath: boolean;
 }
 
-export interface AppliedInsertion {
+interface AppliedInsertion {
 	text: string;
 	/** Where the caret belongs afterwards: immediately after what was inserted. */
 	caret: number;

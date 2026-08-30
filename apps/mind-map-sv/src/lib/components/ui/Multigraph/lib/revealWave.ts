@@ -1,11 +1,11 @@
 import type { EdgeData } from '../../types/edge';
 import type { NodeScaleAnimation } from './scaleAnimation';
 
-export const DEFAULT_REVEAL_FRONT_WIDTH_HOPS = 1;
+const DEFAULT_REVEAL_FRONT_WIDTH_HOPS = 1;
 
-export type RevealWaveDirection = 'reveal' | 'hide';
+type RevealWaveDirection = 'reveal' | 'hide';
 
-export interface RevealWaveNodeOpacityOptions {
+interface RevealWaveNodeOpacityOptions {
 	frontWidthHops?: number;
 	direction?: RevealWaveDirection;
 }
@@ -29,7 +29,7 @@ export function revealWaveNodeOpacities(
 	);
 }
 
-export function revealWaveNodeOpacityForHop(
+function revealWaveNodeOpacityForHop(
 	hopCount: number,
 	displayedLayers: number,
 	frontHop: number,

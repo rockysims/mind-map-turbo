@@ -38,7 +38,7 @@ export interface FrameGeometry {
 	borderWidthPx: number;
 }
 
-export interface FrameGeometryOptions {
+interface FrameGeometryOptions {
 	ease?: (progress: number) => number;
 	targetRadiusPx?: number;
 	targetBorderWidthPx?: number;

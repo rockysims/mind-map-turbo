@@ -3,7 +3,7 @@
  * menu-armed hover). Shared by Stage's release handling for both entry paths.
  */
 
-export type CreationDropAction =
+type CreationDropAction =
 	| { kind: 'create-node-and-edge' }
 	| { kind: 'connect-to-node'; targetNodeId: string }
 	| { kind: 'cancel' };

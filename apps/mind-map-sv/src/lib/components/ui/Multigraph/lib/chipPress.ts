@@ -31,7 +31,7 @@ export interface ChipPress {
 }
 
 /** How long a chip has to be held, and how far the pointer may wander doing it. */
-export interface ChipLongPressThresholds {
+interface ChipLongPressThresholds {
 	/** Only this key counts; a press that began elsewhere never matches. */
 	key?: string;
 	minDuration?: number;
@@ -39,7 +39,7 @@ export interface ChipLongPressThresholds {
 }
 
 export const CHIP_PEEK_LONG_PRESS_MS = APP_CONFIG.multigraph.dataflow.chipPeekLongPressMs;
-export const CHIP_PEEK_MAX_DRIFT_PX = APP_CONFIG.interaction.longPressDistancePx;
+const CHIP_PEEK_MAX_DRIFT_PX = APP_CONFIG.interaction.longPressDistancePx;
 
 export function beginChipPress(key: string, point: ChipPressPoint, nowMs: number): ChipPress {
 	return { key, origin: { x: point.x, y: point.y }, startedAtMs: nowMs, maxDistance: 0 };

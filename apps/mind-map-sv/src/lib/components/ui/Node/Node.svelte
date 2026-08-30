@@ -13,7 +13,7 @@
 	import NodeChrome from './NodeChrome.svelte';
 	import NodeCompactContent from './NodeCompactContent.svelte';
 
-	const {
+	let {
 		nodeData = {
 			id: 'id_fallback',
 			title: 'title_fallback',
@@ -27,7 +27,7 @@
 		quantityLabels = [],
 		quantityOverflowCount = 0,
 		onTitleCommit
-	} = $props<{
+	}: {
 		nodeData: NodeData;
 		isTitleEditing?: boolean;
 		/** Caret offset for the opening title input; omitted means select-all. */
@@ -38,7 +38,7 @@
 		quantityLabels?: string[];
 		quantityOverflowCount?: number;
 		onTitleCommit?: (title: string) => void;
-	}>();
+	} = $props();
 
 	const borderBackground = $derived(tagBorderBackground(borderSegments));
 </script>

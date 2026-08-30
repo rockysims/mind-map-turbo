@@ -2,7 +2,6 @@ import type { EdgeData } from '../../types/edge';
 import type { MultigraphData, TagColorNamespace } from '../../types/multigraph';
 import type { NodeData } from '../../types/node';
 
-export const DEFAULT_NODE_BORDER_COLOR = '#aaaaaa';
 export const DEFAULT_EDGE_STROKE_COLOR = '#888888';
 
 export interface TagColorSegment {

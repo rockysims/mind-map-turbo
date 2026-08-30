@@ -20,7 +20,7 @@ import {
 	type ReferenceState
 } from './dataflowDiagnostics';
 
-export type QuantityDiagnosticState =
+type QuantityDiagnosticState =
 	| Exclude<ReferenceState, 'resolved'>
 	| 'conflict'
 	| 'self-conflict'

@@ -12,6 +12,7 @@
 		MIN_NODE_HIT_RADIUS,
 		NODE_RADIUS
 	} from '$lib/constants';
+	import { wheelDeltaForZoomFactor } from './lib/graphMath';
 	import {
 		designations,
 		makeClusteredRandomEdges,
@@ -248,6 +249,20 @@
 	function activeElementText(): string {
 		return document.activeElement?.textContent?.trim() ?? '';
 	}
+
+	/**
+	 * A wheel delta that means "zoom by this factor", rather than a magic number.
+	 *
+	 * The deltas in this file used to be hand-derived from the linear zoom curve
+	 * `scaleFromWheelDelta` once used, which is exactly why fixing that curve
+	 * broke these stories. Said as a factor, a step keeps meaning what it meant
+	 * through any retuning. `WHEEL_SLAM` stays a raw number on purpose: those
+	 * steps mean "past the clamp, whatever the clamp is", not a particular factor.
+	 */
+	const wheelFactor = wheelDeltaForZoomFactor;
+	/** Far enough past either clamp that the boundary logic, not the factor, decides. */
+	const WHEEL_SLAM_IN = -6000;
+	const WHEEL_SLAM_OUT = 6000;
 
 	function dispatchWheel(target: HTMLElement, deltaY: number, clientX?: number, clientY?: number) {
 		const center = getCenter(target);
@@ -1079,7 +1094,7 @@
 		expect(args.onMultigraphChange).not.toHaveBeenCalled();
 		expect(lastViewState(args)).toMatchObject({ panX: 24, panY: 12, scale: 1 });
 
-		dispatchWheel(stage, -200);
+		dispatchWheel(stage, wheelFactor(1.4));
 		await sleep();
 
 		expect(args.onMultigraphChange).not.toHaveBeenCalled();
@@ -1193,21 +1208,21 @@
 		const world = dialog.querySelector('.zoom-world') as HTMLElement;
 		const surface = dialog.querySelector('.focus-surface') as HTMLElement;
 		const initialSurfaceRect = surface.getBoundingClientRect();
-		dispatchWheel(image, -500, imageCenter.x, imageCenter.y);
+		dispatchWheel(image, wheelFactor(2), imageCenter.x, imageCenter.y);
 		await waitFor(() => {
 			expect(Number(world.dataset.zoomWorldScale)).toBeGreaterThan(1);
 			expect(surface.getBoundingClientRect().width).toBeGreaterThan(initialSurfaceRect.width);
 		});
 
 		const frame = image.closest('.image-frame') as HTMLElement;
-		dispatchWheel(image, -1000, imageCenter.x, imageCenter.y);
+		dispatchWheel(image, wheelFactor(3), imageCenter.x, imageCenter.y);
 		await waitFor(() => {
 			expect(Number(world.dataset.zoomWorldScale)).toBeGreaterThan(1);
 		});
 		expect(frame.dataset.imageFocused).toBeUndefined();
 		expect(image.dataset.imageZoomScale).toBeUndefined();
 
-		dispatchWheel(world, 2000, imageCenter.x, imageCenter.y);
+		dispatchWheel(world, WHEEL_SLAM_OUT, imageCenter.x, imageCenter.y);
 		await waitFor(() => {
 			expect(Number(world.dataset.zoomWorldScale)).toBe(1);
 		});
@@ -1278,13 +1293,13 @@
 		const nodeWorld = dialog.querySelector('.zoom-world') as HTMLElement;
 
 		// Zoom the node world in toward max scale over the image.
-		dispatchWheel(image, -3000, imageCenter.x, imageCenter.y);
+		dispatchWheel(image, wheelFactor(7), imageCenter.x, imageCenter.y);
 		await waitFor(() => {
 			expect(Number(nodeWorld.dataset.zoomWorldScale)).toBeGreaterThan(1);
 		});
 
 		// A bold zoom-in past max, cursor over the image, descends to depth 2.
-		dispatchWheel(image, -6000, imageCenter.x, imageCenter.y);
+		dispatchWheel(image, WHEEL_SLAM_IN, imageCenter.x, imageCenter.y);
 		await waitFor(() => {
 			expect(stack.dataset.depth).toBe('2');
 		});
@@ -1314,7 +1329,7 @@
 		// Zoom out past fit in the image world pops back to the node (depth 1),
 		// continuously (focus stays open — it does not close).
 		const imageWorld = dialog.querySelector('.zoom-world') as HTMLElement;
-		dispatchWheel(imageWorld, 6000, imageCenter.x, imageCenter.y);
+		dispatchWheel(imageWorld, WHEEL_SLAM_OUT, imageCenter.x, imageCenter.y);
 		await waitFor(
 			() => {
 				expect(stack.dataset.depth).toBe('1');
@@ -1401,12 +1416,12 @@
 			const imageCenter = getCenter(image);
 			const nodeWorld = dialog.querySelector('.zoom-world') as HTMLElement;
 
-			dispatchWheel(image, -3000, imageCenter.x, imageCenter.y);
+			dispatchWheel(image, wheelFactor(7), imageCenter.x, imageCenter.y);
 			await waitFor(() => {
 				expect(Number(nodeWorld.dataset.zoomWorldScale)).toBeGreaterThan(1);
 			});
 
-			dispatchWheel(image, -6000, imageCenter.x, imageCenter.y);
+			dispatchWheel(image, WHEEL_SLAM_IN, imageCenter.x, imageCenter.y);
 			await waitFor(() => {
 				expect(stack.dataset.depth).toBe('2');
 			});
@@ -1443,7 +1458,7 @@
 		const oversizedRect = circle.getBoundingClientRect();
 		const stageRect = stage.getBoundingClientRect();
 
-		dispatchWheel(stage, -800, center.x, center.y);
+		dispatchWheel(stage, wheelFactor(2.6), center.x, center.y);
 
 		const dialog = await within(canvasElement).findByRole('dialog');
 		// One morph surface owns the committed frame; it fills the stage.
@@ -1477,12 +1492,12 @@
 		expect(oversizedRect.width).toBeGreaterThan(0);
 		expect(canvasElement.querySelector('.graph')).toHaveClass('focus-active');
 
-		dispatchWheel(world, -800, center.x, center.y);
+		dispatchWheel(world, wheelFactor(2.6), center.x, center.y);
 		await sleep();
 		expect(Number(world.dataset.zoomWorldScale)).toBe(1);
 
 		await sleep(APP_CONFIG.multigraph.focus.entryGestureIdleMs + 20);
-		dispatchWheel(world, -800, center.x, center.y);
+		dispatchWheel(world, wheelFactor(2.6), center.x, center.y);
 		await waitFor(() => {
 			expect(Number(world.dataset.zoomWorldScale)).toBeGreaterThan(1);
 		});
@@ -1499,22 +1514,22 @@
 		});
 
 		const stageTransformBeforeExit = getStageTransform(canvasElement);
-		dispatchWheel(world, 5000, center.x, center.y);
+		dispatchWheel(world, WHEEL_SLAM_OUT, center.x, center.y);
 		await waitFor(() => {
 			expect(canvasElement.querySelector('.graph')).not.toHaveClass('focus-active');
 		});
 
-		dispatchWheel(stage, 5000, center.x, center.y);
+		dispatchWheel(stage, WHEEL_SLAM_OUT, center.x, center.y);
 		await sleep();
 		expect(getStageTransform(canvasElement)).toBe(stageTransformBeforeExit);
 
 		await sleep(Math.max(0, APP_CONFIG.multigraph.focus.entryGestureIdleMs - 30));
-		dispatchWheel(stage, 5000, center.x, center.y);
+		dispatchWheel(stage, WHEEL_SLAM_OUT, center.x, center.y);
 		await sleep();
 		expect(getStageTransform(canvasElement)).toBe(stageTransformBeforeExit);
 
 		await sleep(APP_CONFIG.multigraph.focus.entryGestureIdleMs + 20);
-		dispatchWheel(stage, 5000, center.x, center.y);
+		dispatchWheel(stage, WHEEL_SLAM_OUT, center.x, center.y);
 		await waitFor(() => {
 			expect(getStageTransform(canvasElement)).not.toBe(stageTransformBeforeExit);
 		});
@@ -1543,7 +1558,7 @@
 
 		// A gentle scrub mounts the single morph surface partway — but does NOT
 		// commit, so there is no dialog and the in-stage node is hidden.
-		dispatchWheel(stage, -80, center.x, center.y);
+		dispatchWheel(stage, wheelFactor(1.16), center.x, center.y);
 		await waitFor(() => {
 			const layer = getFocusLayer(canvasElement);
 			expect(morphRectOf(layer).progress).toBeGreaterThan(0);
@@ -1564,7 +1579,7 @@
 
 		// Reversing the scrub drives progress back to 0; after the entry gesture
 		// idles the surface unmounts and hands the frame back to the in-stage node.
-		dispatchWheel(stage, 160, center.x, center.y);
+		dispatchWheel(stage, wheelFactor(0.68), center.x, center.y);
 		await waitFor(() => {
 			expect(morphRectOf(getFocusLayer(canvasElement)).progress).toBe(0);
 		});
@@ -1595,7 +1610,7 @@
 		const circle = getCircle(canvasElement, 'n0');
 		const center = getCenter(circle);
 
-		dispatchWheel(stage, -800, center.x, center.y);
+		dispatchWheel(stage, wheelFactor(2.6), center.x, center.y);
 		const dialog = await within(canvasElement).findByRole('dialog');
 		const world = dialog.querySelector('.zoom-world') as HTMLElement;
 		const layer = getFocusLayer(canvasElement);
@@ -1634,7 +1649,7 @@
 
 		// A bold flick out crosses the exit boundary: the gesture drives progress
 		// directly to 0, then unmounts the surface one frame later.
-		dispatchWheel(world, 5000, center.x, center.y);
+		dispatchWheel(world, WHEEL_SLAM_OUT, center.x, center.y);
 		await tick();
 		expect(dialog).toBeInTheDocument();
 		expect(canvasElement.querySelector('.graph')).not.toHaveClass('focus-active');
@@ -1707,11 +1722,11 @@
 
 		// Direction A — mount on entry: scrub in a bit, then reverse to 0 (the
 		// surface stays mounted through the idle window at progress 0).
-		dispatchWheel(stage, -80, center.x, center.y);
+		dispatchWheel(stage, wheelFactor(1.16), center.x, center.y);
 		await waitFor(() => {
 			expect(morphRectOf(getFocusLayer(canvasElement)).progress).toBeGreaterThan(0);
 		});
-		dispatchWheel(stage, 200, center.x, center.y);
+		dispatchWheel(stage, wheelFactor(0.6), center.x, center.y);
 		await waitFor(() => {
 			expect(morphRectOf(getFocusLayer(canvasElement)).progress).toBe(0);
 		});
@@ -1725,10 +1740,10 @@
 
 		// Direction B — unmount on exit: commit, then flick out. On the exit frame
 		// morphProgress is 0 and the surface must again equal the in-stage rect.
-		dispatchWheel(stage, -1000, center.x, center.y);
+		dispatchWheel(stage, wheelFactor(3), center.x, center.y);
 		await within(canvasElement).findByRole('dialog');
 		const world = canvasElement.querySelector('.zoom-world') as HTMLElement;
-		dispatchWheel(world, 6000, center.x, center.y);
+		dispatchWheel(world, WHEEL_SLAM_OUT, center.x, center.y);
 		await waitFor(() => {
 			expect(morphRectOf(getFocusLayer(canvasElement)).progress).toBe(0);
 		});
@@ -1755,7 +1770,7 @@
 		const center = getCenter(circle);
 
 		// Entry scrub mounts one surface element.
-		dispatchWheel(stage, -80, center.x, center.y);
+		dispatchWheel(stage, wheelFactor(1.16), center.x, center.y);
 		await waitFor(() => {
 			const p = morphRectOf(getFocusLayer(canvasElement)).progress;
 			expect(p).toBeGreaterThan(0);
@@ -1764,7 +1779,7 @@
 		const surfaceEl = getFocusLayer(canvasElement);
 
 		// Commit (bold flick): the SAME element reaches progress 1.
-		dispatchWheel(stage, -1000, center.x, center.y);
+		dispatchWheel(stage, wheelFactor(3), center.x, center.y);
 		await waitFor(() => {
 			expect(morphRectOf(getFocusLayer(canvasElement)).progress).toBe(1);
 		});
@@ -1803,7 +1818,7 @@
 
 		/** Commit focus via a bold in-zoom at max scale. */
 		const commitFocusViaWheel = async () => {
-			dispatchWheel(stage, -800, center.x, center.y);
+			dispatchWheel(stage, wheelFactor(2.6), center.x, center.y);
 			await within(canvasElement).findByRole('dialog');
 			expect(canvasElement.querySelector('.graph')).toHaveClass('focus-active');
 			expect(canvasElement.querySelector('.deep-zoom-layer')).toBeInTheDocument();
@@ -1831,7 +1846,7 @@
 		// Route C: Wheel-out completion (delta >= 1 triggers unified closeFocus).
 		await commitFocusViaWheel();
 		const world = canvasElement.querySelector('.zoom-world') as HTMLElement;
-		dispatchWheel(world, 5000, center.x, center.y);
+		dispatchWheel(world, WHEEL_SLAM_OUT, center.x, center.y);
 		await assertUnfocused();
 	}}
 />
@@ -4710,7 +4725,7 @@
 		);
 		expect(initialFadedPositions).toHaveLength(2);
 
-		dispatchWheel(stage, 250);
+		dispatchWheel(stage, wheelFactor(0.5));
 		await waitFor(() => {
 			expect(getStageTransform(canvasElement)).toContain('scale(0.5)');
 		});
@@ -5021,7 +5036,7 @@
 		const stage = getStage(canvasElement);
 		const center = getCenter(getCircle(canvasElement, 'n0'));
 
-		dispatchWheel(stage, -800, center.x, center.y);
+		dispatchWheel(stage, wheelFactor(2.6), center.x, center.y);
 		await within(canvasElement).findByRole('dialog');
 
 		const defineButton = await waitFor(() => {
@@ -5107,7 +5122,7 @@
 		expect(canvasTitle.textContent).not.toContain('$');
 
 		const stage = getStage(canvasElement);
-		dispatchWheel(stage, -800, getCenter(getCircle(canvasElement, 'n0')).x, 0);
+		dispatchWheel(stage, wheelFactor(2.6), getCenter(getCircle(canvasElement, 'n0')).x, 0);
 		const dialog = await within(canvasElement).findByRole('dialog');
 
 		// The heading names the dialog, so the name a screen reader announces is

@@ -8,7 +8,7 @@ export const STORAGE_PROBE_KEY = 'mind-map:storage-probe';
 
 export type StorageDurability = 'durable' | 'memory-only';
 
-export type GraphStorageResolution = {
+type GraphStorageResolution = {
 	storage: StorageLike;
 	durability: StorageDurability;
 	/** Why the durable storage was rejected; undefined when it was accepted. */

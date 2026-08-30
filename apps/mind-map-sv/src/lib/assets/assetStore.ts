@@ -119,54 +119,11 @@ export class IndexedDbGraphAssetStore implements GraphAssetStore {
 	}
 }
 
-export class MemoryGraphAssetStore implements GraphAssetStore {
-	private readonly records = new Map<string, StoredGraphAsset>();
-
-	async put(asset: StoredGraphAsset): Promise<AssetStoreResult> {
-		this.records.set(assetKey(asset.scope, asset.assetId), { ...asset });
-		return { ok: true, value: undefined };
-	}
-
-	async get(scope: string, assetId: string): Promise<AssetStoreResult<StoredGraphAsset>> {
-		const record = this.records.get(assetKey(scope, assetId));
-		return record ? { ok: true, value: { ...record } } : { ok: false, reason: 'not-found' };
-	}
-
-	async delete(scope: string, assetId: string): Promise<AssetStoreResult> {
-		this.records.delete(assetKey(scope, assetId));
-		return { ok: true, value: undefined };
-	}
-
-	async deleteUnreferenced(
-		scope: string,
-		keepAssetIds: Set<string>
-	): Promise<AssetStoreResult<string[]>> {
-		const removed: string[] = [];
-		const listed = await this.list(scope);
-		if (!listed.ok) return listed;
-		for (const asset of listed.value) {
-			if (keepAssetIds.has(asset.assetId)) continue;
-			this.records.delete(assetKey(scope, asset.assetId));
-			removed.push(asset.assetId);
-		}
-		return { ok: true, value: removed };
-	}
-
-	async list(scope: string): Promise<AssetStoreResult<StoredGraphAsset[]>> {
-		return {
-			ok: true,
-			value: [...this.records.values()]
-				.filter((asset) => asset.scope === scope)
-				.map((asset) => ({ ...asset }))
-		};
-	}
-}
-
-export function assetKey(scope: string, assetId: string): string {
+function assetKey(scope: string, assetId: string): string {
 	return `${encodeURIComponent(scope)}:${encodeURIComponent(assetId)}`;
 }
 
-export function classifyAssetStoreError(error: unknown): AssetStoreResult<never> {
+function classifyAssetStoreError(error: unknown): AssetStoreResult<never> {
 	if (
 		error instanceof DOMException &&
 		(error.name === 'QuotaExceededError' || error.name === 'NS_ERROR_DOM_QUOTA_REACHED')

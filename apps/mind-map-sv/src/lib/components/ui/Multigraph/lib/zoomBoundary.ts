@@ -13,30 +13,30 @@ export interface Rect {
 	height: number;
 }
 
-export interface Circle {
+interface Circle {
 	center: Point;
 	radius: number;
 }
 
-export interface AxisContact {
+interface AxisContact {
 	start: boolean;
 	end: boolean;
 	inscribed: boolean;
 }
 
-export interface InscribedContact {
+interface InscribedContact {
 	x: AxisContact;
 	y: AxisContact;
 	inscribed: boolean;
 }
 
-export interface ClampResult {
+interface ClampResult {
 	rect: Rect;
 	dx: number;
 	dy: number;
 }
 
-export interface CenteredFitResult {
+interface CenteredFitResult {
 	fits: boolean;
 	centered: boolean;
 	centeredFit: boolean;

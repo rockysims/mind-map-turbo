@@ -32,7 +32,7 @@ import type { StorageDurability } from './storageAvailability';
 export const MEMORY_ONLY_STORAGE_NOTICE =
 	"This browser is blocking site data, so drafts can't be saved here. Download to keep your work.";
 
-export type ImportGraphResult =
+type ImportGraphResult =
 	| 'imported'
 	| 'cancelled'
 	| 'invalid'
@@ -50,7 +50,7 @@ export type ControllerStatus =
 	| { state: 'notice'; message: string }
 	| { state: 'error'; message: string };
 
-export type ControllerView = {
+type ControllerView = {
 	graph: MultigraphData;
 	viewState: ViewState;
 	graphSummaries: GraphSummary[];
@@ -72,7 +72,7 @@ export type GraphSaveScheduler = {
 	dispose(): void;
 };
 
-export type LoadGraphResult = {
+type LoadGraphResult = {
 	createdDefaultGraph: boolean;
 };
 

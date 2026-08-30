@@ -10,7 +10,7 @@
  */
 
 /** A WOFF2 table's position and size within the decompressed table stream. */
-export interface Woff2TableEntry {
+interface Woff2TableEntry {
 	tag: string;
 	offset: number;
 	length: number;
@@ -216,7 +216,7 @@ export function nameValue(records: NameRecord[], nameID: number): string | undef
 	return (windows ?? matches[0])?.value;
 }
 
-export interface CmapSubtableHeader {
+interface CmapSubtableHeader {
 	format: number;
 	platformID: number;
 	encodingID: number;

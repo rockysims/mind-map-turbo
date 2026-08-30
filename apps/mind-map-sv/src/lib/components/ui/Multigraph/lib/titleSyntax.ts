@@ -7,7 +7,7 @@ export interface TagSyntaxConfig {
 	edgeTagMarker: string;
 }
 
-export interface ParsedTitleSyntax {
+interface ParsedTitleSyntax {
 	displayTitle: string;
 	nodeTags: string[];
 	edgeTags: string[];
@@ -88,10 +88,7 @@ export function normalizeTagList(
 		.filter((tag) => isValidTagName(tag, tagSyntax));
 }
 
-export function isValidTagName(
-	tagName: string,
-	tagSyntax: TagSyntaxConfig = DEFAULT_TAG_SYNTAX
-): boolean {
+function isValidTagName(tagName: string, tagSyntax: TagSyntaxConfig = DEFAULT_TAG_SYNTAX): boolean {
 	return (
 		tagName.length > 0 &&
 		!/\s/.test(tagName) &&

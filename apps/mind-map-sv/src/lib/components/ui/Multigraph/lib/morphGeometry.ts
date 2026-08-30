@@ -1,7 +1,7 @@
 import { APP_CONFIG } from '$lib/appConfig';
 import type { Rect } from './zoomBoundary';
 
-export interface MorphGeometry {
+interface MorphGeometry {
 	x: number;
 	y: number;
 	width: number;
@@ -11,7 +11,7 @@ export interface MorphGeometry {
 	borderWidthPx?: number;
 }
 
-export interface MorphGeometryOptions {
+interface MorphGeometryOptions {
 	ease?: (progress: number) => number;
 	sourceRadiusPx?: number;
 	targetRadiusPx?: number;

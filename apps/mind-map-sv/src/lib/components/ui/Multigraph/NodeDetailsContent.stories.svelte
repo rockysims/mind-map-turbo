@@ -276,9 +276,16 @@
 		);
 	}
 
-	/** A press somewhere that is neither a chip nor a card. */
+	/**
+	 * A press somewhere that is neither a chip nor a card. The dismissal listens
+	 * for the `click`, not the `pointerdown` — collapsing the cards mid-press
+	 * moved the controls below them out from under the reader's finger — so the
+	 * whole press is dispatched here rather than just its first half.
+	 */
 	function pressOutside(canvasElement: HTMLElement): void {
 		canvasElement.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1 }));
+		canvasElement.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }));
+		canvasElement.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 	}
 
 	/** Open the peek for the one confirmed input, the way a reader does. */

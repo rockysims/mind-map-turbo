@@ -26,11 +26,11 @@ export interface MathNode {
 	toMarkup(): string;
 }
 
-export type MathRenderResult =
+type MathRenderResult =
 	| { ok: true; markup: string; tree: MathNode }
 	| { ok: false; markup: string; message: string };
 
-export interface MathRenderOptions {
+interface MathRenderOptions {
 	displayMode?: boolean;
 	maxSizeEm?: number;
 	maxSizePt?: number;

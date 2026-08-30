@@ -1,4 +1,4 @@
-export interface LongPressInput {
+interface LongPressInput {
 	duration: number;
 	distance: number;
 	minDuration: number;

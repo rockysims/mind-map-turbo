@@ -3,10 +3,13 @@
 	import { hasMath as containsMath } from '../MathText/lib/mathSegments';
 	import { mathPlainText } from '../MathText/lib/mathPlainText';
 
-	const { text = 'SquareText fallback text.', classList = [] } = $props<{
+	let {
+		text = 'SquareText fallback text.',
+		classList = []
+	}: {
 		text: string;
 		classList: string[];
-	}>();
+	} = $props();
 
 	let squareTextRef = $state<HTMLElement | null>(null);
 

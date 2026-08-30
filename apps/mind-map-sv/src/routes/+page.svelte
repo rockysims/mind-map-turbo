@@ -27,11 +27,13 @@
 		type GraphFileDocument
 	} from '$lib/graphFile';
 	import {
+		appUrlWithoutGraphRoute,
 		DEFAULT_GRAPH_ID,
 		graphHash,
 		graphIdFromUrl,
 		graphRouteModeForProtocol,
-		graphSearch
+		graphSearch,
+		urlWithoutHash
 	} from '$lib/graphRoute';
 	import {
 		cleanExportHtmlShell,
@@ -105,13 +107,12 @@
 						window.history.pushState(
 							window.history.state,
 							'',
-							`${window.location.href.split('#')[0]}${graphHash(graphId)}`
+							`${urlWithoutHash(window.location.href)}${graphHash(graphId)}`
 						);
 						return;
 					}
 
-					const currentWithoutHash = window.location.href.split('#')[0];
-					const currentPath = currentWithoutHash.split('?')[0];
+					const currentPath = appUrlWithoutGraphRoute(window.location.href);
 					window.history.pushState(
 						window.history.state,
 						'',
@@ -190,7 +191,7 @@
 	}
 
 	function openGraphFilePicker(): void {
-		openHtmlFilePickerInNewTab(currentAppUrlWithoutGraphRoute());
+		openHtmlFilePickerInNewTab(appUrlWithoutGraphRoute(window.location.href));
 	}
 
 	function consumeOpenFileFromPickerFlag(): boolean {
@@ -318,11 +319,6 @@
 		return `<!doctype html>\n${html.outerHTML}`;
 	}
 
-	function currentAppUrlWithoutGraphRoute(): string {
-		const currentWithoutHash = window.location.href.split('#')[0];
-		return currentWithoutHash.split('?')[0];
-	}
-
 	function openNewGraphInNewTab(): void {
 		const graphId =
 			typeof crypto.randomUUID === 'function'
@@ -333,8 +329,10 @@
 			routeMode === 'hash' &&
 			(window.location.protocol === 'file:' || window.location.protocol === 'blob:')
 		) {
-			const currentWithoutHash = window.location.href.split('#')[0];
-			window.open(`${currentWithoutHash}${graphHash(graphId, { editRoot: true })}`, '_blank');
+			window.open(
+				`${urlWithoutHash(window.location.href)}${graphHash(graphId, { editRoot: true })}`,
+				'_blank'
+			);
 			return;
 		}
 		if (routeMode === 'hash' && isSelfContainedHtmlShell(currentHtmlShell())) {
@@ -345,8 +343,7 @@
 			return;
 		}
 
-		const currentWithoutHash = window.location.href.split('#')[0];
-		const currentPath = currentWithoutHash.split('?')[0];
+		const currentPath = appUrlWithoutGraphRoute(window.location.href);
 		window.open(
 			`${currentPath}${
 				routeMode === 'hash'
@@ -382,13 +379,17 @@
 				window.history.replaceState(
 					window.history.state,
 					'',
-					`${url.href.split('#')[0]}#${hashRoute.pathname}${hashRoute.search}`
+					`${urlWithoutHash(url.href)}#${hashRoute.pathname}${hashRoute.search}`
 				);
 				return;
 			}
 			const params = new SvelteURLSearchParams(hash.startsWith('?') ? hash.slice(1) : hash);
 			params.delete(EDIT_ROOT_PARAM);
-			window.history.replaceState(window.history.state, '', `${url.href.split('#')[0]}#${params}`);
+			window.history.replaceState(
+				window.history.state,
+				'',
+				`${urlWithoutHash(url.href)}#${params}`
+			);
 			return;
 		}
 		url.searchParams.delete(EDIT_ROOT_PARAM);

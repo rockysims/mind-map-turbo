@@ -18,7 +18,7 @@ export function contentLayerScale(frameSizePx: number, baseSizePx: number): numb
 	return frameSizePx / baseSizePx;
 }
 
-export interface CrossfadeOpacity {
+interface CrossfadeOpacity {
 	compact: number;
 	details: number;
 }

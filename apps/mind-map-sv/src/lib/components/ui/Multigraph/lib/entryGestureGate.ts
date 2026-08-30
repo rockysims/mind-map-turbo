@@ -7,7 +7,7 @@ export interface EntryGestureGateState {
 	direction: EntryGestureDirection | null;
 }
 
-export interface EntryGestureGateStep {
+interface EntryGestureGateStep {
 	state: EntryGestureGateState;
 	swallow: boolean;
 }
