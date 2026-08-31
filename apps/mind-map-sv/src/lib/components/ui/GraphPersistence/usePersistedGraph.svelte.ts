@@ -5,16 +5,21 @@ import {
 	GraphPersistenceController,
 	controllerNotice,
 	controllerNoticeSeverity,
-	type GraphPersistenceControllerDeps
+	type GraphPersistenceControllerDeps,
+	type SnapshotSummary
 } from '$lib/graphPersistenceController';
 
 export type PersistedGraph = {
 	readonly graph: MultigraphData;
 	readonly viewState: ViewState;
 	readonly graphGeneration: number;
+	/** Bumped when the loaded document is mutated in place; see `ControllerView`. */
+	readonly graphRevision: number;
 	readonly graphSummaries: ReturnType<GraphPersistenceController['getView']>['graphSummaries'];
 	readonly loadedGraphId: string;
 	readonly documentStatus: DocumentStatus;
+	/** The revert offer standing over this graph, refreshed on load and by every revert path. */
+	readonly snapshot: SnapshotSummary | null;
 	readonly draftCached: boolean;
 	readonly notice: string;
 	readonly noticeSeverity: 'info' | 'warning';
@@ -28,6 +33,10 @@ export type PersistedGraph = {
 	exportGraphDocument: GraphPersistenceController['exportGraphDocument'];
 	importGraphDocument: GraphPersistenceController['importGraphDocument'];
 	importGraphDocumentFromReader: GraphPersistenceController['importGraphDocumentFromReader'];
+	importGraphIntoCurrent: GraphPersistenceController['importGraphIntoCurrent'];
+	importGraphIntoCurrentFromReader: GraphPersistenceController['importGraphIntoCurrentFromReader'];
+	revertToSnapshot: GraphPersistenceController['revertToSnapshot'];
+	dismissSnapshot: GraphPersistenceController['dismissSnapshot'];
 	selectGraph: GraphPersistenceController['selectGraph'];
 	createGraph: GraphPersistenceController['createGraph'];
 	deleteGraph: GraphPersistenceController['deleteGraph'];
@@ -54,6 +63,9 @@ export function usePersistedGraph(deps: GraphPersistenceControllerDeps): Persist
 		get graphGeneration() {
 			return view.graphGeneration;
 		},
+		get graphRevision() {
+			return view.graphRevision;
+		},
 		get graphSummaries() {
 			return view.graphSummaries;
 		},
@@ -62,6 +74,9 @@ export function usePersistedGraph(deps: GraphPersistenceControllerDeps): Persist
 		},
 		get documentStatus() {
 			return view.documentStatus;
+		},
+		get snapshot() {
+			return view.snapshot;
 		},
 		get draftCached() {
 			return view.draftCached;
@@ -79,6 +94,10 @@ export function usePersistedGraph(deps: GraphPersistenceControllerDeps): Persist
 		exportGraphDocument: controller.exportGraphDocument.bind(controller),
 		importGraphDocument: controller.importGraphDocument.bind(controller),
 		importGraphDocumentFromReader: controller.importGraphDocumentFromReader.bind(controller),
+		importGraphIntoCurrent: controller.importGraphIntoCurrent.bind(controller),
+		importGraphIntoCurrentFromReader: controller.importGraphIntoCurrentFromReader.bind(controller),
+		revertToSnapshot: controller.revertToSnapshot.bind(controller),
+		dismissSnapshot: controller.dismissSnapshot.bind(controller),
 		selectGraph: controller.selectGraph.bind(controller),
 		createGraph: controller.createGraph.bind(controller),
 		deleteGraph: controller.deleteGraph.bind(controller),

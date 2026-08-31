@@ -166,3 +166,26 @@ function filePickerTabHtml(appUrl: string): string {
 function scriptCloseTag(): string {
 	return '</' + 'script>';
 }
+
+/**
+ * Read the text content of a File object.
+ *
+ * Returns a promise that resolves to the file text, or rejects with an Error
+ * if the read fails.
+ */
+export function readFileText(file: File): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const reader = new FileReader();
+		reader.onload = () => resolve(reader.result as string);
+		reader.onerror = () => reject(new Error(`Failed to read file: ${file.name}`));
+		reader.readAsText(file);
+	});
+}
+
+/**
+ * Reset a file input element so that selecting the same file again will fire
+ * another `change` event.
+ */
+export function resetFileInput(input: HTMLInputElement): void {
+	input.value = '';
+}

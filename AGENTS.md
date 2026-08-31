@@ -5,6 +5,10 @@
 > Codex reusable workflows live in `.agents/skills/*`. This file mirrors the
 > universal parts so any agent (Codex, Aider, Cline, etc.) gets the same
 > expectations.
+>
+> Keep this file lean — it is read every session. If any guidance needs more
+> than ~4 lines, put the long form in `docs/` and leave a one-line pointer
+> here.
 
 ## How to run things
 
@@ -52,7 +56,9 @@ Every change must satisfy these before being claimed complete:
    the `export` keyword rather than adding it to an ignore list.
 6. Commit messages follow Conventional Commits (`feat`, `fix`, `refactor`,
    `test`, `docs`, `chore`, etc.).
-7. No tracked changes to `.svelte-kit/`, build outputs, or `*storybook*.log`.
+7. Anything real you found and deliberately did not fix is filed in
+   `docs/debt/` — dropping it and widening the change are both wrong.
+8. No tracked changes to `.svelte-kit/`, build outputs, or `*storybook*.log`.
 
 You must actually run those commands and report results. Do not claim done
 based on vibes.
@@ -70,8 +76,16 @@ based on vibes.
 | Constants                 | `apps/mind-map-sv/src/lib/constants.ts`                                 |
 | E2E                       | `apps/mind-map-sv/e2e/*.test.ts`                                        |
 | Roadmaps & plans          | `docs/roadmaps/<YYYY-MM-DD> <name>/`                                    |
+| Technical debt            | `docs/debt/` (conventions in `docs/debt/README.md`)                     |
 | Plan template             | `docs/roadmaps/PLAN_TEMPLATE.md`                                        |
 | Codex plan workflow       | `.agents/skills/mm-plan/SKILL.md`                                       |
+
+## Technical debt
+
+`docs/debt/` records compromises we knowingly carry — one file per item, and
+`ls docs/debt/` is the index. File one when something real is out of scope for
+the change you are making (a review's out-of-scope findings belong here rather
+than dropped or force-fixed). Conventions: `docs/debt/README.md`.
 
 ## Coding conventions (highlights)
 
@@ -101,6 +115,16 @@ chore(deps): bump @storybook/addon-vitest to ^10.3
 ```
 
 Full details: `.cursor/rules/commits.mdc`.
+
+## Git across worktrees
+
+Multiple agents run in worktrees under `.claude/worktrees/`; branches like
+`temp` are shared. Never check out a shared branch inside your worktree to
+merge into it — update it in place with `git push . HEAD:<branch>`, which
+only fast-forwards and fails loudly if someone advanced the branch
+concurrently. If it's not a fast-forward, merge the target branch into yours
+first, then push again. Never use bare `git stash` (the stash stack is
+shared); prefer a temporary WIP commit.
 
 ## Process for new work
 

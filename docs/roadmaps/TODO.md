@@ -98,7 +98,6 @@ folded into the 08/09/10 math and dataflow milestones:
 - Consider allowing deep zoom to show iframe (with url configured by node) so third party websites can be accessed smoothly via deep zoom
 
 TODO: make long press work too even if its not a mobile device
-TODO: allow nodes from disconnected graph components to be as close as r1+r2 where r1 and r2 are the radii of the nodes. Currently they are forced relatively far apart.
 
 - Scrape from website after (establishing the pattern)
   Maybe we need a built in AI assistant that can be given a url to scrape from?
@@ -118,8 +117,6 @@ Later:
 - Mark done (checkbox?) feature (maybe via special !task tag?)
 - Allow # prefix even within edit for consistency? currently seems to fail to add tag
 - Need an easier way to add/remove tags (at least for nodes)?
-- Import another graph into current graph (as a disconnected beacon node)
-  Maybe need a way to merge nodes?
 
 from the 2026-08-28 derived-edges review (small math-layer improvements; the
 big findings became milestone 11 and two standalone bug-fix tasks):

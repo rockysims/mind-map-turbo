@@ -1,15 +1,20 @@
 import type { Point } from '../../types/multigraph';
 
-import { shouldShowCreationPreviewNode } from './creationGesture.js';
+import { shouldShowCreationPreviewNode, type NodeGestureMode } from './creationGesture.js';
 import { easeInOut } from './elementTransitions.js';
 
 /**
- * Pure state for the creation-gesture preview: a preview node that scales in
+ * Pure state for the drag-from-node preview: a preview node that scales in
  * while the cursor is over background and scales out over any node, plus the
  * cursor point the preview edge is drawn to.
+ *
+ * A merge-mode preview keeps the same shape and the same edge, and simply never
+ * shows the preview node — nothing is being created for it to stand in for.
  */
 export interface CreationPreviewState {
 	sourceNodeId: string;
+	/** What the gesture will do on release; decides whether a preview node exists at all. */
+	mode: NodeGestureMode;
 	/** Cursor position in graph coordinates. */
 	point: Point;
 	hoverNodeId: string | null;
@@ -26,10 +31,12 @@ export const CREATION_PREVIEW_TARGET_SCALE = 1;
 export function beginCreationPreview(
 	sourceNodeId: string,
 	point: Point,
-	nowMs: number
+	nowMs: number,
+	mode: NodeGestureMode = 'create'
 ): CreationPreviewState {
 	return {
 		sourceNodeId,
+		mode,
 		point,
 		hoverNodeId: sourceNodeId,
 		anim: { fromScale: 0, toScale: 0, startedAtMs: nowMs, durationMs: 0 },
@@ -49,7 +56,7 @@ export function updateCreationPreview(
 	nowMs: number,
 	durationMs: number
 ): CreationPreviewState {
-	const targetScale = shouldShowCreationPreviewNode(input.hoverNodeId)
+	const targetScale = shouldShowCreationPreviewNode(input.hoverNodeId, state.mode)
 		? CREATION_PREVIEW_TARGET_SCALE
 		: 0;
 	const anim =
