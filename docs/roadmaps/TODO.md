@@ -127,3 +127,5 @@ big findings became milestone 11 and two standalone bug-fix tasks):
 - Edit-sheet note for "looks like a definition but isn't" (chained equalities, `f(x) = …`, rejected left sides currently fail silently; extraction already knows why). Canvas stays quiet; the note is focus-only.
 - `hasDerivedEdges` guard has no production caller — wire it into the save path or drop it.
 - Group diagnostics references by node id at compute time (`referencesForNode` is a linear scan per rendered node).
+
+TODO: look into vector embedding search (using transform) so users can search title, description, images (later videos), etc.
