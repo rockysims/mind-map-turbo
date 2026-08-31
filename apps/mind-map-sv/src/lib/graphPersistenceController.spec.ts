@@ -5,6 +5,7 @@ import { GRAPH_HTML_READER_VERSION, parseGraphFileText, serializeGraphHtmlFile }
 import { CURRENT_SCHEMA_VERSION, NEUTRAL_VIEW_STATE, type ViewState } from './migrations';
 import {
 	GraphPersistenceController,
+	controllerNotice,
 	statusToNotice,
 	type ControllerStatus,
 	type EmbeddedDocumentConflictChoice,
@@ -100,6 +101,7 @@ function setup(
 			draftGraph: MultigraphData;
 			fileGraph: MultigraphData;
 		}) => EmbeddedDocumentConflictChoice | Promise<EmbeddedDocumentConflictChoice>;
+		appVersion?: string;
 	} = {}
 ) {
 	const persistence = new MemoryPersistence();
@@ -122,12 +124,90 @@ function setup(
 		chooseEmbeddedDocumentConflict: options.chooseEmbeddedDocumentConflict,
 		createDocumentId: () => 'doc-new',
 		now: () => 456,
-		createGraphId: () => 'graph-new'
+		createGraphId: () => 'graph-new',
+		appVersion: options.appVersion
 	});
 
 	if (scheduler === null) throw new Error('Expected scheduler to be created');
 	return { controller, persistence, scheduler: scheduler as TestScheduler, navigate, events };
 }
+
+const APP_STAMP = '2026-08-30T21:41:32-07:00 efa2bbc';
+const NEWER_STAMP = '2026-09-15T10:02:00-07:00 abc1234';
+
+describe('opening a document written by another app version', () => {
+	function documentFrom(appVersion: string | undefined): string {
+		return serializeGraphHtmlFile({
+			data: makeGraph({ nodeCount: 2, edges: [[0, 1]] }),
+			viewState: NEUTRAL_VIEW_STATE,
+			documentId: 'doc-1',
+			appVersion
+		});
+	}
+
+	it('warns when importing a document from a newer app', async () => {
+		const { controller } = setup({ appVersion: APP_STAMP });
+		await controller.load(DEFAULT_GRAPH_ID);
+
+		await controller.importGraphDocument(documentFrom(NEWER_STAMP));
+
+		expect(controller.getView().status).toEqual({
+			state: 'notice',
+			message: 'Saved by a newer app (2026-09-15 10:02).'
+		});
+	});
+
+	it('surfaces that warning over the document status', async () => {
+		// controllerNotice normally lets documentStatusNotice win. If it ever
+		// stops making an exception for this message the warning becomes
+		// invisible, which is a silent failure rather than a loud one.
+		const { controller } = setup({ appVersion: APP_STAMP });
+		await controller.load(DEFAULT_GRAPH_ID);
+
+		await controller.importGraphDocument(documentFrom(NEWER_STAMP));
+
+		expect(controllerNotice(controller.getView())).toBe('Saved by a newer app (2026-09-15 10:02).');
+	});
+
+	it('reports the ordinary import when the document is from an older app', async () => {
+		const { controller } = setup({ appVersion: APP_STAMP });
+		await controller.load(DEFAULT_GRAPH_ID);
+
+		await controller.importGraphDocument(documentFrom('2026-05-07T09:00:00-07:00 0000001'));
+
+		expect(controller.getView().status).toEqual({
+			state: 'notice',
+			message: `Imported graph into "${DEFAULT_GRAPH_ID}".`
+		});
+	});
+
+	it('says nothing about a document written before the stamp existed', async () => {
+		const { controller } = setup({ appVersion: APP_STAMP });
+		await controller.load(DEFAULT_GRAPH_ID);
+
+		await controller.importGraphDocument(documentFrom(undefined));
+
+		expect(controllerNotice(controller.getView())).not.toMatch(/newer/);
+	});
+
+	it('warns when a document opened from the picker is from a newer app', async () => {
+		const { controller } = setup({ appVersion: APP_STAMP });
+		const doc = parseGraphFileText(documentFrom(NEWER_STAMP));
+
+		await controller.loadEmbeddedDocument(doc, { openedFromPicker: true });
+
+		expect(controllerNotice(controller.getView())).toBe('Saved by a newer app (2026-09-15 10:02).');
+	});
+
+	it('records the running app version on every document it writes', async () => {
+		const { controller } = setup({ appVersion: APP_STAMP });
+		await controller.load(DEFAULT_GRAPH_ID);
+
+		const artifact = await controller.exportGraphDocument();
+
+		expect(parseGraphFileText(artifact.content).appVersion).toBe(APP_STAMP);
+	});
+});
 
 describe('GraphPersistenceController', () => {
 	it('loads a missing graph by creating and saving the default graph', async () => {

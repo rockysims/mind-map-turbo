@@ -2,6 +2,7 @@ import type { MultigraphData } from './components/ui/types/multigraph';
 import { base64ToBlob, blobToBase64 } from './assets/assetEncoding';
 import type { GraphAssetStore } from './assets/assetStore';
 import { referencedAssetIds } from './components/ui/Multigraph/lib/graph';
+import { newerAppNotice } from './buildInfo';
 import {
 	documentStatusHasUndownloadedChanges,
 	documentStatusForGraph,
@@ -90,7 +91,10 @@ export type GraphPersistenceControllerDeps = {
 	createGraphId?: () => string;
 	createDocumentId?: () => string;
 	now?: () => number;
-	/** Build stamp of the running app, recorded on every document it writes. */
+	/**
+	 * Raw build stamp of the running app. Recorded on every document it writes,
+	 * and compared against a document's own stamp on open.
+	 */
 	appVersion?: string;
 	openUnsupportedHtmlFile?: (html: string) => boolean;
 	assetStore?: GraphAssetStore;
@@ -231,6 +235,12 @@ export class GraphPersistenceController {
 			await this.flushPendingSave();
 			await this.refreshGraphList();
 		}
+
+		// Last, so the awaits above cannot overwrite it with a routine status.
+		const versionNotice = newerAppNotice(doc.appVersion, this.deps.appVersion);
+		if (versionNotice !== null) {
+			this.update({ status: { state: 'notice', message: versionNotice } });
+		}
 	}
 
 	private async shouldOpenEmbeddedFile(context: {
@@ -369,7 +379,9 @@ export class GraphPersistenceController {
 		this.update({
 			status: {
 				state: 'notice',
-				message: `Imported graph into "${graphId}".`
+				message:
+					newerAppNotice(imported.appVersion, this.deps.appVersion) ??
+					`Imported graph into "${graphId}".`
 			}
 		});
 		return 'imported';

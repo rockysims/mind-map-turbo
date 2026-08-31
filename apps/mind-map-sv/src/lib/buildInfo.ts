@@ -66,10 +66,13 @@ export function parseBuildStamp(content: string | null | undefined): BuildStamp 
  */
 export function formatBuildStamp(stamp: BuildStamp | null): string {
 	if (stamp === null) return 'dev';
+	if (stamp.commit === null) return formatStampWhen(stamp);
+	return `${formatStampWhen(stamp)} · ${stamp.commit}${stamp.dirty ? '-dirty' : ''}`;
+}
 
-	const when = `${stamp.iso.slice(0, 10)} ${stamp.iso.slice(11, 16)}`;
-	if (stamp.commit === null) return when;
-	return `${when} · ${stamp.commit}${stamp.dirty ? '-dirty' : ''}`;
+/** Date and time alone, for places too narrow to carry the sha as well. */
+function formatStampWhen(stamp: BuildStamp): string {
+	return `${stamp.iso.slice(0, 10)} ${stamp.iso.slice(11, 16)}`;
 }
 
 /**
@@ -90,4 +93,29 @@ export function compareBuildStamps(
 	if (Number.isNaN(leftTime) || Number.isNaN(rightTime)) return null;
 
 	return Math.sign(leftTime - rightTime);
+}
+
+/**
+ * The one-line warning for opening a document into an app older than the one
+ * that wrote it, or null when there is nothing to say.
+ *
+ * Only that direction is dangerous. Opening an older document is the ordinary
+ * upgrade path and works; opening a newer one is silent damage, because the
+ * next Download wraps the newer graph in this older app's code. Anything
+ * unorderable — a document from before the stamp existed, a dev build on either
+ * side — stays silent rather than guessing.
+ *
+ * Deliberately short: the toolbar renders notices on one nowrap line, so a
+ * longer message would clip on a phone. It carries the word "newer" because
+ * `controllerNotice` uses that to decide a notice outranks the document status.
+ */
+export function newerAppNotice(
+	documentVersion: string | null | undefined,
+	appVersion: string | null | undefined
+): string | null {
+	const documentStamp = parseBuildStamp(documentVersion);
+	if (compareBuildStamps(documentStamp, parseBuildStamp(appVersion)) !== 1) return null;
+	if (documentStamp === null) return null;
+
+	return `Saved by a newer app (${formatStampWhen(documentStamp)}).`;
 }

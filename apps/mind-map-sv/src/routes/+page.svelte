@@ -46,9 +46,11 @@
 
 	/**
 	 * Which app build this document holds, read once from the shell's meta tag.
-	 * Absent on the dev server, which injects no stamp, so this reads `dev`.
+	 * Kept raw — exports record it verbatim so a later reader can compare it,
+	 * which a display string could not support. Null on the dev server, which
+	 * injects no stamp.
 	 */
-	let appVersion = 'dev';
+	let appBuildStamp: string | null = null;
 
 	let persisted = $state<PersistedGraph | null>(null);
 	let graphAssetStore = $state<IndexedDbGraphAssetStore | null>(null);
@@ -61,7 +63,7 @@
 	const defaultPrimaryNodeId = $derived(persisted?.graph.nodes[0]?.id ?? '');
 
 	onMount(() => {
-		appVersion = formatBuildStamp(parseBuildStamp(readBuildStampMeta()));
+		appBuildStamp = readBuildStampMeta();
 		selectedGraphId = graphIdFromUrl(
 			new URL(window.location.href),
 			graphRouteModeForProtocol(window.location.protocol)
@@ -80,7 +82,7 @@
 		const openedFromFilePicker = selectedGraphFileText !== null || consumeOpenFileFromPickerFlag();
 
 		const persistedGraph = usePersistedGraph({
-			appVersion,
+			appVersion: appBuildStamp ?? undefined,
 			persistence,
 			createScheduler: (onStatus) =>
 				new SaveScheduler({
@@ -161,7 +163,10 @@
 	}
 
 	function openGraphFilePicker(): void {
-		openHtmlFilePickerInNewTab(currentAppUrlWithoutGraphRoute(), appVersion);
+		openHtmlFilePickerInNewTab(
+			currentAppUrlWithoutGraphRoute(),
+			formatBuildStamp(parseBuildStamp(appBuildStamp))
+		);
 	}
 
 	function readBuildStampMeta(): string | null {

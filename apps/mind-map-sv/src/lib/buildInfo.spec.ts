@@ -8,6 +8,7 @@ import {
 	BUILD_STAMP_META_NAME,
 	compareBuildStamps,
 	formatBuildStamp,
+	newerAppNotice,
 	parseBuildStamp
 } from './buildInfo';
 
@@ -139,6 +140,47 @@ describe('compareBuildStamps', () => {
 		['both sides are unknown', null, null]
 	])('refuses to order when %s', (_label, left, right) => {
 		expect(compareBuildStamps(left, right)).toBeNull();
+	});
+});
+
+describe('newerAppNotice', () => {
+	const APP = '2026-08-30T21:41:32-07:00 efa2bbc';
+
+	it('warns when the document came from a newer app', () => {
+		expect(newerAppNotice('2026-09-15T10:02:00-07:00 abc1234', APP)).toBe(
+			'Saved by a newer app (2026-09-15 10:02).'
+		);
+	});
+
+	it('leaves out the sha, which would not fit the toolbar on a phone', () => {
+		expect(newerAppNotice('2026-09-15T10:02:00-07:00 abc1234', APP)).not.toContain('abc1234');
+	});
+
+	it('says "newer", which is how controllerNotice knows to outrank the status', () => {
+		expect(newerAppNotice('2026-09-15T10:02:00-07:00 abc1234', APP)).toContain('newer');
+	});
+
+	it('says nothing about an older document, which is the ordinary upgrade path', () => {
+		expect(newerAppNotice('2026-05-07T09:00:00-07:00 0000001', APP)).toBeNull();
+	});
+
+	it('says nothing when the document is this same build', () => {
+		expect(newerAppNotice(APP, APP)).toBeNull();
+	});
+
+	it.each([
+		['the document predates the stamp', undefined, APP],
+		['the document stamp is unreadable', 'sometime last week', APP],
+		['the app is a dev build', '2026-09-15T10:02:00-07:00 abc1234', null],
+		['neither side is known', null, null]
+	])('says nothing when %s', (_label, documentVersion, appVersion) => {
+		expect(newerAppNotice(documentVersion, appVersion)).toBeNull();
+	});
+
+	it('compares the moment rather than the text, across offsets', () => {
+		// 2026-08-31T04:41Z is the same moment as the app's 2026-08-30T21:41-07:00.
+		expect(newerAppNotice('2026-08-31T04:41:32Z abc1234', APP)).toBeNull();
+		expect(newerAppNotice('2026-08-31T04:41:33Z abc1234', APP)).not.toBeNull();
 	});
 });
 
