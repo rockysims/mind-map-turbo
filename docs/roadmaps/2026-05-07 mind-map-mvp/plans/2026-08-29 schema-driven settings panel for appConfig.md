@@ -6,7 +6,7 @@
 [milestone 04f](../milestones/04f-tag-colors-and-graph-tag-config.md) (per-graph
 config precedent) and
 [milestone 05](../milestones/05-filter-find-search.md) (left-panel precedent)
-**Status:** draft
+**Status:** done
 **Total estimated effort:** L
 
 ## Summary
@@ -623,6 +623,29 @@ no test surface of its own, T08 because it is where all five prior threads meet.
   any saved graph file — every export already carries its settings, so the save
   side is free and there is only ever one artifact holding settings. Cost: you
   cannot share tuning without also sharing the graph.
+- 2026-08-30: Executed, all 10 tasks. Notes from execution:
+  - The settle kick did NOT need damping: dragging `scaleFalloff` end to end
+    resizes live and settles with no visible thrash, so every `resize-only` and
+    `physics` field stays fully live. The schema's `preview` values match
+    reality as shipped.
+  - T04's prop-default question was sidestepped as planned (parents pass
+    explicitly); no spike was needed.
+  - T09 layering deviation: `SettingsPanel`'s `onImportSettings`/`onSaveSeed`
+    props default to the real `graphFile`/`settingsSeed` implementations
+    instead of being wired through `Multigraph`, which was frozen during that
+    task. Works end-to-end; re-thread through `Multigraph` if the panel should
+    stay free of persistence imports.
+  - T10 found a real hash-router quirk: a second navigation during e2e-style
+    `goto` can tear down the debounced save, so the `resetSettings` flag is
+    stripped from the URL only after `saveDebounceMs`, and is left in place
+    (idempotent retry) if a reload beats it.
+  - Two pre-existing issues found and filed separately: the centered toolbar
+    overlaps the left panels' Close buttons at narrower widths (z-index 40 vs
+    30), and `offline-app-shell.html` regenerates non-deterministically on
+    every build.
+  - The DoD's "adding a key fails check" guarantee was verified by actually
+    adding a dummy key: `svelte-check` reports the missing `CONFIG_SCHEMA`
+    entry as a type error.
 - 2026-08-29: If the settle kick has to be damped in T08, record which fields
   ended up commit-only here so the schema's `preview` values can be corrected to
   match reality.
