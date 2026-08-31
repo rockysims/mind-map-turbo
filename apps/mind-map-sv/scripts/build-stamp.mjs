@@ -87,8 +87,21 @@ function buildStampMetaPattern() {
 export function hasSourceChanges(status) {
 	return status
 		.split('\n')
-		.filter((line) => line.trim() !== '')
-		.some((line) => line.slice(3).trim() !== offlineShellRepoPath);
+		.map((line) => line.trim())
+		.filter((line) => line !== '')
+		.some((line) => statusPath(line) !== offlineShellRepoPath);
+}
+
+/**
+ * The path out of one `--porcelain` line, tolerating a trimmed leading space —
+ * `git()` trims, so ` M path` reaches here as `M path` and a fixed-width slice
+ * would eat the first character of the path.
+ *
+ * @param {string} line
+ * @returns {string}
+ */
+function statusPath(line) {
+	return /^\S{1,2}\s+(.*)$/.exec(line)?.[1] ?? line;
 }
 
 /**

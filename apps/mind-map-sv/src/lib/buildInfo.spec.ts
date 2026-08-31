@@ -194,6 +194,13 @@ describe('the build script dirty check', () => {
 		expect(hasSourceChanges(` M ${SHELL}\n`)).toBe(false);
 	});
 
+	it('ignores it in the trimmed form the build actually passes', () => {
+		// git() trims, so the leading status space is already gone by the time
+		// this runs. Reading the path at a fixed offset ate the first character
+		// of it and made every build after the first one claim -dirty.
+		expect(hasSourceChanges(`M ${SHELL}`)).toBe(false);
+	});
+
 	it('reports a clean tree', () => {
 		expect(hasSourceChanges('')).toBe(false);
 	});
