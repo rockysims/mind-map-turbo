@@ -48,12 +48,20 @@ that fires on the one dangerous direction.
   `package.json` has sat at `0.0.1` with no bump discipline, so semver would be
   a lie the first time someone forgot.
 
-- **Commit date, not wall-clock build time.** **Commit date.**
-  `static/offline-app-shell.html` is tracked in git (581 KB). A wall-clock
-  stamp would dirty it on every `pnpm build` even when nothing changed, turning
-  the deliberate `chore(build): regenerate the offline shell` commits into
-  noise. Same commit in → byte-identical shell out. It is also the truer claim:
-  "which app is this" means "which commit is this".
+- **Commit date, not wall-clock build time.** **Commit date**, because it names
+  _which code_ is in the file — and "which app is this" is exactly the question
+  the stamp exists to answer. A build clock only records when someone ran a
+  command. Anchoring to a commit is also what makes the `-dirty` flag mean
+  anything: it says "this build contains work that is not in that commit".
+
+  This was originally justified by git churn — the claim that a wall-clock stamp
+  would dirty the tracked 581 KB shell on every build. **That was wrong, and is
+  recorded here so nobody re-derives it.** The shell already churns on every
+  build: SvelteKit randomizes its client global namespace per build
+  (`__sveltekit_1014tg8` → `__sveltekit_n5nfo0`) and defaults `version.name` to
+  `Date.now()`. Two consecutive builds of identical source differ in three
+  places today, so the stamp cannot make reproducibility worse — there is none
+  to lose.
 
 - **Where it is displayed.** **The Open page only
   (`filePickerTabHtml` in `browserGraphFile.ts`), as a faint second line under
@@ -112,14 +120,14 @@ that fires on the one dangerous direction.
 
 ### T01 — Generate the build stamp and inject it into the offline shell
 
-|                |                                                                  |
-| -------------- | ---------------------------------------------------------------- |
-| **Depends on** | —                                                                |
-| **Wave**       | 1                                                                |
-| **Agent**      | fast/cheap                                                       |
-| **Effort**     | S                                                                |
-| **Files**      | new `scripts/build-stamp.mjs`, `scripts/inline-static-build.mjs` |
-| **PR title**   | `feat(build): stamp the offline shell with its source commit`    |
+|                |                                                                                                           |
+| -------------- | --------------------------------------------------------------------------------------------------------- |
+| **Depends on** | —                                                                                                         |
+| **Wave**       | 1                                                                                                         |
+| **Agent**      | fast/cheap                                                                                                |
+| **Effort**     | S                                                                                                         |
+| **Files**      | new `scripts/build-stamp.mjs`, `scripts/inline-static-build.mjs`, `scripts/offline-shell-fingerprint.mjs` |
+| **PR title**   | `feat(build): stamp the offline shell with its source commit`                                             |
 
 New module mirroring the shape of `scripts/offline-shell-fingerprint.mjs`:
 export `BUILD_STAMP_META_NAME = 'mind-map-build'`, `resolveBuildStamp({ repoRoot })`,
@@ -136,14 +144,20 @@ Call it from `inline-static-build.mjs` alongside the existing
 `withOfflineShellFingerprint` call, so the meta lands in both `build/index.html`
 and `static/offline-app-shell.html`.
 
+Add `scripts/build-stamp.mjs` to `appInputs` in
+`scripts/offline-shell-fingerprint.mjs`. That list enumerates build inputs by
+hand, so without this an edit to the new script would leave the freshness gate
+reporting a stale shell as fresh.
+
 **Acceptance**
 
 - `pnpm --filter mind-map-sv build` emits
   `<meta name="mind-map-build" content="...">` into both outputs.
-- Building twice from the same clean commit produces a byte-identical
-  `static/offline-app-shell.html`.
-- `pnpm check:offline-shell` still passes (the new meta is injected into
-  output, so the source fingerprint is unaffected).
+- Two builds of the same commit emit the **same stamp value**. Not the same
+  shell — see the churn note above; that difference is SvelteKit's, not ours.
+- Editing `scripts/build-stamp.mjs` alone changes the source fingerprint.
+- `pnpm check:offline-shell` still passes (the meta is injected into output, so
+  it does not feed back into the source fingerprint).
 - A build with an uncommitted edit produces a `-dirty` suffix.
 
 ### T02 — `buildInfo.ts`: parse, format, and compare build stamps
@@ -378,6 +392,12 @@ Each of T01–T03 is independently shippable: T01 alone already makes
   better way". The better way turned out to be _not putting it on the canvas_:
   the Open page is the moment the question is actually live, and the greppable
   meta answers it without running the app at all.
+- 2026-08-30: the offline shell is not reproducible build-to-build, for reasons
+  that predate this plan (see the commit-date resolution). Pinning
+  `kit.version.name` in `svelte.config.js` would fix one of the two causes; the
+  randomized `__sveltekit_*` namespace would need a normalization pass in
+  `inline-static-build.mjs`. Deliberately not attempted here — it is its own
+  change with its own risk to the boot path.
 - 2026-08-30: `exportedAt` has been on the payload since 04c and is still
   displayed nowhere. If a document-info surface ever appears, it and `appVersion`
   belong on it together.
