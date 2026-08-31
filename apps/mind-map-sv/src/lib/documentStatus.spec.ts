@@ -77,10 +77,10 @@ describe('documentStatus', () => {
 			['new-clean', 'New graph.'],
 			['new-dirty', 'Draft cached in this browser. Save to keep it.'],
 			['file-clean', 'Matches opened file.'],
-			['file-dirty', 'Draft differs from the opened file. Save to keep the changes.'],
+			['file-dirty', 'Differs from the opened file. Save to keep the changes.'],
 			['file-recovered-draft', 'Recovered cached edits. Save to keep them.'],
 			['saved-file-clean', 'Matches saved file.'],
-			['saved-file-dirty', 'Draft differs from your saved file. Save to keep the changes.']
+			['saved-file-dirty', 'Differs from your saved file. Save to keep the changes.']
 		];
 
 		for (const [status, notice] of cases) {
@@ -92,15 +92,9 @@ describe('documentStatus', () => {
 	it('never claims a draft is cached when nothing reached storage', () => {
 		const cases: Array<[DocumentStatus, string]> = [
 			['new-dirty', 'Draft not cached. Save now to keep your work.'],
-			[
-				'file-dirty',
-				'Draft differs from the opened file and is not cached. Save now to keep the changes.'
-			],
-			['file-recovered-draft', 'Recovered edits are not cached. Save now to keep them.'],
-			[
-				'saved-file-dirty',
-				'Draft differs from your saved file and is not cached. Save now to keep the changes.'
-			]
+			['file-dirty', 'Differs from the opened file. Not cached — save now.'],
+			['file-recovered-draft', 'Recovered edits not cached. Save now to keep them.'],
+			['saved-file-dirty', 'Differs from your saved file. Not cached — save now.']
 		];
 
 		for (const [status, notice] of cases) {

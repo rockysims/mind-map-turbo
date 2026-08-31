@@ -46,8 +46,10 @@
 	import { resolveGraphStorage, type StorageDurability } from '$lib/storageAvailability';
 
 	const EDIT_ROOT_PARAM = 'editRoot';
+	// Written as short sentences: the toolbar stacks one per line, so each has to
+	// stand on its own in a notice column narrower than the message used to be.
 	const STARTUP_ERROR_NOTICE =
-		'The app could not start in this browser. Try reloading, or open it in another browser.';
+		'The app could not start. Try reloading the page. Another browser may work.';
 
 	let persisted = $state<PersistedGraph | null>(null);
 	let storageDurability = $state<StorageDurability>('durable');
@@ -155,11 +157,23 @@
 				event.preventDefault();
 				event.returnValue = '';
 			};
+			// Camera moves no longer schedule a cache write of their own, so leaving
+			// the page is where the current pan/zoom (and any still-debounced edit)
+			// has to reach the cache. 'visibilitychange' covers mobile, where a tab
+			// can be discarded without ever firing 'pagehide'.
+			const onPageHide = () => {
+				void persistedGraph.flushPendingSave();
+			};
+			const onVisibilityChange = () => {
+				if (document.visibilityState === 'hidden') onPageHide();
+			};
 
 			window.addEventListener('storage', onStorage);
 			window.addEventListener('hashchange', onRouteChange);
 			window.addEventListener('popstate', onRouteChange);
 			window.addEventListener('beforeunload', onBeforeUnload);
+			window.addEventListener('pagehide', onPageHide);
+			document.addEventListener('visibilitychange', onVisibilityChange);
 
 			return () => {
 				persistedGraph.dispose();
@@ -167,6 +181,8 @@
 				window.removeEventListener('hashchange', onRouteChange);
 				window.removeEventListener('popstate', onRouteChange);
 				window.removeEventListener('beforeunload', onBeforeUnload);
+				window.removeEventListener('pagehide', onPageHide);
+				document.removeEventListener('visibilitychange', onVisibilityChange);
 			};
 		} catch {
 			// Startup itself failed. Say so instead of leaving a blank page that
@@ -460,7 +476,8 @@
 				{defaultPrimaryNodeId}
 				assetStore={graphAssetStore}
 				assetScope={persisted.loadedGraphId}
-				onMultigraphChange={(graph) => persisted?.notifyGraphChanged(graph, { syncView: true })}
+				onMultigraphChange={(graph, generation) =>
+					persisted?.notifyGraphChanged(graph, { syncView: true, generation })}
 				onViewStateChange={(viewState) =>
 					persisted?.notifyViewStateChanged(viewState, { syncView: true })}
 			/>

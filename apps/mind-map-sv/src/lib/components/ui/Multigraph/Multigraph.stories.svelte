@@ -57,13 +57,14 @@
 		args: {
 			multigraphData: MultigraphData;
 			defaultPrimaryNodeId?: string;
-			onMultigraphChange?: (data: MultigraphData) => void;
+			graphGeneration?: number;
+			onMultigraphChange?: (data: MultigraphData, generation: number) => void;
 			onViewStateChange?: (state: ViewState) => void;
 		};
 	};
 
 	type ChangeSpy = {
-		mock: { calls: Array<[MultigraphData]> };
+		mock: { calls: Array<[MultigraphData, number]> };
 	};
 
 	type ViewStateSpy = {
@@ -311,6 +312,14 @@
 		const graph = spy?.mock.calls.at(-1)?.[0];
 		if (!graph) throw new Error('Expected onMultigraphChange to be called with graph data');
 		return graph;
+	}
+
+	/** The generation an edit was stamped with: which loaded graph it belongs to. */
+	function lastChangeGeneration(args: PlayContext['args']): number {
+		const spy = args.onMultigraphChange as ChangeSpy | undefined;
+		const call = spy?.mock.calls.at(-1);
+		if (!call) throw new Error('Expected onMultigraphChange to have been called');
+		return call[1];
 	}
 
 	function lastViewState(args: PlayContext['args']): ViewState {
@@ -1856,6 +1865,7 @@
 	args={{
 		multigraphData: makeGraph({ nodeCount: 1 }),
 		defaultPrimaryNodeId: 'n0',
+		graphGeneration: 3,
 		onMultigraphChange: fn()
 	}}
 	play={async ({ canvasElement, args }: PlayContext) => {
@@ -1881,6 +1891,9 @@
 		expect(canvas.getByText('Updated mobile title')).toBeInTheDocument();
 		expect(lastChangedGraph(args).nodes[0].title).toBe('Updated mobile title');
 		expect(lastChangedGraph(args).nodes[0].tags).toEqual(['abc', 'urgent']);
+		// Stamped with the graph load it was made to, so a commit that lands while
+		// the canvas is being replaced can be told apart from a live edit.
+		expect(lastChangeGeneration(args)).toBe(3);
 	}}
 />
 

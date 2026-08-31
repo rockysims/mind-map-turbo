@@ -95,7 +95,7 @@ export class SaveScheduler {
 					state: 'warning',
 					savedAt,
 					fingerprint,
-					message: `Cached graphs use ${Math.round(warning.ratio * 100)}% of the local budget.`
+					message: `Local cache is ${Math.round(warning.ratio * 100)}% full.`
 				});
 			} else {
 				this.report({ state: 'saved', savedAt, fingerprint });

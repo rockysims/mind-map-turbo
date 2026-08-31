@@ -50,6 +50,11 @@ export function documentStatusForGraph(
  * browser's local cache: a dirty document whose draft has not been written is
  * never described as cached, because that is the message that costs people
  * their work. It defaults to true so status-only callers still read naturally.
+ *
+ * Every notice is written as short sentences the toolbar stacks one per line
+ * (see `noticeLines`), so each sentence has to fit the toolbar's fixed notice
+ * column on its own — roughly thirty characters — rather than stretching the
+ * toolbar to fit the longest message.
  */
 export function documentStatusNotice(
 	status: DocumentStatus,
@@ -70,18 +75,18 @@ export function documentStatusNotice(
 	if (status === 'file-recovered-draft') {
 		return draftCached
 			? 'Recovered cached edits. Save to keep them.'
-			: 'Recovered edits are not cached. Save now to keep them.';
+			: 'Recovered edits not cached. Save now to keep them.';
 	}
 
 	if (status === 'saved-file-dirty') {
 		return draftCached
-			? 'Draft differs from your saved file. Save to keep the changes.'
-			: 'Draft differs from your saved file and is not cached. Save now to keep the changes.';
+			? 'Differs from your saved file. Save to keep the changes.'
+			: 'Differs from your saved file. Not cached — save now.';
 	}
 
 	return draftCached
-		? 'Draft differs from the opened file. Save to keep the changes.'
-		: 'Draft differs from the opened file and is not cached. Save now to keep the changes.';
+		? 'Differs from the opened file. Save to keep the changes.'
+		: 'Differs from the opened file. Not cached — save now.';
 }
 
 export function documentStatusHasUnsavedChanges(status: DocumentStatus): boolean {

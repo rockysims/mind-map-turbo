@@ -83,7 +83,7 @@ class TestScheduler implements GraphSaveScheduler {
 				state: 'warning',
 				savedAt: 123,
 				fingerprint,
-				message: 'Cached graphs use 85% of the local budget.'
+				message: 'Local cache is 85% full.'
 			});
 			return;
 		}
@@ -505,7 +505,7 @@ describe('GraphPersistenceController', () => {
 			documentStatus: 'new-dirty',
 			status: {
 				state: 'notice',
-				message: 'Kept cached draft; another tab changed this document.'
+				message: 'Changed in another tab. Kept your cached draft.'
 			}
 		});
 	});
@@ -551,7 +551,7 @@ describe('GraphPersistenceController', () => {
 		await controller.exportGraphDocument('<!doctype html><html><body></body></html>');
 
 		expect(controller.getView().status).toEqual({ state: 'exported', filename: 'active.html' });
-		expect(controllerNotice(controller.getView())).toBe('Saved active.html to your downloads.');
+		expect(controllerNotice(controller.getView())).toBe('Saved active.html. Check your downloads.');
 		expect(controllerNoticeSeverity(controller.getView())).toBe('info');
 	});
 
@@ -595,7 +595,7 @@ describe('GraphPersistenceController', () => {
 			viewState: importedViewState,
 			documentId: 'doc-imported',
 			graphGeneration: generationBeforeImport + 1,
-			status: { state: 'notice', message: 'Imported graph into "active".' }
+			status: { state: 'notice', message: 'Imported into "active".' }
 		});
 		expect(persistence.save).toHaveBeenLastCalledWith('active', {
 			data: importedGraph,
@@ -672,27 +672,112 @@ describe('GraphPersistenceController', () => {
 		expect(openUnsupportedHtmlFile).toHaveBeenCalledWith(html);
 		expect(controller.getView().status).toEqual({
 			state: 'notice',
-			message: 'Opened newer graph file in a new tab.'
+			sticky: true,
+			message: 'Newer graph file. Opened in a new tab.'
 		});
 	});
 
-	it('autosaves pan and zoom changes without mutating graph positions', async () => {
+	it('keeps pan and zoom out of the cache write path', async () => {
 		const { controller, persistence, scheduler } = setup();
 		await controller.load('active');
 		const graphBefore = controller.getView().graph;
 		const positionsBefore = graphBefore.posByNodeId;
+		const saveCallsBefore = persistence.save.mock.calls.length;
+		scheduler.schedule.mockClear();
+
+		controller.notifyViewStateChanged({ panX: 25, panY: 10, scale: 0.8 }, { syncView: true });
+
+		expect(scheduler.schedule).not.toHaveBeenCalled();
+		expect(persistence.save.mock.calls).toHaveLength(saveCallsBefore);
+		// The camera is a view concern: the document must be untouched by it, and
+		// the toolbar must not claim a cache write is happening.
+		expect(controller.getView().graph).toEqual(graphBefore);
+		expect(controller.getView().graph.posByNodeId).toEqual(positionsBefore);
+		expect(controllerNotice(controller.getView())).not.toBe('Caching draft...');
+	});
+
+	it('carries the latest camera along with the next edit', async () => {
+		const { controller, persistence, scheduler } = setup();
+		await controller.load('active');
+		const updatedViewState = { panX: 25, panY: 10, scale: 0.8 };
+		const edited = makeGraph({ nodeCount: 2 });
+
+		controller.notifyViewStateChanged(updatedViewState, { syncView: true });
+		controller.notifyGraphChanged(edited, { syncView: true });
+		await scheduler.flush();
+
+		expect(persistence.save).toHaveBeenLastCalledWith('active', {
+			data: edited,
+			viewState: updatedViewState
+		});
+	});
+
+	it('flushes a camera-only change so leaving the page does not lose it', async () => {
+		const { controller, persistence } = setup();
+		await controller.load('active');
+		const graphBefore = controller.getView().graph;
 		const updatedViewState = { panX: 25, panY: 10, scale: 0.8 };
 
 		controller.notifyViewStateChanged(updatedViewState, { syncView: true });
-		await scheduler.flush();
+		await controller.flushPendingSave();
 
-		expect(controller.getView().graph).toEqual(graphBefore);
-		expect(controller.getView().graph.posByNodeId).toEqual(positionsBefore);
 		expect(persistence.save).toHaveBeenLastCalledWith('active', {
 			data: graphBefore,
 			viewState: updatedViewState
 		});
-		expect(controller.getView().graphSummaries).toEqual([{ id: 'active', updatedAt: 2 }]);
+		// A second flush has nothing left to write.
+		const saveCallsAfter = persistence.save.mock.calls.length;
+		await controller.flushPendingSave();
+		expect(persistence.save.mock.calls).toHaveLength(saveCallsAfter);
+	});
+
+	it('ignores an edit committed by the graph that was just replaced', async () => {
+		const { controller, persistence, scheduler } = setup();
+		await persistence.save('active', {
+			data: makeGraph({ nodeCount: 3 }),
+			viewState: NEUTRAL_VIEW_STATE
+		});
+		await controller.load('first');
+		const staleGeneration = controller.getView().graphGeneration;
+		await controller.load('active');
+		const loaded = controller.getView().graph;
+		scheduler.schedule.mockClear();
+
+		// The canvas for 'first' blurs a title edit while it is being torn down.
+		controller.notifyGraphChanged(makeGraph({ nodeCount: 1 }), {
+			syncView: true,
+			generation: staleGeneration
+		});
+
+		expect(scheduler.schedule).not.toHaveBeenCalled();
+		expect(controller.getView().graph).toEqual(loaded);
+	});
+
+	it('accepts an edit committed by the current graph', async () => {
+		const { controller, scheduler } = setup();
+		await controller.load('active');
+		const edited = makeGraph({ nodeCount: 2 });
+
+		controller.notifyGraphChanged(edited, {
+			syncView: true,
+			generation: controller.getView().graphGeneration
+		});
+
+		expect(scheduler.schedule).toHaveBeenLastCalledWith('active', edited, NEUTRAL_VIEW_STATE);
+	});
+
+	it('skips a cache write for a change event that matches the cached graph', async () => {
+		const { controller, scheduler } = setup();
+		await controller.load('active');
+		const edited = makeGraph({ nodeCount: 2 });
+		controller.notifyGraphChanged(edited, { syncView: true });
+		await scheduler.flush();
+		scheduler.schedule.mockClear();
+
+		controller.notifyGraphChanged(edited, { syncView: true });
+
+		expect(scheduler.schedule).not.toHaveBeenCalled();
+		expect(controller.getView().draftCached).toBe(true);
 	});
 
 	it('cancels import when replacement confirmation is declined for non-empty graphs', async () => {
@@ -753,7 +838,8 @@ describe('GraphPersistenceController', () => {
 		expect(result).toBe('read-failed');
 		expect(controller.getView().status).toEqual({
 			state: 'notice',
-			message: 'Import failed: unable to read file.'
+			sticky: true,
+			message: 'Import failed. Could not read the file.'
 		});
 	});
 
@@ -804,7 +890,7 @@ describe('GraphPersistenceController', () => {
 		// The failure clears the pending flag, which is what lets the warning
 		// through instead of leaving a permanent 'Caching draft...'.
 		expect(controller.getView()).toMatchObject({ draftCached: false, cachePending: false });
-		expect(controllerNotice(controller.getView())).toBe('Could not cache draft: quota exceeded');
+		expect(controllerNotice(controller.getView())).toBe('Could not cache draft. quota exceeded');
 		expect(controllerNoticeSeverity(controller.getView())).toBe('warning');
 	});
 
@@ -815,9 +901,7 @@ describe('GraphPersistenceController', () => {
 		controller.notifyGraphChanged(makeGraph({ nodeCount: 2 }), { syncView: true });
 		await scheduler.flush();
 
-		expect(controllerNotice(controller.getView())).toBe(
-			'Cached graphs use 85% of the local budget.'
-		);
+		expect(controllerNotice(controller.getView())).toBe('Local cache is 85% full.');
 		expect(controllerNoticeSeverity(controller.getView())).toBe('warning');
 
 		controller.notifyGraphChanged(makeGraph({ nodeCount: 3 }), { syncView: true });
@@ -852,7 +936,7 @@ describe('GraphPersistenceController', () => {
 
 		await controller.selectGraph('next');
 
-		expect(controllerNotice(controller.getView())).toBe('Could not cache draft: quota exceeded');
+		expect(controllerNotice(controller.getView())).toBe('Could not cache draft. quota exceeded');
 		expect(controllerNoticeSeverity(controller.getView())).toBe('warning');
 	});
 
@@ -874,16 +958,16 @@ describe('statusToNotice', () => {
 		const cases: Array<[ControllerStatus, string]> = [
 			[{ state: 'loading', graphId: 'graph' }, 'Loading graph...'],
 			[{ state: 'loaded', graphId: 'graph' }, 'Loaded "graph".'],
-			[{ state: 'reloaded', graphId: 'graph' }, 'Reloaded "graph" from another tab.'],
+			[{ state: 'reloaded', graphId: 'graph' }, 'Reloaded from another tab.'],
 			[{ state: 'saving' }, 'Caching draft...'],
 			[{ state: 'saved', savedAt: 1 }, 'Draft cached.'],
 			[
-				{ state: 'warning', savedAt: 1, message: 'Cached graphs use 81% of the local budget.' },
-				'Cached graphs use 81% of the local budget.'
+				{ state: 'warning', savedAt: 1, message: 'Local cache is 81% full.' },
+				'Local cache is 81% full.'
 			],
 			[{ state: 'notice', message: 'Import cancelled.' }, 'Import cancelled.'],
-			[{ state: 'exported', filename: 'graph.html' }, 'Saved graph.html to your downloads.'],
-			[{ state: 'error', message: 'quota exceeded' }, 'Could not cache draft: quota exceeded']
+			[{ state: 'exported', filename: 'graph.html' }, 'Saved graph.html. Check your downloads.'],
+			[{ state: 'error', message: 'quota exceeded' }, 'Could not cache draft. quota exceeded']
 		];
 
 		for (const [status, notice] of cases) {

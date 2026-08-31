@@ -152,7 +152,7 @@ test('exports HTML graph document containing schemaVersion, graph data, and view
 	// Dispatch a wheel event directly on the stage to trigger a zoom and produce
 	// a non-default viewState before exporting.
 	await page.locator('.stage').dispatchEvent('wheel', { deltaY: -300 });
-	await waitForStoredViewState(page, graphId, { scaleDifferentFrom: 1 });
+	await waitForStageScale(page, { differentFrom: 1 });
 
 	// Capture the saved file artifact.
 	const downloadPromise = page.waitForEvent('download');
@@ -175,7 +175,7 @@ test('exports HTML graph document containing schemaVersion, graph data, and view
 	});
 	// Wheel zoom should have changed scale away from the neutral value of 1.
 	expect(doc.viewState.scale).not.toBe(1);
-	await expect(page.getByRole('status')).toHaveText(`Saved ${graphId}.html to your downloads.`);
+	await expect(page.getByRole('status')).toHaveText(`Saved ${graphId}.html. Check your downloads.`);
 });
 
 test('downloaded HTML documents propagate a clean live shell to descendants', async ({ page }) => {
@@ -448,9 +448,7 @@ test('still renders the graph when the browser blocks site data', async ({ page 
 
 	await expect(page.locator('.title-input')).toHaveValue('Root');
 	const alert = page.getByRole('alert');
-	await expect(alert).toHaveText(
-		'This browser is blocking site data, so nothing is cached here. Save to a file to keep your work.'
-	);
+	await expect(alert).toHaveText('Caching is blocked here. Save to a file to keep it.');
 	await expect(toolbarSaveButton(page)).toBeVisible();
 });
 
@@ -596,20 +594,10 @@ test('reload restores graph data and viewState from localStorage without file im
 	await editFirstNodeTitle(page, 'Refresh Test Node');
 	await waitForStoredTitle(page, graphId, 'Refresh Test Node');
 
-	// Zoom with a wheel event to create a non-default viewState.
+	// Zoom with a wheel event to create a non-default viewState. Zooming does not
+	// write to the cache by itself; leaving the page is what flushes the camera.
 	await page.locator('.stage').dispatchEvent('wheel', { deltaY: -300 });
-	await waitForStoredViewState(page, graphId, { scaleDifferentFrom: 1 });
-
-	// Capture the saved viewState before reloading.
-	const savedViewState = await page.evaluate((id) => {
-		const item = localStorage.getItem(`mind-map:graph:${encodeURIComponent(id)}`);
-		if (!item) return null;
-		return (
-			(JSON.parse(item) as { viewState?: { panX: number; panY: number; scale: number } })
-				.viewState ?? null
-		);
-	}, graphId);
-	if (!savedViewState) throw new Error('viewState was not saved to localStorage before reload');
+	const zoomedScale = await waitForStageScale(page, { differentFrom: 1 });
 
 	// Reload without any file import; localStorage is the only source of truth.
 	await page.reload();
@@ -626,14 +614,14 @@ test('reload restores graph data and viewState from localStorage without file im
 		)
 	).toBe(true);
 
-	// viewState should also be restored from localStorage.
-	expect(restoredPayload?.viewState).toMatchObject(savedViewState);
+	// The camera the user left with reached the cache on unload...
+	const storedScale = (restoredPayload as { viewState?: { scale?: number } } | null)?.viewState
+		?.scale;
+	expect(storedScale).toBeCloseTo(zoomedScale, 5);
 
-	// Stage transform should reflect the restored viewState.
-	const transform = await page
-		.locator('.stage-content')
-		.evaluate((el) => (el as HTMLElement).style.transform);
-	expect(transform).toContain(`scale(${savedViewState.scale})`);
+	// ...and the reloaded stage is rendering it. The rendered transform is
+	// rounded for the style attribute, so compare numbers rather than strings.
+	expect(await readStageScale(page)).toBeCloseTo(zoomedScale, 4);
 });
 
 test('deep zoom enters node focus and exits by wheel gestures', async ({ page }) => {
@@ -1084,21 +1072,23 @@ async function waitForStoredTitle(page: Page, graphId: string, title: string) {
 	);
 }
 
-async function waitForStoredViewState(
-	page: Page,
-	graphId: string,
-	opts: { scaleDifferentFrom: number }
-) {
-	await page.waitForFunction(
-		({ graphId, scaleDifferentFrom }) => {
-			const item = localStorage.getItem(`mind-map:graph:${encodeURIComponent(graphId)}`);
-			if (!item) return false;
-			const payload = JSON.parse(item) as { viewState?: { scale?: number } };
-			const scale = payload.viewState?.scale;
-			return scale !== undefined && scale !== scaleDifferentFrom;
-		},
-		{ graphId, scaleDifferentFrom: opts.scaleDifferentFrom }
-	);
+/**
+ * The live camera scale off the stage transform. Panning and zooming are not
+ * document edits, so they no longer write to the cache on their own: the DOM,
+ * not localStorage, is where a fresh camera shows up first.
+ */
+async function readStageScale(page: Page): Promise<number> {
+	const transform = await page
+		.locator('.stage-content')
+		.evaluate((el) => (el as HTMLElement).style.transform);
+	const scale = Number(/scale\(([-0-9.e]+)\)/.exec(transform)?.[1]);
+	if (!Number.isFinite(scale)) throw new Error(`No scale in stage transform: "${transform}"`);
+	return scale;
+}
+
+async function waitForStageScale(page: Page, opts: { differentFrom: number }): Promise<number> {
+	await expect.poll(async () => readStageScale(page)).not.toBeCloseTo(opts.differentFrom, 5);
+	return readStageScale(page);
 }
 
 /** The toolbar's Save writes the file; the node edit sheet has a Save of its own. */

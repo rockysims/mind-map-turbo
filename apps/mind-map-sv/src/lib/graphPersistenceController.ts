@@ -29,8 +29,7 @@ import {
 import type { SaveStatus } from './saveScheduler';
 import type { StorageDurability } from './storageAvailability';
 
-export const MEMORY_ONLY_STORAGE_NOTICE =
-	'This browser is blocking site data, so nothing is cached here. Save to a file to keep your work.';
+export const MEMORY_ONLY_STORAGE_NOTICE = 'Caching is blocked here. Save to a file to keep it.';
 
 type ImportGraphResult =
 	| 'imported'
@@ -47,7 +46,12 @@ export type ControllerStatus =
 	| { state: 'saving' }
 	| { state: 'saved'; savedAt: number }
 	| { state: 'warning'; savedAt: number; message: string }
-	| { state: 'notice'; message: string }
+	/**
+	 * `sticky` marks a notice the reader still has to act on — a failed import,
+	 * or a cached draft another tab would have overwritten. It outranks the
+	 * document status line until something replaces it; a plain notice does not.
+	 */
+	| { state: 'notice'; message: string; sticky?: boolean }
 	| { state: 'exported'; filename: string }
 	| { state: 'error'; message: string };
 
@@ -123,6 +127,8 @@ export class GraphPersistenceController {
 	private lastPersistedFingerprint: string | null = null;
 	/** A cache write has been scheduled and has not reported back yet. */
 	private cachePending = false;
+	/** The camera moved since the last scheduled write, so no write carries it yet. */
+	private viewStateDirty = false;
 
 	constructor(private readonly deps: GraphPersistenceControllerDeps) {
 		const defaultGraph = deps.createDefaultGraph();
@@ -270,20 +276,43 @@ export class GraphPersistenceController {
 		return choice === 'open-file';
 	}
 
-	notifyGraphChanged(data: MultigraphData, options: { syncView?: boolean } = {}): void {
+	/**
+	 * `generation` names the graph the change was made to. A canvas being torn
+	 * down still commits pending edits — a title input blurring as the graph is
+	 * swapped is the usual one — and without this guard that commit is written
+	 * under the graph that replaced it, silently overwriting it. Callers that
+	 * cannot name a generation are trusted as before.
+	 */
+	notifyGraphChanged(
+		data: MultigraphData,
+		options: { syncView?: boolean; generation?: number } = {}
+	): void {
+		if (options.generation !== undefined && options.generation !== this.graphGeneration) return;
 		const graphId = this.view.loadedGraphId || DEFAULT_GRAPH_ID;
-		this.scheduleSave(graphId, data, this.view.viewState);
+		// A change event that lands on exactly what the cache already holds buys
+		// nothing but a 'Caching draft...' flash. Skipping it is only safe while no
+		// write is in flight, since a pending one may still hold different data.
+		const alreadyCached =
+			!this.cachePending && graphFingerprint(data) === this.lastPersistedFingerprint;
+		if (!alreadyCached) this.scheduleSave(graphId, data, this.view.viewState);
 		if (options.syncView) {
 			this.update({ graph: data, documentStatus: this.currentDocumentStatus(data) });
 		}
 	}
 
+	/**
+	 * Panning, zooming and deep zoom move the camera without editing the
+	 * document, so they must not schedule a cache write: doing so rewrote the
+	 * whole graph and flashed 'Caching draft...' through every gesture. The camera
+	 * is held in memory and rides along with the next edit or flush instead.
+	 */
 	notifyViewStateChanged(viewState: ViewState, options: { syncView?: boolean } = {}): void {
-		const graphId = this.view.loadedGraphId || DEFAULT_GRAPH_ID;
-		this.scheduleSave(graphId, this.view.graph, viewState);
+		this.viewStateDirty = true;
 		if (options.syncView) {
 			this.update({ viewState });
+			return;
 		}
+		this.view = { ...this.view, viewState };
 	}
 
 	async exportGraphDocument(htmlShell?: string): Promise<GraphFileArtifact> {
@@ -334,9 +363,10 @@ export class GraphPersistenceController {
 				this.update({
 					status: {
 						state: 'notice',
+						sticky: true,
 						message: opened
-							? 'Opened newer graph file in a new tab.'
-							: 'Import needs a newer app version. Open the file directly to continue.'
+							? 'Newer graph file. Opened in a new tab.'
+							: 'Needs a newer app version. Open the file directly.'
 					}
 				});
 				return opened ? 'opened-in-new-tab' : 'open-tab-blocked';
@@ -345,7 +375,8 @@ export class GraphPersistenceController {
 				this.update({
 					status: {
 						state: 'notice',
-						message: 'Import failed: unsupported graph file version.'
+						sticky: true,
+						message: 'Import failed. Unsupported file version.'
 					}
 				});
 				return 'unsupported';
@@ -353,7 +384,8 @@ export class GraphPersistenceController {
 			this.update({
 				status: {
 					state: 'notice',
-					message: 'Import failed: invalid graph file.'
+					sticky: true,
+					message: 'Import failed. Not a valid graph file.'
 				}
 			});
 			return 'invalid';
@@ -400,7 +432,7 @@ export class GraphPersistenceController {
 		this.update({
 			status: {
 				state: 'notice',
-				message: `Imported graph into "${graphId}".`
+				message: `Imported into "${graphId}".`
 			}
 		});
 		return 'imported';
@@ -416,7 +448,8 @@ export class GraphPersistenceController {
 			this.update({
 				status: {
 					state: 'notice',
-					message: 'Import failed: unable to read file.'
+					sticky: true,
+					message: 'Import failed. Could not read the file.'
 				}
 			});
 			return 'read-failed';
@@ -490,7 +523,8 @@ export class GraphPersistenceController {
 			this.update({
 				status: {
 					state: 'notice',
-					message: 'Kept cached draft; another tab changed this document.'
+					sticky: true,
+					message: 'Changed in another tab. Kept your cached draft.'
 				}
 			});
 			return;
@@ -510,10 +544,20 @@ export class GraphPersistenceController {
 	 */
 	private scheduleSave(id: string, data: MultigraphData, viewState: ViewState): void {
 		this.cachePending = true;
+		// The scheduled write carries the current camera, so it is no longer owed.
+		this.viewStateDirty = false;
 		this.scheduler.schedule(id, data, viewState);
 	}
 
-	private async flushPendingSave(): Promise<void> {
+	/**
+	 * Writes whatever is owed to the cache. Camera-only changes never scheduled a
+	 * write of their own, so this is where they are folded in: leaving the page,
+	 * switching graphs, importing over the current one.
+	 */
+	async flushPendingSave(): Promise<void> {
+		if (this.viewStateDirty && this.view.loadedGraphId !== '') {
+			this.scheduleSave(this.view.loadedGraphId, this.view.graph, this.view.viewState);
+		}
 		try {
 			await this.scheduler.flush();
 		} catch {
@@ -634,13 +678,13 @@ export class GraphPersistenceController {
 export function statusToNotice(status: ControllerStatus): string {
 	if (status.state === 'loading') return 'Loading graph...';
 	if (status.state === 'loaded') return `Loaded "${status.graphId}".`;
-	if (status.state === 'reloaded') return `Reloaded "${status.graphId}" from another tab.`;
+	if (status.state === 'reloaded') return 'Reloaded from another tab.';
 	if (status.state === 'saving') return 'Caching draft...';
 	if (status.state === 'saved') return 'Draft cached.';
 	if (status.state === 'warning') return status.message;
 	if (status.state === 'notice') return status.message;
-	if (status.state === 'exported') return `Saved ${status.filename} to your downloads.`;
-	return `Could not cache draft: ${status.message}`;
+	if (status.state === 'exported') return `Saved ${status.filename}. Check your downloads.`;
+	return `Could not cache draft. ${status.message}`;
 }
 
 export function controllerNotice(view: ControllerView): string {
@@ -659,14 +703,7 @@ export function controllerNotice(view: ControllerView): string {
 	// the write that follows it half a second later.
 	if (view.cachePending) return statusToNotice({ state: 'saving' });
 	if (view.status.state === 'warning') return statusToNotice(view.status);
-	if (
-		view.status.state === 'notice' &&
-		(view.status.message.includes('failed') ||
-			view.status.message.includes('newer') ||
-			view.status.message.includes('Kept cached draft'))
-	) {
-		return view.status.message;
-	}
+	if (view.status.state === 'notice' && view.status.sticky === true) return view.status.message;
 	return documentStatusNotice(view.documentStatus, { draftCached: view.draftCached });
 }
 
