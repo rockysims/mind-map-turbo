@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { resetFileInput } from '$lib/browserGraphFile';
+	import { noticeLines } from './lib/noticeLines';
 
 	let {
 		notice = '',
@@ -21,6 +22,8 @@
 
 	let importInput = $state<HTMLInputElement | null>(null);
 
+	const lines = $derived(noticeLines(notice));
+
 	/**
 	 * Import picks its file in this page, not in the picker tab Open uses: that
 	 * tab hands the file over by reloading the app, which would remount the canvas
@@ -37,6 +40,15 @@
 		// Reset first, so choosing the same file twice fires `change` both times.
 		resetFileInput(input);
 		if (file !== null) onImportGraphFile?.(file);
+	}
+
+	/**
+	 * Stacked lines are separate elements, so this trailing space is what keeps
+	 * the notice reading as one message ('browser. Save') rather than running the
+	 * sentences together ('browser.Save'). It collapses away inside a block line.
+	 */
+	function spoken(line: string): string {
+		return `${line} `;
 	}
 </script>
 
@@ -68,9 +80,13 @@
 		onclick={() => onSave?.()}>Save</button
 	>
 	{#if severity === 'warning'}
-		<p class="warning" role="alert" aria-live="assertive">{notice}</p>
+		<p class="notice warning" role="alert" aria-live="assertive">
+			{#each lines as line, index (index)}<span class="notice-line">{spoken(line)}</span>{/each}
+		</p>
 	{:else}
-		<p role="status">{notice}</p>
+		<p class="notice" role="status">
+			{#each lines as line, index (index)}<span class="notice-line">{spoken(line)}</span>{/each}
+		</p>
 	{/if}
 </div>
 
@@ -119,19 +135,30 @@
 		white-space: nowrap;
 	}
 
-	.graph-toolbar p {
+	/*
+	 * Fixed basis and a two-line floor: the toolbar must not resize as the notice
+	 * changes between 'Caching draft...' and a two-sentence status. Every notice
+	 * is written as sentences that fit this column on their own (the widest
+	 * measures ~11.5rem in the bold warning face), and they stack one per line,
+	 * so the bar stays the same compact size whatever it is saying.
+	 */
+	.graph-toolbar .notice {
+		flex: 0 0 12rem;
+		min-height: 2rem;
 		margin: 0;
 		color: #475569;
 		font-size: 0.8125rem;
-		white-space: nowrap;
+		line-height: 1.25;
+	}
+
+	.graph-toolbar .notice-line {
+		display: block;
+		white-space: normal;
 	}
 
 	.graph-toolbar p.warning {
-		max-width: 22rem;
 		color: #b45309;
 		font-weight: 600;
-		/* Warnings are longer than a status line and must not be clipped. */
-		white-space: normal;
 	}
 
 	@media (max-width: 640px) {
@@ -142,6 +169,11 @@
 			justify-content: center;
 			border-radius: 1rem;
 			transform: none;
+		}
+
+		.graph-toolbar .notice {
+			flex-basis: 100%;
+			text-align: center;
 		}
 	}
 </style>

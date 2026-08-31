@@ -288,7 +288,12 @@
 		initialTitleEditNodeId?: string | null;
 		layoutSettings?: Partial<LayoutSettings>;
 		initialViewState?: ViewState;
-		onMultigraphChange?: (data: MultigraphData) => void;
+		/**
+		 * `generation` names the external graph load this edit was made to, so a
+		 * commit that lands while the canvas is being replaced can be told apart
+		 * from one made to the graph now on screen.
+		 */
+		onMultigraphChange?: (data: MultigraphData, generation: number) => void;
 		onViewStateChange?: (state: ViewState) => void;
 		/** Static per-node opacity override; used by stories and T04/T05 animation wiring. Default 1. */
 		nodeRenderOverrides?: Record<string, { opacity?: number }>;
@@ -1835,7 +1840,7 @@
 
 	function commitUserGraph(nextGraph: MultigraphData) {
 		graph = nextGraph;
-		onMultigraphChange?.(nextGraph);
+		onMultigraphChange?.(nextGraph, lastSyncedGeneration);
 	}
 
 	/**

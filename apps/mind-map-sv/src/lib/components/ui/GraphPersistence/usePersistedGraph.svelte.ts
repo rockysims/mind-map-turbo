@@ -25,7 +25,10 @@ export type PersistedGraph = {
 	readonly noticeSeverity: 'info' | 'warning';
 	load: GraphPersistenceController['load'];
 	loadEmbeddedDocument: GraphPersistenceController['loadEmbeddedDocument'];
-	notifyGraphChanged: (data: MultigraphData, options?: { syncView?: boolean }) => void;
+	notifyGraphChanged: (
+		data: MultigraphData,
+		options?: { syncView?: boolean; generation?: number }
+	) => void;
 	notifyViewStateChanged: (viewState: ViewState, options?: { syncView?: boolean }) => void;
 	exportGraphDocument: GraphPersistenceController['exportGraphDocument'];
 	importGraphDocument: GraphPersistenceController['importGraphDocument'];
@@ -38,6 +41,7 @@ export type PersistedGraph = {
 	createGraph: GraphPersistenceController['createGraph'];
 	deleteGraph: GraphPersistenceController['deleteGraph'];
 	handleStorageEvent: GraphPersistenceController['handleStorageEvent'];
+	flushPendingSave: GraphPersistenceController['flushPendingSave'];
 	dispose: GraphPersistenceController['dispose'];
 };
 
@@ -98,6 +102,7 @@ export function usePersistedGraph(deps: GraphPersistenceControllerDeps): Persist
 		createGraph: controller.createGraph.bind(controller),
 		deleteGraph: controller.deleteGraph.bind(controller),
 		handleStorageEvent: controller.handleStorageEvent.bind(controller),
+		flushPendingSave: controller.flushPendingSave.bind(controller),
 		dispose: () => {
 			unsubscribe();
 			controller.dispose();

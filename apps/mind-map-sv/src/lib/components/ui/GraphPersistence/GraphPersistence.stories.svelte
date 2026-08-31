@@ -381,7 +381,7 @@
 		await userEvent.click(canvas.getByRole('button', { name: 'Simulate external reload' }));
 
 		await waitFor(() =>
-			expect(harness.dataset.notice).toBe('Kept cached draft; another tab changed this document.')
+			expect(harness.dataset.notice).toBe('Changed in another tab. Kept your cached draft.')
 		);
 		await expect(harness.dataset.primaryTitle).toBe('Original Graph');
 	}}
@@ -405,7 +405,7 @@
 		// Save captures HTML into data-last-download without a real browser download.
 		await userEvent.click(canvas.getByRole('button', { name: 'Save' }));
 		await waitFor(() => expect(harness.dataset.lastDownload).toBeTruthy());
-		await expect(harness.dataset.notice).toBe('Saved export-graph.html to your downloads.');
+		await expect(harness.dataset.notice).toBe('Saved export-graph.html. Check your downloads.');
 
 		const exportedHtml = harness.dataset.lastDownload!;
 		const parsed = parseGraphFileText(exportedHtml);

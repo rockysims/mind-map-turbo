@@ -50,7 +50,7 @@
 <Story
 	name="UserSeesDocumentControlsOnly"
 	args={{
-		notice: 'Draft differs from the opened file. Save to keep the changes.',
+		notice: 'Differs from the opened file. Save to keep the changes.',
 		onNewGraph: fn(),
 		onOpenGraphFilePicker: fn(),
 		onImportGraphFile: fn(),
@@ -79,7 +79,7 @@
 			await expect(canvas.getByRole('button', { name })).toHaveAttribute('title');
 		}
 		await expect(canvas.getByRole('status')).toHaveTextContent(
-			'Draft differs from the opened file. Save to keep the changes.'
+			'Differs from the opened file. Save to keep the changes.'
 		);
 		await expect(canvas.queryByRole('button', { name: 'Delete graph' })).not.toBeInTheDocument();
 	}}
@@ -151,8 +151,7 @@
 <Story
 	name="UserSeesUnsavedWorkWarning"
 	args={{
-		notice:
-			'This browser is blocking site data, so nothing is cached here. Save to a file to keep your work.',
+		notice: 'Caching is blocked here. Save to a file to keep it.',
 		severity: 'warning',
 		onNewGraph: fn(),
 		onOpenGraphFilePicker: fn(),
@@ -162,13 +161,38 @@
 		const canvas = within(canvasElement);
 
 		const alert = canvas.getByRole('alert');
-		await expect(alert).toHaveTextContent(
-			'This browser is blocking site data, so nothing is cached here. Save to a file to keep your work.'
-		);
+		await expect(alert).toHaveTextContent('Caching is blocked here. Save to a file to keep it.');
 		await expect(alert).toHaveAttribute('aria-live', 'assertive');
-		// The warning is longer than a status line, so it must be allowed to wrap.
+		// A sentence longer than the notice column wraps inside it rather than
+		// stretching the toolbar or being clipped.
 		await expect(getComputedStyle(alert).whiteSpace).toBe('normal');
 		await expect(canvas.queryByRole('status')).not.toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="UserSeesNoticeSentencesStacked"
+	args={{
+		notice: 'Draft cached in this browser. Save to keep it.',
+		onNewGraph: fn(),
+		onOpenGraphFilePicker: fn(),
+		onSave: fn()
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const canvas = within(canvasElement);
+
+		const status = canvas.getByRole('status');
+		await expect(status).toHaveTextContent('Draft cached in this browser. Save to keep it.');
+		// Stacked, not run together: the toolbar stays narrow enough to sit beside
+		// the buttons instead of stretching across the viewport.
+		const lines = Array.from(status.querySelectorAll('span'));
+		// Each line carries a trailing space so the sentences do not run together
+		// in the accessible text; the visible wording is what is asserted here.
+		await expect(lines.map((line) => line.textContent?.trim())).toEqual([
+			'Draft cached in this browser.',
+			'Save to keep it.'
+		]);
+		await expect(getComputedStyle(lines[0]).display).toBe('block');
 	}}
 />
 
