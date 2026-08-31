@@ -103,14 +103,31 @@
 	</div>
 
 	<div class="settings-toolbar" aria-label="Graph settings controls">
+		<!--
+			A gear rather than the word: this pill sits beside three verbs that each
+			act on the document, and an icon is what keeps it from reading as a
+			fourth. `aria-label` carries the name the buttons beside it wear openly,
+			so nothing is lost to anyone reading by name rather than by shape.
+		-->
 		<button
 			type="button"
+			class="icon-button"
 			title="Adjust how this graph looks and behaves"
+			aria-label="Settings"
 			aria-haspopup="dialog"
 			aria-expanded={settingsOpen}
 			onclick={() => onOpenSettings?.()}
 		>
-			Settings
+			<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+				<!-- Eight teeth on a ring: a gear reads as one at this size from the
+				     silhouette, so it is drawn from that rather than an outline. -->
+				<circle cx="12" cy="12" r="5.5" />
+				<circle cx="12" cy="12" r="2.1" />
+				<path
+					class="teeth"
+					d="M17.5 12h2.7M15.889 15.889l1.909 1.909M12 17.5v2.7M8.111 15.889 6.202 17.798M6.5 12H3.8M8.111 8.111 6.202 6.202M12 6.5V3.8M15.889 8.111 17.798 6.202"
+				/>
+			</svg>
 		</button>
 	</div>
 </div>
@@ -143,6 +160,30 @@
 
 	.graph-toolbar {
 		min-width: 0;
+	}
+
+	.icon-button {
+		/* Square, so the gear sits centred in a target the same height as the
+		   lettered buttons beside it rather than in a wider slab. */
+		padding: 0.375rem;
+		aspect-ratio: 1;
+	}
+
+	.icon-button svg {
+		display: block;
+		width: 1.125rem;
+		height: 1.125rem;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.9;
+		stroke-linecap: round;
+	}
+
+	/* Thicker than the ring, and squared off: tooth weight is what separates a
+	   gear from a sun at this size. */
+	.icon-button svg .teeth {
+		stroke-width: 2.9;
+		stroke-linecap: butt;
 	}
 
 	.graph-toolbar button,
