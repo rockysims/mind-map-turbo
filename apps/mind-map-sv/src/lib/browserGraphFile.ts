@@ -133,8 +133,10 @@ export function filePickerTabHtml(appUrl: string, appVersion: string): string {
 				gap: 0.25rem;
 			}
 
+			/* Secondary, but still legible: #94a3b8 read at roughly 2.4:1 here,
+			   under the 4.5:1 floor. This clears it at about 4.8:1. */
 			.app-version {
-				color: #94a3b8;
+				color: #64748b;
 				font-size: 0.8125rem;
 			}
 
