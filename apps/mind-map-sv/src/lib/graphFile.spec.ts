@@ -42,6 +42,33 @@ describe('serializeGraphFile', () => {
 		expect(JSON.parse(json)).toMatchObject({ schemaVersion: CURRENT_SCHEMA_VERSION });
 	});
 
+	it('records the app version that wrote the document', () => {
+		const json = serializeGraphFile(makeDoc({ appVersion: '2026-08-30 21:41 · efa2bbc' }));
+		expect(JSON.parse(json)).toMatchObject({ appVersion: '2026-08-30 21:41 · efa2bbc' });
+	});
+
+	it('round-trips the app version through JSON and HTML', () => {
+		const doc = makeDoc({ appVersion: '2026-08-30 21:41 · efa2bbc', documentId: 'doc-1' });
+
+		expect(parseGraphFile(serializeGraphFile(doc)).appVersion).toBe('2026-08-30 21:41 · efa2bbc');
+		expect(parseGraphFileText(serializeGraphHtmlFile(doc)).appVersion).toBe(
+			'2026-08-30 21:41 · efa2bbc'
+		);
+	});
+
+	it('reads back no app version from a document written before the stamp existed', () => {
+		expect(parseGraphFile(serializeGraphFile(makeDoc())).appVersion).toBeUndefined();
+	});
+
+	it('ignores unknown top-level keys, which is why appVersion needs no schema bump', () => {
+		const payload = {
+			...JSON.parse(serializeGraphFile(makeDoc())),
+			somethingAddedLater: { by: 'a newer app' }
+		};
+
+		expect(parseGraphFile(JSON.stringify(payload)).data.nodes).toHaveLength(2);
+	});
+
 	it('round-trips quantity designations through JSON and HTML', () => {
 		const base = makeGraph({ nodeCount: 2, edges: [[0, 1]], pinned: [0] });
 		const doc = makeDoc({

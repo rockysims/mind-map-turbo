@@ -10,8 +10,8 @@
 		type StageSize
 	} from '$lib/components/ui/Multigraph/lib/revealCamera';
 	import type { MultigraphData } from '$lib/components/ui/types/multigraph';
-	import { parseGraphFileText } from '$lib/graphFile';
-	import { CURRENT_SCHEMA_VERSION } from '$lib/migrations';
+	import { parseGraphFileText, serializeGraphFile } from '$lib/graphFile';
+	import { CURRENT_SCHEMA_VERSION, NEUTRAL_VIEW_STATE } from '$lib/migrations';
 	import PersistedGraphHarness from './PersistedGraphHarness.svelte';
 
 	const { Story } = defineMeta({
@@ -34,6 +34,15 @@
 	type PlayContext = {
 		canvasElement: HTMLElement;
 	};
+
+	/** A graph file claiming it was written by the app build `appVersion`. */
+	function graphFileWrittenBy(appVersion: string, title: string): string {
+		return serializeGraphFile({
+			data: graphWithTitle(title),
+			viewState: NEUTRAL_VIEW_STATE,
+			appVersion
+		});
+	}
 
 	function graphWithTitle(title: string, nodeCount = 1): MultigraphData {
 		const graph = makeGraph({ nodeCount });
@@ -454,6 +463,59 @@
 
 		// Existing graph is still rendered.
 		expect(harness.dataset.primaryTitle).toBe('Stable Graph');
+	}}
+/>
+
+<Story
+	name="OpeningAFileFromANewerAppSaysSo"
+	args={{
+		initialGraphId: 'stable',
+		graphs: {
+			stable: graphWithTitle('Stable Graph')
+		},
+		appVersion: '2026-08-30T21:41:32-07:00 efa2bbc',
+		simulateImportText: graphFileWrittenBy('2026-09-15T10:02:00-07:00 abc1234', 'From The Future')
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const canvas = within(canvasElement);
+		const harness = getHarness(canvasElement);
+
+		await waitForHarnessData(canvasElement, 'loadedGraphId', 'stable');
+		await userEvent.click(canvas.getByRole('button', { name: 'Import text' }));
+
+		await waitFor(() => expect(harness.dataset.lastImportResult).toBe('imported'));
+
+		// The import succeeds — the warning is about what the next Download would
+		// do, which is wrap this newer graph back up in this older app's code.
+		await waitFor(() =>
+			expect(harness.dataset.notice).toBe('Saved by a newer app (2026-09-15 10:02).')
+		);
+		expect(harness.dataset.primaryTitle).toBe('From The Future');
+	}}
+/>
+
+<Story
+	name="OpeningAFileFromAnOlderAppSaysNothing"
+	args={{
+		initialGraphId: 'stable',
+		graphs: {
+			stable: graphWithTitle('Stable Graph')
+		},
+		appVersion: '2026-08-30T21:41:32-07:00 efa2bbc',
+		simulateImportText: graphFileWrittenBy('2026-05-07T09:00:00-07:00 0000001', 'From The Past')
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const canvas = within(canvasElement);
+		const harness = getHarness(canvasElement);
+
+		await waitForHarnessData(canvasElement, 'loadedGraphId', 'stable');
+		await userEvent.click(canvas.getByRole('button', { name: 'Import text' }));
+
+		await waitFor(() => expect(harness.dataset.lastImportResult).toBe('imported'));
+		await waitFor(() => expect(harness.dataset.primaryTitle).toBe('From The Past'));
+
+		// Opening an older document is the ordinary upgrade path, so it is silent.
+		expect(harness.dataset.notice).not.toMatch(/newer/);
 	}}
 />
 

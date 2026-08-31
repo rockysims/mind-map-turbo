@@ -3,6 +3,7 @@ import { base64ToBlob, blobToBase64 } from './assets/assetEncoding';
 import type { GraphAssetStore, StoredGraphAsset } from './assets/assetStore';
 import { referencedAssetIds } from './components/ui/Multigraph/lib/graph';
 import { importGraphData } from './components/ui/Multigraph/lib/graphImport';
+import { newerAppNotice } from './buildInfo';
 import {
 	documentStatusHasUnsavedChanges,
 	documentStatusForGraph,
@@ -162,6 +163,11 @@ export type GraphPersistenceControllerDeps = {
 	createGraphId?: () => string;
 	createDocumentId?: () => string;
 	now?: () => number;
+	/**
+	 * Raw build stamp of the running app. Recorded on every document it writes,
+	 * and compared against a document's own stamp on open.
+	 */
+	appVersion?: string;
 	openUnsupportedHtmlFile?: (html: string) => boolean;
 	assetStore?: GraphAssetStore;
 	/**
@@ -331,6 +337,14 @@ export class GraphPersistenceController {
 			await this.flushPendingSave();
 			await this.refreshGraphList();
 		}
+
+		// Last, so the awaits above cannot overwrite it with a routine status, and
+		// sticky because the reader has to act on it: their next Save would wrap
+		// this newer graph back up in this older app's code.
+		const versionNotice = newerAppNotice(doc.appVersion, this.deps.appVersion);
+		if (versionNotice !== null) {
+			this.update({ status: { state: 'notice', sticky: true, message: versionNotice } });
+		}
 	}
 
 	private async shouldOpenEmbeddedFile(context: {
@@ -399,6 +413,7 @@ export class GraphPersistenceController {
 				viewState: this.view.viewState,
 				documentId,
 				exportedAt: this.deps.now?.() ?? Date.now(),
+				appVersion: this.deps.appVersion,
 				embeddedAssets
 			},
 			{
@@ -466,10 +481,13 @@ export class GraphPersistenceController {
 		await this.hydrateEmbeddedAssets(graphId, imported);
 		await this.flushPendingSave();
 		await this.refreshGraphList();
+		const versionNotice = newerAppNotice(imported.appVersion, this.deps.appVersion);
 		this.update({
 			status: {
 				state: 'notice',
-				message: `Imported into "${graphId}".`
+				// Only the version warning is sticky; a routine import is not.
+				sticky: versionNotice !== null,
+				message: versionNotice ?? `Imported into "${graphId}".`
 			}
 		});
 		return 'imported';
