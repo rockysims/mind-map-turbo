@@ -2090,9 +2090,27 @@
 
 		const canvas = within(canvasElement);
 		expect(canvas.getByRole('menuitem', { name: 'Add node/edge' })).toBeInTheDocument();
+		expect(canvas.getByRole('menuitem', { name: 'Merge' })).toBeInTheDocument();
 		expect(canvas.getByRole('menuitem', { name: 'Pin' })).toBeInTheDocument();
 		expect(canvas.getByRole('menuitem', { name: 'Edit' })).toBeInTheDocument();
 		expect(canvas.getByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
+
+		// Every item explains itself beyond its label, and the label still names
+		// the button — `title` is the description, so the role query above by name
+		// keeps working. Merge is the one that prompted these: it has to say which
+		// node is left standing.
+		for (const item of canvas.getAllByRole('menuitem')) {
+			expect(item).toHaveAttribute('title');
+			expect(item.getAttribute('title')).not.toBe('');
+		}
+		expect(canvas.getByRole('menuitem', { name: 'Merge' })).toHaveAttribute(
+			'title',
+			'Drag onto the node this one should merge into; the other node survives'
+		);
+		expect(canvas.getByRole('menuitem', { name: 'Pin' })).toHaveAttribute(
+			'title',
+			'Anchor the node here; nearby nodes stay large and visible'
+		);
 		dispatchPointer(circle, 'pointerup', center.x, center.y);
 	}}
 />

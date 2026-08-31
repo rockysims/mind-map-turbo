@@ -41,9 +41,19 @@
 </script>
 
 <div class="graph-toolbar" aria-label="Graph persistence controls">
-	<button type="button" onclick={() => onNewGraph?.()}>New</button>
-	<button type="button" onclick={() => onOpenGraphFilePicker?.()}>Open</button>
-	<button type="button" onclick={chooseImportFile}>Import…</button>
+	<button type="button" title="Start a blank graph in a new tab" onclick={() => onNewGraph?.()}
+		>New</button
+	>
+	<button
+		type="button"
+		title="Open a saved graph file in a new tab"
+		onclick={() => onOpenGraphFilePicker?.()}>Open</button
+	>
+	<button
+		type="button"
+		title="Add a saved graph file to this graph, keeping both"
+		onclick={chooseImportFile}>Import…</button
+	>
 	<input
 		bind:this={importInput}
 		class="import-input"
@@ -52,7 +62,11 @@
 		aria-label="Graph file to import"
 		onchange={handleImportFileChange}
 	/>
-	<button type="button" onclick={() => onSave?.()}>Save</button>
+	<button
+		type="button"
+		title="Download this graph as a file you can reopen later"
+		onclick={() => onSave?.()}>Save</button
+	>
 	{#if severity === 'warning'}
 		<p class="warning" role="alert" aria-live="assertive">{notice}</p>
 	{:else}

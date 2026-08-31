@@ -63,6 +63,21 @@
 		await expect(canvas.getByText('Open')).toBeInTheDocument();
 		await expect(canvas.getByRole('button', { name: 'Import…' })).toBeInTheDocument();
 		await expect(canvas.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+
+		// Each control says what it does beyond its one-word label. Import and Open
+		// both take a file, so their tooltips have to separate "adds to this graph"
+		// from "opens somewhere else".
+		await expect(canvas.getByRole('button', { name: 'Import…' })).toHaveAttribute(
+			'title',
+			'Add a saved graph file to this graph, keeping both'
+		);
+		await expect(canvas.getByRole('button', { name: 'Open' })).toHaveAttribute(
+			'title',
+			'Open a saved graph file in a new tab'
+		);
+		for (const name of ['New', 'Save']) {
+			await expect(canvas.getByRole('button', { name })).toHaveAttribute('title');
+		}
 		await expect(canvas.getByRole('status')).toHaveTextContent(
 			'Draft differs from the opened file. Save to keep the changes.'
 		);
