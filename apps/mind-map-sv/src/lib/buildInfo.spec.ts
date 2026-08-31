@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	BUILD_STAMP_META_NAME as SCRIPT_META_NAME,
+	hasSourceChanges,
 	resolveBuildStamp,
 	withBuildStamp
 } from '../../scripts/build-stamp.mjs';
@@ -181,6 +182,32 @@ describe('newerAppNotice', () => {
 		// 2026-08-31T04:41Z is the same moment as the app's 2026-08-30T21:41-07:00.
 		expect(newerAppNotice('2026-08-31T04:41:32Z abc1234', APP)).toBeNull();
 		expect(newerAppNotice('2026-08-31T04:41:33Z abc1234', APP)).not.toBeNull();
+	});
+});
+
+describe('the build script dirty check', () => {
+	const SHELL = 'apps/mind-map-sv/static/offline-app-shell.html';
+
+	it('ignores the regenerated shell, which every build rewrites', () => {
+		// Building writes the shell, so the next build would otherwise see a dirty
+		// tree caused by its own output and stamp -dirty over nothing.
+		expect(hasSourceChanges(` M ${SHELL}\n`)).toBe(false);
+	});
+
+	it('reports a clean tree', () => {
+		expect(hasSourceChanges('')).toBe(false);
+	});
+
+	it('reports a modified source file', () => {
+		expect(hasSourceChanges(' M apps/mind-map-sv/src/lib/buildInfo.ts\n')).toBe(true);
+	});
+
+	it('reports an untracked source file', () => {
+		expect(hasSourceChanges('?? apps/mind-map-sv/src/lib/newThing.ts\n')).toBe(true);
+	});
+
+	it('reports source changes alongside the shell', () => {
+		expect(hasSourceChanges(` M ${SHELL}\n M apps/mind-map-sv/src/lib/buildInfo.ts\n`)).toBe(true);
 	});
 });
 

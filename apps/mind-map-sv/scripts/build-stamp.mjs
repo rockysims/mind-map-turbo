@@ -9,6 +9,14 @@ const defaultAppRoot = resolve(scriptDir, '..');
 const defaultRepoRoot = resolve(defaultAppRoot, '../..');
 
 /**
+ * A build output, never a build input — `offline-shell-fingerprint.mjs` skips
+ * it for the same reason. Without this, regenerating the shell dirties the tree
+ * with its own product, so the very next build would stamp `-dirty` and claim
+ * uncommitted source that does not exist.
+ */
+const offlineShellRepoPath = 'apps/mind-map-sv/static/offline-app-shell.html';
+
+/**
  * Identify the app build going into the offline shell, as
  * `<iso-instant> <short-sha>[-dirty]`.
  *
@@ -32,7 +40,7 @@ export function resolveBuildStamp({ repoRoot = defaultRepoRoot, now = () => new 
 	if (commit === null || committedAt === null) return buildClockInstant(now());
 
 	const status = git(repoRoot, ['status', '--porcelain']);
-	const dirty = status !== null && status !== '';
+	const dirty = status !== null && hasSourceChanges(status);
 	return `${committedAt} ${commit}${dirty ? '-dirty' : ''}`;
 }
 
@@ -65,6 +73,22 @@ function buildStampMetaPattern() {
 		`<meta\\b(?=[^>]*\\bname=(["'])${BUILD_STAMP_META_NAME}\\1)(?=[^>]*\\bcontent=(["'])([^"']+)\\2)[^>]*>`,
 		'i'
 	);
+}
+
+/**
+ * Whether `git status --porcelain` output names anything but the shell itself.
+ *
+ * Exported for its spec: this is the difference between `-dirty` meaning
+ * "built from uncommitted source" and meaning nothing at all.
+ *
+ * @param {string} status
+ * @returns {boolean}
+ */
+export function hasSourceChanges(status) {
+	return status
+		.split('\n')
+		.filter((line) => line.trim() !== '')
+		.some((line) => line.slice(3).trim() !== offlineShellRepoPath);
 }
 
 /**
