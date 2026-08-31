@@ -2,6 +2,7 @@
 	import { setOverride } from '$lib/config/configOverrides';
 	import type { ConfigOverrides } from '$lib/config/configOverrides';
 	import type { ConfigPath, ConfigValue } from '$lib/config/configPaths';
+	import type { SettingsImportOutcome } from '$lib/graphFile';
 	import SettingsPanel from './SettingsPanel.svelte';
 
 	/**
@@ -12,18 +13,36 @@
 	 *
 	 * Previews deliberately touch nothing but their counters: in the real app a
 	 * preview feeds a component-local layer, never the persisted overrides.
+	 *
+	 * `onImportSettings` and `onSaveSeed` are optional overrides for the panel's
+	 * own defaults (real file parsing, real `localStorage`), so a story can drive
+	 * the footer deterministically without a real file or touching browser
+	 * storage other stories share.
 	 */
-	let { initialOverrides = {} }: { initialOverrides?: ConfigOverrides } = $props();
+	let {
+		initialOverrides = {},
+		onImportSettings
+	}: {
+		initialOverrides?: ConfigOverrides;
+		onImportSettings?: (fileText: string) => SettingsImportOutcome;
+	} = $props();
 
 	let overrides = $state<ConfigOverrides>(overridesAtMount());
 	let previewCount = $state(0);
 	let commitCount = $state(0);
 	let overridesChangeCount = $state(0);
 	let closeCount = $state(0);
+	let saveSeedCount = $state(0);
+	let lastSeedOverrides = $state('');
 	let lastPreviewPath = $state('');
 	let lastPreviewValue = $state('');
 	let lastCommitPath = $state('');
 	let lastCommitValue = $state('');
+
+	function handleSaveSeed(next: ConfigOverrides): void {
+		saveSeedCount += 1;
+		lastSeedOverrides = JSON.stringify(next);
+	}
 
 	/** Seeds the harness once, the way a graph seeds from its stored settings. */
 	function overridesAtMount(): ConfigOverrides {
@@ -65,6 +84,8 @@
 	data-last-commit-value={lastCommitValue}
 	data-overrides-change-count={overridesChangeCount}
 	data-close-count={closeCount}
+	data-save-seed-count={saveSeedCount}
+	data-last-seed-overrides={lastSeedOverrides}
 >
 	<SettingsPanel
 		{overrides}
@@ -72,6 +93,8 @@
 		onCommit={handleCommit}
 		onOverridesChange={handleOverridesChange}
 		onClose={() => (closeCount += 1)}
+		{onImportSettings}
+		onSaveSeed={handleSaveSeed}
 	/>
 </div>
 

@@ -164,6 +164,57 @@ export function isUnsupportedHtmlGraphFile(error: unknown): boolean {
 	return error instanceof PersistedGraphError && error.code === 'unsupported-app-version';
 }
 
+/** The three distinguishable results of lifting settings out of a graph file. */
+export type SettingsImportOutcome =
+	| { kind: 'applied'; overrides: ConfigOverrides; warnings: string[] }
+	| { kind: 'no-settings' }
+	| { kind: 'unreadable' };
+
+/**
+ * Lifts just the `settings` blob out of a `.html` or `.json` graph file's
+ * text, for the settings panel's "Import from graph file…" action. There is
+ * no settings file format of its own — every exported graph already carries
+ * its own tuning (see the plan's "Reusing tuning across graphs" decision), so
+ * this is the only way settings move between graphs.
+ *
+ * Two things this deliberately does NOT do, both load-bearing:
+ *
+ * - It never calls `extractHtmlAssetPayloads`. Reading tuning out of a 100 MB
+ *   illustrated graph must cost one regex match and one `JSON.parse`, not a
+ *   base64 decode of every embedded image.
+ * - It never calls `unwrapPersistedGraph`. Settings must be readable from a
+ *   graph file whose `data` this build cannot open — a future-version graph,
+ *   or one hand-edited into invalidity — because the two are unrelated
+ *   payload keys and a broken graph should not also cost the user their tuning.
+ *
+ * `raw.settings` is run through `sanitizeOverrides`, the same trust boundary
+ * `readSettings` (above) uses for the normal load path; the difference is that
+ * this function surfaces the warnings instead of discarding them, and treats
+ * "no settings key" and "every key got dropped" as the same common,
+ * non-error outcome: `'no-settings'`. Only a file that could not be parsed at
+ * all is `'unreadable'`.
+ */
+export function readSettingsFromGraphFileText(text: string): SettingsImportOutcome {
+	let raw: unknown;
+	try {
+		const json = looksLikeHtml(text) ? extractHtmlGraphPayload(text) : text;
+		raw = JSON.parse(json);
+	} catch {
+		return { kind: 'unreadable' };
+	}
+
+	if (!isRecord(raw) || raw.settings === undefined) {
+		return { kind: 'no-settings' };
+	}
+
+	const { overrides, warnings } = sanitizeOverrides(raw.settings);
+	if (!hasConfigOverrides(overrides)) {
+		return { kind: 'no-settings' };
+	}
+
+	return { kind: 'applied', overrides, warnings };
+}
+
 function parseGraphFilePayload(
 	json: string,
 	opts: { minScale?: number; maxScale?: number } = {}

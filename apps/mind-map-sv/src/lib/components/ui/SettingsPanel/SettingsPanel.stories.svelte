@@ -10,7 +10,8 @@
 		component: SettingsPanelHarness,
 		tags: [],
 		argTypes: {
-			initialOverrides: { control: false }
+			initialOverrides: { control: false },
+			onImportSettings: { control: false }
 		}
 	});
 
@@ -256,5 +257,85 @@
 		await expectHarnessData(canvasElement, 'commitCount', '1');
 		await expectHarnessData(canvasElement, 'overrides', '{"multigraph.layout.scaleFalloff":0.4}');
 		await expectHarnessData(canvasElement, 'previewCount', '3');
+	}}
+/>
+
+<Story
+	name="UserImportsAFileWithAnUnknownPath"
+	args={{
+		initialOverrides: {},
+		// A fixture in place of the real `readSettingsFromGraphFileText`: the
+		// content of the uploaded file is irrelevant here, only that *some* file
+		// reaches the panel and the outcome it gets back renders correctly and
+		// reaches `onOverridesChange`. `sanitizeOverrides` itself (dropping
+		// unknown paths, naming them in a warning) is covered by
+		// `configOverrides.spec.ts`; this story is about the panel's own
+		// rendering and wiring of that outcome.
+		onImportSettings: () => ({
+			kind: 'applied',
+			overrides: { 'multigraph.layout.scaleFalloff': 0.4 },
+			warnings: ['Unknown setting "multigraph.layout.doesNotExist" was dropped.']
+		})
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const canvas = within(canvasElement);
+		const fileInput = canvasElement.querySelector('input[type="file"]');
+		if (!(fileInput instanceof HTMLInputElement)) throw new Error('File input not found');
+
+		await userEvent.click(canvas.getByRole('button', { name: 'Import from graph file…' }));
+		await userEvent.upload(
+			fileInput,
+			new File(['{"settings":{}}'], 'graph.json', { type: 'application/json' })
+		);
+
+		await expectHarnessData(canvasElement, 'overrides', '{"multigraph.layout.scaleFalloff":0.4}');
+		await expectHarnessData(canvasElement, 'overridesChangeCount', '1');
+
+		const message = canvasElement.querySelector('[data-import-outcome="applied"]');
+		expect(message).not.toBeNull();
+		expect(message?.textContent).toContain('Imported 1 setting');
+		expect(message?.textContent).toContain(
+			'Unknown setting "multigraph.layout.doesNotExist" was dropped.'
+		);
+	}}
+/>
+
+<Story
+	name="UserSeesTheNoSettingsOutcomeForAnUntunedGraphFile"
+	args={{
+		initialOverrides: {},
+		onImportSettings: () => ({ kind: 'no-settings' })
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const canvas = within(canvasElement);
+		const fileInput = canvasElement.querySelector('input[type="file"]');
+		if (!(fileInput instanceof HTMLInputElement)) throw new Error('File input not found');
+
+		await userEvent.click(canvas.getByRole('button', { name: 'Import from graph file…' }));
+		await userEvent.upload(
+			fileInput,
+			new File(['<!doctype html>'], 'graph.html', { type: 'text/html' })
+		);
+
+		await waitFor(() =>
+			expect(canvasElement.querySelector('[data-import-outcome="no-settings"]')).not.toBeNull()
+		);
+		// No settings arrived, so the overrides map is untouched.
+		await expectHarnessData(canvasElement, 'overridesChangeCount', '0');
+	}}
+/>
+
+<Story
+	name="UserSavesTheCurrentOverridesAsTheSeedForNewGraphs"
+	args={{ initialOverrides: SPREAD_OVERRIDES }}
+	play={async ({ canvasElement }: PlayContext) => {
+		const canvas = within(canvasElement);
+
+		await userEvent.click(canvas.getByRole('button', { name: 'Use as seed for new graphs' }));
+
+		await expectHarnessData(canvasElement, 'saveSeedCount', '1');
+		const harness = getHarness(canvasElement);
+		expect(JSON.parse(harness.dataset.lastSeedOverrides ?? '{}')).toEqual(SPREAD_OVERRIDES);
+		expect(canvasElement.querySelector('[data-seed-saved="true"]')).not.toBeNull();
 	}}
 />

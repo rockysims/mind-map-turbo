@@ -1,7 +1,11 @@
 <script lang="ts">
+	import { readFileText, resetFileInput } from '$lib/browserGraphFile';
+	import { APP_CONFIG } from '$lib/appConfig';
 	import { clearOverride, readConfigDefault } from '$lib/config/configOverrides';
 	import type { ConfigOverrides } from '$lib/config/configOverrides';
 	import type { ConfigPath, ConfigValue } from '$lib/config/configPaths';
+	import { writeSettingsSeed } from '$lib/config/settingsSeed';
+	import { readSettingsFromGraphFileText, type SettingsImportOutcome } from '$lib/graphFile';
 	import SettingField from './SettingField.svelte';
 	import {
 		buildPanelSections,
@@ -30,20 +34,45 @@
 	 * Advanced fields are not rendered until the group is opened, so the panel
 	 * mounts 15 controls rather than 69 and a collapsed field cannot be found by
 	 * anything walking the DOM.
+	 *
+	 * The footer's two actions — import and seed — are also callback props
+	 * (`onImportSettings`, `onSaveSeed`), each defaulted to a real
+	 * implementation. Every other callback here is a pure hand-off to whichever
+	 * component renders this panel (currently `Multigraph.svelte`) precisely so
+	 * this component stays free of side effects; these two are the exception.
+	 * `Multigraph.svelte` is not touched by this change, and it is the only
+	 * place this panel is mounted, so a callback prop with no default would be
+	 * unreachable in the shipped app — there would be no caller left to supply
+	 * it. Defaulting to the real `readSettingsFromGraphFileText` /
+	 * `writeSettingsSeed` keeps the feature working end to end while still
+	 * letting a story substitute a fixture, which is the only reason these stay
+	 * props rather than plain internal calls.
 	 */
 	let {
 		overrides,
 		onPreview,
 		onCommit,
 		onOverridesChange,
-		onClose
+		onClose,
+		onImportSettings = readSettingsFromGraphFileText,
+		onSaveSeed = saveSeedToLocalStorage
 	}: {
 		overrides: ConfigOverrides;
 		onPreview?: (path: ConfigPath, value: ConfigValue) => void;
 		onCommit: (path: ConfigPath, value: ConfigValue) => void;
 		onOverridesChange: (next: ConfigOverrides) => void;
 		onClose: () => void;
+		/** Parses a `.html`/`.json` graph file's text into an import outcome. */
+		onImportSettings?: (fileText: string) => SettingsImportOutcome;
+		/** Persists `next` as the seed future "New graph" actions will stamp in. */
+		onSaveSeed?: (next: ConfigOverrides) => void;
 	} = $props();
+
+	/** Default `onSaveSeed`: writes straight to `localStorage`. See the prop doc above. */
+	function saveSeedToLocalStorage(next: ConfigOverrides): void {
+		if (typeof localStorage === 'undefined') return;
+		writeSettingsSeed(localStorage, APP_CONFIG.persistence.storageNamespace, next);
+	}
 
 	// The schema is a module constant, so the grouping is computed once.
 	const sections = buildPanelSections();
@@ -71,6 +100,52 @@
 
 	function resetAll(): void {
 		onOverridesChange({});
+	}
+
+	// --- Footer: import from a graph file, and save the current overrides as
+	// the seed for new graphs. Both are one-shot actions with no config state
+	// of their own; the panel still holds no *settings* state, only the little
+	// UI state needed to report what the last action did.
+
+	let importInputEl = $state<HTMLInputElement | undefined>();
+	let importResult = $state<SettingsImportOutcome | null>(null);
+	let seedSaved = $state(false);
+
+	function openImportPicker(): void {
+		seedSaved = false;
+		importInputEl?.click();
+	}
+
+	async function handleImportFileChange(event: Event): Promise<void> {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0] ?? null;
+		resetFileInput(input); // allow reselecting the same file later
+		if (!file) return;
+
+		let text: string;
+		try {
+			text = await readFileText(file);
+		} catch {
+			importResult = { kind: 'unreadable' };
+			return;
+		}
+
+		const outcome = onImportSettings(text);
+		importResult = outcome;
+		if (outcome.kind === 'applied') {
+			// Replace, not merge, with the imported overrides. A merge would make
+			// repeated imports non-deterministic — a later, narrower import would
+			// leave behind keys from an earlier one that it never mentioned — and
+			// "replace" is what lets the applied count above equal exactly what
+			// this file carries.
+			onOverridesChange(outcome.overrides);
+		}
+	}
+
+	function saveSeed(): void {
+		importResult = null;
+		onSaveSeed(overrides);
+		seedSaved = true;
 	}
 </script>
 
@@ -154,6 +229,47 @@
 			</div>
 		{/if}
 	</div>
+
+	<footer class="footer">
+		<div class="footer-actions">
+			<button type="button" class="quiet" onclick={openImportPicker}>
+				Import from graph file…
+			</button>
+			<button type="button" class="quiet" onclick={saveSeed}> Use as seed for new graphs </button>
+		</div>
+		<input
+			bind:this={importInputEl}
+			type="file"
+			accept=".html,.json"
+			class="visually-hidden"
+			aria-label="Import settings from graph file"
+			onchange={handleImportFileChange}
+		/>
+
+		{#if importResult}
+			<p class="footer-message" data-import-outcome={importResult.kind}>
+				{#if importResult.kind === 'applied'}
+					{@const count = Object.keys(importResult.overrides).length}
+					Imported {count} setting{count === 1 ? '' : 's'} from the file.
+					{#if importResult.warnings.length > 0}
+						<span class="footer-warnings">
+							{#each importResult.warnings as warning (warning)}
+								<span class="footer-warning">{warning}</span>
+							{/each}
+						</span>
+					{/if}
+				{:else if importResult.kind === 'no-settings'}
+					This graph file carries no custom settings.
+				{:else}
+					Couldn't read settings from that file.
+				{/if}
+			</p>
+		{/if}
+
+		{#if seedSaved}
+			<p class="footer-message" data-seed-saved="true">Saved as the seed for new graphs.</p>
+		{/if}
+	</footer>
 </section>
 
 <style>
@@ -287,6 +403,48 @@
 	.advanced {
 		display: grid;
 		gap: 0.625rem;
+	}
+
+	.footer {
+		display: grid;
+		gap: 0.5rem;
+		padding-top: 0.5rem;
+		border-top: 1px solid #e2e8f0;
+	}
+
+	.footer-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+
+	.footer-message {
+		color: #334155;
+		font-size: 0.75rem;
+	}
+
+	.footer-warnings {
+		display: grid;
+		gap: 0.125rem;
+		margin-top: 0.25rem;
+	}
+
+	.footer-warning {
+		display: block;
+		color: #b45309;
+	}
+
+	.visually-hidden {
+		position: absolute;
+		box-sizing: border-box;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
 	}
 
 	@media (max-width: 640px) {

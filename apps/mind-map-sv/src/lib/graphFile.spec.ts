@@ -9,11 +9,12 @@ import {
 	createGraphFileArtifact,
 	parseGraphFile,
 	parseGraphFileText,
+	readSettingsFromGraphFileText,
 	serializeGraphFile,
 	serializeGraphHtmlFile,
 	type GraphFileDocument
 } from './graphFile';
-import type { ConfigOverrides } from './config/configOverrides';
+import { resolveConfig, type ConfigOverrides } from './config/configOverrides';
 import { CURRENT_SCHEMA_VERSION, NEUTRAL_VIEW_STATE, PersistedGraphError } from './migrations';
 
 const NEUTRAL = NEUTRAL_VIEW_STATE;
@@ -394,5 +395,123 @@ describe('graph file settings', () => {
 	it('reads a wholly unusable settings blob as no settings at all', () => {
 		expect(parseGraphFile(settingsPayload('nope')).settings).toBeUndefined();
 		expect(parseGraphFile(settingsPayload({ 'not.a.real.setting': 3 })).settings).toBeUndefined();
+	});
+});
+
+describe('readSettingsFromGraphFileText', () => {
+	const SETTINGS = {
+		'multigraph.layout.scaleFalloff': 0.5
+	} satisfies ConfigOverrides;
+
+	function settingsOnlyPayload(settings: unknown, data: unknown = makeDoc().data): string {
+		return JSON.stringify({
+			schemaVersion: CURRENT_SCHEMA_VERSION,
+			data,
+			viewState: NEUTRAL,
+			settings
+		});
+	}
+
+	it('applies settings from a JSON graph file', () => {
+		const doc = makeDoc({ settings: SETTINGS });
+		expect(readSettingsFromGraphFileText(serializeGraphFile(doc))).toEqual({
+			kind: 'applied',
+			overrides: SETTINGS,
+			warnings: []
+		});
+	});
+
+	it('applies settings from an HTML graph file', () => {
+		const doc = makeDoc({ settings: SETTINGS });
+		expect(readSettingsFromGraphFileText(serializeGraphHtmlFile(doc))).toEqual({
+			kind: 'applied',
+			overrides: SETTINGS,
+			warnings: []
+		});
+	});
+
+	it('round-trips settings: exporting graph A and importing into graph B yields the same resolveConfig', () => {
+		const graphA = makeDoc({
+			settings: SETTINGS,
+			data: makeGraph({ nodeCount: 3, edges: [[0, 1]] })
+		});
+		const htmlA = serializeGraphHtmlFile(graphA);
+
+		const outcome = readSettingsFromGraphFileText(htmlA);
+		if (outcome.kind !== 'applied') throw new Error(`expected 'applied', got '${outcome.kind}'`);
+
+		// Graph B never existed here; the point is that applying the imported
+		// overrides to *any* graph resolves identically to graph A's own config.
+		expect(resolveConfig(outcome.overrides)).toEqual(resolveConfig(SETTINGS));
+	});
+
+	it('names a dropped key in warnings while still applying the keys it can use', () => {
+		const outcome = readSettingsFromGraphFileText(
+			settingsOnlyPayload({ ...SETTINGS, 'not.a.real.setting': 3 })
+		);
+		expect(outcome).toEqual({ kind: 'applied', overrides: SETTINGS, warnings: expect.any(Array) });
+		if (outcome.kind === 'applied') {
+			expect(outcome.warnings.some((warning) => warning.includes('not.a.real.setting'))).toBe(true);
+		}
+	});
+
+	it('reads a file with no settings key as no-settings, not an error', () => {
+		const html = serializeGraphHtmlFile(makeDoc());
+		expect(readSettingsFromGraphFileText(html)).toEqual({ kind: 'no-settings' });
+	});
+
+	it('reads a fully-dropped settings blob as no-settings rather than applied-empty', () => {
+		expect(readSettingsFromGraphFileText(settingsOnlyPayload({ 'not.a.real.setting': 3 }))).toEqual(
+			{ kind: 'no-settings' }
+		);
+		expect(readSettingsFromGraphFileText(settingsOnlyPayload({}))).toEqual({ kind: 'no-settings' });
+	});
+
+	it('reads settings from a payload whose graph data fails validation', () => {
+		const payload = settingsOnlyPayload(SETTINGS, { nodes: 'not-a-graph' });
+
+		// Sanity check: the full parse path *does* validate `data` and rejects it.
+		expect(() => parseGraphFile(payload)).toThrow(PersistedGraphError);
+
+		// The settings-only path never calls `unwrapPersistedGraph`, so the same
+		// unopenable graph's settings are still readable.
+		expect(readSettingsFromGraphFileText(payload)).toEqual({
+			kind: 'applied',
+			overrides: SETTINGS,
+			warnings: []
+		});
+	});
+
+	it('reads unparseable JSON as unreadable', () => {
+		expect(readSettingsFromGraphFileText('{ nope')).toEqual({ kind: 'unreadable' });
+	});
+
+	it('reads HTML with no embedded graph payload at all as unreadable', () => {
+		expect(readSettingsFromGraphFileText('<!doctype html><html><body></body></html>')).toEqual({
+			kind: 'unreadable'
+		});
+	});
+
+	it('never decodes embedded image assets to read settings out of an illustrated graph', () => {
+		const doc = makeDoc({
+			settings: SETTINGS,
+			embeddedAssets: [
+				{ assetId: 'bad-asset', mimeType: 'image/png', size: 4, base64: '!!!not-valid-base64!!!' }
+			]
+		});
+		const html = serializeGraphHtmlFile(doc);
+
+		// Sanity check: the full parse path *does* decode embedded assets, and
+		// rejects this deliberately malformed one.
+		expect(() => parseGraphFileText(html)).toThrow(PersistedGraphError);
+
+		// The settings-only path never calls `extractHtmlAssetPayloads`, so the
+		// same malformed asset causes no error here — proof it was never touched,
+		// not just tolerated.
+		expect(readSettingsFromGraphFileText(html)).toEqual({
+			kind: 'applied',
+			overrides: SETTINGS,
+			warnings: []
+		});
 	});
 });

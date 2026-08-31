@@ -103,6 +103,7 @@ function setup(
 			draftGraph: MultigraphData;
 			fileGraph: MultigraphData;
 		}) => EmbeddedDocumentConflictChoice | Promise<EmbeddedDocumentConflictChoice>;
+		createSettingsSeed?: () => ConfigOverrides;
 	} = {}
 ) {
 	const persistence = new MemoryPersistence();
@@ -123,6 +124,7 @@ function setup(
 		confirmGraphImportReplace: options.confirmGraphImportReplace,
 		confirmNewGraphReplace: options.confirmNewGraphReplace,
 		chooseEmbeddedDocumentConflict: options.chooseEmbeddedDocumentConflict,
+		createSettingsSeed: options.createSettingsSeed,
 		createDocumentId: () => 'doc-new',
 		now: () => 456,
 		createGraphId: () => 'graph-new'
@@ -751,6 +753,38 @@ describe('GraphPersistenceController', () => {
 
 		expect(controller.getView().settings).toEqual({});
 		expect((await persistence.load('graph-new'))?.settings).toBeUndefined();
+	});
+
+	it('stamps the saved seed into a new graph at creation', async () => {
+		const seed = { 'multigraph.layout.scaleFalloff': 0.4 } satisfies ConfigOverrides;
+		const createSettingsSeed = vi.fn(() => seed);
+		const { controller, persistence } = setup({ createSettingsSeed });
+		await controller.load('active');
+
+		await controller.createGraph('graph-new');
+
+		expect(createSettingsSeed).toHaveBeenCalledTimes(1);
+		expect(controller.getView().settings).toEqual(seed);
+		expect((await persistence.load('graph-new'))?.settings).toEqual(seed);
+	});
+
+	it('does not let a seed change after creation retune an existing graph', async () => {
+		let seed: ConfigOverrides = { 'multigraph.layout.scaleFalloff': 0.4 };
+		const { controller, persistence } = setup({ createSettingsSeed: () => seed });
+		await controller.load('active');
+
+		await controller.createGraph('graph-new');
+		expect(controller.getView().settings).toEqual({ 'multigraph.layout.scaleFalloff': 0.4 });
+
+		// The seed changes (or is cleared) after the graph was created...
+		seed = { 'multigraph.layout.scaleFalloff': 0.9 };
+
+		// ...but the already-created graph's stored settings are untouched: the
+		// seed is read exactly once, at creation, never again.
+		expect((await persistence.load('graph-new'))?.settings).toEqual({
+			'multigraph.layout.scaleFalloff': 0.4
+		});
+		expect(controller.getView().settings).toEqual({ 'multigraph.layout.scaleFalloff': 0.4 });
 	});
 
 	it('autosaves settings changes without remounting the canvas', async () => {

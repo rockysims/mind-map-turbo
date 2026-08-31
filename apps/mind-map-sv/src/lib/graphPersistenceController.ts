@@ -93,6 +93,15 @@ export type GraphPersistenceControllerDeps = {
 	createDefaultGraph: () => MultigraphData;
 	navigate: (graphId: string) => void | Promise<void>;
 	storageNamespace: string;
+	/**
+	 * Reads the sparse "seed" overrides saved by the settings panel's "Use as
+	 * seed for new graphs" action, if any. Called once per `createGraph`, never
+	 * stored — the seed is stamped into the new graph's own overrides and is
+	 * never consulted again, so changing or clearing it afterwards cannot
+	 * retune a graph that already exists. A dep (mirroring `createDefaultGraph`)
+	 * rather than an import, so `localStorage` stays out of this pure controller.
+	 */
+	createSettingsSeed?: () => ConfigOverrides;
 	confirmGraphImportReplace?: (context: {
 		loadedGraphId: string;
 		currentGraph: MultigraphData;
@@ -446,21 +455,24 @@ export class GraphPersistenceController {
 
 		await this.flushPendingSave();
 		const nextGraph = this.deps.createDefaultGraph();
+		// A new graph is stamped with the saved seed, if any, at creation only —
+		// this is the one and only place `createSettingsSeed` is read. See its
+		// doc comment for why that makes the seed inert against existing graphs.
+		const seedSettings = this.deps.createSettingsSeed?.() ?? {};
 		this.baseline = { kind: 'new', graph: nextGraph };
 		this.recoveredDraft = false;
 		this.graphGeneration += 1;
 		this.update({
 			graph: nextGraph,
 			viewState: { ...NEUTRAL_VIEW_STATE },
-			// A new graph starts untuned; T09 stamps the saved seed in here.
-			settings: {},
+			settings: seedSettings,
 			loadedGraphId: graphId,
 			documentId: null,
 			documentStatus: this.currentDocumentStatus(nextGraph),
 			graphGeneration: this.graphGeneration,
 			status: { state: 'loaded', graphId }
 		});
-		this.scheduleSave(graphId, nextGraph, { ...NEUTRAL_VIEW_STATE }, {});
+		this.scheduleSave(graphId, nextGraph, { ...NEUTRAL_VIEW_STATE }, seedSettings);
 		await this.flushPendingSave();
 		await this.refreshGraphList();
 		await this.deps.navigate(graphId);
