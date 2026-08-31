@@ -238,7 +238,7 @@ export function setNodeDesignations(
 }
 
 /** A designation's canonical identity — the key of the symbol it designates. */
-function designationKey(designation: QuantityDesignation): string {
+export function designationKey(designation: QuantityDesignation): string {
 	return symbolFor(designation.base, designation.subscript).key;
 }
 
@@ -492,7 +492,7 @@ function otherEndpoint(edge: EdgeData, nodeId: string): string {
 	return edge.sourceNodeId === nodeId ? edge.targetNodeId : edge.sourceNodeId;
 }
 
-function nextId(prefix: string, existingIds: string[]): string {
+export function nextId(prefix: string, existingIds: string[]): string {
 	const usedIds = new Set(existingIds);
 	let index = 0;
 

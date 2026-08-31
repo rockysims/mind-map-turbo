@@ -19,6 +19,10 @@ describe('beginCreationPreview', () => {
 		expect(isCreationPreviewSettled(state, 1000)).toBe(true);
 		expect(state.ending).toBe(false);
 	});
+
+	it('defaults to the create mode', () => {
+		expect(beginCreationPreview('n0', { x: 0, y: 0 }, 1000).mode).toBe('create');
+	});
 });
 
 describe('updateCreationPreview', () => {
@@ -102,6 +106,25 @@ describe('updateCreationPreview', () => {
 			DURATION
 		);
 		expect(updated.ending).toBe(true);
+	});
+
+	it('keeps a merge preview node hidden over background, where a create one would grow', () => {
+		let state = beginCreationPreview('n0', { x: 0, y: 0 }, 1000, 'merge');
+		state = updateCreationPreview(
+			state,
+			{ point: { x: 50, y: 0 }, hoverNodeId: null },
+			1000,
+			DURATION
+		);
+		expect(state.point).toEqual({ x: 50, y: 0 });
+		expect(creationPreviewScaleAt(state, 1000 + DURATION)).toBe(0);
+	});
+
+	it('carries the mode through an update, so the preview never changes its aim', () => {
+		let state = beginCreationPreview('n0', { x: 0, y: 0 }, 1000, 'merge');
+		state = updateCreationPreview(state, { point: { x: 9, y: 0 }, hoverNodeId: 'n1' }, 1000, 0);
+		expect(state.mode).toBe('merge');
+		expect(state.hoverNodeId).toBe('n1');
 	});
 
 	it('settles immediately when duration is 0', () => {

@@ -10,7 +10,8 @@
 		OPEN_HTML_FILE_TEXT_SESSION_KEY,
 		OPEN_HTML_FILE_WINDOW_NAME_PREFIX,
 		openHtmlFilePickerInNewTab,
-		openHtmlTextInNewTab
+		openHtmlTextInNewTab,
+		readFileText
 	} from '$lib/browserGraphFile';
 	import {
 		usePersistedGraph,
@@ -18,6 +19,7 @@
 	} from '$lib/components/ui/GraphPersistence/usePersistedGraph.svelte';
 	import GraphToolbar from '$lib/components/ui/GraphToolbar/GraphToolbar.svelte';
 	import Multigraph from '$lib/components/ui/Multigraph/Multigraph.svelte';
+	import RevertBanner from '$lib/components/ui/RevertBanner/RevertBanner.svelte';
 	import { createDefaultGraph, shouldEditInitialRootTitle } from '$lib/defaultGraph';
 	import { documentStatusHasUnsavedChanges } from '$lib/documentStatus';
 	import type { EmbeddedDocumentConflictChoice } from '$lib/graphPersistenceController';
@@ -192,6 +194,15 @@
 
 	function openGraphFilePicker(): void {
 		openHtmlFilePickerInNewTab(appUrlWithoutGraphRoute(window.location.href));
+	}
+
+	/**
+	 * Fold a chosen file into the graph on screen. Read here rather than through
+	 * the picker tab Open uses: that tab reloads the app to hand the file over,
+	 * and this import is meant to keep the reader exactly where they are.
+	 */
+	async function importGraphFile(file: File): Promise<void> {
+		await persisted?.importGraphIntoCurrentFromReader(() => readFileText(file));
 	}
 
 	function consumeOpenFileFromPickerFlag(): boolean {
@@ -421,8 +432,20 @@
 		severity={startupError !== null ? 'warning' : (persisted?.noticeSeverity ?? 'info')}
 		onNewGraph={createNewGraph}
 		onOpenGraphFilePicker={openGraphFilePicker}
+		onImportGraphFile={(file) => void importGraphFile(file)}
 		onSave={() => void handleSave()}
 	/>
+
+	{#if persisted !== null && persisted.snapshot !== null}
+		<RevertBanner
+			label={persisted.snapshot.label}
+			createdAt={persisted.snapshot.createdAt}
+			snapshotNodeCount={persisted.snapshot.nodeCount}
+			currentNodeCount={persisted.graph.nodes.length}
+			onRevert={() => void persisted?.revertToSnapshot()}
+			onDismiss={() => persisted?.dismissSnapshot()}
+		/>
+	{/if}
 
 	{#if embeddedDocumentConflict !== null}
 		<div
@@ -455,6 +478,7 @@
 			<Multigraph
 				multigraphData={persisted.graph}
 				graphGeneration={persisted.graphGeneration}
+				graphRevision={persisted.graphRevision}
 				initialViewState={persisted.viewState}
 				{initialTitleEditNodeId}
 				{defaultPrimaryNodeId}

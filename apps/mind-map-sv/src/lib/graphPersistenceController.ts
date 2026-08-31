@@ -1,7 +1,8 @@
 import type { MultigraphData } from './components/ui/types/multigraph';
 import { base64ToBlob, blobToBase64 } from './assets/assetEncoding';
-import type { GraphAssetStore } from './assets/assetStore';
+import type { GraphAssetStore, StoredGraphAsset } from './assets/assetStore';
 import { referencedAssetIds } from './components/ui/Multigraph/lib/graph';
+import { importGraphData } from './components/ui/Multigraph/lib/graphImport';
 import {
 	documentStatusHasUnsavedChanges,
 	documentStatusForGraph,
@@ -16,15 +17,23 @@ import {
 	isUnsupportedHtmlGraphFile,
 	parseGraphFileText,
 	type GraphFileDocument,
-	type GraphFileArtifact
+	type GraphFileArtifact,
+	type GraphFileEmbeddedAsset
 } from './graphFile';
 import { DEFAULT_GRAPH_ID } from './graphRoute';
+import {
+	clearGraphSnapshot,
+	readGraphSnapshot,
+	writeGraphSnapshot,
+	type GraphSnapshotOptions
+} from './graphSnapshot';
 import { NEUTRAL_VIEW_STATE, PersistedGraphError, type ViewState } from './migrations';
 import {
 	documentDraftGraphId,
 	graphIdFromStorageKey,
 	type GraphSummary,
-	type Persistence
+	type Persistence,
+	type StorageLike
 } from './persistence';
 import type { SaveStatus } from './saveScheduler';
 import type { StorageDurability } from './storageAvailability';
@@ -40,6 +49,18 @@ type ImportGraphResult =
 	| 'opened-in-new-tab'
 	| 'open-tab-blocked';
 
+/** Why an additive import did not parse. Shared with the replacing import path. */
+type ImportGraphFailure = Exclude<ImportGraphResult, 'imported' | 'cancelled'>;
+
+/**
+ * Outcome of an additive import. Unlike the replacing path this reports how much
+ * arrived, because the revert offer names it ("Imported 14 nodes"), and whether a
+ * pre-import snapshot survived — without one there is nothing to revert to.
+ */
+type ImportIntoCurrentResult =
+	| { outcome: 'imported'; importedNodeCount: number; snapshotStored: boolean }
+	| { outcome: ImportGraphFailure | 'read-failed' };
+
 export type ControllerStatus =
 	| { state: 'loading'; graphId: string }
 	| { state: 'loaded'; graphId: string }
@@ -50,6 +71,21 @@ export type ControllerStatus =
 	| { state: 'notice'; message: string }
 	| { state: 'exported'; filename: string }
 	| { state: 'error'; message: string };
+
+/**
+ * What the revert offer knows about the snapshot standing behind the loaded
+ * graph. Deliberately not the snapshot itself: the banner only needs to say what
+ * happened and how long ago, and holding a second copy of the graph in the view
+ * would double every render's memory for a card the size of a sentence.
+ *
+ * `nodeCount` is the count *before* the operation, so the banner can name what
+ * the operation added by subtracting it from the graph on screen.
+ */
+export type SnapshotSummary = {
+	label: string;
+	createdAt: number;
+	nodeCount: number;
+};
 
 type ControllerView = {
 	graph: MultigraphData;
@@ -63,7 +99,26 @@ type ControllerView = {
 	/** A cache write is scheduled or in flight, so "not cached" is premature rather than true. */
 	cachePending: boolean;
 	durability: StorageDurability;
+	/**
+	 * Bumped when the document itself is swapped — a load, a replacing import, a
+	 * new graph, a revert. The canvas is keyed on it and remounts around the graph
+	 * that arrived, discarding pan, zoom, focus and nav along with the old
+	 * document, because none of it describes the new one.
+	 */
 	graphGeneration: number;
+	/**
+	 * Bumped when the *same* document is mutated from outside the canvas — today
+	 * only by an additive import. The canvas stays mounted and adopts the incoming
+	 * graph in place, exactly as it would a mutation of its own, so the reader
+	 * keeps where they were looking while new nodes settle in beside their work.
+	 *
+	 * Deliberately separate from `graphGeneration`: a bump there would remount and
+	 * throw that away. Never moved by `notifyGraphChanged`, which comes *from* the
+	 * canvas — echoing it back would be the canvas telling itself what it just did.
+	 */
+	graphRevision: number;
+	/** The revertible snapshot for the loaded graph, or `null` when there is none. */
+	snapshot: SnapshotSummary | null;
 	status: ControllerStatus;
 };
 
@@ -105,6 +160,11 @@ export type GraphPersistenceControllerDeps = {
 	now?: () => number;
 	openUnsupportedHtmlFile?: (html: string) => boolean;
 	assetStore?: GraphAssetStore;
+	/**
+	 * Where pre-import snapshots live. Defaults to the ambient `localStorage`,
+	 * beside the saved graphs; `null` turns snapshotting off.
+	 */
+	snapshotStorage?: StorageLike | null;
 	chooseEmbeddedDocumentConflict?: (context: {
 		documentId: string;
 		draftGraph: MultigraphData;
@@ -117,6 +177,7 @@ export class GraphPersistenceController {
 	private readonly scheduler: GraphSaveScheduler;
 	private view: ControllerView;
 	private graphGeneration = 0;
+	private graphRevision = 0;
 	private baseline: DocumentBaseline;
 	private recoveredDraft = false;
 	/** Fingerprint of the graph data storage last accepted; null when nothing has been written. */
@@ -139,6 +200,8 @@ export class GraphPersistenceController {
 			cachePending: false,
 			durability: deps.durability ?? 'durable',
 			graphGeneration: 0,
+			graphRevision: 0,
+			snapshot: null,
 			status: { state: 'loading', graphId: DEFAULT_GRAPH_ID }
 		};
 	}
@@ -190,6 +253,9 @@ export class GraphPersistenceController {
 			documentId: options.documentId ?? null,
 			documentStatus: this.currentDocumentStatus(),
 			graphGeneration: this.graphGeneration,
+			// Read from storage rather than carried in memory: a snapshot outlives a
+			// reload, so the revert offer has to be rediscovered on every load.
+			snapshot: this.readSnapshotSummary(graphId),
 			graphSummaries: await this.deps.persistence.list()
 		});
 
@@ -248,6 +314,7 @@ export class GraphPersistenceController {
 			documentId: doc.documentId,
 			documentStatus: this.currentDocumentStatus(),
 			graphGeneration: this.graphGeneration,
+			snapshot: this.readSnapshotSummary(graphId),
 			graphSummaries: await this.deps.persistence.list(),
 			status: { state: 'loaded', graphId }
 		});
@@ -329,34 +396,7 @@ export class GraphPersistenceController {
 				maxScale: this.deps.maxScale
 			});
 		} catch (error) {
-			if (isUnsupportedHtmlGraphFile(error)) {
-				const opened = this.deps.openUnsupportedHtmlFile?.(text) ?? false;
-				this.update({
-					status: {
-						state: 'notice',
-						message: opened
-							? 'Opened newer graph file in a new tab.'
-							: 'Import needs a newer app version. Open the file directly to continue.'
-					}
-				});
-				return opened ? 'opened-in-new-tab' : 'open-tab-blocked';
-			}
-			if (error instanceof PersistedGraphError && error.code === 'unsupported-version') {
-				this.update({
-					status: {
-						state: 'notice',
-						message: 'Import failed: unsupported graph file version.'
-					}
-				});
-				return 'unsupported';
-			}
-			this.update({
-				status: {
-					state: 'notice',
-					message: 'Import failed: invalid graph file.'
-				}
-			});
-			return 'invalid';
+			return this.reportImportFailure(error, text);
 		}
 
 		const confirmReplace = this.deps.confirmGraphImportReplace;
@@ -423,6 +463,218 @@ export class GraphPersistenceController {
 		}
 	}
 
+	/**
+	 * Fold a graph file into the graph the reader is already looking at, as a
+	 * separate component, and leave a snapshot of the moment before.
+	 *
+	 * Deliberately unlike `importGraphDocument`, which swaps the document out:
+	 * this is an additive edit, so `graphGeneration` does not move and the view
+	 * state is never touched. Bumping either would remount the canvas and throw
+	 * away the reader's pan, zoom and focus for what is, to them, one more
+	 * component appearing beside their work.
+	 *
+	 * The incoming document's own view state and document id are discarded for
+	 * the same reason: the host document is still the document.
+	 */
+	async importGraphIntoCurrent(text: string): Promise<ImportIntoCurrentResult> {
+		let imported: GraphFileDocument;
+		try {
+			imported = parseGraphFileText(text, {
+				minScale: this.deps.minScale,
+				maxScale: this.deps.maxScale
+			});
+		} catch (error) {
+			// Nothing has been written yet, so a bad file leaves no snapshot behind
+			// and no revert offer pointing at a moment that never changed.
+			return { outcome: this.reportImportFailure(error, text) };
+		}
+
+		const graphId = this.view.loadedGraphId || DEFAULT_GRAPH_ID;
+		const snapshotNodeCount = this.view.graph.nodes.length;
+		const createdAt = this.deps.now?.() ?? Date.now();
+		const snapshotStored = writeGraphSnapshot(
+			graphId,
+			{ data: this.view.graph, viewState: this.view.viewState, label: 'import' },
+			{ ...this.snapshotOptions(), now: () => createdAt }
+		);
+
+		const { next, nodeIdMap } = importGraphData(this.view.graph, imported.data);
+		// The one bump in the codebase. `graphGeneration` stays put so the canvas
+		// stays mounted; the revision is how a mounted canvas is told that the graph
+		// under it grew, and without it the nodes only appear on the next reload.
+		this.graphRevision += 1;
+		this.update({
+			graph: next,
+			documentStatus: this.currentDocumentStatus(next),
+			graphRevision: this.graphRevision,
+			// Without a stored snapshot there is nothing to revert to, so the offer
+			// is not made — better silence than a button that cannot keep its word.
+			snapshot: snapshotStored ? { label: 'import', createdAt, nodeCount: snapshotNodeCount } : null
+		});
+		this.scheduler.schedule(graphId, next, this.view.viewState);
+		await this.hydrateImportedAssets(graphId, imported);
+		await this.flushPendingSave();
+		await this.refreshGraphList();
+		this.update({
+			status: {
+				state: 'notice',
+				message: `Imported ${nodeIdMap.size} ${nodeIdMap.size === 1 ? 'node' : 'nodes'} into "${graphId}".`
+			}
+		});
+
+		return { outcome: 'imported', importedNodeCount: nodeIdMap.size, snapshotStored };
+	}
+
+	async importGraphIntoCurrentFromReader(
+		readText: () => Promise<string>
+	): Promise<ImportIntoCurrentResult> {
+		let text: string;
+		try {
+			text = await readText();
+		} catch {
+			this.update({
+				status: {
+					state: 'notice',
+					message: 'Import failed: unable to read file.'
+				}
+			});
+			return { outcome: 'read-failed' };
+		}
+
+		return await this.importGraphIntoCurrent(text);
+	}
+
+	/**
+	 * Put the graph back the way the snapshot found it, and forget the snapshot.
+	 * Returns whether there was one to restore.
+	 *
+	 * This is a wholesale replacement of the document's contents, so unlike the
+	 * additive import it *does* bump `graphGeneration`: the canvas remounts around
+	 * the restored graph and its restored pan and zoom, the same way a replacing
+	 * import or a load does. Everything the reader did since the snapshot goes
+	 * with it, which is why the caller asks first.
+	 *
+	 * The baseline is left alone on purpose. Reverting does not change where this
+	 * document came from — it changes only how far it has drifted — so restoring
+	 * the graph a download was taken from correctly reads as "matches downloaded
+	 * file" again.
+	 *
+	 * Assets are deliberately untouched. Sweeping here would take the host graph's
+	 * own images with the imported ones, because the restored graph references
+	 * neither set by id it did not already know about; blobs the revert orphans
+	 * are collected by the next replacing load.
+	 */
+	async revertToSnapshot(): Promise<boolean> {
+		const graphId = this.view.loadedGraphId || DEFAULT_GRAPH_ID;
+		const snapshot = readGraphSnapshot(graphId, this.snapshotOptions());
+		if (snapshot === null) {
+			this.update({ snapshot: null });
+			return false;
+		}
+
+		const nextViewState = snapshot.viewState ?? this.view.viewState;
+		this.graphGeneration += 1;
+		this.update({
+			graph: snapshot.data,
+			viewState: nextViewState,
+			documentStatus: this.currentDocumentStatus(snapshot.data),
+			graphGeneration: this.graphGeneration,
+			snapshot: null
+		});
+		this.scheduler.schedule(graphId, snapshot.data, nextViewState);
+		clearGraphSnapshot(graphId, this.snapshotOptions());
+		await this.flushPendingSave();
+		await this.refreshGraphList();
+		this.update({
+			status: {
+				state: 'notice',
+				message:
+					snapshot.label === 'import'
+						? `Reverted the import into "${graphId}".`
+						: `Reverted "${graphId}".`
+			}
+		});
+		return true;
+	}
+
+	/** Turn down the revert offer, discarding the snapshot behind it. */
+	dismissSnapshot(): void {
+		const graphId = this.view.loadedGraphId || DEFAULT_GRAPH_ID;
+		clearGraphSnapshot(graphId, this.snapshotOptions());
+		this.update({ snapshot: null });
+	}
+
+	private snapshotOptions(): GraphSnapshotOptions {
+		return {
+			storage: this.deps.snapshotStorage,
+			namespace: this.deps.storageNamespace,
+			...(this.deps.now === undefined ? {} : { now: this.deps.now })
+		};
+	}
+
+	private readSnapshotSummary(graphId: string): SnapshotSummary | null {
+		const snapshot = readGraphSnapshot(graphId, this.snapshotOptions());
+		if (snapshot === null) return null;
+		return {
+			label: snapshot.label,
+			createdAt: snapshot.createdAt,
+			nodeCount: snapshot.data.nodes.length
+		};
+	}
+
+	/** Report a file that would not parse, in the words both import paths share. */
+	private reportImportFailure(error: unknown, text: string): ImportGraphFailure {
+		if (isUnsupportedHtmlGraphFile(error)) {
+			const opened = this.deps.openUnsupportedHtmlFile?.(text) ?? false;
+			this.update({
+				status: {
+					state: 'notice',
+					message: opened
+						? 'Opened newer graph file in a new tab.'
+						: 'Import needs a newer app version. Open the file directly to continue.'
+				}
+			});
+			return opened ? 'opened-in-new-tab' : 'open-tab-blocked';
+		}
+		if (error instanceof PersistedGraphError && error.code === 'unsupported-version') {
+			this.update({
+				status: {
+					state: 'notice',
+					message: 'Import failed: unsupported graph file version.'
+				}
+			});
+			return 'unsupported';
+		}
+		this.update({
+			status: {
+				state: 'notice',
+				message: 'Import failed: invalid graph file.'
+			}
+		});
+		return 'invalid';
+	}
+
+	/**
+	 * Copy an imported document's embedded assets into a scope that is already in
+	 * use, for an additive import.
+	 *
+	 * Deliberately unlike the replacing `hydrateEmbeddedAssets`: it never sweeps,
+	 * because the incoming document's referenced ids say nothing about the host
+	 * graph's own images — sweeping against them would delete every host asset.
+	 * An incoming asset whose id is already stored in the scope is skipped rather
+	 * than overwritten, so the host's copy stays authoritative. Assets left
+	 * orphaned by later edits are collected by the next replacing load or import.
+	 */
+	async hydrateImportedAssets(scope: string, doc: GraphFileDocument): Promise<void> {
+		const store = this.deps.assetStore;
+		if (!store) return;
+		for (const asset of doc.embeddedAssets ?? []) {
+			const existing = await store.get(scope, asset.assetId);
+			if (existing.ok) continue;
+			await store.put(this.storedAsset(scope, asset));
+		}
+	}
+
 	async selectGraph(graphId: string): Promise<void> {
 		if (graphId === this.view.loadedGraphId) return;
 		await this.flushPendingSave();
@@ -452,6 +704,7 @@ export class GraphPersistenceController {
 			documentId: null,
 			documentStatus: this.currentDocumentStatus(nextGraph),
 			graphGeneration: this.graphGeneration,
+			snapshot: this.readSnapshotSummary(graphId),
 			status: { state: 'loaded', graphId }
 		});
 		this.scheduleSave(graphId, nextGraph, { ...NEUTRAL_VIEW_STATE });
@@ -575,21 +828,26 @@ export class GraphPersistenceController {
 		return embeddedAssets;
 	}
 
+	/** Replace a scope's assets with the document's, sweeping whatever it no longer references. */
 	private async hydrateEmbeddedAssets(scope: string, doc: GraphFileDocument): Promise<void> {
 		const store = this.deps.assetStore;
 		if (!store) return;
 		for (const asset of doc.embeddedAssets ?? []) {
-			await store.put({
-				scope,
-				assetId: asset.assetId,
-				blob: base64ToBlob(asset.base64, asset.mimeType),
-				mimeType: asset.mimeType,
-				name: asset.name,
-				size: asset.size,
-				updatedAt: this.deps.now?.() ?? Date.now()
-			});
+			await store.put(this.storedAsset(scope, asset));
 		}
 		await store.deleteUnreferenced(scope, referencedAssetIds(doc.data));
+	}
+
+	private storedAsset(scope: string, asset: GraphFileEmbeddedAsset): StoredGraphAsset {
+		return {
+			scope,
+			assetId: asset.assetId,
+			blob: base64ToBlob(asset.base64, asset.mimeType),
+			mimeType: asset.mimeType,
+			name: asset.name,
+			size: asset.size,
+			updatedAt: this.deps.now?.() ?? Date.now()
+		};
 	}
 
 	private update(patch: Partial<ControllerView>): void {

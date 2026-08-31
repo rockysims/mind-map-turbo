@@ -18,6 +18,7 @@
 	import NodeDetailsLayer from '$lib/components/ui/Node/NodeDetailsLayer.svelte';
 	import DuplicateEdgeDialog from './DuplicateEdgeDialog.svelte';
 	import GraphQueryPanel from './GraphQueryPanel.svelte';
+	import MergeConfirmDialog from './MergeConfirmDialog.svelte';
 	import NodeDetailsContent from './NodeDetailsContent.svelte';
 	import NodeActionMenu from './NodeActionMenu.svelte';
 	import NavBreadcrumbs from './NavBreadcrumbs.svelte';
@@ -153,6 +154,8 @@
 		updateCreationPreview,
 		type CreationPreviewState
 	} from './lib/creationPreview.js';
+	import type { NodeGestureMode } from './lib/creationGesture.js';
+	import { planNodeMerge, type NodeMergePlan } from './lib/nodeMerge.js';
 	import { computeParallelEdgeOffsets } from './lib/parallelEdges.js';
 	import type { FocusLevel } from './lib/focusRuntime.svelte.js';
 	import { FocusController } from './lib/focusController.svelte.js';
@@ -169,11 +172,30 @@
 		type NodeFrameLayout
 	} from './lib/frameGeometry.js';
 	import { interpolateMorph } from './lib/morphGeometry.js';
+	import { importRevealTargetNodeId } from './lib/importRevealTarget.js';
+	import {
+		revealPursuitStep,
+		viewportWorldRect,
+		type CameraViewState,
+		type RevealCircle,
+		type RevealPursuit,
+		type StageSize
+	} from './lib/revealCamera.js';
+	import { DEFAULT_MAX_SCALE, DEFAULT_MIN_SCALE } from './lib/graphMath.js';
 	import type { Rect } from './lib/zoomBoundary.js';
 	import type { StageRect } from './lib/stageCoordinates.js';
 	import { NODE_RADIUS, NODE_TEXT_FONT_SIZE } from '$lib/constants.js';
 
 	const CENTERED_POSITION: Point = { x: 0, y: 0 };
+
+	/**
+	 * An in-flight import reveal: the pure chase state plus the two things only
+	 * this component can supply — who is being chased, and where it was last frame.
+	 */
+	type ImportRevealPursuit = RevealPursuit & {
+		nodeId: string;
+		lastTarget: RevealCircle;
+	};
 
 	/**
 	 * Stand-ins for the node/edge a finishing creation gesture would commit
@@ -193,7 +215,36 @@
 		targetNodeId: 'creation-preview',
 		tags: []
 	};
+	/**
+	 * The merge gesture's own colour, for both the preview line and the ring on
+	 * the node about to absorb — nothing else on the canvas is this amber, so
+	 * "absorb into" never reads as "connect to". Kept in sync with the
+	 * `.node-wrapper.merge-target` ring in the style block below.
+	 */
+	const MERGE_PREVIEW_COLOR = '#b45309';
 	const FOCUS_TRANSITION_MS = APP_CONFIG.multigraph.focus.entryTransitionMs;
+	/**
+	 * How long the camera takes to travel to an arriving import.
+	 *
+	 * The focus morph duration, not a new constant: it is the one length in the
+	 * config that already means "the view is travelling somewhere on its own", and
+	 * a second number would only invite the two to drift apart.
+	 */
+	const IMPORT_REVEAL_TRANSITION_MS = APP_CONFIG.multigraph.focus.entryTransitionMs;
+	/**
+	 * Breathing room around the revealed node, as a fraction of its own radius —
+	 * so the reveal frames a node rather than jamming it against the bezel, at
+	 * whatever size the layout drew it.
+	 */
+	const IMPORT_REVEAL_MARGIN_RADIUS_FACTOR = 0.5;
+	/**
+	 * Hard cap on how long the reveal may keep chasing a still-moving arrival.
+	 *
+	 * The pursuit normally ends the moment the node comes to rest, but physics can
+	 * jitter below its own settle epsilon indefinitely, and a camera that never
+	 * lets go of the reader is worse than one that stops a little early.
+	 */
+	const IMPORT_REVEAL_MAX_PURSUIT_MS = APP_CONFIG.multigraph.focus.entryTransitionMs * 3;
 	const DETAILS_TITLE_ID = 'node-focus-title';
 	const NODE_DIAMETER_PX = NODE_RADIUS * 2;
 	/** Modest starting corner radius for an image frame's descend morph. */
@@ -210,6 +261,7 @@
 			assets: {}
 		},
 		graphGeneration = 0,
+		graphRevision = 0,
 		defaultPrimaryNodeId = '',
 		initialTitleEditNodeId,
 		layoutSettings = {},
@@ -224,7 +276,14 @@
 		dataflowEnabled = true
 	}: {
 		multigraphData: MultigraphData;
+		/** Bumped when the document is swapped: this component is keyed on it and remounts. */
 		graphGeneration?: number;
+		/**
+		 * Bumped when the *same* document is mutated from outside this component (an
+		 * additive import). Not part of the caller's key: the canvas stays mounted
+		 * and adopts the incoming graph in place, keeping pan, zoom, focus and nav.
+		 */
+		graphRevision?: number;
 		defaultPrimaryNodeId?: string;
 		initialTitleEditNodeId?: string | null;
 		layoutSettings?: Partial<LayoutSettings>;
@@ -255,9 +314,24 @@
 	let editNodeId = $state<string | null>(null);
 	let actionMenu = $state<{ nodeId: string; position: Point } | null>(null);
 	let creationPreview = $state<CreationPreviewState | null>(null);
-	let creationArmRequest = $state<{ id: number; sourceNode: NodeData } | null>(null);
+	let creationArmRequest = $state<{
+		id: number;
+		sourceNode: NodeData;
+		mode: NodeGestureMode;
+	} | null>(null);
 	let creationArmRequestId = $state(0);
 	let duplicateEdgeConfirm = $state<{ edgeId: string } | null>(null);
+	/**
+	 * A merge that has been planned but not committed, waiting on the direction
+	 * confirmation. Holding the whole plan (not the ids) is the point: confirming
+	 * commits this `next`, so the count the dialog showed cannot drift from what
+	 * lands.
+	 */
+	let pendingNodeMerge = $state<{
+		plan: NodeMergePlan;
+		absorbedId: string;
+		survivorId: string;
+	} | null>(null);
 	let titleEditContext = $state<{
 		nodeId: string;
 		edgeId?: string;
@@ -287,6 +361,21 @@
 		scale: number;
 	} | null>(null);
 	let viewStateRequestId = $state(0);
+	/**
+	 * The node the last adopted import is being revealed by. Session-only, and
+	 * kept after the camera lands so the story (and anyone debugging a reveal that
+	 * went to the wrong place) can name what was aimed at.
+	 */
+	let importRevealNodeId = $state<string | null>(null);
+	/** True exactly while the reveal camera is in flight or still tracking a settling arrival. */
+	let importRevealActive = $state(false);
+	/**
+	 * Deliberately not `$state`: the frame loop rewrites `lastTarget` on every
+	 * tick, and nothing renders from it. `importRevealActive` carries the one bit
+	 * the markup needs.
+	 */
+	let importRevealPursuit: ImportRevealPursuit | null = null;
+	let importRevealFrameId: number | null = null;
 	let graphRef = $state<HTMLElement | null>(null);
 	/**
 	 * Endpoints of the most recent severing mutation (edge removal / node
@@ -296,6 +385,15 @@
 	 */
 	let severedBeaconPreference = $state<string[]>([]);
 	let lastSyncedGeneration = $state(-1);
+	/**
+	 * Seeded from the incoming revision rather than from -1, which is the whole
+	 * difference between the two sync effects: mounting *is* the ingest, so the
+	 * generation effect must fire on mount and the revision effect must not.
+	 *
+	 * The initial value is all that is wanted here — `untrack` says so rather than
+	 * leaving the compiler to guess it was a mistake.
+	 */
+	let lastSyncedRevision = $state(untrack(() => graphRevision));
 	let lastInitialTitleEditKey = $state('');
 	let stageViewState = $state<ViewState>({ panX: 0, panY: 0, scale: 1 });
 	const stageScale = $derived(stageViewState.scale);
@@ -614,18 +712,36 @@
 		creationPreview ? creationPreviewScaleAt(creationPreview, layoutRuntime.animationNowMs) : 0
 	);
 	/**
+	 * The node a merge gesture is currently poised to absorb into, or null while
+	 * it is over background or back on its own source (both of which cancel).
+	 */
+	const mergeTargetNodeId = $derived.by(() => {
+		const preview = creationPreview;
+		if (!preview || preview.mode !== 'merge' || preview.ending) return null;
+		const hoverNodeId = preview.hoverNodeId;
+		if (!hoverNodeId || hoverNodeId === preview.sourceNodeId) return null;
+		return graphLayout.posByNodeId[hoverNodeId] ? hoverNodeId : null;
+	});
+	/**
 	 * Preview edge trimmed to the node borders exactly like a real edge (source by
 	 * its layout radius, target by the preview node's animated radius) so the
 	 * handoff to the committed edge does not snap shorter.
+	 *
+	 * A merge aims at a whole node rather than a point, so once it is over its
+	 * target the line snaps to that node's centre and trims to its border — the
+	 * same reading as an edge already drawn between them.
 	 */
 	const creationPreviewEdgePoints = $derived.by(() => {
 		const preview = creationPreview;
 		if (!preview || preview.ending || !creationPreviewSourcePos) return null;
+		const mergeTargetPos = mergeTargetNodeId ? graphLayout.posByNodeId[mergeTargetNodeId] : null;
 		return trimSegmentToNodeBorders(
 			creationPreviewSourcePos,
-			preview.point,
+			mergeTargetPos ?? preview.point,
 			graphLayout.radiusByNodeId[preview.sourceNodeId] ?? 0,
-			resolvedLayoutSettings.baseRadius * creationPreviewScale
+			mergeTargetNodeId
+				? (graphLayout.radiusByNodeId[mergeTargetNodeId] ?? 0)
+				: resolvedLayoutSettings.baseRadius * creationPreviewScale
 		);
 	});
 	const editNode = $derived(graph.nodes.find((node) => node.id === editNodeId) ?? null);
@@ -706,6 +822,28 @@
 		internalExitingBuffer = EMPTY_EXITING_BUFFER;
 		nodeEnterAnimations = {};
 		edgeEnterAnimations = {};
+		// This ingest has just adopted whatever the incoming graph holds, revision
+		// included, so the in-place effect below must not adopt it a second time.
+		lastSyncedRevision = untrack(() => graphRevision);
+	});
+
+	/**
+	 * Adopt a graph that changed under a *mounted* canvas — an additive import
+	 * folding a second component in beside the reader's work.
+	 *
+	 * Deliberately not the ingest above. Nothing here is replaced: no
+	 * `layoutRuntime.reset()`, no cleared reveal stack or beacon preference, no
+	 * re-settle of the whole graph. The incoming `posByNodeId` already places both
+	 * the host's nodes and the arriving ones, so this is exactly the treatment any
+	 * mutation made in this component gets — relax from where things are, commit,
+	 * and let the change save itself back through `onMultigraphChange`.
+	 */
+	$effect(() => {
+		const revision = graphRevision;
+		if (revision === lastSyncedRevision) return;
+
+		lastSyncedRevision = revision;
+		untrack(() => adoptGraphInPlace(multigraphData));
 	});
 
 	$effect(() => {
@@ -772,6 +910,7 @@
 		return () => {
 			focus.dispose();
 			layoutRuntime.stop();
+			cancelImportReveal();
 		};
 	});
 
@@ -851,12 +990,16 @@
 	 * and in the delete path, and a fallback order that disagrees with itself
 	 * between unpinning and deleting is a difference nobody would ever choose on
 	 * purpose.
+	 *
+	 * `source` defaults to the graph on screen; an adopted import passes the
+	 * arriving graph instead, because the primary is being re-pointed against a
+	 * graph this component has not committed yet.
 	 */
-	function fallbackPrimaryNodeId(): string {
+	function fallbackPrimaryNodeId(source: MultigraphData = graph): string {
 		return (
-			graph.nodes.find((candidate) => candidate.pinned)?.id ??
-			graph.nodes.find((candidate) => candidate.id === defaultPrimaryNodeId)?.id ??
-			graph.nodes[0]?.id ??
+			source.nodes.find((candidate) => candidate.pinned)?.id ??
+			source.nodes.find((candidate) => candidate.id === defaultPrimaryNodeId)?.id ??
+			source.nodes[0]?.id ??
 			''
 		);
 	}
@@ -985,15 +1128,48 @@
 		if (creationPreview) layoutRuntime.start();
 	}
 
-	function armCreationGesture(node: NodeData) {
+	function armCreationGesture(node: NodeData, mode: NodeGestureMode = 'create') {
 		actionMenu = null;
 		creationArmRequestId += 1;
-		creationArmRequest = { id: creationArmRequestId, sourceNode: node };
+		creationArmRequest = { id: creationArmRequestId, sourceNode: node, mode };
 		creationPreview = beginCreationPreview(
 			node.id,
 			graphLayout.posByNodeId[node.id] ?? CENTERED_POSITION,
-			layoutRuntime.now()
+			layoutRuntime.now(),
+			mode
 		);
+	}
+
+	function handleNodeMergeDropOntoNode(absorbedNode: NodeData, survivorNode: NodeData) {
+		closeOverlays();
+		commitNodeMerge(absorbedNode.id, survivorNode.id);
+	}
+
+	/**
+	 * The one place a merge reaches the graph. `planNodeMerge` is a dry run and
+	 * the commit in one call, so the confirmation hanging off
+	 * `plan.directionConflicts` here shows exactly the `next` it goes on to
+	 * commit — the dialog and the mutation cannot drift apart.
+	 */
+	function commitNodeMerge(absorbedId: string, survivorId: string) {
+		const plan = planNodeMerge(graph, absorbedId, survivorId);
+		// A mis-aimed merge (unknown or identical ids) returns the graph itself.
+		if (plan.next === graph) return;
+		// Overwriting an edge's direction is the only thing a merge does that the
+		// reader cannot undo in the edit sheet, so it is the only thing that asks.
+		// A merge that loses no direction commits with no dialog at all.
+		if (plan.directionConflicts.length > 0) {
+			pendingNodeMerge = { plan, absorbedId, survivorId };
+			return;
+		}
+		applyNodeMerge(plan, absorbedId, survivorId);
+	}
+
+	/** Commits an already-planned merge. Never re-plans: the dialog described this. */
+	function applyNodeMerge(plan: NodeMergePlan, absorbedId: string, survivorId: string) {
+		// The absorbed node is gone; leaving it primary would strand the pointer.
+		if (primaryNodeId === absorbedId) primaryNodeId = survivorId;
+		commitUserGraph(layoutRuntime.relaxAfterMutation(plan.next));
 	}
 
 	function openEditSheet(nodeId: string) {
@@ -1016,6 +1192,8 @@
 		editNodeId = null;
 		creationPreview = null;
 		duplicateEdgeConfirm = null;
+		// Dropping the plan is the whole cancel: nothing was mutated to undo.
+		pendingNodeMerge = null;
 		titleEditContext = null;
 		tagColorLegendOpen = false;
 		graphQueryPanelOpen = false;
@@ -1661,6 +1839,171 @@
 	}
 
 	/**
+	 * Take an externally mutated graph as this component's own, through the same
+	 * path an internal mutation uses, so the new elements settle and animate in
+	 * rather than snapping into place on the next reload.
+	 *
+	 * Committing here calls back out through `onMultigraphChange` — wanted, not
+	 * tolerated: the relaxed positions are the ones worth saving. It cannot loop,
+	 * because that callback never moves the revision this effect watches.
+	 */
+	function adoptGraphInPlace(incoming: MultigraphData) {
+		// Read before committing: once `graph` is the incoming one, there is nothing
+		// left to diff it against.
+		const revealNodeId = importRevealTargetNodeId(graph, incoming);
+		// Additive imports keep every host node, so the primary normally survives.
+		// This is the same last-resort re-point a deletion does, for the day some
+		// other in-place mutation does take it away.
+		if (!incoming.nodes.some((node) => node.id === primaryNodeId)) {
+			primaryNodeId = fallbackPrimaryNodeId(incoming);
+		}
+		commitUserGraph(layoutRuntime.relaxAfterMutation(incoming));
+		if (revealNodeId) revealImportedNode(revealNodeId);
+	}
+
+	/**
+	 * Show the reader what just arrived, by the smallest camera move that does it.
+	 *
+	 * Only the revision-adopt path calls this. An import lands as its own
+	 * component beside the reader's work — off screen more often than not — so
+	 * without a camera the whole operation reads as nothing having happened. Every
+	 * other mutation is something the reader just did, at a place they are already
+	 * looking, and moving the camera for one would be taking the canvas away from
+	 * them.
+	 *
+	 * The camera *pursues* the arrival rather than aiming once. Committing does not
+	 * finish the layout: enter animations are still growing radii and the seam
+	 * forces are still pushing the new component clear of the host, so a camera
+	 * aimed at the position read one statement after the commit lands where the
+	 * node used to be — measured at 81px of a node hanging off the right edge in
+	 * the dev app. Each frame re-reads where the node is *now* and re-frames.
+	 *
+	 * The rect that has to stay visible is frozen at the reader's departing view.
+	 * That is what makes re-aiming safe: the goal only moves because the target
+	 * moved, never because the camera has already travelled — so the "keep what you
+	 * could see" guarantee cannot ratchet itself outward frame by frame.
+	 */
+	function revealImportedNode(nodeId: string) {
+		importRevealNodeId = nodeId;
+		cancelImportReveal();
+		const rect = stageRect;
+		if (!rect || rect.width <= 0 || rect.height <= 0) return;
+		const stage: StageSize = { width: rect.width, height: rect.height };
+		const target = importRevealCircle(nodeId);
+		if (!target) return;
+		const from: CameraViewState = {
+			panX: stageViewState.panX,
+			panY: stageViewState.panY,
+			scale: stageViewState.scale
+		};
+		const startedAtMs = Date.now();
+		const pursuit: ImportRevealPursuit = {
+			nodeId,
+			from,
+			viewport: viewportWorldRect(from, stage),
+			stage,
+			startedAtMs,
+			durationMs: IMPORT_REVEAL_TRANSITION_MS,
+			deadlineMs: startedAtMs + IMPORT_REVEAL_MAX_PURSUIT_MS,
+			marginRadiusFactor: IMPORT_REVEAL_MARGIN_RADIUS_FACTOR,
+			minScale: DEFAULT_MIN_SCALE,
+			maxScale: DEFAULT_MAX_SCALE,
+			// Reduced motion lands at once and then joins the pursuit as a silent
+			// observer: no per-frame camera, just one correction if the layout carries
+			// the node elsewhere while it settles.
+			instant: reduceMotion || typeof requestAnimationFrame !== 'function',
+			lastTarget: target
+		};
+		if (pursuit.instant === true) {
+			// Through the pursuit's own step, so the view motion lands on cannot be
+			// framed differently from the one the flight would have reached.
+			const landing = revealPursuitStep({
+				pursuit,
+				target,
+				previousTarget: target,
+				nowMs: startedAtMs,
+				restEpsilon: resolvedLayoutSettings.postDragSettleEpsilonPx
+			}).goal;
+			if (landing) applyCameraView(landing);
+		}
+		// No rAF (server render): the landing above is all the reveal there can be.
+		if (typeof requestAnimationFrame !== 'function') return;
+
+		importRevealPursuit = pursuit;
+		importRevealActive = true;
+		importRevealFrameId = requestAnimationFrame(stepImportReveal);
+	}
+
+	/**
+	 * One frame of the pursuit. All the deciding lives in `revealPursuitStep`; this
+	 * only supplies where the arrival is drawn now and moves the camera it asks for.
+	 */
+	function stepImportReveal() {
+		importRevealFrameId = null;
+		const pursuit = importRevealPursuit;
+		if (!pursuit) return;
+		const target = importRevealCircle(pursuit.nodeId);
+		// The node left the graph mid-flight. Nowhere left to aim; stop where we are.
+		if (!target) {
+			cancelImportReveal();
+			return;
+		}
+		const step = revealPursuitStep({
+			pursuit,
+			target,
+			previousTarget: pursuit.lastTarget,
+			nowMs: Date.now(),
+			// The same threshold the drag settle calls "at rest", so one idea of
+			// "stopped moving" serves the physics and the camera watching it.
+			restEpsilon: resolvedLayoutSettings.postDragSettleEpsilonPx
+		});
+		pursuit.lastTarget = target;
+		if (step.view) applyCameraView(step.view);
+		if (!step.done) {
+			importRevealFrameId = requestAnimationFrame(stepImportReveal);
+			return;
+		}
+		// The last word on where the camera belongs, from the position the node
+		// actually came to rest at. Idempotent when the flight already landed there,
+		// and the one correction the reduced-motion path gets.
+		if (step.goal) applyCameraView(step.goal);
+		cancelImportReveal();
+	}
+
+	/** Where the reveal target is drawn right now, off the live derived layout. */
+	function importRevealCircle(nodeId: string): RevealCircle | null {
+		const position = graphLayout.posByNodeId[nodeId] ?? graph.posByNodeId[nodeId];
+		if (!position) return null;
+		return {
+			center: position,
+			radius: graphLayout.radiusByNodeId[nodeId] ?? resolvedLayoutSettings.baseRadius
+		};
+	}
+
+	/**
+	 * Move the stage camera, through `viewStateRequest` — the same one-shot channel
+	 * a Back crumb restores an exact camera with. Stage owns pan/zoom and reports
+	 * every applied request out through `onViewStateChange`, so the landing view
+	 * persists by the ordinary route with nothing special wired for it.
+	 */
+	function applyCameraView(view: CameraViewState) {
+		viewStateRequest = {
+			id: (viewStateRequestId += 1),
+			panX: view.panX,
+			panY: view.panY,
+			scale: view.scale
+		};
+	}
+
+	function cancelImportReveal() {
+		importRevealPursuit = null;
+		importRevealActive = false;
+		if (importRevealFrameId === null) return;
+		if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(importRevealFrameId);
+		importRevealFrameId = null;
+	}
+
+	/**
 	 * Commits an edit to a node's own text. Since the dataflow layer is derived
 	 * from that text, writing an equation is as topology-changing as drawing an
 	 * edge: it can put a node on the canvas that has never been placed by
@@ -1767,6 +2110,8 @@
 	data-scale-animation-active={layoutRuntime.hasActiveScaleAnimations ? 'true' : undefined}
 	data-layered-relayout-active={layoutRuntime.isLayeredRelayoutActive ? 'true' : undefined}
 	data-layered-relayout-state={layoutRuntime.relayoutStateKey ?? undefined}
+	data-import-reveal-node={importRevealNodeId ?? undefined}
+	data-import-reveal-active={importRevealActive ? 'true' : undefined}
 >
 	<button
 		type="button"
@@ -1840,6 +2185,7 @@
 		{creationArmRequest}
 		onCreationDragUpdate={handleCreationDragUpdate}
 		onCreationCancel={handleCreationCancel}
+		onNodeMergeDropOntoNode={handleNodeMergeDropOntoNode}
 		onViewStateLiveChange={(state) => {
 			stageViewState = state;
 		}}
@@ -2061,13 +2407,15 @@
 				{/if}
 			{/each}
 			{#if creationPreviewEdgePoints}
-				{@const previewEdgeColor = edgeStrokeColor(
-					CREATION_PREVIEW_EDGE,
-					graph.tagColorConfig.edgeTags
-				)}
+				{@const isMergePreview = creationPreview?.mode === 'merge'}
+				{@const previewEdgeColor = isMergePreview
+					? MERGE_PREVIEW_COLOR
+					: edgeStrokeColor(CREATION_PREVIEW_EDGE, graph.tagColorConfig.edgeTags)}
 				<div
 					class="edge"
+					class:merge-preview={isMergePreview}
 					data-creation-preview-edge="true"
+					data-creation-preview-mode={creationPreview?.mode ?? 'create'}
 					style={`${edgeStyle(creationPreviewEdgePoints.source, creationPreviewEdgePoints.target)} --edge-background: ${previewEdgeColor}; color: ${previewEdgeColor}; --edge-stroke-width: ${EDGE_STROKE_WIDTH}px; pointer-events: none;`}
 				></div>
 			{/if}
@@ -2105,10 +2453,12 @@
 					class="node-wrapper"
 					class:primary={primaryNodeId === node.id}
 					class:focus-owned={focus.focusedNodeId === node.id}
+					class:merge-target={mergeTargetNodeId === node.id}
 					role="button"
 					tabindex="0"
 					aria-label={nodeAccessibleName(node)}
 					data-node-id={node.id}
+					data-merge-target={mergeTargetNodeId === node.id ? 'true' : undefined}
 					data-query-role={queryNodeState?.role}
 					data-scale={nodeScale}
 					data-node-opacity={nodeOpacity}
@@ -2197,6 +2547,7 @@
 			node={actionMenuNode}
 			position={actionMenu.position}
 			onAddNodeEdge={() => armCreationGesture(actionMenuNode)}
+			onMergeNode={() => armCreationGesture(actionMenuNode, 'merge')}
 			onTogglePinned={() => {
 				toggleNodePinned(actionMenuNode.id);
 				closeOverlays();
@@ -2423,6 +2774,21 @@
 		/>
 	{/if}
 
+	{#if pendingNodeMerge}
+		{@const heldMerge = pendingNodeMerge}
+		<MergeConfirmDialog
+			conflictCount={heldMerge.plan.directionConflicts.length}
+			onCancel={() => (pendingNodeMerge = null)}
+			onConfirm={() => {
+				// `heldMerge` tracks the state it came from, so read it out before
+				// clearing — afterwards it is null and the plan is gone.
+				const merge = heldMerge;
+				pendingNodeMerge = null;
+				applyNodeMerge(merge.plan, merge.absorbedId, merge.survivorId);
+			}}
+		/>
+	{/if}
+
 	{#if tagColorLegendOpen}
 		<TagColorLegend
 			tags={legendTags}
@@ -2468,6 +2834,14 @@
 
 	.node-wrapper.focus-owned {
 		visibility: hidden;
+	}
+
+	/* The node a merge is poised to absorb into, ringed in the merge colour
+	   (kept in sync with MERGE_PREVIEW_COLOR above). */
+	.node-wrapper.merge-target :global(.circle) {
+		box-shadow:
+			0 0 0 4px color-mix(in srgb, #b45309 62%, transparent),
+			0 0 18px color-mix(in srgb, #b45309 45%, transparent);
 	}
 
 	/* The wrapper carries a scale transform, so the ring is drawn on the wrapper
@@ -2663,6 +3037,22 @@
 	.edge.boundary::before {
 		--edge-dash-length: 8px;
 		--edge-dash-gap: 6px;
+
+		mask-image: repeating-linear-gradient(
+			to right,
+			#000 0 var(--edge-dash-length),
+			transparent var(--edge-dash-length) calc(var(--edge-dash-length) + var(--edge-dash-gap))
+		);
+	}
+
+	/*
+	 * The merge preview reads as a pull rather than a connection: a long dash,
+	 * spaced wider than either the boundary or the derived stroke so it is never
+	 * mistaken for an edge that is about to exist.
+	 */
+	.edge.merge-preview::before {
+		--edge-dash-length: 12px;
+		--edge-dash-gap: 8px;
 
 		mask-image: repeating-linear-gradient(
 			to right,

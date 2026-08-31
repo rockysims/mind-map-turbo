@@ -194,6 +194,38 @@ describe('graphLayout', () => {
 		expect(layout.scaleByNodeId.n1).toBe(0.2);
 	});
 
+	// An import is parked beside its host with the two components touching, and
+	// nothing connects them, so whatever the layout does next is where they stay.
+	describe('two disconnected components parked side by side', () => {
+		const BASE_RADIUS = 200;
+		const RADIUS_SUM = BASE_RADIUS * 2;
+
+		function settledDistance(): number {
+			const graph = {
+				...makeGraph({ nodeCount: 2 }),
+				posByNodeId: { n0: { x: 0, y: 0 }, n1: { x: RADIUS_SUM, y: 0 } }
+			};
+
+			const settled = withSettledGraphPositions(graph, {
+				hopsByNodeId: { n0: 0, n1: 0 },
+				settings: { baseRadius: BASE_RADIUS },
+				relaxIterations: 400
+			});
+
+			return Math.hypot(
+				settled.posByNodeId.n1.x - settled.posByNodeId.n0.x,
+				settled.posByNodeId.n1.y - settled.posByNodeId.n0.y
+			);
+		}
+
+		it('leaves them close to touching instead of flinging them apart', () => {
+			// The old ramp read `Infinity` hops as the hop cap and settled these at
+			// three radius sums — the import ended up most of a screen from its host.
+			expect(settledDistance()).toBeGreaterThanOrEqual(RADIUS_SUM);
+			expect(settledDistance()).toBeLessThan(RADIUS_SUM * 1.2);
+		});
+	});
+
 	it('uses animated scale overrides for radii and physics', () => {
 		const graph = makeGraph({
 			nodeCount: 2,

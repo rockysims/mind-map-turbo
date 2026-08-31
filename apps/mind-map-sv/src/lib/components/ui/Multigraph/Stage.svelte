@@ -14,7 +14,7 @@
 		zoomViewTransformAtPoint
 	} from './lib/graphMath.js';
 	import { pointerDistance } from './lib/hitTest.js';
-	import { resolveCreationDrop } from './lib/creationGesture.js';
+	import { resolveCreationDrop, type NodeGestureMode } from './lib/creationGesture.js';
 	import { recognizeLongPress } from './lib/longPress.js';
 	import { persistedScaleForFocusOverzoom } from './lib/nodeFocus.js';
 	import {
@@ -77,6 +77,8 @@
 	interface CreationArmRequest {
 		id: number;
 		sourceNode: NodeData;
+		/** What the release commits. Omitted means the original create gesture. */
+		mode?: NodeGestureMode;
 	}
 
 	interface Props {
@@ -110,7 +112,9 @@
 		onCreationDragUpdate?: (sourceNode: NodeData, point: Point, hoverNode: NodeData | null) => void;
 		/** Fired when a creation gesture is cancelled (Escape, release on source, pinch, pointercancel). */
 		onCreationCancel?: (sourceNode: NodeData) => void;
-		/** One-shot request to arm a creation gesture from a node (menu-initiated, no button pressed). */
+		/** Callback when a merge-mode gesture is dropped onto another node: fold `sourceNode` into `targetNode`. */
+		onNodeMergeDropOntoNode?: (sourceNode: NodeData, targetNode: NodeData) => void;
+		/** One-shot request to arm a drag-from-node gesture (menu-initiated, no button pressed). */
 		creationArmRequest?: CreationArmRequest | null;
 		/** Fired whenever the internal pan/zoom state changes, including initial mount. */
 		onViewStateLiveChange?: (state: ViewStateSnapshot) => void;
@@ -167,6 +171,7 @@
 		onNodeContextMenu,
 		onCreationDragUpdate,
 		onCreationCancel,
+		onNodeMergeDropOntoNode,
 		creationArmRequest,
 		onViewStateLiveChange,
 		onStageRectChange,
@@ -303,9 +308,15 @@
 	let longPressStartTime = 0;
 	let longPressFired = false;
 
-	// Creation gesture (new node/edge): either a double-click drag or a
-	// menu-armed hover session where no button is pressed until the final click.
-	let creationSession = $state<{ sourceNode: NodeData; via: 'menu' | 'doubleclick' } | null>(null);
+	// Drag-from-node gesture (new node/edge, or a merge): either a double-click
+	// drag or a menu-armed hover session where no button is pressed until the
+	// final click. Only `mode` differs between the two aims; the tracking,
+	// cancelling and hit testing below are shared verbatim.
+	let creationSession = $state<{
+		sourceNode: NodeData;
+		via: 'menu' | 'doubleclick';
+		mode: NodeGestureMode;
+	} | null>(null);
 	let lastCreationArmRequestId = $state<number | null>(null);
 
 	$effect(() => {
@@ -314,7 +325,11 @@
 		lastCreationArmRequestId = request.id;
 		cancelActiveNodeGesture();
 		panStart = null;
-		creationSession = { sourceNode: request.sourceNode, via: 'menu' };
+		creationSession = {
+			sourceNode: request.sourceNode,
+			via: 'menu',
+			mode: request.mode ?? 'create'
+		};
 	});
 
 	$effect(() => {
@@ -359,11 +374,14 @@
 	}
 
 	function completeCreationSession(sourceNode: NodeData, e: PointerEvent) {
+		const mode = creationSession?.mode ?? 'create';
 		creationSession = null;
 		const dropTarget = getNodeAt(e.clientX, e.clientY);
-		const action = resolveCreationDrop(sourceNode.id, dropTarget?.id ?? null);
+		const action = resolveCreationDrop(sourceNode.id, dropTarget?.id ?? null, mode);
 		if (action.kind === 'connect-to-node') {
 			onNodeDoubleClickDropOntoNode?.(sourceNode, dropTarget!);
+		} else if (action.kind === 'merge-into-node') {
+			onNodeMergeDropOntoNode?.(sourceNode, dropTarget!);
 		} else if (action.kind === 'create-node-and-edge') {
 			onNodeDoubleClickDropOntoBackground?.(sourceNode, graphPointForEvent(e));
 		} else {
@@ -459,7 +477,9 @@
 			const dist = pointerDistance(dragStartPos.x, dragStartPos.y, e.clientX, e.clientY);
 			if (dist >= dragThreshold || creationSession) {
 				cancelLongPressTimer();
-				if (!creationSession) creationSession = { sourceNode: dragNode, via: 'doubleclick' };
+				if (!creationSession) {
+					creationSession = { sourceNode: dragNode, via: 'doubleclick', mode: 'create' };
+				}
 				onCreationDragUpdate?.(
 					creationSession.sourceNode,
 					graphPointForEvent(e),

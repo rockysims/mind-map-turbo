@@ -41,7 +41,8 @@ Prefer setting the tool's `working_directory` parameter over chaining
 6. If the work executes a roadmap plan, update the plan, milestone, and roadmap status fields before closing out.
 7. Commit message follows Conventional Commits (see `commits.mdc`).
 8. No tracked changes to `.svelte-kit/`, build output, or log files (those are gitignored).
-9. After validation passes, commit the completed logical change unless the user has explicitly said not to commit yet.
+9. Anything real you found and deliberately did not fix is filed in `docs/debt/` (see "Technical debt" below). Dropping the finding and widening the change to fix it are both wrong.
+10. After validation passes, commit the completed logical change unless the user has explicitly said not to commit yet.
 
 You must actually run the commands above and report results. Do not claim done from "I think this is fine".
 
@@ -68,11 +69,29 @@ If a milestone doesn't have a current plan, write one before coding.
 Format and authoring checklist live in `.cursor/rules/plans.mdc` and
 `docs/roadmaps/PLAN_TEMPLATE.md`.
 
+## Technical debt
+
+`docs/debt/` records compromises the codebase is knowingly carrying — one file
+per item, `<YYYY-MM-DD>-<short-slug>.md`. `ls docs/debt/` is the index; there is
+no list file to go stale.
+
+File one when you knowingly leave something worse than it should be and the fix
+is out of scope for what you are doing. This is where a review's out-of-scope
+findings go: real, not worth widening the current change for, and too easy to
+lose otherwise. Bugs and feature ideas are not debt — they belong in
+`docs/roadmaps/TODO.md`. Anything you can fix in the change you are already
+making, just fix.
+
+Copy `docs/debt/TEMPLATE.md`, file it in the same commit as the work that
+incurred it, and delete the file in the same commit as its fix. Conventions:
+`docs/debt/README.md`.
+
 ## Where things live
 
 | Concern | Location |
 |---|---|
 | Pure graph/layout/physics logic | `apps/mind-map-sv/src/lib/components/ui/Multigraph/lib/*.ts` |
+| Technical debt | `docs/debt/` |
 | Component | `apps/mind-map-sv/src/lib/components/ui/<Name>/<Name>.svelte` |
 | Story | `apps/mind-map-sv/src/lib/components/ui/<Name>/<Name>.stories.svelte` |
 | Unit spec | colocated next to the `.ts` file as `*.spec.ts` |
