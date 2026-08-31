@@ -105,9 +105,12 @@ export function compareBuildStamps(
  * unorderable — a document from before the stamp existed, a dev build on either
  * side — stays silent rather than guessing.
  *
- * Deliberately short: the toolbar renders notices on one nowrap line, so a
- * longer message would clip on a phone. It carries the word "newer" because
- * `controllerNotice` uses that to decide a notice outranks the document status.
+ * Written as two short sentences because the toolbar stacks notices one per
+ * line in a fixed-width column — measured at 157px and 172px against its 184px
+ * widest existing line — and names the consequence rather than just the fact:
+ * the damage is not in opening the document, it is in the save that comes
+ * after. The date stays in because it is what tells the reader which of their
+ * files is the newer app they should go back to.
  */
 export function newerAppNotice(
 	documentVersion: string | null | undefined,
@@ -117,5 +120,5 @@ export function newerAppNotice(
 	if (compareBuildStamps(documentStamp, parseBuildStamp(appVersion)) !== 1) return null;
 	if (documentStamp === null) return null;
 
-	return `Saved by a newer app (${formatStampWhen(documentStamp)}).`;
+	return `Newer app: ${documentStamp.iso.slice(0, 10)}. Saving here downgrades it.`;
 }

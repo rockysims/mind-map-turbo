@@ -73,7 +73,7 @@ export type ControllerStatus =
 	 * or a cached draft another tab would have overwritten. It outranks the
 	 * document status line until something replaces it; a plain notice does not.
 	 */
-	| { state: 'notice'; message: string; sticky?: boolean }
+	| { state: 'notice'; message: string; sticky?: boolean; severity?: 'info' | 'warning' }
 	| { state: 'exported'; filename: string }
 	| { state: 'error'; message: string };
 
@@ -343,7 +343,9 @@ export class GraphPersistenceController {
 		// this newer graph back up in this older app's code.
 		const versionNotice = newerAppNotice(doc.appVersion, this.deps.appVersion);
 		if (versionNotice !== null) {
-			this.update({ status: { state: 'notice', sticky: true, message: versionNotice } });
+			this.update({
+				status: { state: 'notice', sticky: true, severity: 'warning', message: versionNotice }
+			});
 		}
 	}
 
@@ -483,12 +485,10 @@ export class GraphPersistenceController {
 		await this.refreshGraphList();
 		const versionNotice = newerAppNotice(imported.appVersion, this.deps.appVersion);
 		this.update({
-			status: {
-				state: 'notice',
-				// Only the version warning is sticky; a routine import is not.
-				sticky: versionNotice !== null,
-				message: versionNotice ?? `Imported into "${graphId}".`
-			}
+			status:
+				versionNotice !== null
+					? { state: 'notice', sticky: true, severity: 'warning', message: versionNotice }
+					: { state: 'notice', message: `Imported into "${graphId}".` }
 		});
 		return 'imported';
 	}
@@ -999,6 +999,12 @@ export function controllerNoticeSeverity(view: ControllerView): 'info' | 'warnin
 	if (view.status.state === 'loading' || view.status.state === 'saving') return 'info';
 	if (view.cachePending) return 'info';
 	if (view.status.state === 'warning') return 'warning';
+	// A sticky notice may name its own severity, at the same point in the order
+	// where controllerNotice hands it the line. Notices that name none keep
+	// falling through to the document-status rule, as they always have.
+	if (view.status.state === 'notice' && view.status.sticky === true) {
+		if (view.status.severity !== undefined) return view.status.severity;
+	}
 	// Only escalate when the notice is the document-status one saying the work
 	// is not saved.
 	if (!view.draftCached && documentStatusHasUnsavedChanges(view.documentStatus)) {

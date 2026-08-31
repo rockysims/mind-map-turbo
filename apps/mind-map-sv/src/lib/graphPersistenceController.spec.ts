@@ -255,7 +255,8 @@ describe('opening a document written by another app version', () => {
 			state: 'notice',
 			// Sticky: the reader has to act on it, so it outranks the document status.
 			sticky: true,
-			message: 'Saved by a newer app (2026-09-15 10:02).'
+			severity: 'warning',
+			message: 'Newer app: 2026-09-15. Saving here downgrades it.'
 		});
 	});
 
@@ -268,7 +269,9 @@ describe('opening a document written by another app version', () => {
 
 		await controller.importGraphDocument(documentFrom(NEWER_STAMP));
 
-		expect(controllerNotice(controller.getView())).toBe('Saved by a newer app (2026-09-15 10:02).');
+		expect(controllerNotice(controller.getView())).toBe(
+			'Newer app: 2026-09-15. Saving here downgrades it.'
+		);
 	});
 
 	it('reports the ordinary import when the document is from an older app', async () => {
@@ -277,9 +280,9 @@ describe('opening a document written by another app version', () => {
 
 		await controller.importGraphDocument(documentFrom('2026-05-07T09:00:00-07:00 0000001'));
 
+		// Neither sticky nor amber: an ordinary import is not something to act on.
 		expect(controller.getView().status).toEqual({
 			state: 'notice',
-			sticky: false,
 			message: `Imported into "${DEFAULT_GRAPH_ID}".`
 		});
 	});
@@ -299,7 +302,9 @@ describe('opening a document written by another app version', () => {
 
 		await controller.loadEmbeddedDocument(doc, { openedFromPicker: true });
 
-		expect(controllerNotice(controller.getView())).toBe('Saved by a newer app (2026-09-15 10:02).');
+		expect(controllerNotice(controller.getView())).toBe(
+			'Newer app: 2026-09-15. Saving here downgrades it.'
+		);
 	});
 
 	it('records the running app version on every document it writes', async () => {

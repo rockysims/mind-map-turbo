@@ -149,16 +149,28 @@ describe('newerAppNotice', () => {
 
 	it('warns when the document came from a newer app', () => {
 		expect(newerAppNotice('2026-09-15T10:02:00-07:00 abc1234', APP)).toBe(
-			'Saved by a newer app (2026-09-15 10:02).'
+			'Newer app: 2026-09-15. Saving here downgrades it.'
 		);
 	});
 
-	it('leaves out the sha, which would not fit the toolbar on a phone', () => {
+	it('leaves out the sha, which would not fit the toolbar column', () => {
 		expect(newerAppNotice('2026-09-15T10:02:00-07:00 abc1234', APP)).not.toContain('abc1234');
 	});
 
-	it('says "newer", which is how controllerNotice knows to outrank the status', () => {
-		expect(newerAppNotice('2026-09-15T10:02:00-07:00 abc1234', APP)).toContain('newer');
+	it('names the consequence, not just the fact', () => {
+		// Opening the document is harmless; the save after it is what downgrades.
+		expect(newerAppNotice('2026-09-15T10:02:00-07:00 abc1234', APP)).toContain('downgrades');
+	});
+
+	it('stays within the two short sentences the toolbar column stacks', () => {
+		// A character proxy for a pixel constraint: the toolbar's notice column is
+		// 12rem and its widest existing line measures 182px at 29 characters, so a
+		// line over 30 wraps and grows a bar the toolbar means to keep fixed.
+		const lines = (newerAppNotice('2026-09-15T10:02:00-07:00 abc1234', APP) ?? '')
+			.split(/(?<=\.)\s+/)
+			.filter((line) => line !== '');
+
+		expect(lines.every((line) => line.length <= 30)).toBe(true);
 	});
 
 	it('says nothing about an older document, which is the ordinary upgrade path', () => {

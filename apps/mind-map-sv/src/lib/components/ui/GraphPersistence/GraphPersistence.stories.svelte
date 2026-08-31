@@ -485,11 +485,13 @@
 
 		await waitFor(() => expect(harness.dataset.lastImportResult).toBe('imported'));
 
-		// The import succeeds — the warning is about what the next Download would
-		// do, which is wrap this newer graph back up in this older app's code.
+		// The import succeeds — the warning is about what the next Save would do,
+		// which is wrap this newer graph back up in this older app's code. Amber,
+		// because that is the toolbar's colour for work at risk.
 		await waitFor(() =>
-			expect(harness.dataset.notice).toBe('Saved by a newer app (2026-09-15 10:02).')
+			expect(harness.dataset.notice).toBe('Newer app: 2026-09-15. Saving here downgrades it.')
 		);
+		expect(harness.dataset.noticeSeverity).toBe('warning');
 		expect(harness.dataset.primaryTitle).toBe('From The Future');
 	}}
 />
@@ -514,8 +516,10 @@
 		await waitFor(() => expect(harness.dataset.lastImportResult).toBe('imported'));
 		await waitFor(() => expect(harness.dataset.primaryTitle).toBe('From The Past'));
 
-		// Opening an older document is the ordinary upgrade path, so it is silent.
+		// Opening an older document is the ordinary upgrade path, so it is silent
+		// and stays the ordinary colour.
 		expect(harness.dataset.notice).not.toMatch(/newer/);
+		expect(harness.dataset.noticeSeverity).toBe('info');
 	}}
 />
 

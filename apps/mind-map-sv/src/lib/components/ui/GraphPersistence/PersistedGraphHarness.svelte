@@ -185,6 +185,7 @@
 	data-loaded-graph-id={persisted.loadedGraphId}
 	data-routed-graph-id={routedGraphId}
 	data-notice={persisted.notice}
+	data-notice-severity={persisted.noticeSeverity}
 	data-graph-ids={graphIds}
 	data-node-count={persisted.graph.nodes.length}
 	data-primary-title={primaryTitle}
