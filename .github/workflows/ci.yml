@@ -71,7 +71,8 @@ jobs:
       - name: "Tests (vitest: server + client + storybook)"
         run: pnpm --filter mind-map-sv test:unit -- --run
 
-      # Last: the e2e suite builds the app and serves it on port 4173, so it is
+      # Last: the e2e suite builds the app and serves it on the checkout's own
+      # derived preview port (see scripts/dev-ports.mjs), so it is
       # the slowest gate and runs only once the faster ones are green.
       - name: End-to-end tests (playwright)
         run: pnpm --filter mind-map-sv run test:e2e
