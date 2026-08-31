@@ -57,8 +57,7 @@ Every change must satisfy these before being claimed complete:
 6. Commit messages follow Conventional Commits (`feat`, `fix`, `refactor`,
    `test`, `docs`, `chore`, etc.).
 7. Anything real you found and deliberately did not fix is filed in
-   `docs/debt/` — see [Technical debt](#technical-debt). Silently dropping it
-   and widening the change to fix it are both wrong.
+   `docs/debt/` — dropping it and widening the change are both wrong.
 8. No tracked changes to `.svelte-kit/`, build outputs, or `*storybook*.log`.
 
 You must actually run those commands and report results. Do not claim done
@@ -83,21 +82,10 @@ based on vibes.
 
 ## Technical debt
 
-`docs/debt/` records compromises this codebase is knowingly carrying — one
-file per item, named `<YYYY-MM-DD>-<short-slug>.md`. `ls docs/debt/` is the
-index; there is no list file to fall out of date.
-
-File an item when you knowingly leave something worse than it should be and
-fixing it is out of scope for the change you are making. **This is what a
-review's out-of-scope findings are for**: a real finding that the current
-change should not grow to include gets filed, not dropped. Bugs and feature
-ideas are not debt — those belong in `docs/roadmaps/TODO.md`, and anything you
-can simply fix in the change you are already making should just be fixed.
-
-Copy `docs/debt/TEMPLATE.md`, and file it in the same commit as the work that
-incurred it. When an item is fixed, delete its file in the same commit as the
-fix — git history keeps the record, and the folder stays an honest list of
-what is still owed. Full conventions: `docs/debt/README.md`.
+`docs/debt/` records compromises we knowingly carry — one file per item, and
+`ls docs/debt/` is the index. File one when something real is out of scope for
+the change you are making (a review's out-of-scope findings belong here rather
+than dropped or force-fixed). Conventions: `docs/debt/README.md`.
 
 ## Coding conventions (highlights)
 
