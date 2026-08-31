@@ -16,6 +16,7 @@
 		usePersistedGraph,
 		type PersistedGraph
 	} from '$lib/components/ui/GraphPersistence/usePersistedGraph.svelte';
+	import { readSettingsSeed } from '$lib/config/settingsSeed';
 	import GraphToolbar from '$lib/components/ui/GraphToolbar/GraphToolbar.svelte';
 	import Multigraph from '$lib/components/ui/Multigraph/Multigraph.svelte';
 	import { createDefaultGraph, shouldEditInitialRootTitle } from '$lib/defaultGraph';
@@ -42,6 +43,7 @@
 	import { SaveScheduler } from '$lib/saveScheduler';
 
 	const EDIT_ROOT_PARAM = 'editRoot';
+	const RESET_SETTINGS_PARAM = 'resetSettings';
 
 	let persisted = $state<PersistedGraph | null>(null);
 	/**
@@ -111,6 +113,13 @@
 				);
 			},
 			storageNamespace: APP_CONFIG.persistence.storageNamespace,
+			// Read once per `createGraph` call, never stored: the seed is stamped
+			// into a new graph's own overrides and never consulted again, so
+			// changing or clearing it later cannot retune a graph that already
+			// exists (T09's "Use as seed for new graphs" writes this same key via
+			// `SettingsPanel`'s own default `onSaveSeed`).
+			createSettingsSeed: () =>
+				readSettingsSeed(localStorage, APP_CONFIG.persistence.storageNamespace),
 			confirmGraphImportReplace: ({ loadedGraphId }) =>
 				window.confirm(
 					`Replace the current graph "${loadedGraphId}" with the imported graph? This cannot be undone.`
@@ -219,9 +228,11 @@
 			await persistedGraph.loadEmbeddedDocument(embeddedGraph, {
 				openedFromPicker: options.openedFromPicker
 			});
+			applyResetSettingsFromUrlIfRequested(persistedGraph);
 			return;
 		}
 		const loadResult = await persistedGraph.load(graphId, options);
+		applyResetSettingsFromUrlIfRequested(persistedGraph);
 		const requestedRootEdit = shouldEditRootTitleFromUrl();
 		const shouldEditRoot = shouldEditInitialRootTitle({
 			graphId,
@@ -367,6 +378,90 @@
 		}
 		url.searchParams.delete(EDIT_ROOT_PARAM);
 		window.history.replaceState(window.history.state, '', url);
+	}
+
+	/**
+	 * `?resetSettings=1` escape hatch: with 69 live knobs it is possible to reach
+	 * a settings combination that makes the graph — and so the toolbar button
+	 * that opens the panel — unusable. This clears the *loaded* graph's own
+	 * overrides only; it never touches the seed (`settingsSeed.ts`) or any other
+	 * graph, and a hostile config must never paint even for one frame, so the
+	 * in-memory clear (`notifySettingsChanged`, in
+	 * `applyResetSettingsFromUrlIfRequested` below) runs synchronously right
+	 * after the graph that owns it loads, in the same tick, before anything
+	 * yields back to the event loop for a render. Only stripping the URL flag
+	 * itself is deferred — see that function's own comment for why.
+	 *
+	 * Mirrors `shouldEditRootTitleFromUrl`/`removeEditRootTitleFlagFromUrl`
+	 * above for the two route modes, plus one case those two don't need to
+	 * handle: `graphIdFromUrl` accepts a `#/?...` hash route as an alternate
+	 * spelling of a query-mode URL (see its own `mode === 'query' &&
+	 * url.hash.startsWith('#/')` branch), and this flag must be readable
+	 * through that same spelling — e.g. a direct navigation to
+	 * `/#/?graph=x&resetSettings=1` under `http:` — not just through a real
+	 * query string. Kept as a separate pair rather than folded into the
+	 * `editRoot` helpers so this narrowly-scoped addition does not risk the
+	 * already-shipped flow.
+	 */
+	function shouldResetSettingsFromUrl(): boolean {
+		const url = new URL(window.location.href);
+		if (url.hash.startsWith('#/')) {
+			return (
+				new URL(url.hash.slice(1), 'https://hash-route.local').searchParams.get(
+					RESET_SETTINGS_PARAM
+				) === '1'
+			);
+		}
+		const routeMode = graphRouteModeForProtocol(window.location.protocol);
+		if (routeMode === 'hash') {
+			const params = new SvelteURLSearchParams(
+				url.hash.startsWith('#?') ? url.hash.slice(2) : url.hash.slice(1)
+			);
+			return params.get(RESET_SETTINGS_PARAM) === '1';
+		}
+		return url.searchParams.get(RESET_SETTINGS_PARAM) === '1';
+	}
+
+	function removeResetSettingsFlagFromUrl(): void {
+		const url = new URL(window.location.href);
+		if (url.hash.startsWith('#/')) {
+			const hashRoute = new URL(url.hash.slice(1), 'https://hash-route.local');
+			hashRoute.searchParams.delete(RESET_SETTINGS_PARAM);
+			window.history.replaceState(
+				window.history.state,
+				'',
+				`${url.href.split('#')[0]}#${hashRoute.pathname}${hashRoute.search}`
+			);
+			return;
+		}
+		const routeMode = graphRouteModeForProtocol(window.location.protocol);
+		if (routeMode === 'hash') {
+			const params = new SvelteURLSearchParams(
+				url.hash.startsWith('#?') ? url.hash.slice(2) : url.hash.slice(1)
+			);
+			params.delete(RESET_SETTINGS_PARAM);
+			window.history.replaceState(window.history.state, '', `${url.href.split('#')[0]}#${params}`);
+			return;
+		}
+		url.searchParams.delete(RESET_SETTINGS_PARAM);
+		window.history.replaceState(window.history.state, '', url);
+	}
+
+	function applyResetSettingsFromUrlIfRequested(persistedGraph: PersistedGraph): void {
+		if (!shouldResetSettingsFromUrl()) return;
+		persistedGraph.notifySettingsChanged({}, { syncView: true });
+		// The debounced save (`SaveScheduler`, `saveDebounceMs`) must actually
+		// reach storage before the flag is safe to strip. Stripping it right away
+		// races that debounce: a fragment-only navigation can be followed by a
+		// second, independent navigation to the same URL (observed under
+		// Playwright's `page.goto()`, unrelated to anything this function does),
+		// which tears down this component — and the in-flight scheduled save —
+		// before the timer fires. Waiting out the debounce first, and simply
+		// leaving the flag in the URL if such a reload happens before that,
+		// keeps this self-healing: a fresh mount reads the same still-present
+		// flag and retries this whole function, which is idempotent once the
+		// graph's settings are already empty.
+		setTimeout(() => removeResetSettingsFlagFromUrl(), APP_CONFIG.persistence.saveDebounceMs + 50);
 	}
 
 	async function exportHtmlShell(): Promise<string> {

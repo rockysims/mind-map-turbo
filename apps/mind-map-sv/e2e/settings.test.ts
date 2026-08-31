@@ -4,9 +4,72 @@ import { expect, test, type Page } from '@playwright/test';
 const GRAPH_HTML_PAYLOAD_SCRIPT_ID = 'mind-map-embedded-graph';
 const SCALE_FALLOFF_PATH = 'multigraph.layout.scaleFalloff';
 const COMMITTED_SCALE_FALLOFF = 0.35;
+const GRAPH_STORAGE_NAMESPACE = 'mind-map';
+const CURRENT_SCHEMA_VERSION = 6;
 
 function graphUrl(graphId: string): string {
 	return `/#/?${new URLSearchParams({ graph: graphId }).toString()}`;
+}
+
+function graphUrlWithResetSettings(graphId: string): string {
+	return `/#/?${new URLSearchParams({ graph: graphId, resetSettings: '1' }).toString()}`;
+}
+
+function graphStorageKey(graphId: string): string {
+	return `${GRAPH_STORAGE_NAMESPACE}:graph:${encodeURIComponent(graphId)}`;
+}
+
+/**
+ * Seeds a graph directly in `localStorage`, bypassing the app entirely, so a
+ * hostile settings combination can be in place *before* the first load rather
+ * than reached by dragging a slider. Mirrors `createDefaultGraph` in
+ * `src/lib/defaultGraph.ts` for the graph shape.
+ */
+async function seedGraphWithSettings(
+	page: Page,
+	graphId: string,
+	settings: Record<string, unknown>
+): Promise<void> {
+	await page.evaluate(
+		({ key, settings, schemaVersion }) => {
+			const record = {
+				schemaVersion,
+				data: {
+					nodes: [
+						{
+							id: 'n0',
+							title: 'Root',
+							description: '',
+							tags: [],
+							pinned: true,
+							content: []
+						}
+					],
+					edges: [],
+					posByNodeId: { n0: { x: 0, y: 0 } },
+					tagColorConfig: { nodeTags: {}, edgeTags: {} },
+					assets: {}
+				},
+				settings,
+				viewState: { panX: 0, panY: 0, scale: 1 },
+				updatedAt: Date.now()
+			};
+			localStorage.setItem(key, JSON.stringify(record));
+		},
+		{ key: graphStorageKey(graphId), settings, schemaVersion: CURRENT_SCHEMA_VERSION }
+	);
+}
+
+async function readStoredSettings(
+	page: Page,
+	graphId: string
+): Promise<Record<string, unknown> | undefined> {
+	return page.evaluate((key) => {
+		const item = localStorage.getItem(key);
+		if (!item) return undefined;
+		const payload = JSON.parse(item) as { settings?: Record<string, unknown> };
+		return payload.settings;
+	}, graphStorageKey(graphId));
 }
 
 /**
@@ -120,4 +183,45 @@ test('a committed settings change rides along in the exported HTML file', async 
 	const html = await downloadHtml(page);
 	const doc = extractGraphHtmlPayload(html);
 	expect(doc.settings).toMatchObject({ [SCALE_FALLOFF_PATH]: COMMITTED_SCALE_FALLOFF });
+});
+
+const HOSTILE_SETTINGS = {
+	'multigraph.layout.minScale': 0.001,
+	'multigraph.layout.displayedLayers': 0
+};
+
+test("?resetSettings=1 clears a hostile graph's overrides and the app recovers", async ({
+	page
+}) => {
+	const graphId = `e2e-reset-settings-${Date.now()}`;
+	const otherGraphId = `e2e-reset-settings-other-${Date.now()}`;
+
+	await page.goto('/');
+	await page.evaluate(() => localStorage.clear());
+	await seedGraphWithSettings(page, graphId, HOSTILE_SETTINGS);
+	// A second, unrelated graph with its own overrides: the param must reach
+	// only the graph it loads.
+	await seedGraphWithSettings(page, otherGraphId, HOSTILE_SETTINGS);
+
+	await page.goto(graphUrlWithResetSettings(graphId));
+	await expect(page.getByText('Root')).toBeVisible();
+
+	await expect.poll(() => readStoredSettings(page, graphId)).toBeUndefined();
+	// The flag strips itself from the URL rather than surviving a later reload.
+	expect(page.url()).not.toContain('resetSettings');
+	// The other graph's overrides are untouched.
+	await expect(readStoredSettings(page, otherGraphId)).resolves.toEqual(HOSTILE_SETTINGS);
+});
+
+test("loading without ?resetSettings=1 leaves a graph's overrides intact", async ({ page }) => {
+	const graphId = `e2e-keep-settings-${Date.now()}`;
+
+	await page.goto('/');
+	await page.evaluate(() => localStorage.clear());
+	await seedGraphWithSettings(page, graphId, HOSTILE_SETTINGS);
+
+	await page.goto(graphUrl(graphId));
+	await expect(page.getByText('Root')).toBeVisible();
+
+	await expect.poll(() => readStoredSettings(page, graphId)).toEqual(HOSTILE_SETTINGS);
 });
