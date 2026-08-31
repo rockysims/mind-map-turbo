@@ -3,6 +3,7 @@
 	import { onMount } from 'svelte';
 	import { SvelteURLSearchParams } from 'svelte/reactivity';
 	import { APP_CONFIG } from '$lib/appConfig';
+	import { BUILD_STAMP_META_NAME, formatBuildStamp, parseBuildStamp } from '$lib/buildInfo';
 	import { IndexedDbGraphAssetStore } from '$lib/assets/assetStore';
 	import {
 		downloadFileArtifact,
@@ -43,6 +44,12 @@
 
 	const EDIT_ROOT_PARAM = 'editRoot';
 
+	/**
+	 * Which app build this document holds, read once from the shell's meta tag.
+	 * Absent on the dev server, which injects no stamp, so this reads `dev`.
+	 */
+	let appVersion = 'dev';
+
 	let persisted = $state<PersistedGraph | null>(null);
 	let graphAssetStore = $state<IndexedDbGraphAssetStore | null>(null);
 	let selectedGraphId = $state(graphIdFromUrl(page.url));
@@ -54,6 +61,7 @@
 	const defaultPrimaryNodeId = $derived(persisted?.graph.nodes[0]?.id ?? '');
 
 	onMount(() => {
+		appVersion = formatBuildStamp(parseBuildStamp(readBuildStampMeta()));
 		selectedGraphId = graphIdFromUrl(
 			new URL(window.location.href),
 			graphRouteModeForProtocol(window.location.protocol)
@@ -152,7 +160,14 @@
 	}
 
 	function openGraphFilePicker(): void {
-		openHtmlFilePickerInNewTab(currentAppUrlWithoutGraphRoute());
+		openHtmlFilePickerInNewTab(currentAppUrlWithoutGraphRoute(), appVersion);
+	}
+
+	function readBuildStampMeta(): string | null {
+		return (
+			document.querySelector(`meta[name="${BUILD_STAMP_META_NAME}"]`)?.getAttribute('content') ??
+			null
+		);
 	}
 
 	function consumeOpenFileFromPickerFlag(): boolean {
