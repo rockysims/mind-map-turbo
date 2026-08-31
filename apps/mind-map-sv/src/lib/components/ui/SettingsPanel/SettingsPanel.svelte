@@ -84,6 +84,8 @@
 	let advancedOpen = $state(false);
 
 	const anyOverride = $derived(hasAnyOverride(overrides));
+	/** How many settings a Reset all would clear; named on the armed button. */
+	const overriddenCount = $derived(Object.keys(overrides).length);
 
 	/** The override if there is one, otherwise the shipped default. */
 	function valueFor(path: ConfigPath): ConfigValue | undefined {
@@ -98,9 +100,62 @@
 		onOverridesChange(clearSectionOverrides(overrides, section.fields));
 	}
 
+	/**
+	 * Reset all asks first, in place.
+	 *
+	 * It is the one reset that can throw away work the reader cannot see — an
+	 * override in a collapsed Advanced group, or in a section scrolled off the
+	 * panel — so unlike the per-field and per-section resets it takes two
+	 * presses. The armed label names the count for that reason: it is the only
+	 * way to say how much is about to go.
+	 *
+	 * Armed in place rather than behind a modal because the reader is already
+	 * looking at the thing being reset; a dialog would cover it. The arming
+	 * lapses on its own so a panel left open does not keep a destructive button
+	 * one stray click away.
+	 */
+	const RESET_ALL_ARM_MS = 6000;
+	/**
+	 * A double-click is one gesture, and it must not be able to arm and confirm
+	 * in one go — that would hand the reader a confirmation they never saw. The
+	 * second press only counts once it is slow enough to have been a decision.
+	 */
+	const RESET_ALL_MIN_READ_MS = 350;
+
+	let resetAllArmed = $state(false);
+	let resetAllArmedAtMs = 0;
+	let resetAllArmTimer: ReturnType<typeof setTimeout> | null = null;
+
+	function disarmResetAll(): void {
+		if (resetAllArmTimer !== null) clearTimeout(resetAllArmTimer);
+		resetAllArmTimer = null;
+		resetAllArmed = false;
+	}
+
 	function resetAll(): void {
+		if (!resetAllArmed) {
+			resetAllArmed = true;
+			resetAllArmedAtMs = Date.now();
+			if (resetAllArmTimer !== null) clearTimeout(resetAllArmTimer);
+			resetAllArmTimer = setTimeout(disarmResetAll, RESET_ALL_ARM_MS);
+			return;
+		}
+		// Still inside the double-click window: stay armed and wait for a press
+		// that was actually aimed at the question.
+		if (Date.now() - resetAllArmedAtMs < RESET_ALL_MIN_READ_MS) return;
+		disarmResetAll();
 		onOverridesChange({});
 	}
+
+	// Nothing left to reset — after the reset itself, or after the last field
+	// was reset one at a time — so the armed state has nothing to be about.
+	$effect(() => {
+		if (!anyOverride && resetAllArmed) disarmResetAll();
+	});
+
+	$effect(() => () => {
+		if (resetAllArmTimer !== null) clearTimeout(resetAllArmTimer);
+	});
 
 	// --- Footer: import from a graph file, and save the current overrides as
 	// the seed for new graphs. Both are one-shot actions with no config state
@@ -197,7 +252,19 @@
 		<h2>Settings</h2>
 		<div class="header-actions">
 			{#if anyOverride}
-				<button type="button" class="quiet" onclick={resetAll}>Reset all</button>
+				<button
+					type="button"
+					class="quiet"
+					class:armed={resetAllArmed}
+					data-reset-all-armed={resetAllArmed}
+					aria-label={resetAllArmed
+						? `Confirm resetting all ${overriddenCount} changed settings to their defaults`
+						: 'Reset all changed settings to their defaults'}
+					onclick={resetAll}
+					onblur={disarmResetAll}
+				>
+					{resetAllArmed ? `Reset all ${overriddenCount}?` : 'Reset all'}
+				</button>
 			{/if}
 			<button type="button" class="quiet" onclick={onClose}>Close</button>
 		</div>
@@ -362,6 +429,14 @@
 	.quiet {
 		background: #e2e8f0;
 		color: #0f172a;
+	}
+
+	/* Armed: the same button, saying what the next press will do. Amber rather
+	   than red — this clears presentation settings, it does not touch the graph. */
+	.quiet.armed {
+		background: #fef3c7;
+		color: #92400e;
+		font-weight: 600;
 	}
 
 	.reset {

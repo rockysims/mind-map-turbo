@@ -184,17 +184,59 @@
 
 		await expectHarnessData(canvasElement, 'overrideCount', '10');
 
-		await userEvent.click(canvas.getByRole('button', { name: 'Reset all' }));
+		// First press only arms it: nothing is cleared, and the button now says
+		// how much the next press would take.
+		await userEvent.click(canvas.getByRole('button', { name: /^Reset all changed settings/ }));
+		await expectHarnessData(canvasElement, 'overrideCount', '10');
+		await expectHarnessData(canvasElement, 'overridesChangeCount', '0');
+		const armed = canvas.getByRole('button', { name: /^Confirm resetting all 10 / });
+		await expect(armed).toHaveTextContent('Reset all 10?');
+
+		// A second press inside the double-click window is ignored, so one stray
+		// double-click cannot arm and confirm without the reader ever reading it.
+		await userEvent.click(armed);
+		await expectHarnessData(canvasElement, 'overrideCount', '10');
+		await expectHarnessData(canvasElement, 'overridesChangeCount', '0');
+
+		// The press that follows the question is the one that clears.
+		await new Promise((resolve) => setTimeout(resolve, 400));
+		await userEvent.click(armed);
 
 		await expectHarnessData(canvasElement, 'overrides', '{}');
 		await expectHarnessData(canvasElement, 'overrideCount', '0');
 		await expectHarnessData(canvasElement, 'overridesChangeCount', '1');
 		expect(modifiedPaths(canvasElement)).toEqual([]);
-		expect(canvas.queryByRole('button', { name: 'Reset all' })).not.toBeInTheDocument();
+		expect(
+			canvas.queryByRole('button', { name: /Reset all changed settings/ })
+		).not.toBeInTheDocument();
 
 		// Advanced fields were cleared too, even though they were never mounted.
 		await openAdvanced(canvasElement);
 		expect(modifiedPaths(canvasElement)).toEqual([]);
+	}}
+/>
+
+<Story
+	name="UserAbandonsAResetAllWithoutLosingAnything"
+	args={{ initialOverrides: SPREAD_OVERRIDES }}
+	play={async ({ canvasElement }: PlayContext) => {
+		const canvas = within(canvasElement);
+
+		// Armed by a first press...
+		await userEvent.click(canvas.getByRole('button', { name: /^Reset all changed settings/ }));
+		await expect(
+			canvas.getByRole('button', { name: /^Confirm resetting all 10 / })
+		).toBeInTheDocument();
+
+		// ...and disarmed by looking away, because a destructive button must not
+		// sit armed in a panel the reader has moved on from.
+		await userEvent.click(canvas.getByRole('button', { name: 'Close' }));
+
+		await expect(
+			canvas.getByRole('button', { name: /^Reset all changed settings/ })
+		).toBeInTheDocument();
+		await expectHarnessData(canvasElement, 'overrideCount', '10');
+		await expectHarnessData(canvasElement, 'overridesChangeCount', '0');
 	}}
 />
 
