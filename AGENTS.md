@@ -87,6 +87,7 @@ them after every small edit.
 | E2E                       | `apps/mind-map-sv/e2e/*.test.ts`                                        |
 | Roadmaps & plans          | `docs/roadmaps/<YYYY-MM-DD> <name>/`                                    |
 | Technical debt            | `docs/debt/` (conventions in `docs/debt/README.md`)                     |
+| Agent reporting / footer  | `docs/agent-reporting.md`                                               |
 | Plan template             | `docs/roadmaps/PLAN_TEMPLATE.md`                                        |
 | Codex plan workflow       | `.agents/skills/mm-plan/SKILL.md`                                       |
 
@@ -96,6 +97,13 @@ them after every small edit.
 `ls docs/debt/` is the index. File one when something real is out of scope for
 the change you are making (a review's out-of-scope findings belong here rather
 than dropped or force-fixed). Conventions: `docs/debt/README.md`.
+
+## Reporting back
+
+End every substantive turn with the status footer (`STATUS` / `NEEDS YOU` /
+`MERGE`) so the user can tell at a glance whether the thread needs them, and
+batch questions into one numbered list. Format and rules:
+`docs/agent-reporting.md`.
 
 ## Coding conventions (highlights)
 
