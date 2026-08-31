@@ -40,7 +40,8 @@ their pan, zoom, focus and nav stack. That is `graphRevision` plus
 a different reason.
 
 **The absence is now shaping the design of other features.** The quantity
-designation chips commit on every tap, and the code says why:
+designation chips commit on every tap in the details overlay, and the code
+says why:
 "makes committing on the tap safe without an undo to fall back on"
 (`QuantityDesignationChips.svelte`). Deleting a tag pays for the missing undo
 with a `window.confirm`. Reverting an import pays with a second confirm inside
@@ -81,18 +82,24 @@ they are what make an unbounded history affordable rather than aspirational.
   any realistic session but cannot exhaust a tab.
 - A **persisted tail**: the most recent K entries, stored as reference-identity
   deltas, in the `localStorage` draft — so undo survives a reload or a closed
-  tab on the machine the edits were made on.
+  tab on the machine the edits were made on. Undo only: redo does not survive
+  a reload.
 - Undo and redo restore into a _mounted_ canvas via `graphRevision`, preserving
   camera, focus, deep-zoom stack and nav — the import-adopt path, reused.
 - Every semantic edit is one entry: node/edge add and remove, merge, pin
-  toggle, content save, designation cycle, image add/move/remove, edge patch,
-  tag colour, tag delete, inline title syntax, additive import.
+  toggle, content save, designation cycle, image add/reorder/remove, edge
+  patch, tag colour, tag delete, inline title syntax, additive import. A
+  continuous input is one entry too: scrubbing the tag colour picker previews
+  live but coalesces into a single entry.
 - Deferred asset deletion, so undoing an image removal restores a working
   image rather than a broken reference, including after a reload.
-- Toolbar Undo/Redo controls, and `Cmd/Ctrl+Z` / `Cmd/Ctrl+Shift+Z` that stand
-  down inside text entry.
+- Toolbar Undo/Redo controls, and `Cmd/Ctrl+Z` / `Cmd/Ctrl+Shift+Z` /
+  `Ctrl+Y` that stand down inside text entry, while the edit sheet is open
+  (its unsaved drafts would be silently destroyed), and while a drag is in
+  flight.
 - Retiring `graphSnapshot.ts`. `RevertBanner` stays as a presentation over the
-  history's top entry when that entry is an import.
+  history's newest import entry — surviving subsequent edits, as it does today
+  — and its revert becomes an ordinary, redoable history operation.
 
 **Out:**
 
@@ -147,17 +154,28 @@ So:
 6. `Cmd/Ctrl+Z` inside the description textarea undoes typing in the textarea,
    not the last graph edit.
 7. Undo and Redo are reachable by touch, with disabled states that say when
-   there is nothing to undo or redo.
+   there is nothing to undo or redo — and tapping a disabled control surfaces
+   the reason where touch can see it, since tooltips are hover-only here.
 8. An additive import is one undo entry; `RevertBanner` still offers its
    labelled, confirmed revert, now driven by that entry.
-9. Switching graphs, or loading a different document, clears the history — an
-   undo can never restore one document's contents into another. A document
-   whose schema version predates the current one loads its graph and drops its
-   history, the way `graphSnapshot.ts` already refuses to migrate a snapshot.
+9. An undo can never restore one document's contents into another. Switching
+   graphs or loading a different document drops the in-memory stack; the
+   destination document starts from its own persisted tail, if it has one. A
+   document whose schema version predates the current one loads its graph and
+   drops its history, the way `graphSnapshot.ts` already refuses to migrate a
+   snapshot.
 10. The persisted tail is byte-budgeted: entries that would push the draft past
     the storage quota are dropped oldest-first rather than failing the write.
 11. An exported file contains no history — no entries, and no asset embedded
     only because an entry referenced it.
+12. Scrubbing a tag colour previews live and lands as one entry; undoing it
+    restores the colour from before the scrub began.
+13. Undo and redo stand down while the node edit sheet is open (the sheet's
+    unsaved drafts survive) and while a node drag or creation gesture is in
+    flight.
+14. A restore that removes the node or image the reader is focused into closes
+    focus cleanly — never an empty overlay — and back-stack crumbs naming
+    removed nodes are pruned.
 
 ## The saved file carries no history
 
