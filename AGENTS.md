@@ -28,6 +28,11 @@ Node ≥ 20 is required; the pnpm version comes from `packageManager` in the
 root `package.json` (pnpm 11 at the time of writing) — run `corepack enable`
 and let it pick that up rather than pinning a version by hand.
 
+Dev, e2e-preview, and Storybook ports are derived per worktree from its path
+(`pnpm dev-ports` prints them and regenerates `.claude/launch.json`; runs
+automatically on install). Never assume a server on another worktree's port
+is serving your code.
+
 ## Architecture
 
 - **Pure logic first.** Behavior goes in pure TypeScript modules under
@@ -62,6 +67,11 @@ Every change must satisfy these before being claimed complete:
 
 You must actually run those commands and report results. Do not claim done
 based on vibes.
+
+While iterating, run only the specs affected by your change (vitest path
+filters); save the full gate suite for once, before committing or claiming
+done. The full runs are the ones that count — the point is not to pay for
+them after every small edit.
 
 ## Where things live
 
@@ -125,6 +135,14 @@ only fast-forwards and fails loudly if someone advanced the branch
 concurrently. If it's not a fast-forward, merge the target branch into yours
 first, then push again. Never use bare `git stash` (the stash stack is
 shared); prefer a temporary WIP commit.
+
+Merging into `temp` needs an explicit user go-ahead every time. When work is
+complete and gates are green, report readiness and wait — do not merge on
+your own initiative.
+
+Before your first commit on an auto-generated branch named
+`claude/<random-words>-<hash>` (words unrelated to the task), rename it:
+`git branch -m claude/<topic-slug>-<hash>`, keeping the hash suffix.
 
 ## Process for new work
 
