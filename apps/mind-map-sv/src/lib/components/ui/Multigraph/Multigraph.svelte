@@ -144,7 +144,7 @@
 	import { beaconNodeIds } from './lib/beacons.js';
 	import { severedComponentAfterMutation } from './lib/severedComponent.js';
 	import type { LayoutSettings } from './lib/layoutSettings.js';
-	import { withDefaultLayoutSettings } from './lib/layoutSettings.js';
+	import { DEFAULT_LAYOUT_SETTINGS, withDefaultLayoutSettings } from './lib/layoutSettings.js';
 	import {
 		composeVisibleLayoutGraph,
 		computeBoundedHops,
@@ -416,8 +416,6 @@
 	const focusEntryGestureMaxMs = $derived(cfg.multigraph.focus.entryGestureMaxMs);
 	const focusDetailsCornerRadiusPx = $derived(cfg.multigraph.focus.detailsCornerRadiusPx);
 	const focusDetailsBorderWidthPx = $derived(cfg.multigraph.focus.detailsBorderWidthPx);
-	const nodeRadiusPx = $derived(cfg.multigraph.nodeRadiusPx);
-	const nodeDiameterPx = $derived(nodeRadiusPx * 2);
 	const nodeTextFontSizePx = $derived(cfg.multigraph.nodeTextFontSizePx);
 	const nodeBorderWidthPx = $derived(cfg.multigraph.nodeBorderWidthPx);
 	const pinnedNodeBorderWidthPx = $derived(cfg.multigraph.pinnedNodeBorderWidthPx);
@@ -441,6 +439,20 @@
 		...cfg.multigraph.layout,
 		...layoutSettings
 	});
+	/**
+	 * Node chrome is sized from the layout's own base radius, not from
+	 * `multigraph.nodeRadiusPx`.
+	 *
+	 * They ship as the same number and the schema hides the latter for exactly
+	 * this reason: the layout trims every edge at `baseRadius * scale`, so a
+	 * circle drawn from a second, independent radius would leave its edges
+	 * stopping short of — or crossing into — its own border the moment the two
+	 * disagreed. Reading one number is what makes them unable to.
+	 */
+	const nodeRadiusPx = $derived(
+		layoutSettingsFromConfig.baseRadius ?? DEFAULT_LAYOUT_SETTINGS.baseRadius
+	);
+	const nodeDiameterPx = $derived(nodeRadiusPx * 2);
 	/** Everything Stage needs; a prop default there is only a story's fallback. */
 	const stageTunables = $derived({
 		dragThreshold: cfg.interaction.dragThresholdPx,
