@@ -5,6 +5,10 @@
 > Codex reusable workflows live in `.agents/skills/*`. This file mirrors the
 > universal parts so any agent (Codex, Aider, Cline, etc.) gets the same
 > expectations.
+>
+> Keep this file lean — it is read every session. If any guidance needs more
+> than ~4 lines, put the long form in `docs/` and leave a one-line pointer
+> here.
 
 ## How to run things
 
@@ -101,6 +105,16 @@ chore(deps): bump @storybook/addon-vitest to ^10.3
 ```
 
 Full details: `.cursor/rules/commits.mdc`.
+
+## Git across worktrees
+
+Multiple agents run in worktrees under `.claude/worktrees/`; branches like
+`temp` are shared. Never check out a shared branch inside your worktree to
+merge into it — update it in place with `git push . HEAD:<branch>`, which
+only fast-forwards and fails loudly if someone advanced the branch
+concurrently. If it's not a fast-forward, merge the target branch into yours
+first, then push again. Never use bare `git stash` (the stash stack is
+shared); prefer a temporary WIP commit.
 
 ## Process for new work
 
