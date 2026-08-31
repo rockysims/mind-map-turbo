@@ -19,6 +19,12 @@ export type GraphFileDocument = {
 	viewState: ViewState;
 	documentId?: string;
 	exportedAt?: number;
+	/**
+	 * Build stamp of the app that wrote this document, so a reader opening it
+	 * into an older app can be told before the next Download wraps a newer graph
+	 * in older app code. Absent on anything written before the stamp existed.
+	 */
+	appVersion?: string;
 	embeddedAssets?: GraphFileEmbeddedAsset[];
 };
 
@@ -42,6 +48,7 @@ type GraphFilePayload = {
 	viewState: ViewState;
 	documentId?: string;
 	exportedAt?: number;
+	appVersion?: string;
 	htmlDocumentVersion?: number;
 	minReaderVersion?: number;
 };
@@ -184,7 +191,8 @@ function parseGraphFilePayload(
 		data,
 		viewState,
 		documentId: readOptionalString(raw, 'documentId'),
-		exportedAt: readOptionalNumber(raw, 'exportedAt')
+		exportedAt: readOptionalNumber(raw, 'exportedAt'),
+		appVersion: readOptionalString(raw, 'appVersion')
 	};
 }
 
@@ -194,7 +202,8 @@ function graphFilePayload(doc: GraphFileDocument): GraphFilePayload {
 		data: doc.data,
 		viewState: doc.viewState,
 		documentId: doc.documentId,
-		exportedAt: doc.exportedAt
+		exportedAt: doc.exportedAt,
+		appVersion: doc.appVersion
 	};
 }
 

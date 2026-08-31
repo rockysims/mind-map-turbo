@@ -90,6 +90,8 @@ export type GraphPersistenceControllerDeps = {
 	createGraphId?: () => string;
 	createDocumentId?: () => string;
 	now?: () => number;
+	/** Build stamp of the running app, recorded on every document it writes. */
+	appVersion?: string;
 	openUnsupportedHtmlFile?: (html: string) => boolean;
 	assetStore?: GraphAssetStore;
 	chooseEmbeddedDocumentConflict?: (context: {
@@ -274,6 +276,7 @@ export class GraphPersistenceController {
 				viewState: this.view.viewState,
 				documentId,
 				exportedAt: this.deps.now?.() ?? Date.now(),
+				appVersion: this.deps.appVersion,
 				embeddedAssets
 			},
 			{

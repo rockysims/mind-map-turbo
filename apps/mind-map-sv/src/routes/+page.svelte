@@ -80,6 +80,7 @@
 		const openedFromFilePicker = selectedGraphFileText !== null || consumeOpenFileFromPickerFlag();
 
 		const persistedGraph = usePersistedGraph({
+			appVersion,
 			persistence,
 			createScheduler: (onStatus) =>
 				new SaveScheduler({
