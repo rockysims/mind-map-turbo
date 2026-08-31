@@ -65,7 +65,7 @@ individual PR-sized tasks.
 | 09  | Variable dataflow layer                            | complete    | [milestone](milestones/09-variable-dataflow-layer.md), [plan](plans/2026-08-27%2009-variable-dataflow-layer.md)                                       |
 | 10  | LaTeX math in node titles                          | complete    | [milestone](milestones/10-latex-math-in-node-titles.md), [plan](plans/2026-08-27%2010-latex-math-in-node-titles.md)                                   |
 | 11  | Unified hop model for derived edges                | complete    | [milestone](milestones/11-unified-hop-model-for-derived-edges.md), [plan](plans/2026-08-28%2011-unified-hop-model-for-derived-edges.md)               |
-| 12  | Undo and redo                                      | proposed    | [milestone](milestones/12-undo-and-redo.md), [plan](plans/2026-08-30%2012-undo-and-redo.md)                                                           |
+| 12  | Undo and redo                                      | complete    | [milestone](milestones/12-undo-and-redo.md), [plan](plans/2026-08-30%2012-undo-and-redo.md)                                                           |
 
 Milestones 04a-04m deepen the local-first graph experience before multiplayer.
 Milestone 04b intentionally supersedes 04a's Fibonacci reveal and dimming
@@ -154,8 +154,8 @@ we change approach mid-stream — old plans stay as historical record.
 - Rich text / markdown in node descriptions (post-MVP). Image attachments are
   tracked separately in milestone 06, and LaTeX math in milestone 08; neither
   opens the door to general markdown.
-- Versioning / undo-redo UI (the immutable-update pattern enables it; a
-  UI for it can come later).
+- Versioning. Undo and redo shipped in milestone 12, built on the
+  immutable-update pattern; a version history browser is still out of scope.
 - AI-generated nodes / auto-suggest edges (interesting future direction;
   no MVP commitment).
 

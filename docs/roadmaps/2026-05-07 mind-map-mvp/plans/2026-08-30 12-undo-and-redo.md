@@ -3,7 +3,7 @@
 **Created:** 2026-08-30
 **Author:** Claude (Fable 5)
 **Milestone:** [milestones/12-undo-and-redo.md](../milestones/12-undo-and-redo.md)
-**Status:** draft
+**Status:** done
 **Total estimated effort:** M–L
 
 ## Summary
@@ -748,6 +748,64 @@ entry in the same wave.
   no enter animation; `Cmd/Ctrl+K` skips the `keyboardIsInTextEntry()` guard;
   the RevertBanner at phone widths covers the bottom-corner `Tag colors` and
   `Find / Filter` buttons (z-index 39 over 25).
+- 2026-08-30: Executed. Seven deviations from the plan as written, each
+  forced by something the code did that the plan did not know:
+  - **`graphIdentity.ts` has a fourth function**, `semanticFingerprint`. T02's
+    confirmation step cannot compare whole graphs: a commit that rebuilds an
+    array to an equal value still relaxes afterwards, so a whole-graph
+    fingerprint would call the relax a change and record an entry for an edit
+    that did nothing. The fingerprint covers the five tracked fields only.
+  - **A sticky notice now outranks a pending cache write** in
+    `controllerNotice` / `controllerNoticeSeverity`, and undo/redo/blocked
+    notices are sticky. Without this the plan's "set a notice naming the
+    operation" was unreachable: a restore schedules a write in the same breath,
+    so `cachePending` covered the answer for the whole debounce and the save
+    status then replaced it. The same reorder incidentally fixes import-failure
+    notices, which were hidden the same way; it costs those notices the amber
+    they sometimes picked up from the document status.
+  - **The asset sweep takes the committed graph as an argument** rather than
+    reading `view.graph`. History is recorded _before_ the view syncs, so a
+    sweep triggered by an image removal was seeing the graph that still had the
+    image, deciding the blob was live, and clearing the tombstone that was about
+    to collect it — a permanent leak, not a test artifact.
+  - **Taking the revert offer marks the import entry dismissed.** The plan's
+    rule ("show while the newest import entry is on the undo side") is still
+    true after a revert, so without this the banner offered to revert an import
+    it had just reverted.
+  - **The undo/redo guard is computed in the canvas and reported outward**
+    (`onHistoryGuardChange`), because the toolbar lives outside it. The plan put
+    the guards "all here so buttons and shortcuts share them"; one judgement,
+    reported once, is how that works across the component boundary.
+  - **`restoredCanvasState` on `ControllerView`** is how the canvas tells a
+    restore from an import arrival on a `graphRevision` bump — the two adopt
+    paths differ in exactly the camera and the canvas-local pointers.
+  - **`SnapshotSummary` carries `addedNodeCount`**, and
+    `snapshotOfferHeadline` takes it directly, rather than the banner
+    subtracting a remembered count from the graph on screen.
+- 2026-08-30: Two acceptance points are covered by specs rather than the
+  surface the plan named, and deliberately: the undo notice's text is pinned in
+  `graphPersistenceController.spec.ts` rather than in a story, because the story
+  harness caches with a zero debounce and the save status replaces the notice
+  before a `waitFor` can see it; and the T07 asset journeys are controller specs
+  plus an e2e journey rather than a story, because a story cannot put a real
+  blob in IndexedDB.
+- 2026-08-30: Manual smoke pass done on a 200-node / 299-edge graph in the dev
+  app. Repeated undo/redo walked the full stack both ways twice with identical
+  counts each round and no layout lurch (positions settled, nothing teleported).
+  An undo applied while `data-settling` was `true` changed the graph with no
+  console errors. Thirty `input` events from one colour scrub landed as a single
+  entry, and one undo returned the tag to having no configured colour at all. An
+  import-then-revert-then-redo round trip worked, and the `.stage` element was
+  the same object before and after the revert — the canvas really does stay
+  mounted now, which is the improvement over the old remounting revert. The undo
+  notice reads 'Undid "delete node".' for the debounce and is then superseded by
+  the save status, exactly the lifetime the note below predicted.
+- 2026-08-30: T10's icon buttons do _not_ keep the phone toolbar to two rows.
+  The plan expected them to; measured at 375px, the four text buttons fill row
+  one and the pair lands on row two with the notice on row three. They are
+  grouped into one flex item so the pair wraps together — ↷ alone on a line read
+  as a rendering fault. Icons still earn their place (a text pair would have
+  been wider still), but the third row is the honest outcome.
 - 2026-08-30: Watch the undo notice in real use: controller notices never
   auto-dismiss but the next save status ("Caching draft...") supersedes them
   within the debounce, which happens to give undo feedback a natural lifetime

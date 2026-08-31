@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { blobToBase64 } from './assets/assetEncoding';
 import { MemoryGraphAssetStore } from './assets/assetStore';
+import { tombstoneAsset } from './assets/assetTrash';
 import type { GraphAssetStore } from './assets/assetStore';
+import { addNode, setTagColor } from './components/ui/Multigraph/lib/graph';
 import { makeGraph } from './components/ui/Multigraph/lib/testFixtures';
+import type { GraphCommitIntent } from './components/ui/types/history';
 import type { MultigraphData } from './components/ui/types/multigraph';
 import {
 	GRAPH_HTML_READER_VERSION,
@@ -10,7 +13,6 @@ import {
 	serializeGraphHtmlFile,
 	type GraphFileEmbeddedAsset
 } from './graphFile';
-import { readGraphSnapshot } from './graphSnapshot';
 import { graphFingerprint } from './documentStatus';
 import { CURRENT_SCHEMA_VERSION, NEUTRAL_VIEW_STATE, type ViewState } from './migrations';
 import {
@@ -24,7 +26,9 @@ import {
 	type GraphSaveScheduler
 } from './graphPersistenceController';
 import { DEFAULT_GRAPH_ID } from './graphRoute';
+import { APP_CONFIG } from './appConfig';
 import {
+	LocalStoragePersistence,
 	documentDraftGraphId,
 	graphStorageKey,
 	type GraphSummary,
@@ -32,7 +36,7 @@ import {
 	type Persistence,
 	type StorageLike
 } from './persistence';
-import type { SaveStatus } from './saveScheduler';
+import type { ReadHistoryTail, SaveStatus } from './saveScheduler';
 
 class MemoryPersistence implements Persistence {
 	private readonly graphs = new Map<string, { graph: PersistedGraphRecord; updatedAt: number }>();
@@ -59,7 +63,11 @@ class MemoryPersistence implements Persistence {
 }
 
 class TestScheduler implements GraphSaveScheduler {
-	private pending: { id: string; graph: PersistedGraphRecord } | null = null;
+	private pending: {
+		id: string;
+		graph: PersistedGraphRecord;
+		readHistory?: ReadHistoryTail;
+	} | null = null;
 	failFlushOnce = false;
 	warnOnFlush = false;
 	dispose = vi.fn();
@@ -70,9 +78,16 @@ class TestScheduler implements GraphSaveScheduler {
 		private readonly events: string[]
 	) {}
 
-	schedule = vi.fn((id: string, data: MultigraphData, viewState: ViewState): void => {
-		this.pending = { id, graph: { data, viewState } };
-	});
+	schedule = vi.fn(
+		(
+			id: string,
+			data: MultigraphData,
+			viewState: ViewState,
+			readHistory?: ReadHistoryTail
+		): void => {
+			this.pending = { id, graph: { data, viewState }, readHistory };
+		}
+	);
 
 	flush = vi.fn(async (): Promise<void> => {
 		if (this.failFlushOnce) {
@@ -85,7 +100,7 @@ class TestScheduler implements GraphSaveScheduler {
 		const save = this.pending;
 		this.onStatus({ state: 'saving' });
 		this.events.push('save');
-		await this.persistence.save(save.id, save.graph);
+		await this.persistence.save(save.id, { ...save.graph, history: save.readHistory?.() });
 		this.pending = null;
 		const fingerprint = graphFingerprint(save.graph.data);
 		if (this.warnOnFlush) {
@@ -196,11 +211,13 @@ function setup(
 			fileGraph: MultigraphData;
 		}) => EmbeddedDocumentConflictChoice | Promise<EmbeddedDocumentConflictChoice>;
 		assetStore?: GraphAssetStore;
-		snapshotStorage?: StorageLike | null;
 		durability?: 'durable' | 'memory-only';
+		historyCeiling?: number;
+		/** Share one store between two controllers, the way a reload shares a draft. */
+		persistence?: MemoryPersistence;
 	} = {}
 ) {
-	const persistence = new MemoryPersistence();
+	const persistence = options.persistence ?? new MemoryPersistence();
 	const events: string[] = [];
 	const navigate = vi.fn(async (graphId: string) => {
 		events.push(`navigate:${graphId}`);
@@ -220,7 +237,7 @@ function setup(
 		confirmNewGraphReplace: options.confirmNewGraphReplace,
 		chooseEmbeddedDocumentConflict: options.chooseEmbeddedDocumentConflict,
 		assetStore: options.assetStore,
-		snapshotStorage: options.snapshotStorage ?? null,
+		historyCeiling: options.historyCeiling,
 		createDocumentId: () => 'doc-new',
 		now: () => 456,
 		createGraphId: () => 'graph-new'
@@ -241,7 +258,8 @@ describe('GraphPersistenceController', () => {
 		expect(scheduler.schedule).toHaveBeenCalledWith(
 			'missing',
 			createDefaultGraph(),
-			NEUTRAL_VIEW_STATE
+			NEUTRAL_VIEW_STATE,
+			expect.any(Function)
 		);
 		expect(persistence.save).toHaveBeenCalledWith('missing', {
 			data: createDefaultGraph(),
@@ -283,7 +301,12 @@ describe('GraphPersistenceController', () => {
 
 		expect(controller.getView().graph).toEqual(loaded);
 		expect(controller.getView().graphGeneration).toBe(generationAfterLoad);
-		expect(scheduler.schedule).toHaveBeenLastCalledWith('active', edited, NEUTRAL_VIEW_STATE);
+		expect(scheduler.schedule).toHaveBeenLastCalledWith(
+			'active',
+			edited,
+			NEUTRAL_VIEW_STATE,
+			expect.any(Function)
+		);
 	});
 
 	it('can optionally sync the loaded view for display-only callers', async () => {
@@ -523,7 +546,8 @@ describe('GraphPersistenceController', () => {
 		expect(scheduler.schedule).toHaveBeenLastCalledWith(
 			documentDraftGraphId('doc-opened'),
 			fileGraph,
-			fileViewState
+			fileViewState,
+			expect.any(Function)
 		);
 		expect(await persistence.load(documentDraftGraphId('doc-opened'))).toEqual({
 			data: fileGraph,
@@ -847,7 +871,12 @@ describe('GraphPersistenceController', () => {
 			generation: controller.getView().graphGeneration
 		});
 
-		expect(scheduler.schedule).toHaveBeenLastCalledWith('active', edited, NEUTRAL_VIEW_STATE);
+		expect(scheduler.schedule).toHaveBeenLastCalledWith(
+			'active',
+			edited,
+			NEUTRAL_VIEW_STATE,
+			expect.any(Function)
+		);
 	});
 
 	it('skips a cache write for a change event that matches the cached graph', async () => {
@@ -1038,11 +1067,9 @@ describe('GraphPersistenceController', () => {
 });
 
 describe('GraphPersistenceController additive import', () => {
-	const snapshotOptions = (storage: StorageLike) => ({ storage, namespace: 'test' });
-
 	/** A loaded 'active' graph of two nodes, viewed at a non-neutral pan and zoom. */
-	async function loadedHost(storage: StorageLike) {
-		const context = setup({ snapshotStorage: storage });
+	async function loadedHost(options: Parameters<typeof setup>[0] = {}) {
+		const context = setup(options);
 		await context.persistence.save('active', {
 			data: makeGraph({ nodeCount: 2, edges: [[0, 1]] }),
 			viewState: NEUTRAL_VIEW_STATE
@@ -1053,8 +1080,7 @@ describe('GraphPersistenceController additive import', () => {
 	}
 
 	it('keeps every existing node and adds the incoming ones', async () => {
-		const storage = new MemoryStorage();
-		const { controller, persistence, before } = await loadedHost(storage);
+		const { controller, persistence, before } = await loadedHost();
 
 		const result = await controller.importGraphIntoCurrent(
 			serializeGraphHtmlFile({
@@ -1064,7 +1090,7 @@ describe('GraphPersistenceController additive import', () => {
 			})
 		);
 
-		expect(result).toEqual({ outcome: 'imported', importedNodeCount: 3, snapshotStored: true });
+		expect(result).toEqual({ outcome: 'imported', importedNodeCount: 3 });
 		const after = controller.getView();
 		expect(after.graph.nodes.slice(0, 2)).toEqual(before.graph.nodes);
 		expect(after.graph.nodes).toHaveLength(5);
@@ -1072,13 +1098,13 @@ describe('GraphPersistenceController additive import', () => {
 		expect(after.graph.edges).toHaveLength(2);
 		expect(persistence.save).toHaveBeenLastCalledWith('active', {
 			data: after.graph,
-			viewState: nonNeutralViewState()
+			viewState: nonNeutralViewState(),
+			history: expect.objectContaining({ head: expect.objectContaining({ label: 'import' }) })
 		});
 	});
 
 	it('leaves the reader where they were: no remount, no view state change', async () => {
-		const storage = new MemoryStorage();
-		const { controller, before } = await loadedHost(storage);
+		const { controller, before } = await loadedHost();
 
 		await controller.importGraphIntoCurrent(
 			serializeGraphHtmlFile({
@@ -1097,8 +1123,7 @@ describe('GraphPersistenceController additive import', () => {
 	});
 
 	it('bumps the graph revision exactly once so the mounted canvas adopts the nodes', async () => {
-		const storage = new MemoryStorage();
-		const { controller, before } = await loadedHost(storage);
+		const { controller, before } = await loadedHost();
 		const revisions: number[] = [];
 		controller.subscribe((view) => revisions.push(view.graphRevision));
 
@@ -1119,9 +1144,8 @@ describe('GraphPersistenceController additive import', () => {
 		expect(after.graphGeneration).toBe(before.graphGeneration);
 	});
 
-	it('leaves the revision alone for loads, reverts and changes coming from the canvas', async () => {
-		const storage = new MemoryStorage();
-		const { controller, persistence } = await loadedHost(storage);
+	it('leaves the revision alone for loads and for changes coming from the canvas', async () => {
+		const { controller, persistence } = await loadedHost();
 		await controller.importGraphIntoCurrent(
 			serializeGraphHtmlFile({ data: makeGraph({ nodeCount: 2 }), viewState: NEUTRAL_VIEW_STATE })
 		);
@@ -1132,14 +1156,6 @@ describe('GraphPersistenceController additive import', () => {
 		controller.notifyGraphChanged(makeGraph({ nodeCount: 4 }), { syncView: true });
 		expect(controller.getView().graphRevision).toBe(afterImport.graphRevision);
 
-		// A revert replaces the document wholesale; the remount it triggers
-		// supersedes any in-place adoption.
-		await controller.revertToSnapshot();
-		expect(controller.getView()).toMatchObject({
-			graphRevision: afterImport.graphRevision,
-			graphGeneration: afterImport.graphGeneration + 1
-		});
-
 		await persistence.save('other', {
 			data: makeGraph({ nodeCount: 1 }),
 			viewState: NEUTRAL_VIEW_STATE
@@ -1148,9 +1164,8 @@ describe('GraphPersistenceController additive import', () => {
 		expect(controller.getView().graphRevision).toBe(afterImport.graphRevision);
 	});
 
-	it('snapshots the graph as it stood before the import', async () => {
-		const storage = new MemoryStorage();
-		const { controller, before } = await loadedHost(storage);
+	it('records the import as exactly one undo entry', async () => {
+		const { controller, before } = await loadedHost();
 
 		await controller.importGraphIntoCurrent(
 			serializeGraphHtmlFile({
@@ -1159,17 +1174,14 @@ describe('GraphPersistenceController additive import', () => {
 			})
 		);
 
-		expect(readGraphSnapshot('active', snapshotOptions(storage))).toEqual({
-			label: 'import',
-			createdAt: 456,
-			data: before.graph,
-			viewState: nonNeutralViewState()
-		});
+		expect(controller.getView().undoLabel).toBe('import');
+		controller.undo();
+		expect(controller.getView().graph.nodes).toEqual(before.graph.nodes);
+		expect(controller.getView().canUndo).toBe(false);
 	});
 
 	it('imports a version 1 payload through the migration path', async () => {
-		const storage = new MemoryStorage();
-		const { controller, before } = await loadedHost(storage);
+		const { controller, before } = await loadedHost();
 
 		const result = await controller.importGraphIntoCurrent(
 			JSON.stringify({
@@ -1182,14 +1194,13 @@ describe('GraphPersistenceController additive import', () => {
 			})
 		);
 
-		expect(result).toEqual({ outcome: 'imported', importedNodeCount: 1, snapshotStored: true });
+		expect(result).toEqual({ outcome: 'imported', importedNodeCount: 1 });
 		const titles = controller.getView().graph.nodes.map((node) => node.title);
 		expect(titles).toEqual([...before.graph.nodes.map((node) => node.title), 'Ancient']);
 	});
 
-	it('changes nothing and leaves no snapshot when the file will not parse', async () => {
-		const storage = new MemoryStorage();
-		const { controller, persistence, before } = await loadedHost(storage);
+	it('changes nothing and offers no revert when the file will not parse', async () => {
+		const { controller, persistence, before } = await loadedHost();
 		const saveCallsBefore = persistence.save.mock.calls.length;
 
 		const result = await controller.importGraphIntoCurrent(
@@ -1201,15 +1212,14 @@ describe('GraphPersistenceController additive import', () => {
 			graph: before.graph,
 			viewState: before.viewState,
 			graphGeneration: before.graphGeneration,
+			snapshot: null,
 			status: { state: 'notice', sticky: true, message: 'Import failed. Not a valid graph file.' }
 		});
-		expect(readGraphSnapshot('active', snapshotOptions(storage))).toBeNull();
 		expect(persistence.save).toHaveBeenCalledTimes(saveCallsBefore);
 	});
 
 	it('reports an unsupported version without touching the graph', async () => {
-		const storage = new MemoryStorage();
-		const { controller, before } = await loadedHost(storage);
+		const { controller, before } = await loadedHost();
 
 		const result = await controller.importGraphIntoCurrent(
 			JSON.stringify({ schemaVersion: 999, data: makeGraph({ nodeCount: 1 }) })
@@ -1218,18 +1228,17 @@ describe('GraphPersistenceController additive import', () => {
 		expect(result).toEqual({ outcome: 'unsupported' });
 		expect(controller.getView()).toMatchObject({
 			graph: before.graph,
+			snapshot: null,
 			status: {
 				state: 'notice',
 				sticky: true,
 				message: 'Import failed. Unsupported file version.'
 			}
 		});
-		expect(readGraphSnapshot('active', snapshotOptions(storage))).toBeNull();
 	});
 
 	it('reports a file it cannot read without touching the graph', async () => {
-		const storage = new MemoryStorage();
-		const { controller, before } = await loadedHost(storage);
+		const { controller, before } = await loadedHost();
 
 		const result = await controller.importGraphIntoCurrentFromReader(async () => {
 			throw new Error('read failed');
@@ -1238,18 +1247,18 @@ describe('GraphPersistenceController additive import', () => {
 		expect(result).toEqual({ outcome: 'read-failed' });
 		expect(controller.getView()).toMatchObject({
 			graph: before.graph,
+			snapshot: null,
 			status: {
 				state: 'notice',
 				sticky: true,
 				message: 'Import failed. Could not read the file.'
 			}
 		});
-		expect(readGraphSnapshot('active', snapshotOptions(storage))).toBeNull();
 	});
 
 	it('copies the incoming assets in without sweeping the host graph own images', async () => {
 		const assetStore = new MemoryGraphAssetStore();
-		const { controller } = setup({ assetStore, snapshotStorage: new MemoryStorage() });
+		const { controller } = setup({ assetStore });
 		await controller.load('active');
 		controller.notifyGraphChanged(imageGraph(['host-asset']), { syncView: true });
 		await storeAsset(assetStore, 'active', 'host-asset', 'host bytes');
@@ -1266,26 +1275,12 @@ describe('GraphPersistenceController additive import', () => {
 		expect(await readAsset(assetStore, 'active', 'host-asset')).toBe('host bytes');
 		expect(await readAsset(assetStore, 'active', 'incoming-asset')).toBe('incoming bytes');
 	});
-
-	it('imports without a snapshot when storage will not take one', async () => {
-		const { controller } = setup({ snapshotStorage: null });
-		await controller.load('active');
-
-		const result = await controller.importGraphIntoCurrent(
-			serializeGraphHtmlFile({ data: makeGraph({ nodeCount: 2 }), viewState: NEUTRAL_VIEW_STATE })
-		);
-
-		expect(result).toEqual({ outcome: 'imported', importedNodeCount: 2, snapshotStored: false });
-		expect(controller.getView().graph.nodes).toHaveLength(3);
-	});
 });
 
 describe('GraphPersistenceController revert', () => {
-	const snapshotOptions = (storage: StorageLike) => ({ storage, namespace: 'test' });
-
 	/** A loaded 'active' graph with one import already folded into it. */
-	async function importedInto(storage: StorageLike) {
-		const context = setup({ snapshotStorage: storage });
+	async function importedInto(options: Parameters<typeof setup>[0] = {}) {
+		const context = setup(options);
 		await context.persistence.save('active', {
 			data: makeGraph({ nodeCount: 2, edges: [[0, 1]] }),
 			viewState: NEUTRAL_VIEW_STATE
@@ -1302,67 +1297,118 @@ describe('GraphPersistenceController revert', () => {
 		return { ...context, beforeImport };
 	}
 
-	it('surfaces the snapshot in the view once an import has written one', async () => {
-		const storage = new MemoryStorage();
-		const { controller } = await importedInto(storage);
+	it('offers the revert once an import has landed, naming exactly what arrived', async () => {
+		const { controller } = await importedInto();
 
 		expect(controller.getView().snapshot).toEqual({
 			label: 'import',
 			createdAt: 456,
-			nodeCount: 2
+			addedNodeCount: 3
 		});
 	});
 
-	it('rediscovers the snapshot on a later load, the way a reload would', async () => {
-		const storage = new MemoryStorage();
-		const { controller } = await importedInto(storage);
+	it('keeps offering it across later edits', async () => {
+		const { controller } = await importedInto();
 
-		const reloaded = setup({ snapshotStorage: storage });
+		controller.notifyGraphChanged(addNode(controller.getView().graph, { title: 'After' }), {
+			syncView: true,
+			intent: {
+				label: 'add node',
+				primaryNodeId: 'n0',
+				severedBeaconPreference: []
+			}
+		});
+
+		// Load-bearing: the offer outlives the edits made after the import it
+		// offers to undo, so it is the newest import entry on the undo side rather
+		// than the top entry.
+		expect(controller.getView().snapshot).not.toBeNull();
+	});
+
+	it('hides once the import has been undone past', async () => {
+		const { controller } = await importedInto();
+
+		controller.undo();
+
+		expect(controller.getView().snapshot).toBeNull();
+		// Nothing is lost: the offer comes back as a plain redo.
+		controller.redo();
+		expect(controller.getView().snapshot).not.toBeNull();
+	});
+
+	it('is served by the persisted tail after a reload', async () => {
+		const persistence = new MemoryPersistence();
+		await importedInto({ persistence });
+
+		const reloaded = setup({ persistence });
 		await reloaded.controller.load('active');
 
 		expect(reloaded.controller.getView().snapshot).toEqual({
 			label: 'import',
 			createdAt: 456,
-			nodeCount: 2
+			addedNodeCount: 3
 		});
-		expect(controller.getView().snapshot).not.toBeNull();
 	});
 
-	it('offers no revert for a graph that has no snapshot of its own', async () => {
-		const storage = new MemoryStorage();
-		const { controller } = await importedInto(storage);
+	it('offers no revert for a graph with no import behind it', async () => {
+		const { controller, persistence } = await importedInto();
+		await persistence.save('other', {
+			data: makeGraph({ nodeCount: 1 }),
+			viewState: NEUTRAL_VIEW_STATE
+		});
 
 		await controller.load('other');
 
 		expect(controller.getView().snapshot).toBeNull();
 	});
 
-	it('restores the pre-import graph exactly, clears the snapshot and remounts', async () => {
-		const storage = new MemoryStorage();
-		const { controller, persistence, beforeImport } = await importedInto(storage);
-		controller.notifyViewStateChanged({ panX: 5, panY: 5, scale: 2 }, { syncView: true });
+	it('restores the pre-import graph as one new entry, without a remount', async () => {
+		const { controller, persistence, beforeImport } = await importedInto();
 		const generationBeforeRevert = controller.getView().graphGeneration;
+		const revisionBeforeRevert = controller.getView().graphRevision;
 
 		const reverted = await controller.revertToSnapshot();
 
 		expect(reverted).toBe(true);
 		const after = controller.getView();
-		expect(after.graph).toEqual(beforeImport.graph);
+		expect(after.graph.nodes).toEqual(beforeImport.graph.nodes);
+		expect(after.graph.edges).toEqual(beforeImport.graph.edges);
+		// The canvas stays mounted and keeps the reader's camera: a revert is a
+		// history operation now, not a document swap.
+		expect(after.graphGeneration).toBe(generationBeforeRevert);
+		expect(after.graphRevision).toBe(revisionBeforeRevert + 1);
 		expect(after.viewState).toEqual(nonNeutralViewState());
-		expect(after.graphGeneration).toBe(generationBeforeRevert + 1);
 		expect(after.snapshot).toBeNull();
-		expect(readGraphSnapshot('active', snapshotOptions(storage))).toBeNull();
 		expect(persistence.save).toHaveBeenLastCalledWith('active', {
-			data: beforeImport.graph,
-			viewState: nonNeutralViewState()
+			data: after.graph,
+			viewState: nonNeutralViewState(),
+			history: expect.anything()
 		});
+	});
+
+	it('lands as an entry a redo can walk back', async () => {
+		const { controller } = await importedInto();
+		const imported = controller.getView().graph;
+
+		await controller.revertToSnapshot();
+		expect(controller.getView().undoLabel).toBe('revert import');
+
+		controller.undo();
+
+		// Strictly kinder than the one-way door it replaces.
+		expect(controller.getView().graph.nodes).toEqual(imported.nodes);
 	});
 
 	it('leaves both the host and the imported assets in place', async () => {
 		const assetStore = new MemoryGraphAssetStore();
-		const { controller } = setup({ assetStore, snapshotStorage: new MemoryStorage() });
+		const { controller } = setup({ assetStore });
 		await controller.load('active');
-		controller.notifyGraphChanged(imageGraph(['host-asset']), { syncView: true });
+		// With an intent, as every canvas commit carries one: the revert goes back
+		// to the entry behind the import, which is this edit.
+		controller.notifyGraphChanged(imageGraph(['host-asset']), {
+			syncView: true,
+			intent: { label: 'add image', primaryNodeId: 'n0', severedBeaconPreference: [] }
+		});
 		await storeAsset(assetStore, 'active', 'host-asset', 'host bytes');
 		await controller.importGraphIntoCurrent(
 			serializeGraphHtmlFile({
@@ -1374,13 +1420,13 @@ describe('GraphPersistenceController revert', () => {
 
 		await controller.revertToSnapshot();
 
-		expect(controller.getView().graph).toEqual(imageGraph(['host-asset']));
+		expect(controller.getView().graph.nodes).toEqual(imageGraph(['host-asset']).nodes);
 		expect(await readAsset(assetStore, 'active', 'host-asset')).toBe('host bytes');
 		expect(await readAsset(assetStore, 'active', 'incoming-asset')).toBe('incoming bytes');
 	});
 
 	it('reports that there was nothing to revert to', async () => {
-		const { controller } = setup({ snapshotStorage: new MemoryStorage() });
+		const { controller } = setup();
 		await controller.load('active');
 		const before = controller.getView();
 
@@ -1394,9 +1440,8 @@ describe('GraphPersistenceController revert', () => {
 		});
 	});
 
-	it('drops the snapshot on dismiss, leaving the imported graph alone', async () => {
-		const storage = new MemoryStorage();
-		const { controller } = await importedInto(storage);
+	it('hides the offer on dismiss, touching neither the graph nor the history', async () => {
+		const { controller } = await importedInto();
 		const imported = controller.getView();
 
 		controller.dismissSnapshot();
@@ -1406,91 +1451,570 @@ describe('GraphPersistenceController revert', () => {
 			graphGeneration: imported.graphGeneration,
 			snapshot: null
 		});
-		expect(readGraphSnapshot('active', snapshotOptions(storage))).toBeNull();
+		// The import is still one plain undo away — dismissing hides a card.
+		expect(controller.getView().undoLabel).toBe('import');
 		expect(await controller.revertToSnapshot()).toBe(false);
 	});
 });
 
-describe('GraphPersistenceController embedded assets', () => {
-	it('keeps the host scope assets when hydrating an imported document', async () => {
-		const assetStore = new MemoryGraphAssetStore();
-		const { controller } = setup({ assetStore });
-		await controller.load('host');
-		await storeAsset(assetStore, 'host', 'host-asset', 'host bytes');
-
-		await controller.hydrateImportedAssets('host', {
-			data: imageGraph(['incoming-asset']),
-			viewState: NEUTRAL_VIEW_STATE,
-			embeddedAssets: [await embeddedAsset('incoming-asset', 'incoming bytes')]
-		});
-
-		expect(await readAsset(assetStore, 'host', 'host-asset')).toBe('host bytes');
-		expect(await readAsset(assetStore, 'host', 'incoming-asset')).toBe('incoming bytes');
+describe('the persisted undo tail', () => {
+	const intent = (label: string): GraphCommitIntent => ({
+		label,
+		primaryNodeId: 'n0',
+		severedBeaconPreference: []
 	});
 
-	it('keeps the host asset when an imported asset reuses its id', async () => {
-		const assetStore = new MemoryGraphAssetStore();
-		const { controller } = setup({ assetStore });
-		await controller.load('host');
-		await storeAsset(assetStore, 'host', 'shared-asset', 'host bytes');
+	/** Edit, cache, then load the same graph into a fresh controller. */
+	async function reopened(
+		edit: (controller: GraphPersistenceController) => void,
+		options: { storage?: MemoryStorage } = {}
+	) {
+		const storage = options.storage ?? new MemoryStorage();
+		const first = setupWithStorage(storage);
+		await first.controller.load('graph-1');
+		edit(first.controller);
+		await first.controller.flushPendingSave();
 
-		await controller.hydrateImportedAssets('host', {
-			data: imageGraph(['shared-asset']),
-			viewState: NEUTRAL_VIEW_STATE,
-			embeddedAssets: [await embeddedAsset('shared-asset', 'incoming bytes')]
+		const second = setupWithStorage(storage);
+		await second.controller.load('graph-1');
+		return { storage, before: first.controller, after: second.controller };
+	}
+
+	/** Like `setup`, but over real `LocalStoragePersistence` so the envelope is exercised. */
+	function setupWithStorage(storage: MemoryStorage) {
+		const events: string[] = [];
+		const persistence = new LocalStoragePersistence(storage, 'test', () => 1);
+		let scheduler: TestScheduler | null = null;
+		const controller = new GraphPersistenceController({
+			persistence,
+			createScheduler: (onStatus) => {
+				scheduler = new TestScheduler(persistence, onStatus, events);
+				return scheduler;
+			},
+			createDefaultGraph,
+			navigate: vi.fn(),
+			storageNamespace: 'test',
+			now: () => 456
+		});
+		if (scheduler === null) throw new Error('Expected scheduler to be created');
+		return { controller, scheduler: scheduler as TestScheduler };
+	}
+
+	it('rebuilds the states the in-memory stack held, with their canvas fields', async () => {
+		const { before, after } = await reopened((controller) => {
+			controller.notifyGraphChanged(addNode(controller.getView().graph, { title: 'Added' }), {
+				syncView: true,
+				intent: intent('add node')
+			});
+			controller.notifyGraphChanged(
+				setTagColor(controller.getView().graph, 'nodeTags', 'physics', '#123456'),
+				{ syncView: true, intent: intent('tag color') }
+			);
 		});
 
-		expect(await readAsset(assetStore, 'host', 'shared-asset')).toBe('host bytes');
-	});
+		expect(after.getView().canUndo).toBe(true);
+		expect(after.getView().undoLabel).toBe('tag color');
 
-	it('sweeps unreferenced scope assets when a replacing document load hydrates', async () => {
-		const assetStore = new MemoryGraphAssetStore();
-		const { controller } = setup({ assetStore });
-		const scope = documentDraftGraphId('doc-sweep');
-		await storeAsset(assetStore, scope, 'stale-asset', 'stale bytes');
-
-		await controller.loadEmbeddedDocument({
-			documentId: 'doc-sweep',
-			data: imageGraph(['kept-asset']),
-			viewState: NEUTRAL_VIEW_STATE,
-			embeddedAssets: [await embeddedAsset('kept-asset', 'kept bytes')]
+		after.undo();
+		expect(after.getView().graph.tagColorConfig.nodeTags).toEqual({});
+		expect(after.getView().graph.nodes.map((node) => node.title)).toEqual(
+			before.getView().graph.nodes.map((node) => node.title)
+		);
+		expect(after.getView().restoredCanvasState).toEqual({
+			primaryNodeId: 'n0',
+			severedBeaconPreference: []
 		});
 
-		expect(await readAsset(assetStore, scope, 'stale-asset')).toBeNull();
-		expect(await readAsset(assetStore, scope, 'kept-asset')).toBe('kept bytes');
+		after.undo();
+		expect(after.getView().graph.nodes).toHaveLength(1);
+		// The seed is the state the graph loaded in, and there is nothing behind it.
+		expect(after.getView().canUndo).toBe(false);
 	});
 
-	it('sweeps unreferenced scope assets when a replacing file import hydrates', async () => {
-		const assetStore = new MemoryGraphAssetStore();
-		const { controller } = setup({ assetStore });
-		await controller.load('active');
-		await storeAsset(assetStore, 'active', 'stale-asset', 'stale bytes');
+	it('does not survive a redo across the reload', async () => {
+		const { after } = await reopened((controller) => {
+			controller.notifyGraphChanged(addNode(controller.getView().graph, {}), {
+				syncView: true,
+				intent: intent('add node')
+			});
+			controller.undo();
+		});
 
-		const result = await controller.importGraphDocument(
-			serializeGraphHtmlFile({
-				data: imageGraph(['kept-asset']),
-				viewState: nonNeutralViewState(),
-				documentId: 'doc-import',
-				embeddedAssets: [await embeddedAsset('kept-asset', 'kept bytes')]
-			})
+		// The tail chains backwards from the draft's own graph, so nothing forward
+		// of it can be described — which is what every mainstream editor does.
+		expect(after.getView().canRedo).toBe(false);
+	});
+
+	it('drops the tail on a schema-version mismatch, leaving the graph intact', async () => {
+		const storage = new MemoryStorage();
+		const { after: first } = await reopened(
+			(controller) => {
+				controller.notifyGraphChanged(addNode(controller.getView().graph, { title: 'Added' }), {
+					syncView: true,
+					intent: intent('add node')
+				});
+			},
+			{ storage }
+		);
+		expect(first.getView().canUndo).toBe(true);
+
+		const key = graphStorageKey('test', 'graph-1');
+		const payload = JSON.parse(storage.getItem(key) ?? '{}');
+		storage.setItem(key, JSON.stringify({ ...payload, schemaVersion: CURRENT_SCHEMA_VERSION - 1 }));
+
+		const reloaded = setupWithStorage(storage);
+		await reloaded.controller.load('graph-1');
+
+		expect(reloaded.controller.getView().canUndo).toBe(false);
+		expect(reloaded.controller.getView().graph.nodes).toHaveLength(2);
+	});
+
+	it('drops a tail that does not describe the graph the draft holds', async () => {
+		const storage = new MemoryStorage();
+		await reopened(
+			(controller) => {
+				controller.notifyGraphChanged(addNode(controller.getView().graph, { title: 'Added' }), {
+					syncView: true,
+					intent: intent('add node')
+				});
+			},
+			{ storage }
 		);
 
-		expect(result).toBe('imported');
-		expect(await readAsset(assetStore, 'active', 'stale-asset')).toBeNull();
-		expect(await readAsset(assetStore, 'active', 'kept-asset')).toBe('kept bytes');
+		// What the losing tab leaves behind: a tail describing a graph the winning
+		// tab has already replaced.
+		const key = graphStorageKey('test', 'graph-1');
+		const payload = JSON.parse(storage.getItem(key) ?? '{}');
+		storage.setItem(
+			key,
+			JSON.stringify({ ...payload, data: { ...payload.data, nodes: [], edges: [] } })
+		);
+
+		const reloaded = setupWithStorage(storage);
+		await reloaded.controller.load('graph-1');
+
+		expect(reloaded.controller.getView().canUndo).toBe(false);
+		expect(reloaded.controller.getView().graph.nodes).toHaveLength(0);
 	});
 
-	it('leaves the scope untouched when no asset store is configured', async () => {
-		const { controller } = setup();
-		await controller.load('host');
+	it('caps the tail at the configured entry count', async () => {
+		const storage = new MemoryStorage();
+		await reopened(
+			(controller) => {
+				for (let index = 0; index < APP_CONFIG.history.persistedEntryCount + 5; index += 1) {
+					controller.notifyGraphChanged(
+						addNode(controller.getView().graph, { title: `Node ${index}` }),
+						{ syncView: true, intent: intent('add node') }
+					);
+				}
+			},
+			{ storage }
+		);
 
-		await expect(
-			controller.hydrateImportedAssets('host', {
-				data: imageGraph(['incoming-asset']),
-				viewState: NEUTRAL_VIEW_STATE,
-				embeddedAssets: [await embeddedAsset('incoming-asset', 'incoming bytes')]
-			})
-		).resolves.toBeUndefined();
+		const payload = JSON.parse(storage.getItem(graphStorageKey('test', 'graph-1')) ?? '{}');
+		expect(payload.history.entries).toHaveLength(APP_CONFIG.history.persistedEntryCount);
+	});
+
+	it('writes no tail into an exported file', async () => {
+		const { controller } = setup();
+		await controller.load('graph-1');
+		controller.notifyGraphChanged(addNode(controller.getView().graph, {}), {
+			syncView: true,
+			intent: intent('add node')
+		});
+
+		const artifact = await controller.exportGraphDocument();
+
+		// An entry holds the content an edit removed, so a tail in a document would
+		// send deleted material along with it.
+		expect(artifact.content).not.toContain('"history"');
+	});
+});
+
+describe('undo history', () => {
+	const intent = (label: string, extra: Partial<GraphCommitIntent> = {}): GraphCommitIntent => ({
+		label,
+		primaryNodeId: 'n0',
+		severedBeaconPreference: [],
+		...extra
+	});
+
+	/** A graph through the layout path: positions rewritten, everything else shared. */
+	const relaxed = (graph: MultigraphData): MultigraphData => ({
+		...graph,
+		posByNodeId: { ...graph.posByNodeId, n0: { x: 17, y: 17 } }
+	});
+
+	async function loadedController(options: Parameters<typeof setup>[0] = {}) {
+		const harness = setup(options);
+		await harness.controller.load('graph-1');
+		return harness;
+	}
+
+	it('pushes one entry for one edit, and offers it by name', async () => {
+		const { controller } = await loadedController();
+		const edited = addNode(controller.getView().graph, {});
+
+		controller.notifyGraphChanged(edited, { syncView: true, intent: intent('add node') });
+
+		expect(controller.getView().canUndo).toBe(true);
+		expect(controller.getView().undoLabel).toBe('add node');
+		expect(controller.getView().canRedo).toBe(false);
+	});
+
+	it('pushes nothing for a position-only change', async () => {
+		const { controller } = await loadedController();
+
+		controller.notifyGraphChanged(relaxed(controller.getView().graph), {
+			syncView: true,
+			intent: intent('layout')
+		});
+
+		expect(controller.getView().canUndo).toBe(false);
+	});
+
+	it('pushes nothing for a commit that rebuilt an array to an equal value', async () => {
+		const { controller } = await loadedController();
+		const graph = controller.getView().graph;
+
+		// Fails the O(1) reference test, passes the fingerprint confirmation.
+		controller.notifyGraphChanged(
+			{ ...graph, nodes: [...graph.nodes], posByNodeId: { ...graph.posByNodeId } },
+			{ syncView: true, intent: intent('rename node') }
+		);
+
+		expect(controller.getView().canUndo).toBe(false);
+	});
+
+	it('lands a coalesce run as one entry keeping the run start as its before-state', async () => {
+		const { controller } = await loadedController();
+		const loaded = controller.getView().graph;
+		const key = 'tag-color:nodeTags:physics';
+
+		for (const color of ['#111111', '#222222', '#333333']) {
+			controller.notifyGraphChanged(
+				setTagColor(controller.getView().graph, 'nodeTags', 'physics', color),
+				{ syncView: true, intent: intent('tag color', { coalesceKey: key }) }
+			);
+		}
+
+		expect(controller.getView().graph.tagColorConfig.nodeTags.physics).toBe('#333333');
+		controller.undo();
+		// One undo returns all the way to the colour the run started from.
+		expect(controller.getView().graph.tagColorConfig).toEqual(loaded.tagColorConfig);
+		expect(controller.getView().canUndo).toBe(false);
+	});
+
+	it('ends a run on a different key, so the next edit is its own entry', async () => {
+		const { controller } = await loadedController();
+
+		controller.notifyGraphChanged(
+			setTagColor(controller.getView().graph, 'nodeTags', 'physics', '#111111'),
+			{ syncView: true, intent: intent('tag color', { coalesceKey: 'tag-color:nodeTags:physics' }) }
+		);
+		controller.notifyGraphChanged(
+			setTagColor(controller.getView().graph, 'nodeTags', 'maths', '#222222'),
+			{ syncView: true, intent: intent('tag color', { coalesceKey: 'tag-color:nodeTags:maths' }) }
+		);
+
+		controller.undo();
+		expect(controller.getView().graph.tagColorConfig.nodeTags).toEqual({ physics: '#111111' });
+		expect(controller.getView().canUndo).toBe(true);
+	});
+
+	it('closes a run so a later scrub of the same tag starts a new entry', async () => {
+		const { controller } = await loadedController();
+		const key = 'tag-color:nodeTags:physics';
+
+		controller.notifyGraphChanged(
+			setTagColor(controller.getView().graph, 'nodeTags', 'physics', '#111111'),
+			{ syncView: true, intent: intent('tag color', { coalesceKey: key }) }
+		);
+		// The swatch's `change`, carrying the colour its last `input` already sent.
+		controller.notifyGraphChanged(
+			setTagColor(controller.getView().graph, 'nodeTags', 'physics', '#111111'),
+			{ syncView: true, intent: intent('tag color', { coalesceKey: key, endsCoalesceRun: true }) }
+		);
+		controller.notifyGraphChanged(
+			setTagColor(controller.getView().graph, 'nodeTags', 'physics', '#999999'),
+			{ syncView: true, intent: intent('tag color', { coalesceKey: key }) }
+		);
+
+		controller.undo();
+		expect(controller.getView().graph.tagColorConfig.nodeTags.physics).toBe('#111111');
+	});
+
+	it('restores the graph, the pin pointer and the beacon hint', async () => {
+		const { controller } = await loadedController();
+		const loaded = controller.getView().graph;
+
+		controller.notifyGraphChanged(addNode(loaded, {}), {
+			syncView: true,
+			intent: intent('add node', { primaryNodeId: 'n1', severedBeaconPreference: ['n1'] })
+		});
+		// An edit is not a restore, so the canvas has nothing to put back yet.
+		expect(controller.getView().restoredCanvasState).toBeNull();
+
+		controller.undo();
+
+		expect(controller.getView().graph.nodes).toBe(loaded.nodes);
+		// The seed records no pointer: nothing had committed when the graph loaded,
+		// so the canvas re-derives one from a value that names no node.
+		expect(controller.getView().restoredCanvasState).toEqual({
+			primaryNodeId: '',
+			severedBeaconPreference: []
+		});
+
+		controller.redo();
+		expect(controller.getView().restoredCanvasState).toEqual({
+			primaryNodeId: 'n1',
+			severedBeaconPreference: ['n1']
+		});
+	});
+
+	it('bumps graphRevision and not graphGeneration, so the canvas keeps its place', async () => {
+		const { controller } = await loadedController();
+		controller.notifyGraphChanged(addNode(controller.getView().graph, {}), {
+			syncView: true,
+			intent: intent('add node')
+		});
+		const before = controller.getView();
+
+		controller.undo();
+
+		expect(controller.getView().graphRevision).toBe(before.graphRevision + 1);
+		expect(controller.getView().graphGeneration).toBe(before.graphGeneration);
+	});
+
+	it('names the operation in the notice, both ways', async () => {
+		const { controller } = await loadedController();
+		controller.notifyGraphChanged(addNode(controller.getView().graph, {}), {
+			syncView: true,
+			intent: intent('delete node')
+		});
+
+		controller.undo();
+		// Sticky, so the restore's own cache write does not cover the answer to the
+		// tap that caused it.
+		expect(controller.getView().status).toEqual({
+			state: 'notice',
+			sticky: true,
+			message: 'Undid "delete node".'
+		});
+		expect(controllerNotice(controller.getView())).toBe('Undid "delete node".');
+		expect(controllerNoticeSeverity(controller.getView())).toBe('info');
+
+		controller.redo();
+		expect(controller.getView().status).toEqual({
+			state: 'notice',
+			sticky: true,
+			message: 'Redid "delete node".'
+		});
+	});
+
+	it('follows the restored graph with the baseline document status and a cache write', async () => {
+		const { controller, scheduler } = await loadedController();
+		const loaded = controller.getView().graph;
+		controller.notifyGraphChanged(addNode(loaded, {}), {
+			syncView: true,
+			intent: intent('add node')
+		});
+		expect(controller.getView().documentStatus).toBe('new-dirty');
+		scheduler.schedule.mockClear();
+
+		controller.undo();
+
+		expect(controller.getView().documentStatus).toBe('new-clean');
+		expect(scheduler.schedule).toHaveBeenCalled();
+	});
+
+	it('redoes back to the state an undo left', async () => {
+		const { controller } = await loadedController();
+		const edited = addNode(controller.getView().graph, {});
+		controller.notifyGraphChanged(edited, { syncView: true, intent: intent('add node') });
+
+		controller.undo();
+		expect(controller.getView().canRedo).toBe(true);
+		expect(controller.getView().redoLabel).toBe('add node');
+		controller.redo();
+
+		expect(controller.getView().graph.nodes).toBe(edited.nodes);
+		expect(controller.getView().canRedo).toBe(false);
+	});
+
+	it('treats undo at the bottom and redo at the top as no-ops', async () => {
+		const { controller } = await loadedController();
+
+		expect(controller.undo()).toBe(false);
+		expect(controller.redo()).toBe(false);
+	});
+
+	it('drops the redo tail when an edit follows an undo', async () => {
+		const { controller } = await loadedController();
+		controller.notifyGraphChanged(addNode(controller.getView().graph, {}), {
+			syncView: true,
+			intent: intent('add node')
+		});
+		controller.undo();
+
+		controller.notifyGraphChanged(
+			setTagColor(controller.getView().graph, 'nodeTags', 'physics', '#111111'),
+			{ syncView: true, intent: intent('tag color') }
+		);
+
+		expect(controller.getView().canRedo).toBe(false);
+	});
+
+	it('clears and re-seeds on a load', async () => {
+		const { controller } = await loadedController();
+		controller.notifyGraphChanged(addNode(controller.getView().graph, {}), {
+			syncView: true,
+			intent: intent('add node')
+		});
+
+		await controller.load('graph-2');
+
+		expect(controller.getView().canUndo).toBe(false);
+		expect(controller.getView().canRedo).toBe(false);
+	});
+
+	it('clears on a new graph and on a graph switch', async () => {
+		const fresh = await loadedController({ confirmNewGraphReplace: () => true });
+		fresh.controller.notifyGraphChanged(addNode(fresh.controller.getView().graph, {}), {
+			syncView: true,
+			intent: intent('add node')
+		});
+		await fresh.controller.createGraph('graph-new');
+		expect(fresh.controller.getView().canUndo).toBe(false);
+
+		const switched = await loadedController();
+		switched.controller.notifyGraphChanged(addNode(switched.controller.getView().graph, {}), {
+			syncView: true,
+			intent: intent('add node')
+		});
+		await switched.controller.selectGraph('graph-2');
+		expect(switched.controller.getView().canUndo).toBe(false);
+	});
+
+	it('neither saves nor pushes for a commit naming a superseded generation', async () => {
+		const { controller, scheduler } = await loadedController();
+		const staleGeneration = controller.getView().graphGeneration;
+		await controller.load('graph-2');
+		scheduler.schedule.mockClear();
+
+		controller.notifyGraphChanged(addNode(controller.getView().graph, {}), {
+			syncView: true,
+			generation: staleGeneration,
+			intent: intent('add node')
+		});
+
+		expect(scheduler.schedule).not.toHaveBeenCalled();
+		expect(controller.getView().canUndo).toBe(false);
+	});
+
+	it('evicts oldest-first on the retained-pointer ceiling', async () => {
+		// One node per entry, so a ceiling of two admits two entries and no more.
+		const { controller } = await loadedController({ historyCeiling: 2 });
+
+		for (const color of ['#111111', '#222222', '#333333', '#444444']) {
+			controller.notifyGraphChanged(
+				setTagColor(controller.getView().graph, 'nodeTags', 'physics', color),
+				{ syncView: true, intent: intent('tag color') }
+			);
+		}
+
+		controller.undo();
+		expect(controller.getView().canUndo).toBe(false);
+		expect(controller.getView().graph.tagColorConfig.nodeTags.physics).toBe('#333333');
+	});
+});
+
+describe('the asset trash and the history', () => {
+	const intent = (label: string): GraphCommitIntent => ({
+		label,
+		primaryNodeId: 'n0',
+		severedBeaconPreference: []
+	});
+
+	/** A graph whose image block has been removed, as `deleteNodeImage` leaves it. */
+	const withoutImages = (): MultigraphData => makeGraph({ nodeCount: 1 });
+
+	async function tombstonedController(options: Parameters<typeof setup>[0] = {}) {
+		const assetStore = new MemoryGraphAssetStore();
+		const context = setup({ ...options, assetStore });
+		await context.controller.load('active');
+		context.controller.notifyGraphChanged(imageGraph(['pic']), {
+			syncView: true,
+			intent: intent('add image')
+		});
+		await storeAsset(assetStore, 'active', 'pic', 'picture bytes');
+
+		// What the canvas does now: tombstone rather than delete, so the block an
+		// undo brings back still resolves to something.
+		await tombstoneAsset(assetStore, 'active', 'pic', () => 1);
+		context.controller.notifyGraphChanged(withoutImages(), {
+			syncView: true,
+			intent: intent('remove image')
+		});
+		await context.controller.flushPendingSave();
+		return { ...context, assetStore };
+	}
+
+	it('keeps an undone image alive while its entry lives', async () => {
+		const { controller, assetStore } = await tombstonedController();
+
+		controller.undo();
+		await Promise.resolve();
+
+		expect(controller.getView().graph.nodes[0].content).toBeDefined();
+		expect(await readAsset(assetStore, 'active', 'pic')).toBe('picture bytes');
+	});
+
+	it('collects the blob once eviction puts its entry out of reach', async () => {
+		// One node per entry, so a ceiling of one keeps only the state the document
+		// is in — every entry that named the image is evicted.
+		const { controller, assetStore } = await tombstonedController({ historyCeiling: 1 });
+
+		controller.notifyGraphChanged(addNode(controller.getView().graph, {}), {
+			syncView: true,
+			intent: intent('add node')
+		});
+		await vi.waitFor(async () => expect(await readAsset(assetStore, 'active', 'pic')).toBeNull());
+
+		expect(controller.getView().canUndo).toBe(false);
+	});
+
+	it('collects the blob a fresh edit discards with the redo tail', async () => {
+		const { controller, assetStore } = await tombstonedController();
+
+		// Back past the state that added the image: it is on the redo side now, and
+		// a blob one redo from being on screen is not collectable.
+		controller.undo();
+		controller.undo();
+		await Promise.resolve();
+		expect(await readAsset(assetStore, 'active', 'pic')).toBe('picture bytes');
+
+		// Editing here discards that tail, and with it the last entry that could
+		// ever put the block back.
+		controller.notifyGraphChanged(addNode(controller.getView().graph, {}), {
+			syncView: true,
+			intent: intent('add node')
+		});
+		await vi.waitFor(async () => expect(await readAsset(assetStore, 'active', 'pic')).toBeNull());
+	});
+
+	it('does not sweep a blob the tail it just rebuilt still names', async () => {
+		const persistence = new MemoryPersistence();
+		const { assetStore } = await tombstonedController({ persistence });
+
+		const reloaded = setup({ persistence, assetStore });
+		await reloaded.controller.load('active');
+
+		// The ordering the load path states at its call site: sweeping before the
+		// rebuild would delete exactly the blobs the tail was about to resurrect,
+		// and the symptom is a broken image several undos later.
+		expect(await readAsset(assetStore, 'active', 'pic')).toBe('picture bytes');
+		expect(reloaded.controller.getView().undoLabel).toBe('remove image');
 	});
 });
 

@@ -42,7 +42,7 @@
 	});
 
 	type LegendSpy = {
-		mock: { calls: Array<[TagColorNamespace, string, string]> };
+		mock: { calls: Array<[TagColorNamespace, string, string, 'scrub' | 'commit']> };
 	};
 
 	type DeleteSpy = {
@@ -82,7 +82,15 @@
 		input.value = '#123456';
 		input.dispatchEvent(new Event('input', { bubbles: true }));
 
-		expect(colorSpy.mock.calls.at(-1)).toEqual(['nodeTags', 'topic', '#123456']);
+		// A scrub frame: the canvas previews it, and the history folds the run it
+		// belongs to into one entry.
+		expect(colorSpy.mock.calls.at(-1)).toEqual(['nodeTags', 'topic', '#123456', 'scrub']);
+
+		input.dispatchEvent(new Event('change', { bubbles: true }));
+
+		// Closing the picker ends the run, so a later scrub of this tag is its own
+		// undo rather than joining this one.
+		expect(colorSpy.mock.calls.at(-1)).toEqual(['nodeTags', 'topic', '#123456', 'commit']);
 
 		canvas.getByRole('button', { name: 'Delete edge tag rel' }).click();
 		expect(deleteSpy.mock.calls.at(-1)).toEqual(['edgeTags', 'rel']);

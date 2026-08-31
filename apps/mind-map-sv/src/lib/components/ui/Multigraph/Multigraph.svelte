@@ -31,9 +31,12 @@
 	import TagColorLegend from './TagColorLegend.svelte';
 	import { APP_CONFIG } from '$lib/appConfig';
 	import type { GraphAssetStore } from '$lib/assets/assetStore';
+	import { tombstoneAsset } from '$lib/assets/assetTrash';
 	import { prefersReducedMotion } from '$lib/reducedMotion';
 	import type { NodeData } from '../types/node';
 	import type { EdgeData } from '../types/edge';
+	import type { GraphCommitIntent } from '../types/history';
+	import type { TagColorChangePhase } from './lib/tagColors.js';
 	import type {
 		GraphAssetMetadata,
 		MultigraphData,
@@ -68,6 +71,7 @@
 		neighborsOf,
 		removeEdge,
 		removeNode,
+		referencedAssetIds,
 		removeNodeImageContent,
 		moveNodeContentBlock,
 		setNodeDesignations,
@@ -262,12 +266,15 @@
 		},
 		graphGeneration = 0,
 		graphRevision = 0,
+		restoredCanvasState = null,
 		defaultPrimaryNodeId = '',
 		initialTitleEditNodeId,
 		layoutSettings = {},
 		initialViewState,
 		onMultigraphChange,
 		onViewStateChange,
+		onHistoryGuardChange,
+		onHistoryStep,
 		nodeRenderOverrides,
 		edgeRenderOverrides,
 		exitingBuffer,
@@ -284,6 +291,13 @@
 		 * and adopts the incoming graph in place, keeping pan, zoom, focus and nav.
 		 */
 		graphRevision?: number;
+		/**
+		 * What the newest `graphRevision` bump is asking to be put back, or `null`
+		 * when that bump was an arrival (an additive import) rather than a restore.
+		 * The two adopt paths differ in exactly two ways: a restore moves no camera,
+		 * and it re-points the pin and beacon state the graph does not carry.
+		 */
+		restoredCanvasState?: { primaryNodeId: string; severedBeaconPreference: string[] } | null;
 		defaultPrimaryNodeId?: string;
 		initialTitleEditNodeId?: string | null;
 		layoutSettings?: Partial<LayoutSettings>;
@@ -291,10 +305,26 @@
 		/**
 		 * `generation` names the external graph load this edit was made to, so a
 		 * commit that lands while the canvas is being replaced can be told apart
-		 * from one made to the graph now on screen.
+		 * from one made to the graph now on screen. `intent` says what the edit
+		 * was, and carries the canvas state a restore of it has to put back.
 		 */
-		onMultigraphChange?: (data: MultigraphData, generation: number) => void;
+		onMultigraphChange?: (
+			data: MultigraphData,
+			generation: number,
+			intent: GraphCommitIntent
+		) => void;
 		onViewStateChange?: (state: ViewState) => void;
+		/**
+		 * Why an undo/redo must not run right now, or `null` when one may.
+		 *
+		 * Reported outward rather than enforced twice: the state that blocks a
+		 * restore — an open edit sheet, a finger mid-drag — lives in here, and the
+		 * toolbar has to disable and explain from the same judgement the keyboard
+		 * shortcut obeys.
+		 */
+		onHistoryGuardChange?: (reason: string | null) => void;
+		/** Step the history. Fired only from inside the guard. */
+		onHistoryStep?: (direction: 'undo' | 'redo') => void;
 		/** Static per-node opacity override; used by stories and T04/T05 animation wiring. Default 1. */
 		nodeRenderOverrides?: Record<string, { opacity?: number }>;
 		/** Static per-edge opacity override; used by stories and T04/T05 animation wiring. Default 1. */
@@ -848,8 +878,184 @@
 		if (revision === lastSyncedRevision) return;
 
 		lastSyncedRevision = revision;
-		untrack(() => adoptGraphInPlace(multigraphData));
+		const restore = untrack(() => restoredCanvasState);
+		untrack(() =>
+			restore === null
+				? adoptGraphInPlace(multigraphData, 'import')
+				: restoreGraphInPlace(multigraphData, restore)
+		);
 	});
+
+	/**
+	 * Why an undo or redo must not run right now.
+	 *
+	 * All three cases are the same shape: something on screen is holding state
+	 * that a graph swap underneath it would silently destroy or immediately
+	 * overwrite. Stated once, here, so a toolbar tap and a keyboard shortcut
+	 * cannot disagree about them.
+	 */
+	const historyGuardReason = $derived.by(() => {
+		// The sheet's draft-reset effect re-runs when its node object is replaced,
+		// discarding unsaved title, description and tags without a word — and the
+		// toolbar sits above the sheet, so the button is one tap away mid-edit.
+		if (editNodeId !== null) return 'Finish editing first.';
+		// The stage holds pointer capture and re-commits the finger's position on
+		// the next `pointermove`, so a mid-drag restore would be half-overwritten
+		// at once — and `handleNodeDragEnd` would then scale a node that may no
+		// longer exist.
+		if (activeDragNodeId !== null) return 'Finish the drag first.';
+		if (creationPreview !== null) return 'Finish the drag first.';
+		return null;
+	});
+
+	$effect(() => {
+		onHistoryGuardChange?.(historyGuardReason);
+	});
+
+	/** Step the history, if nothing on screen would be damaged by it. */
+	function stepHistory(direction: 'undo' | 'redo') {
+		if (historyGuardReason !== null) return;
+		onHistoryStep?.(direction);
+	}
+
+	/**
+	 * Adopt a graph the history restored: the same in-place treatment an import
+	 * gets, minus the camera, plus the state the graph does not carry.
+	 *
+	 * Deliberately not `adoptGraphInPlace`. An import chases an arrival the reader
+	 * has never seen; an undo reverses something they just did, at a place they
+	 * are already looking, so moving the camera would be taking the canvas away
+	 * from them. The notice names the operation for the case where it happened off
+	 * screen.
+	 *
+	 * Presentation state degrades on purpose. Overlays close as they would for any
+	 * commit, nav crumbs naming nodes the restore removed are pruned, focus closes
+	 * if its subject went with them, and animations play forward from what the
+	 * restore did rather than being replayed backwards.
+	 */
+	function restoreGraphInPlace(
+		incoming: MultigraphData,
+		restore: { primaryNodeId: string; severedBeaconPreference: string[] }
+	) {
+		animateRestoreDifference(incoming);
+		// Unconditionally, not only when the current value has vanished: the
+		// recorded pointer is part of the state being restored. A value naming no
+		// node in the restored graph is the seed's "nothing was recorded yet", and
+		// falls back to the same election an unpin or a delete would run.
+		primaryNodeId = incoming.nodes.some((node) => node.id === restore.primaryNodeId)
+			? restore.primaryNodeId
+			: fallbackPrimaryNodeId(incoming);
+		severedBeaconPreference = [...restore.severedBeaconPreference];
+
+		const liveNodeIds = new Set(incoming.nodes.map((node) => node.id));
+		// Today only `deleteNode` prunes, because until now only a deletion could
+		// take a node out from under a back entry. Every restore can.
+		transientReveal.pruneMissing(liveNodeIds);
+		closeFocusOnMissingSubject(incoming, liveNodeIds);
+		closeOverlays();
+		commitUserGraph(layoutRuntime.relaxAfterMutation(incoming), editIntent('restore'));
+	}
+
+	/**
+	 * Grow back what the restore brought and fade out what it took, using the same
+	 * primitives a creation and a deletion use.
+	 *
+	 * The animation buffers are explicit-call state — nothing diffs for them — so
+	 * a restore that says nothing leaves an undone deletion popping into place
+	 * while an undone creation leaves a node drawn at full size for a frame.
+	 */
+	function animateRestoreDifference(incoming: MultigraphData) {
+		const durationMs = resolvedLayoutSettings.enterExitDurationMs;
+		if (durationMs <= 0) return;
+		const nowMs = layoutRuntime.now();
+		const currentNodeIds = new Set(graph.nodes.map((node) => node.id));
+		const currentEdgeIds = new Set(graph.edges.map((edge) => edge.id));
+		const incomingNodeIds = new Set(incoming.nodes.map((node) => node.id));
+		const incomingEdgeIds = new Set(incoming.edges.map((edge) => edge.id));
+		let nextBuffer = internalExitingBuffer;
+		let started = false;
+
+		for (const node of incoming.nodes) {
+			if (currentNodeIds.has(node.id)) continue;
+			nextBuffer = cancelExitingNode(nextBuffer, node.id);
+			nodeEnterAnimations = {
+				...nodeEnterAnimations,
+				[node.id]: createNodeEnterAnimation(
+					graphLayout.scaleByNodeId[node.id] ?? 1,
+					nowMs,
+					durationMs
+				)
+			};
+			started = true;
+		}
+
+		for (const edge of incoming.edges) {
+			if (currentEdgeIds.has(edge.id)) continue;
+			nextBuffer = cancelExitingEdge(nextBuffer, edge.id);
+			edgeEnterAnimations = {
+				...edgeEnterAnimations,
+				[edge.id]: createEdgeEnterAnimation(nowMs, durationMs)
+			};
+			started = true;
+		}
+
+		for (const node of graph.nodes) {
+			if (incomingNodeIds.has(node.id)) continue;
+			const position = graph.posByNodeId[node.id] ?? CENTERED_POSITION;
+			nodeEnterAnimations = Object.fromEntries(
+				Object.entries(nodeEnterAnimations).filter(([id]) => id !== node.id)
+			);
+			nextBuffer = cancelExitingNode(nextBuffer, node.id);
+			nextBuffer = addExitingNode(nextBuffer, node.id, {
+				nodeData: node,
+				x: position.x,
+				y: position.y,
+				fromScale: graphLayout.scaleByNodeId[node.id] ?? 1,
+				startedAtMs: nowMs,
+				durationMs
+			});
+			started = true;
+		}
+
+		for (const edge of graph.edges) {
+			if (incomingEdgeIds.has(edge.id)) continue;
+			const enterAnim = edgeEnterAnimations[edge.id];
+			edgeEnterAnimations = Object.fromEntries(
+				Object.entries(edgeEnterAnimations).filter(([id]) => id !== edge.id)
+			);
+			nextBuffer = cancelExitingEdge(nextBuffer, edge.id);
+			nextBuffer = addExitingEdge(nextBuffer, edge.id, {
+				edgeData: edge,
+				fromOpacity: enterAnim ? edgeOpacityAt(enterAnim, nowMs) : 1,
+				startedAtMs: nowMs,
+				durationMs
+			});
+			started = true;
+		}
+
+		internalExitingBuffer = nextBuffer;
+		if (started) layoutRuntime.start();
+	}
+
+	/**
+	 * Close focus when the restore took its subject away.
+	 *
+	 * Focus levels hold only a `subjectId`, resolved through `nodeById` behind
+	 * `{#if}` guards, and nothing has ever closed focus on a vanished subject
+	 * because until now nothing could vanish one — the overlay would simply render
+	 * empty. An image level names an asset id, which a restore can drop just as
+	 * easily by removing the content block that referenced it.
+	 */
+	function closeFocusOnMissingSubject(incoming: MultigraphData, liveNodeIds: ReadonlySet<string>) {
+		if (!focus.isFocused) return;
+		const liveAssetIds = referencedAssetIds(incoming);
+		const orphaned = focus.levels.some((level) =>
+			level.subjectKind === 'image'
+				? !liveAssetIds.has(level.subjectId)
+				: !liveNodeIds.has(level.subjectId)
+		);
+		if (orphaned) focus.closeFocus();
+	}
 
 	$effect(() => {
 		const nodeId = initialTitleEditNodeId;
@@ -894,7 +1100,21 @@
 				return;
 			}
 			if (event.metaKey || event.ctrlKey || event.altKey) {
-				if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'k') return;
+				if (!(event.metaKey || event.ctrlKey)) return;
+				const key = event.key.toLowerCase();
+				// The description field's native undo is something this codebase has
+				// deliberately protected twice, so the guard is copied here on purpose:
+				// the branch around it does not have one (Cmd/Ctrl+K skips it), and
+				// inheriting that would take a typist's own undo away.
+				if ((key === 'z' || key === 'y') && !keyboardIsInTextEntry()) {
+					event.preventDefault();
+					// `Ctrl+Y` joins `Shift+Cmd/Ctrl+Z` because it is the redo Windows
+					// hands expect. Key repeat is fine: each step is a pointer swap plus
+					// a relax, and the guard refuses the states where a repeat could hurt.
+					stepHistory(key === 'y' || event.shiftKey ? 'redo' : 'undo');
+					return;
+				}
+				if (key !== 'k') return;
 				event.preventDefault();
 				closeOverlays();
 				graphQueryPanelOpen = true;
@@ -952,7 +1172,7 @@
 
 	function handleNodeMoved(node: NodeData, point: Point) {
 		const movedGraph = moveNode(graph, node.id, point);
-		commitUserGraph(layoutRuntime.relaxAfterMutation(movedGraph, node.id, 1));
+		commitUserGraph(layoutRuntime.relaxAfterMutation(movedGraph, node.id, 1), editIntent('layout'));
 	}
 
 	function handleNodeDragStart(node: NodeData) {
@@ -964,25 +1184,22 @@
 		activeDragNodeId = null;
 
 		if (node.pinned) {
-			commitUserGraph(layoutRuntime.beginScaleChange(graph, node.id));
+			commitUserGraph(layoutRuntime.beginScaleChange(graph, node.id), editIntent('layout'));
 			return;
 		}
 
-		commitUserGraph(layoutRuntime.relaxAfterMutation(graph, null, 1));
+		commitUserGraph(layoutRuntime.relaxAfterMutation(graph, null, 1), editIntent('layout'));
 		layoutRuntime.settleAfterDrag();
 	}
 
 	function handleNodeMakePrimary(node: NodeData) {
 		closeOverlays();
 		const wasPinned = node.pinned === true;
-		commitUserGraph(layoutRuntime.beginScaleChange(togglePinned(graph, node.id), node.id));
-
-		if (!wasPinned) {
-			primaryNodeId = node.id;
-			return;
-		}
-
-		primaryNodeId = fallbackPrimaryNodeId();
+		const nextGraph = layoutRuntime.beginScaleChange(togglePinned(graph, node.id), node.id);
+		// Before the commit: the intent captures the primary as of *after* the
+		// edit, which is the value a restore of this state has to put back.
+		primaryNodeId = wasPinned ? fallbackPrimaryNodeId(nextGraph) : node.id;
+		commitUserGraph(nextGraph, editIntent(wasPinned ? 'unpin node' : 'pin node'));
 	}
 
 	/**
@@ -1019,7 +1236,7 @@
 		} else {
 			const graphWithEdge = addEdge(graph, sourceNode.id, targetNode.id);
 			const newEdge = graphWithEdge.edges[graphWithEdge.edges.length - 1] ?? null;
-			commitUserGraph(layoutRuntime.relaxAfterMutation(graphWithEdge));
+			commitUserGraph(layoutRuntime.relaxAfterMutation(graphWithEdge), editIntent('add edge'));
 
 			const durationMs = resolvedLayoutSettings.enterExitDurationMs;
 			// The preview edge was already drawn at full opacity; fading the real
@@ -1050,7 +1267,7 @@
 			: graphWithNode;
 		const newEdge = graphWithEdge.edges[graphWithEdge.edges.length - 1] ?? null;
 
-		commitUserGraph(layoutRuntime.relaxAfterMutation(graphWithEdge));
+		commitUserGraph(layoutRuntime.relaxAfterMutation(graphWithEdge), editIntent('add node'));
 
 		const durationMs = resolvedLayoutSettings.enterExitDurationMs;
 		if (durationMs > 0) {
@@ -1174,7 +1391,11 @@
 	function applyNodeMerge(plan: NodeMergePlan, absorbedId: string, survivorId: string) {
 		// The absorbed node is gone; leaving it primary would strand the pointer.
 		if (primaryNodeId === absorbedId) primaryNodeId = survivorId;
-		commitUserGraph(layoutRuntime.relaxAfterMutation(plan.next));
+		// And a back entry naming it has nowhere to return to — the same prune a
+		// deletion pays for, which a merge has always skipped. The exit animation it
+		// also skips is filed in `docs/debt/`.
+		transientReveal.pruneMissing(new Set(plan.next.nodes.map((node) => node.id)));
+		commitUserGraph(layoutRuntime.relaxAfterMutation(plan.next), editIntent('merge nodes'));
 	}
 
 	function openEditSheet(nodeId: string) {
@@ -1323,7 +1544,11 @@
 	}
 
 	function toggleNodePinned(nodeId: string) {
-		commitUserGraph(layoutRuntime.beginScaleChange(togglePinned(graph, nodeId), nodeId));
+		const wasPinned = nodeById[nodeId]?.pinned === true;
+		commitUserGraph(
+			layoutRuntime.beginScaleChange(togglePinned(graph, nodeId), nodeId),
+			editIntent(wasPinned ? 'unpin node' : 'pin node')
+		);
 	}
 
 	/**
@@ -1525,7 +1750,7 @@
 			outputs: symbol ? [{ base: symbol.base, subscript: symbol.subscript }] : undefined
 		});
 		const newNode = nextGraph.nodes[nextGraph.nodes.length - 1] ?? null;
-		commitUserGraph(layoutRuntime.relaxAfterMutation(nextGraph, null, 1));
+		commitUserGraph(layoutRuntime.relaxAfterMutation(nextGraph, null, 1), editIntent('add node'));
 		if (!newNode) return;
 
 		if (originNodeId) {
@@ -1567,6 +1792,11 @@
 		// Only a severing deletion creates a pinless component to hint about.
 		severedBeaconPreference = severed ? neighborIds : [];
 
+		// Before the commit, and against `nextGraph`: the fallback must not pick the
+		// node being deleted, and the intent has to name the primary this state
+		// ends with rather than the one it started from.
+		if (primaryNodeId === nodeId) primaryNodeId = fallbackPrimaryNodeId(nextGraph);
+
 		if (severed && survivorNodeId !== null) {
 			// The deletion cut a component off from every pinned node. Play the reveal
 			// wave (as a severing edge removal does) so the orphaned side fades down to
@@ -1574,9 +1804,12 @@
 			// the exiting-buffer fade below: their live geometry is gone, so only the
 			// buffer can still place them (the wave's leftovers skip them, see
 			// revealWaveOnlyEdgeVisibility).
-			commitUserGraph(layoutRuntime.beginScaleChange(nextGraph, survivorNodeId));
+			commitUserGraph(
+				layoutRuntime.beginScaleChange(nextGraph, survivorNodeId),
+				editIntent('delete node')
+			);
 		} else {
-			commitUserGraph(layoutRuntime.relaxAfterMutation(nextGraph));
+			commitUserGraph(layoutRuntime.relaxAfterMutation(nextGraph), editIntent('delete node'));
 		}
 
 		if (durationMs > 0) {
@@ -1623,14 +1856,7 @@
 		// for it would hold a hop open for an id the graph no longer has.
 		transientReveal.pruneMissing(new Set(nextGraph.nodes.map((node) => node.id)));
 
-		restorePrimaryNodeAfterDelete(nodeId);
 		closeOverlays();
-	}
-
-	/** Re-points the primary node after `nodeId` was deleted (no-op otherwise). */
-	function restorePrimaryNodeAfterDelete(nodeId: string) {
-		if (primaryNodeId !== nodeId) return;
-		primaryNodeId = fallbackPrimaryNodeId();
 	}
 
 	function saveNodeContent(
@@ -1643,7 +1869,7 @@
 			outputs?: QuantityDesignation[];
 		}
 	) {
-		commitContentGraph(updateNodeContent(graph, nodeId, content));
+		commitContentGraph(updateNodeContent(graph, nodeId, content), editIntent('edit node'));
 		closeOverlays();
 	}
 
@@ -1682,7 +1908,8 @@
 				nodeId,
 				{ type: 'image', assetId, alt: details.alt, caption: details.caption },
 				asset
-			)
+			),
+			editIntent('add image')
 		);
 		return 'added';
 	}
@@ -1692,28 +1919,60 @@
 		assetId: string,
 		details: { alt: string; caption?: string }
 	) {
-		commitUserGraph(updateNodeImageContent(graph, nodeId, assetId, details));
+		commitUserGraph(
+			updateNodeImageContent(graph, nodeId, assetId, details),
+			editIntent('edit image')
+		);
 	}
 
 	function moveNodeImage(nodeId: string, fromIndex: number, direction: -1 | 1) {
-		commitUserGraph(moveNodeContentBlock(graph, nodeId, fromIndex, fromIndex + direction));
+		commitUserGraph(
+			moveNodeContentBlock(graph, nodeId, fromIndex, fromIndex + direction),
+			editIntent('move image')
+		);
 	}
 
+	/**
+	 * Removing an image tombstones its blob rather than deleting it.
+	 *
+	 * A hard delete here made this the one edit an undo could not honour: the
+	 * content block would come back pointing at nothing. The blob now stays,
+	 * marked unreferenced, and the controller collects it once no history entry
+	 * can reach it any more.
+	 */
 	async function deleteNodeImage(nodeId: string, assetId: string) {
 		const result = removeNodeImageContent(graph, nodeId, assetId);
-		commitUserGraph(result.graph);
+		commitUserGraph(result.graph, editIntent('remove image'));
 		if (!assetStore || !assetScope) return;
 		for (const removedAssetId of result.removedAssetIds) {
-			await assetStore.delete(assetScope, removedAssetId);
+			await tombstoneAsset(assetStore, assetScope, removedAssetId);
 		}
 	}
 
 	function saveEdgeContent(edgeId: string, patch: Parameters<typeof updateEdge>[2]) {
-		commitUserGraph(updateEdge(graph, edgeId, patch));
+		commitUserGraph(updateEdge(graph, edgeId, patch), editIntent('edit edge'));
 	}
 
-	function updateTagColor(namespace: TagColorNamespace, tag: string, color: string) {
-		commitUserGraph(setTagColor(graph, namespace, tag, color));
+	/**
+	 * The swatch is a native `<input type="color">`, whose `input` fires once per
+	 * scrub frame — each a real `tagColorConfig` change that sails through the
+	 * reference test. The coalesce key folds the run into one entry while the
+	 * canvas still previews live; `change` closes it, so a second scrub of the
+	 * same tag later starts a new one.
+	 */
+	function updateTagColor(
+		namespace: TagColorNamespace,
+		tag: string,
+		color: string,
+		phase: TagColorChangePhase = 'scrub'
+	) {
+		commitUserGraph(
+			setTagColor(graph, namespace, tag, color),
+			editIntent('tag color', {
+				coalesceKey: `tag-color:${namespace}:${tag}`,
+				...(phase === 'commit' ? { endsCoalesceRun: true } : {})
+			})
+		);
 	}
 
 	function deleteLegendTag(namespace: TagColorNamespace, tag: string) {
@@ -1726,7 +1985,7 @@
 			if (!confirmed) return;
 		}
 
-		commitUserGraph(deleteTagEverywhere(graph, namespace, tag));
+		commitUserGraph(deleteTagEverywhere(graph, namespace, tag), editIntent('delete tag'));
 	}
 
 	function queryStateForNode(nodeId: string): GraphQueryElementState | undefined {
@@ -1838,9 +2097,31 @@
 		};
 	}
 
-	function commitUserGraph(nextGraph: MultigraphData) {
+	function commitUserGraph(nextGraph: MultigraphData, intent: GraphCommitIntent) {
 		graph = nextGraph;
-		onMultigraphChange?.(nextGraph, lastSyncedGeneration);
+		onMultigraphChange?.(nextGraph, lastSyncedGeneration, intent);
+	}
+
+	/**
+	 * The intent for a commit about to happen, in the words the undo control will
+	 * use.
+	 *
+	 * `primaryNodeId` and `severedBeaconPreference` are read from the live state,
+	 * so every call site that re-points either one has to do it *before* it
+	 * commits — which is also the only order that records a state consistent with
+	 * the graph it belongs to.
+	 */
+	function editIntent(
+		label: string,
+		run: { coalesceKey?: string; endsCoalesceRun?: boolean } = {}
+	): GraphCommitIntent {
+		return {
+			label,
+			primaryNodeId,
+			severedBeaconPreference: [...severedBeaconPreference],
+			...(run.coalesceKey === undefined ? {} : { coalesceKey: run.coalesceKey }),
+			...(run.endsCoalesceRun === undefined ? {} : { endsCoalesceRun: run.endsCoalesceRun })
+		};
 	}
 
 	/**
@@ -1852,7 +2133,7 @@
 	 * tolerated: the relaxed positions are the ones worth saving. It cannot loop,
 	 * because that callback never moves the revision this effect watches.
 	 */
-	function adoptGraphInPlace(incoming: MultigraphData) {
+	function adoptGraphInPlace(incoming: MultigraphData, label: string) {
 		// Read before committing: once `graph` is the incoming one, there is nothing
 		// left to diff it against.
 		const revealNodeId = importRevealTargetNodeId(graph, incoming);
@@ -1862,7 +2143,7 @@
 		if (!incoming.nodes.some((node) => node.id === primaryNodeId)) {
 			primaryNodeId = fallbackPrimaryNodeId(incoming);
 		}
-		commitUserGraph(layoutRuntime.relaxAfterMutation(incoming));
+		commitUserGraph(layoutRuntime.relaxAfterMutation(incoming), editIntent(label));
 		if (revealNodeId) revealImportedNode(revealNodeId);
 	}
 
@@ -2022,8 +2303,8 @@
 	 * rename costs one frame that moves nothing rather than an equality check on
 	 * the whole derived layer.
 	 */
-	function commitContentGraph(nextGraph: MultigraphData) {
-		commitUserGraph(layoutRuntime.relaxAfterMutation(nextGraph));
+	function commitContentGraph(nextGraph: MultigraphData, intent: GraphCommitIntent) {
+		commitUserGraph(layoutRuntime.relaxAfterMutation(nextGraph), intent);
 		layoutRuntime.settleAfterDrag();
 	}
 
@@ -2047,7 +2328,7 @@
 			symbol,
 			suggestedRole
 		);
-		commitContentGraph(setNodeDesignations(graph, nodeId, next));
+		commitContentGraph(setNodeDesignations(graph, nodeId, next), editIntent('change designation'));
 	}
 
 	/**
@@ -2080,7 +2361,8 @@
 				graph,
 				nodeId,
 				designateAs({ inputs: node.inputs, outputs: node.outputs }, symbol, 'output')
-			)
+			),
+			editIntent('confirm definer')
 		);
 	}
 </script>
@@ -2496,11 +2778,12 @@
 									layoutRuntime.beginScaleChange(
 										setNodePinned(committedGraph, node.id, false),
 										node.id
-									)
+									),
+									editIntent('rename node')
 								);
 								return;
 							}
-							commitContentGraph(committedGraph);
+							commitContentGraph(committedGraph, editIntent('rename node'));
 						}}
 					/>
 				</div>
@@ -2751,7 +3034,10 @@
 						Object.entries(edgeEnterAnimations).filter(([k]) => k !== confirmEdgeId)
 					);
 					internalExitingBuffer = cancelExitingEdge(internalExitingBuffer, confirmEdgeId);
-					commitUserGraph(layoutRuntime.beginScaleChange(nextGraph, survivorNodeId));
+					commitUserGraph(
+						layoutRuntime.beginScaleChange(nextGraph, survivorNodeId),
+						editIntent('remove edge')
+					);
 					duplicateEdgeConfirm = null;
 					return;
 				}
@@ -2773,7 +3059,7 @@
 					});
 					layoutRuntime.start();
 				}
-				commitUserGraph(layoutRuntime.relaxAfterMutation(nextGraph));
+				commitUserGraph(layoutRuntime.relaxAfterMutation(nextGraph), editIntent('remove edge'));
 				duplicateEdgeConfirm = null;
 			}}
 		/>
