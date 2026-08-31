@@ -85,7 +85,6 @@ it would also be really nice if tags could be color coded as the user types them
 and maybe bounce (scale up and down a little on repeat) the most recent tag/word/phrase added to the search
 
 - When node is unpinned, trigger relayout (currently have to manually drag any node to trigger relayout of newly unpinned node)
-- We should add a way to tell which version of the mind map is being used (mostly needed so its easier to tell, when upgrading an old graph to a new version, which .html file is newer). Maybe a faint grey version number in the upper left that only appears when mouse is close by (fallback to toggle visibility on tap for mobile devices?). Feels like there might be a better way.
 - When a graph becomes two disconnected graphs, I'd like the beacon node(s) to be the node/edge adjacent to the removal that severed the graph. It looks weird to remove an edge and have the node in the, now severed, graph disappear.
 
 folded into the 08/09/10 math and dataflow milestones:

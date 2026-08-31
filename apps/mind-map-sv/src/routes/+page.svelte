@@ -3,6 +3,7 @@
 	import { onMount } from 'svelte';
 	import { SvelteURLSearchParams } from 'svelte/reactivity';
 	import { APP_CONFIG } from '$lib/appConfig';
+	import { BUILD_STAMP_META_NAME, formatBuildStamp, parseBuildStamp } from '$lib/buildInfo';
 	import { IndexedDbGraphAssetStore } from '$lib/assets/assetStore';
 	import {
 		downloadFileArtifact,
@@ -53,6 +54,14 @@
 	const STARTUP_ERROR_NOTICE =
 		'The app could not start. Try reloading the page. Another browser may work.';
 
+	/**
+	 * Which app build this document holds, read once from the shell's meta tag.
+	 * Kept raw — exports record it verbatim so a later reader can compare it,
+	 * which a display string could not support. Null on the dev server, which
+	 * injects no stamp.
+	 */
+	let appBuildStamp: string | null = null;
+
 	let persisted = $state<PersistedGraph | null>(null);
 	let storageDurability = $state<StorageDurability>('durable');
 	let startupError = $state<string | null>(null);
@@ -66,6 +75,7 @@
 	const defaultPrimaryNodeId = $derived(persisted?.graph.nodes[0]?.id ?? '');
 
 	onMount(() => {
+		appBuildStamp = readBuildStampMeta();
 		try {
 			selectedGraphId = graphIdFromUrl(
 				new URL(window.location.href),
@@ -92,6 +102,7 @@
 				selectedGraphFileText !== null || consumeOpenFileFromPickerFlag();
 
 			const persistedGraph = usePersistedGraph({
+				appVersion: appBuildStamp ?? undefined,
 				persistence,
 				createScheduler: (onStatus) =>
 					new SaveScheduler({
@@ -209,7 +220,17 @@
 	}
 
 	function openGraphFilePicker(): void {
-		openHtmlFilePickerInNewTab(appUrlWithoutGraphRoute(window.location.href));
+		openHtmlFilePickerInNewTab(
+			appUrlWithoutGraphRoute(window.location.href),
+			formatBuildStamp(parseBuildStamp(appBuildStamp))
+		);
+	}
+
+	function readBuildStampMeta(): string | null {
+		return (
+			document.querySelector(`meta[name="${BUILD_STAMP_META_NAME}"]`)?.getAttribute('content') ??
+			null
+		);
 	}
 
 	/**

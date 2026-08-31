@@ -1,12 +1,14 @@
 import { readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveBuildStamp, withBuildStamp } from './build-stamp.mjs';
 import {
 	offlineShellSourceFingerprint,
 	withOfflineShellFingerprint
 } from './offline-shell-fingerprint.mjs';
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const repoRoot = resolve(appRoot, '../..');
 const buildDir = join(appRoot, 'build');
 const indexPath = join(buildDir, 'index.html');
 const staticOfflineShellPath = join(appRoot, 'static', 'offline-app-shell.html');
@@ -21,6 +23,7 @@ html = await inlineIcons(html);
 html = stripModulePreloads(html);
 html = injectExportShellCapture(html);
 html = withOfflineShellFingerprint(html, await offlineShellSourceFingerprint({ appRoot }));
+html = withBuildStamp(html, resolveBuildStamp({ repoRoot }));
 
 await writeFile(indexPath, html);
 await writeFile(staticOfflineShellPath, html);
