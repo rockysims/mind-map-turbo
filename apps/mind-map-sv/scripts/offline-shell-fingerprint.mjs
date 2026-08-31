@@ -15,6 +15,7 @@ const appInputs = [
 	'svelte.config.js',
 	'tsconfig.json',
 	'vite.config.ts',
+	'scripts/build-stamp.mjs',
 	'scripts/inline-static-build.mjs',
 	'scripts/offline-shell-fingerprint.mjs',
 	'src',
