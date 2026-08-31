@@ -17,7 +17,7 @@
 		"test:unit": "vitest",
 		"test": "npm run test:unit -- --run && npm run test:e2e",
 		"test:e2e": "playwright test",
-		"storybook": "storybook dev -p 6006",
+		"storybook": "storybook dev -p $(node ../../scripts/dev-ports.mjs --print storybook)",
 		"build-storybook": "storybook build",
 		"chromatic": "pnpm dlx chromatic --project-token=chpt_1752639e83503f5"
 	},
