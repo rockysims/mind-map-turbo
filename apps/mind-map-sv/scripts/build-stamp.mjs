@@ -22,6 +22,9 @@ const defaultRepoRoot = resolve(defaultAppRoot, '../..');
  * date is the wall clock the commit was made on. Normalizing would push an
  * evening commit onto the next day and read as the wrong build. Ordering is
  * unaffected: comparison parses the offset back to an absolute instant.
+ *
+ * @param {{ repoRoot?: string; now?: () => Date }} [options]
+ * @returns {string}
  */
 export function resolveBuildStamp({ repoRoot = defaultRepoRoot, now = () => new Date() } = {}) {
 	const commit = git(repoRoot, ['rev-parse', '--short', 'HEAD']);
@@ -33,6 +36,11 @@ export function resolveBuildStamp({ repoRoot = defaultRepoRoot, now = () => new 
 	return `${committedAt} ${commit}${dirty ? '-dirty' : ''}`;
 }
 
+/**
+ * @param {string} html
+ * @param {string} stamp
+ * @returns {string}
+ */
 export function withBuildStamp(html, stamp) {
 	const meta = `<meta name="${BUILD_STAMP_META_NAME}" content="${stamp}">`;
 	const existing = buildStampMetaPattern();
@@ -43,6 +51,10 @@ export function withBuildStamp(html, stamp) {
 	return `${html.slice(0, headCloseIndex)}\t\t${meta}\n${html.slice(headCloseIndex)}`;
 }
 
+/**
+ * @param {string} html
+ * @returns {string | null}
+ */
 export function readBuildStamp(html) {
 	const match = buildStampMetaPattern().exec(html);
 	return match?.[3] ?? null;
@@ -55,13 +67,24 @@ function buildStampMetaPattern() {
 	);
 }
 
-/** Seconds precision, matching the shape of git's `%cI` so one parser reads both. */
+/**
+ * Seconds precision, matching the shape of git's `%cI` so one parser reads both.
+ *
+ * @param {Date} date
+ * @returns {string}
+ */
 function buildClockInstant(date) {
 	if (Number.isNaN(date.getTime())) return buildClockInstant(new Date(0));
 	return date.toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 
-/** Trimmed stdout, or null if git is missing, errors, or this is not a checkout. */
+/**
+ * Trimmed stdout, or null if git is missing, errors, or this is not a checkout.
+ *
+ * @param {string} repoRoot
+ * @param {string[]} args
+ * @returns {string | null}
+ */
 function git(repoRoot, args) {
 	try {
 		return execFileSync('git', args, {
