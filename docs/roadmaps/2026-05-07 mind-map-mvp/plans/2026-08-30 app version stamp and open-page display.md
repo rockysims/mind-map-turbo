@@ -6,7 +6,7 @@
 [milestone 04l](../milestones/04l-self-contained-html-save-files.md),
 [milestone 04m](../milestones/04m-single-document-save-ux.md) and
 [milestone 04n](../milestones/04n-reliable-propagated-html-app-shell.md)
-**Status:** draft
+**Status:** done
 **Total estimated effort:** M
 
 ## Summary
@@ -386,6 +386,12 @@ Each of T01–T03 is independently shippable: T01 alone already makes
 - Plan status is `done` and the TODO bullet is removed.
 
 ## Notes
+
+- 2026-08-30: delivered. The "better way" the TODO was reaching for turned out
+  to have three parts, and the visible one is the smallest: `grep mind-map-build
+*.html` answers the original question without opening anything, the Open page
+  names the app you are in, and the warning covers the case where not knowing
+  actually costs you something.
 
 - 2026-08-30: the original TODO proposed a faint corner chip revealed by mouse
   proximity with a tap-toggle fallback, and noted "feels like there might be a
