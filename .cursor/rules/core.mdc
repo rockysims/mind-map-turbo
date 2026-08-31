@@ -86,6 +86,15 @@ Copy `docs/debt/TEMPLATE.md`, file it in the same commit as the work that
 incurred it, and delete the file in the same commit as its fix. Conventions:
 `docs/debt/README.md`.
 
+## Reporting back
+
+End every substantive turn with the status footer — `STATUS: done | needs-you |
+blocked`, a numbered `NEEDS YOU` list (or `NEEDS YOU: nothing`), a blank line,
+then `MERGE:` readiness for `temp` — as the very last thing in the message. Only
+items that genuinely need the user go in `NEEDS YOU`; optional reading stays
+above the footer. `ready for temp` is a signal, not permission to merge. Batch
+questions into one numbered list. Full rules: `docs/agent-reporting.md`.
+
 ## Where things live
 
 | Concern | Location |
@@ -97,5 +106,6 @@ incurred it, and delete the file in the same commit as its fix. Conventions:
 | Unit spec | colocated next to the `.ts` file as `*.spec.ts` |
 | E2E | `apps/mind-map-sv/e2e/*.test.ts` |
 | Test fixtures | `apps/mind-map-sv/src/lib/components/ui/Multigraph/lib/testFixtures.ts` |
+| Agent reporting / footer | `docs/agent-reporting.md` |
 | Roadmaps & plans | `docs/roadmaps/<YYYY-MM-DD> <name>/` |
 | Plan template | `docs/roadmaps/PLAN_TEMPLATE.md` |
