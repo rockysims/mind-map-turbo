@@ -36,7 +36,7 @@ export interface FocusControllerDeps {
 }
 
 /** Input reported by Stage when a zoom-in gesture is blocked at the boundary. */
-export interface BlockedZoomInput {
+interface BlockedZoomInput {
 	direction: 'in' | 'out';
 	focalPoint: Point;
 	boundaryProgress?: number;
@@ -46,7 +46,7 @@ export interface BlockedZoomInput {
 }
 
 /** Input for resolving the sticky boundary-entry candidate under the cursor. */
-export interface EntryBoundaryCandidateInput {
+interface EntryBoundaryCandidateInput {
 	focalPoint: Point;
 	requestedScale: number;
 	viewState: ViewTransform;
@@ -54,7 +54,7 @@ export interface EntryBoundaryCandidateInput {
 }
 
 /** Payload from a bold zoom-in over an image inside a focused world. */
-export interface DescendImageInput {
+interface DescendImageInput {
 	assetId: string;
 	sourceRect: Rect;
 	src: string;

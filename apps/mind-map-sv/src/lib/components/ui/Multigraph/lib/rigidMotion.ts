@@ -1,6 +1,6 @@
 import type { Point } from '../../types/multigraph';
 
-export interface RigidMotionSettings {
+interface RigidMotionSettings {
 	normalizeRelaxationTranslation?: boolean;
 	normalizeRelaxationRotation?: boolean;
 	maxRelaxationRotationPerFrameRad?: number;

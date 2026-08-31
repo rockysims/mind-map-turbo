@@ -1,15 +1,23 @@
-version: '3.9'
+# `version:` is deliberately absent — Compose V2 ignores it and warns that it
+# is obsolete.
 
 services:
   app:
-    build: .
+    build:
+      # The repo root, so the build installs from the workspace lockfile rather
+      # than from a second one kept only for this image. See the Dockerfile.
+      context: ../..
+      dockerfile: apps/mind-map-sv/Dockerfile
     ports:
       - '3000:3000'
-    environment:
-      DB_HOST: db
     depends_on:
       - db
 
+  # Nothing talks to this yet: the app is static and persists to the browser.
+  # It is here for the server work that is planned — persistence behind a login
+  # rather than in localStorage — so that the shape of the deployment is already
+  # written down. Until then it is an idle database, and `docker compose up app`
+  # skips it.
   db:
     image: postgres:15
     environment:

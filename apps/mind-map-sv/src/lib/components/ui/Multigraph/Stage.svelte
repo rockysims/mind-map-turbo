@@ -5,6 +5,7 @@
 	import type { Point } from '../types/multigraph';
 	import {
 		scaleFromWheelDelta,
+		wheelDeltaPixels,
 		clampScale,
 		DEFAULT_MIN_SCALE,
 		DEFAULT_MAX_SCALE,
@@ -13,7 +14,7 @@
 		zoomViewTransformAtPoint
 	} from './lib/graphMath.js';
 	import { pointerDistance } from './lib/hitTest.js';
-	import { resolveCreationDrop } from './lib/creationGesture.js';
+	import { resolveCreationDrop, type NodeGestureMode } from './lib/creationGesture.js';
 	import { recognizeLongPress } from './lib/longPress.js';
 	import { persistedScaleForFocusOverzoom } from './lib/nodeFocus.js';
 	import {
@@ -76,6 +77,8 @@
 	interface CreationArmRequest {
 		id: number;
 		sourceNode: NodeData;
+		/** What the release commits. Omitted means the original create gesture. */
+		mode?: NodeGestureMode;
 	}
 
 	interface Props {
@@ -119,7 +122,9 @@
 		onCreationDragUpdate?: (sourceNode: NodeData, point: Point, hoverNode: NodeData | null) => void;
 		/** Fired when a creation gesture is cancelled (Escape, release on source, pinch, pointercancel). */
 		onCreationCancel?: (sourceNode: NodeData) => void;
-		/** One-shot request to arm a creation gesture from a node (menu-initiated, no button pressed). */
+		/** Callback when a merge-mode gesture is dropped onto another node: fold `sourceNode` into `targetNode`. */
+		onNodeMergeDropOntoNode?: (sourceNode: NodeData, targetNode: NodeData) => void;
+		/** One-shot request to arm a drag-from-node gesture (menu-initiated, no button pressed). */
 		creationArmRequest?: CreationArmRequest | null;
 		/** Fired whenever the internal pan/zoom state changes, including initial mount. */
 		onViewStateLiveChange?: (state: ViewStateSnapshot) => void;
@@ -185,6 +190,7 @@
 		onNodeContextMenu,
 		onCreationDragUpdate,
 		onCreationCancel,
+		onNodeMergeDropOntoNode,
 		creationArmRequest,
 		onViewStateLiveChange,
 		onStageRectChange,
@@ -321,9 +327,15 @@
 	let longPressStartTime = 0;
 	let longPressFired = false;
 
-	// Creation gesture (new node/edge): either a double-click drag or a
-	// menu-armed hover session where no button is pressed until the final click.
-	let creationSession = $state<{ sourceNode: NodeData; via: 'menu' | 'doubleclick' } | null>(null);
+	// Drag-from-node gesture (new node/edge, or a merge): either a double-click
+	// drag or a menu-armed hover session where no button is pressed until the
+	// final click. Only `mode` differs between the two aims; the tracking,
+	// cancelling and hit testing below are shared verbatim.
+	let creationSession = $state<{
+		sourceNode: NodeData;
+		via: 'menu' | 'doubleclick';
+		mode: NodeGestureMode;
+	} | null>(null);
 	let lastCreationArmRequestId = $state<number | null>(null);
 
 	$effect(() => {
@@ -332,7 +344,11 @@
 		lastCreationArmRequestId = request.id;
 		cancelActiveNodeGesture();
 		panStart = null;
-		creationSession = { sourceNode: request.sourceNode, via: 'menu' };
+		creationSession = {
+			sourceNode: request.sourceNode,
+			via: 'menu',
+			mode: request.mode ?? 'create'
+		};
 	});
 
 	$effect(() => {
@@ -377,11 +393,14 @@
 	}
 
 	function completeCreationSession(sourceNode: NodeData, e: PointerEvent) {
+		const mode = creationSession?.mode ?? 'create';
 		creationSession = null;
 		const dropTarget = getNodeAt(e.clientX, e.clientY);
-		const action = resolveCreationDrop(sourceNode.id, dropTarget?.id ?? null);
+		const action = resolveCreationDrop(sourceNode.id, dropTarget?.id ?? null, mode);
 		if (action.kind === 'connect-to-node') {
 			onNodeDoubleClickDropOntoNode?.(sourceNode, dropTarget!);
+		} else if (action.kind === 'merge-into-node') {
+			onNodeMergeDropOntoNode?.(sourceNode, dropTarget!);
 		} else if (action.kind === 'create-node-and-edge') {
 			onNodeDoubleClickDropOntoBackground?.(sourceNode, graphPointForEvent(e));
 		} else {
@@ -477,7 +496,9 @@
 			const dist = pointerDistance(dragStartPos.x, dragStartPos.y, e.clientX, e.clientY);
 			if (dist >= dragThreshold || creationSession) {
 				cancelLongPressTimer();
-				if (!creationSession) creationSession = { sourceNode: dragNode, via: 'doubleclick' };
+				if (!creationSession) {
+					creationSession = { sourceNode: dragNode, via: 'doubleclick', mode: 'create' };
+				}
 				onCreationDragUpdate?.(
 					creationSession.sourceNode,
 					graphPointForEvent(e),
@@ -556,18 +577,25 @@
 
 	function onWheel(e: WheelEvent) {
 		e.preventDefault();
-		if (shouldSwallowEntryGesture(e.deltaY < 0 ? 'in' : 'out')) return;
+		// Normalized once, here at the DOM boundary: everything downstream reads a
+		// pixel delta, and Firefox reports a mouse wheel in lines — which through
+		// the zoom sensitivity is a 0.6% step where Chrome's notch is 18%.
+		const deltaY = wheelDeltaPixels(
+			e,
+			typeof window === 'undefined' ? undefined : window.innerHeight
+		);
+		if (shouldSwallowEntryGesture(deltaY < 0 ? 'in' : 'out')) return;
 		const stage = e.currentTarget as HTMLElement;
 		const rect = stage.getBoundingClientRect();
 		const focalPoint = { x: e.clientX, y: e.clientY };
-		if (releaseFocusEntryBoundaryProgress(e.deltaY, focalPoint)) return;
 		const requestedScale = scaleFromWheelDelta(
 			scale,
-			e.deltaY,
+			deltaY,
 			undefined,
 			Number.NEGATIVE_INFINITY,
 			Number.POSITIVE_INFINITY
 		);
+		if (releaseFocusEntryBoundaryProgress(requestedScale, focalPoint)) return;
 		const clampedScale = clampScale(requestedScale, minScale, maxScale);
 		if (
 			!applyZoomGesture({
@@ -664,9 +692,10 @@
 					const requestedScale = pinchStart.scale * factor;
 					const clampedScale = clampScale(requestedScale, minScale, maxScale);
 					const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-					if (
-						releaseFocusEntryBoundaryProgress(requestedScale < scale ? 1 : -1, pinchStart.centroid)
-					) {
+					// The pinch's own requested scale, not a stand-in for one: how far the
+					// fingers moved is exactly what should decide how much of the
+					// boundary is given back.
+					if (releaseFocusEntryBoundaryProgress(requestedScale, pinchStart.centroid)) {
 						pinchStart = { distance: dist, scale, centroid: pinchStart.centroid, panX, panY };
 						return;
 					}
@@ -853,15 +882,21 @@
 		return true;
 	}
 
-	function releaseFocusEntryBoundaryProgress(deltaY: number, focalPoint: Point): boolean {
-		if (!focusEntryBoundaryProgress || deltaY <= 0) return false;
-		const requestedScale = scaleFromWheelDelta(
-			scale,
-			deltaY,
-			undefined,
-			Number.NEGATIVE_INFINITY,
-			Number.POSITIVE_INFINITY
-		);
+	/**
+	 * Back away from a focus-entry boundary, by however much the gesture asked
+	 * for.
+	 *
+	 * Takes the requested scale rather than a wheel delta. The pinch path used to
+	 * hand this a synthetic delta of ±1 — a stand-in for "the fingers moved
+	 * inward" — which was then run back through `scaleFromWheelDelta` as if it
+	 * were a real wheel. That produced a fixed ~0.2% release per pointermove no
+	 * matter how far the fingers actually travelled, while a wheel released in
+	 * proportion to its delta. The magnitude was being thrown away at the call
+	 * site, so the call sites now do the conversion each already knows how to do
+	 * and pass a scale.
+	 */
+	function releaseFocusEntryBoundaryProgress(requestedScale: number, focalPoint: Point): boolean {
+		if (!focusEntryBoundaryProgress || requestedScale >= scale) return false;
 		const releaseDelta = boundaryReleaseDelta(requestedScale, scale);
 		const nextProgress = Math.max(0, focusEntryBoundaryProgress.progress - releaseDelta);
 		const nodeId = focusEntryBoundaryProgress.nodeId;
@@ -890,11 +925,13 @@
 	onwheel={onWheel}
 	role="presentation"
 >
-	<div
-		class="stage-content"
-		style="transform: {transformStyle}; transform-origin: 50% 50%;"
-		aria-hidden="true"
-	>
+	<!--
+		Deliberately NOT `aria-hidden`. It was, which put the entire graph — every
+		node, every title — outside the accessibility tree, so the canvas offered a
+		screen reader nothing at all. The parts that really are decoration say so
+		themselves: the edge layer, and the buffered/exiting/preview node renders.
+	-->
+	<div class="stage-content" style="transform: {transformStyle}; transform-origin: 50% 50%;">
 		{#if children}
 			{@render children()}
 		{/if}

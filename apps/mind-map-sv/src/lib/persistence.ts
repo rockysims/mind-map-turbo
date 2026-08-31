@@ -21,7 +21,7 @@ export interface Persistence {
 	delete(id: string): Promise<void>;
 }
 
-export type PersistenceKind = 'local' | 'server';
+type PersistenceKind = 'local' | 'server';
 
 export type StorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem' | 'key' | 'length'>;
 

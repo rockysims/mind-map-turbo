@@ -10,6 +10,7 @@
 		type EntryGestureDirection,
 		type EntryGestureGateState
 	} from './lib/entryGestureGate';
+	import { wheelDeltaPixels } from './lib/graphMath';
 	import { pointerDistance } from './lib/hitTest';
 	import {
 		clampZoomWorldState,
@@ -136,22 +137,31 @@
 		return null;
 	}
 
+	/** Only read for `DOM_DELTA_PAGE` wheels, which no mainstream browser sends. */
+	function viewportHeightPx(): number | undefined {
+		return typeof window === 'undefined' ? undefined : window.innerHeight;
+	}
+
 	function handleWheel(event: WheelEvent) {
 		const bounds = currentBounds();
 		const point = localPoint(event.clientX, event.clientY);
 		if (!bounds || !point) return;
 		event.preventDefault();
 		event.stopPropagation();
-		if (shouldSwallowEntryZoom(event.deltaY < 0 ? 'in' : 'out')) return;
+		// Normalized once, at the only place the raw event is in hand: the zoom
+		// math downstream reads a pixel delta, and Firefox reports a mouse wheel
+		// in lines (see `wheelDeltaPixels`).
+		const deltaY = wheelDeltaPixels(event, viewportHeightPx());
+		if (shouldSwallowEntryZoom(deltaY < 0 ? 'in' : 'out')) return;
 		if (exitBoundaryAmount > 0) {
-			exitBoundaryAmount = wheelExitBoundaryAmount(exitBoundaryAmount, event.deltaY, bounds);
+			exitBoundaryAmount = wheelExitBoundaryAmount(exitBoundaryAmount, deltaY, bounds);
 			onExitBoundary?.(exitBoundaryAmount);
 			return;
 		}
 		// A reversal (zoom-out) cancels any in-flight descend accumulation,
 		// mirroring how a zoom-in cancels an exit scrub.
-		if (descendBoundaryAmount > 0 && event.deltaY > 0) descendBoundaryAmount = 0;
-		const step = wheelZoomWorld(worldState, event.deltaY, point, bounds);
+		if (descendBoundaryAmount > 0 && deltaY > 0) descendBoundaryAmount = 0;
+		const step = wheelZoomWorld(worldState, deltaY, point, bounds);
 		commitState(step.state);
 		if (step.exitBoundaryDelta > 0) {
 			exitBoundaryAmount = Math.min(1, exitBoundaryAmount + step.exitBoundaryDelta);

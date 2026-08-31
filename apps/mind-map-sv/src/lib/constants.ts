@@ -24,5 +24,3 @@ export const EDGE_ARROW_HALF_HEIGHT = APP_CONFIG.multigraph.edgeArrow.halfHeight
 export const EDGE_ARROW_REFERENCE_NODE_SCALE = APP_CONFIG.multigraph.edgeArrow.referenceNodeScale;
 export const EDGE_STROKE_WIDTH = APP_CONFIG.multigraph.edgeStroke.widthPx;
 export const EDGE_STROKE_REFERENCE_NODE_SCALE = APP_CONFIG.multigraph.edgeStroke.referenceNodeScale;
-export const MIN_ZOOM_SCALE = APP_CONFIG.multigraph.zoom.minScale;
-export const MAX_ZOOM_SCALE = APP_CONFIG.multigraph.zoom.maxScale;

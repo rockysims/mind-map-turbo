@@ -89,7 +89,6 @@
 		...view.suggestions.filter((chip) => chip.suggestedRole === 'output')
 	]);
 	const isEmpty = $derived(inputColumn.length === 0 && outputColumn.length === 0);
-	const hasSuggestions = $derived(view.suggestions.length > 0);
 
 	const canPeek = $derived(mode === 'view' && onPeek !== undefined);
 	const canInsert = $derived(mode === 'edit' && onInsert !== undefined);
@@ -274,7 +273,14 @@
 		</p>
 	{:else if mode === 'edit'}
 		<p class="hint">Tap a quantity to cycle it: unassigned, input, output.</p>
-	{:else if hasSuggestions}
+	{:else if canPeek}
+		<!--
+			Whenever there is a chip to hold, not only when one of them is a ghost.
+			Gated on `hasSuggestions` this said nothing on the ordinary node whose
+			quantities are all confirmed — which is most of them once a graph is a
+			few edits old — leaving the hold gesture with no announcement anywhere on
+			the surface that offers it.
+		-->
 		<p class="hint">Tap to cycle a quantity; hold or right-click to see where it is defined.</p>
 	{/if}
 </section>

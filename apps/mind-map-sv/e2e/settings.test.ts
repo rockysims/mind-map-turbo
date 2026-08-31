@@ -121,7 +121,7 @@ function extractGraphHtmlPayload(html: string): {
 
 async function downloadHtml(page: Page): Promise<string> {
 	const downloadPromise = page.waitForEvent('download');
-	await page.getByRole('button', { name: 'Download' }).click();
+	await page.getByRole('button', { name: 'Save' }).click();
 	const download = await downloadPromise;
 	const downloadedPath = await download.path();
 	if (!downloadedPath) throw new Error('Download did not produce a file');
@@ -207,8 +207,11 @@ test("?resetSettings=1 clears a hostile graph's overrides and the app recovers",
 	await expect(page.getByText('Root')).toBeVisible();
 
 	await expect.poll(() => readStoredSettings(page, graphId)).toBeUndefined();
-	// The flag strips itself from the URL rather than surviving a later reload.
-	expect(page.url()).not.toContain('resetSettings');
+	// The flag strips itself from the URL rather than surviving a later reload —
+	// polled, not asserted once, because the strip deliberately waits out the save
+	// debounce (see `applyResetSettingsFromUrlIfRequested`) and the clear above can
+	// land first.
+	await expect.poll(() => page.url()).not.toContain('resetSettings');
 	// The other graph's overrides are untouched.
 	await expect(readStoredSettings(page, otherGraphId)).resolves.toEqual(HOSTILE_SETTINGS);
 });

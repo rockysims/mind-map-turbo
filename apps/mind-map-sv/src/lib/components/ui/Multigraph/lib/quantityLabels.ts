@@ -16,7 +16,7 @@ export function edgeAngleDegrees(source: Point, target: Point): number {
 	return (Math.atan2(target.y - source.y, target.x - source.x) * 180) / Math.PI;
 }
 
-export interface QuantityLabelVisibilityOptions {
+interface QuantityLabelVisibilityOptions {
 	/** Zoom below which labels stay hidden entirely. */
 	minStageScale?: number;
 	/** Shortest on-screen edge worth labelling, in CSS pixels. */

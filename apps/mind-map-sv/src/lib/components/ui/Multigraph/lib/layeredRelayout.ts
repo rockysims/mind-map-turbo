@@ -28,7 +28,7 @@ export function participatingNodeIds(
 	return new Set(nodeIds);
 }
 
-export interface LayeredRelayoutAdvanceInput {
+interface LayeredRelayoutAdvanceInput {
 	maxPositionDelta: number;
 	settleEpsilonPx: number;
 }

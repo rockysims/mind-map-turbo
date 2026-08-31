@@ -13,6 +13,7 @@
 		MIN_NODE_HIT_RADIUS,
 		NODE_RADIUS
 	} from '$lib/constants';
+	import { wheelDeltaForZoomFactor } from './lib/graphMath';
 	import {
 		designations,
 		makeClusteredRandomEdges,
@@ -57,13 +58,14 @@
 		args: {
 			multigraphData: MultigraphData;
 			defaultPrimaryNodeId?: string;
-			onMultigraphChange?: (data: MultigraphData) => void;
+			graphGeneration?: number;
+			onMultigraphChange?: (data: MultigraphData, generation: number) => void;
 			onViewStateChange?: (state: ViewState) => void;
 		};
 	};
 
 	type ChangeSpy = {
-		mock: { calls: Array<[MultigraphData]> };
+		mock: { calls: Array<[MultigraphData, number]> };
 	};
 
 	type ViewStateSpy = {
@@ -250,6 +252,20 @@
 		return document.activeElement?.textContent?.trim() ?? '';
 	}
 
+	/**
+	 * A wheel delta that means "zoom by this factor", rather than a magic number.
+	 *
+	 * The deltas in this file used to be hand-derived from the linear zoom curve
+	 * `scaleFromWheelDelta` once used, which is exactly why fixing that curve
+	 * broke these stories. Said as a factor, a step keeps meaning what it meant
+	 * through any retuning. `WHEEL_SLAM` stays a raw number on purpose: those
+	 * steps mean "past the clamp, whatever the clamp is", not a particular factor.
+	 */
+	const wheelFactor = wheelDeltaForZoomFactor;
+	/** Far enough past either clamp that the boundary logic, not the factor, decides. */
+	const WHEEL_SLAM_IN = -6000;
+	const WHEEL_SLAM_OUT = 6000;
+
 	function dispatchWheel(target: HTMLElement, deltaY: number, clientX?: number, clientY?: number) {
 		const center = getCenter(target);
 		target.dispatchEvent(
@@ -297,6 +313,14 @@
 		const graph = spy?.mock.calls.at(-1)?.[0];
 		if (!graph) throw new Error('Expected onMultigraphChange to be called with graph data');
 		return graph;
+	}
+
+	/** The generation an edit was stamped with: which loaded graph it belongs to. */
+	function lastChangeGeneration(args: PlayContext['args']): number {
+		const spy = args.onMultigraphChange as ChangeSpy | undefined;
+		const call = spy?.mock.calls.at(-1);
+		if (!call) throw new Error('Expected onMultigraphChange to have been called');
+		return call[1];
 	}
 
 	function lastViewState(args: PlayContext['args']): ViewState {
@@ -1009,7 +1033,7 @@
 		descriptionInput.dispatchEvent(new Event('input', { bubbles: true }));
 		await tick();
 		await designationStep?.(canvasElement);
-		canvas.getByRole('button', { name: 'Save' }).click();
+		canvas.getByRole('button', { name: 'Done' }).click();
 		// A microtask flush, not a frame: the settle kick has to be observable
 		// before the first animation frame could have consumed it.
 		await tick();
@@ -1168,7 +1192,7 @@
 		expect(args.onMultigraphChange).not.toHaveBeenCalled();
 		expect(lastViewState(args)).toMatchObject({ panX: 24, panY: 12, scale: 1 });
 
-		dispatchWheel(stage, -200);
+		dispatchWheel(stage, wheelFactor(1.4));
 		await sleep();
 
 		expect(args.onMultigraphChange).not.toHaveBeenCalled();
@@ -1282,21 +1306,21 @@
 		const world = dialog.querySelector('.zoom-world') as HTMLElement;
 		const surface = dialog.querySelector('.focus-surface') as HTMLElement;
 		const initialSurfaceRect = surface.getBoundingClientRect();
-		dispatchWheel(image, -500, imageCenter.x, imageCenter.y);
+		dispatchWheel(image, wheelFactor(2), imageCenter.x, imageCenter.y);
 		await waitFor(() => {
 			expect(Number(world.dataset.zoomWorldScale)).toBeGreaterThan(1);
 			expect(surface.getBoundingClientRect().width).toBeGreaterThan(initialSurfaceRect.width);
 		});
 
 		const frame = image.closest('.image-frame') as HTMLElement;
-		dispatchWheel(image, -1000, imageCenter.x, imageCenter.y);
+		dispatchWheel(image, wheelFactor(3), imageCenter.x, imageCenter.y);
 		await waitFor(() => {
 			expect(Number(world.dataset.zoomWorldScale)).toBeGreaterThan(1);
 		});
 		expect(frame.dataset.imageFocused).toBeUndefined();
 		expect(image.dataset.imageZoomScale).toBeUndefined();
 
-		dispatchWheel(world, 2000, imageCenter.x, imageCenter.y);
+		dispatchWheel(world, WHEEL_SLAM_OUT, imageCenter.x, imageCenter.y);
 		await waitFor(() => {
 			expect(Number(world.dataset.zoomWorldScale)).toBe(1);
 		});
@@ -1367,13 +1391,13 @@
 		const nodeWorld = dialog.querySelector('.zoom-world') as HTMLElement;
 
 		// Zoom the node world in toward max scale over the image.
-		dispatchWheel(image, -3000, imageCenter.x, imageCenter.y);
+		dispatchWheel(image, wheelFactor(7), imageCenter.x, imageCenter.y);
 		await waitFor(() => {
 			expect(Number(nodeWorld.dataset.zoomWorldScale)).toBeGreaterThan(1);
 		});
 
 		// A bold zoom-in past max, cursor over the image, descends to depth 2.
-		dispatchWheel(image, -6000, imageCenter.x, imageCenter.y);
+		dispatchWheel(image, WHEEL_SLAM_IN, imageCenter.x, imageCenter.y);
 		await waitFor(() => {
 			expect(stack.dataset.depth).toBe('2');
 		});
@@ -1403,7 +1427,7 @@
 		// Zoom out past fit in the image world pops back to the node (depth 1),
 		// continuously (focus stays open — it does not close).
 		const imageWorld = dialog.querySelector('.zoom-world') as HTMLElement;
-		dispatchWheel(imageWorld, 6000, imageCenter.x, imageCenter.y);
+		dispatchWheel(imageWorld, WHEEL_SLAM_OUT, imageCenter.x, imageCenter.y);
 		await waitFor(
 			() => {
 				expect(stack.dataset.depth).toBe('1');
@@ -1490,12 +1514,12 @@
 			const imageCenter = getCenter(image);
 			const nodeWorld = dialog.querySelector('.zoom-world') as HTMLElement;
 
-			dispatchWheel(image, -3000, imageCenter.x, imageCenter.y);
+			dispatchWheel(image, wheelFactor(7), imageCenter.x, imageCenter.y);
 			await waitFor(() => {
 				expect(Number(nodeWorld.dataset.zoomWorldScale)).toBeGreaterThan(1);
 			});
 
-			dispatchWheel(image, -6000, imageCenter.x, imageCenter.y);
+			dispatchWheel(image, WHEEL_SLAM_IN, imageCenter.x, imageCenter.y);
 			await waitFor(() => {
 				expect(stack.dataset.depth).toBe('2');
 			});
@@ -1532,7 +1556,7 @@
 		const oversizedRect = circle.getBoundingClientRect();
 		const stageRect = stage.getBoundingClientRect();
 
-		dispatchWheel(stage, -800, center.x, center.y);
+		dispatchWheel(stage, wheelFactor(2.6), center.x, center.y);
 
 		const dialog = await within(canvasElement).findByRole('dialog');
 		// One morph surface owns the committed frame; it fills the stage.
@@ -1566,12 +1590,12 @@
 		expect(oversizedRect.width).toBeGreaterThan(0);
 		expect(canvasElement.querySelector('.graph')).toHaveClass('focus-active');
 
-		dispatchWheel(world, -800, center.x, center.y);
+		dispatchWheel(world, wheelFactor(2.6), center.x, center.y);
 		await sleep();
 		expect(Number(world.dataset.zoomWorldScale)).toBe(1);
 
 		await sleep(APP_CONFIG.multigraph.focus.entryGestureIdleMs + 20);
-		dispatchWheel(world, -800, center.x, center.y);
+		dispatchWheel(world, wheelFactor(2.6), center.x, center.y);
 		await waitFor(() => {
 			expect(Number(world.dataset.zoomWorldScale)).toBeGreaterThan(1);
 		});
@@ -1588,22 +1612,22 @@
 		});
 
 		const stageTransformBeforeExit = getStageTransform(canvasElement);
-		dispatchWheel(world, 5000, center.x, center.y);
+		dispatchWheel(world, WHEEL_SLAM_OUT, center.x, center.y);
 		await waitFor(() => {
 			expect(canvasElement.querySelector('.graph')).not.toHaveClass('focus-active');
 		});
 
-		dispatchWheel(stage, 5000, center.x, center.y);
+		dispatchWheel(stage, WHEEL_SLAM_OUT, center.x, center.y);
 		await sleep();
 		expect(getStageTransform(canvasElement)).toBe(stageTransformBeforeExit);
 
 		await sleep(Math.max(0, APP_CONFIG.multigraph.focus.entryGestureIdleMs - 30));
-		dispatchWheel(stage, 5000, center.x, center.y);
+		dispatchWheel(stage, WHEEL_SLAM_OUT, center.x, center.y);
 		await sleep();
 		expect(getStageTransform(canvasElement)).toBe(stageTransformBeforeExit);
 
 		await sleep(APP_CONFIG.multigraph.focus.entryGestureIdleMs + 20);
-		dispatchWheel(stage, 5000, center.x, center.y);
+		dispatchWheel(stage, WHEEL_SLAM_OUT, center.x, center.y);
 		await waitFor(() => {
 			expect(getStageTransform(canvasElement)).not.toBe(stageTransformBeforeExit);
 		});
@@ -1632,7 +1656,7 @@
 
 		// A gentle scrub mounts the single morph surface partway — but does NOT
 		// commit, so there is no dialog and the in-stage node is hidden.
-		dispatchWheel(stage, -80, center.x, center.y);
+		dispatchWheel(stage, wheelFactor(1.16), center.x, center.y);
 		await waitFor(() => {
 			const layer = getFocusLayer(canvasElement);
 			expect(morphRectOf(layer).progress).toBeGreaterThan(0);
@@ -1653,7 +1677,7 @@
 
 		// Reversing the scrub drives progress back to 0; after the entry gesture
 		// idles the surface unmounts and hands the frame back to the in-stage node.
-		dispatchWheel(stage, 160, center.x, center.y);
+		dispatchWheel(stage, wheelFactor(0.68), center.x, center.y);
 		await waitFor(() => {
 			expect(morphRectOf(getFocusLayer(canvasElement)).progress).toBe(0);
 		});
@@ -1684,7 +1708,7 @@
 		const circle = getCircle(canvasElement, 'n0');
 		const center = getCenter(circle);
 
-		dispatchWheel(stage, -800, center.x, center.y);
+		dispatchWheel(stage, wheelFactor(2.6), center.x, center.y);
 		const dialog = await within(canvasElement).findByRole('dialog');
 		const world = dialog.querySelector('.zoom-world') as HTMLElement;
 		const layer = getFocusLayer(canvasElement);
@@ -1723,7 +1747,7 @@
 
 		// A bold flick out crosses the exit boundary: the gesture drives progress
 		// directly to 0, then unmounts the surface one frame later.
-		dispatchWheel(world, 5000, center.x, center.y);
+		dispatchWheel(world, WHEEL_SLAM_OUT, center.x, center.y);
 		await tick();
 		expect(dialog).toBeInTheDocument();
 		expect(canvasElement.querySelector('.graph')).not.toHaveClass('focus-active');
@@ -1796,11 +1820,11 @@
 
 		// Direction A — mount on entry: scrub in a bit, then reverse to 0 (the
 		// surface stays mounted through the idle window at progress 0).
-		dispatchWheel(stage, -80, center.x, center.y);
+		dispatchWheel(stage, wheelFactor(1.16), center.x, center.y);
 		await waitFor(() => {
 			expect(morphRectOf(getFocusLayer(canvasElement)).progress).toBeGreaterThan(0);
 		});
-		dispatchWheel(stage, 200, center.x, center.y);
+		dispatchWheel(stage, wheelFactor(0.6), center.x, center.y);
 		await waitFor(() => {
 			expect(morphRectOf(getFocusLayer(canvasElement)).progress).toBe(0);
 		});
@@ -1814,10 +1838,10 @@
 
 		// Direction B — unmount on exit: commit, then flick out. On the exit frame
 		// morphProgress is 0 and the surface must again equal the in-stage rect.
-		dispatchWheel(stage, -1000, center.x, center.y);
+		dispatchWheel(stage, wheelFactor(3), center.x, center.y);
 		await within(canvasElement).findByRole('dialog');
 		const world = canvasElement.querySelector('.zoom-world') as HTMLElement;
-		dispatchWheel(world, 6000, center.x, center.y);
+		dispatchWheel(world, WHEEL_SLAM_OUT, center.x, center.y);
 		await waitFor(() => {
 			expect(morphRectOf(getFocusLayer(canvasElement)).progress).toBe(0);
 		});
@@ -1844,7 +1868,7 @@
 		const center = getCenter(circle);
 
 		// Entry scrub mounts one surface element.
-		dispatchWheel(stage, -80, center.x, center.y);
+		dispatchWheel(stage, wheelFactor(1.16), center.x, center.y);
 		await waitFor(() => {
 			const p = morphRectOf(getFocusLayer(canvasElement)).progress;
 			expect(p).toBeGreaterThan(0);
@@ -1853,7 +1877,7 @@
 		const surfaceEl = getFocusLayer(canvasElement);
 
 		// Commit (bold flick): the SAME element reaches progress 1.
-		dispatchWheel(stage, -1000, center.x, center.y);
+		dispatchWheel(stage, wheelFactor(3), center.x, center.y);
 		await waitFor(() => {
 			expect(morphRectOf(getFocusLayer(canvasElement)).progress).toBe(1);
 		});
@@ -1892,7 +1916,7 @@
 
 		/** Commit focus via a bold in-zoom at max scale. */
 		const commitFocusViaWheel = async () => {
-			dispatchWheel(stage, -800, center.x, center.y);
+			dispatchWheel(stage, wheelFactor(2.6), center.x, center.y);
 			await within(canvasElement).findByRole('dialog');
 			expect(canvasElement.querySelector('.graph')).toHaveClass('focus-active');
 			expect(canvasElement.querySelector('.deep-zoom-layer')).toBeInTheDocument();
@@ -1920,7 +1944,7 @@
 		// Route C: Wheel-out completion (delta >= 1 triggers unified closeFocus).
 		await commitFocusViaWheel();
 		const world = canvasElement.querySelector('.zoom-world') as HTMLElement;
-		dispatchWheel(world, 5000, center.x, center.y);
+		dispatchWheel(world, WHEEL_SLAM_OUT, center.x, center.y);
 		await assertUnfocused();
 	}}
 />
@@ -1930,6 +1954,7 @@
 	args={{
 		multigraphData: makeGraph({ nodeCount: 1 }),
 		defaultPrimaryNodeId: 'n0',
+		graphGeneration: 3,
 		onMultigraphChange: fn()
 	}}
 	play={async ({ canvasElement, args }: PlayContext) => {
@@ -1949,12 +1974,15 @@
 		const nodeTagsInput = canvas.getByLabelText('Node tags') as HTMLInputElement;
 		nodeTagsInput.value = 'abc urgent';
 		nodeTagsInput.dispatchEvent(new Event('input', { bubbles: true }));
-		canvas.getByRole('button', { name: 'Save' }).click();
+		canvas.getByRole('button', { name: 'Done' }).click();
 		await sleep();
 
 		expect(canvas.getByText('Updated mobile title')).toBeInTheDocument();
 		expect(lastChangedGraph(args).nodes[0].title).toBe('Updated mobile title');
 		expect(lastChangedGraph(args).nodes[0].tags).toEqual(['abc', 'urgent']);
+		// Stamped with the graph load it was made to, so a commit that lands while
+		// the canvas is being replaced can be told apart from a live edit.
+		expect(lastChangeGeneration(args)).toBe(3);
 	}}
 />
 
@@ -2164,9 +2192,27 @@
 
 		const canvas = within(canvasElement);
 		expect(canvas.getByRole('menuitem', { name: 'Add node/edge' })).toBeInTheDocument();
+		expect(canvas.getByRole('menuitem', { name: 'Merge' })).toBeInTheDocument();
 		expect(canvas.getByRole('menuitem', { name: 'Pin' })).toBeInTheDocument();
 		expect(canvas.getByRole('menuitem', { name: 'Edit' })).toBeInTheDocument();
 		expect(canvas.getByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
+
+		// Every item explains itself beyond its label, and the label still names
+		// the button — `title` is the description, so the role query above by name
+		// keeps working. Merge is the one that prompted these: it has to say which
+		// node is left standing.
+		for (const item of canvas.getAllByRole('menuitem')) {
+			expect(item).toHaveAttribute('title');
+			expect(item.getAttribute('title')).not.toBe('');
+		}
+		expect(canvas.getByRole('menuitem', { name: 'Merge' })).toHaveAttribute(
+			'title',
+			'Drag onto the node this one should merge into; the other node survives'
+		);
+		expect(canvas.getByRole('menuitem', { name: 'Pin' })).toHaveAttribute(
+			'title',
+			'Anchor the node here; nearby nodes stay large and visible'
+		);
 		dispatchPointer(circle, 'pointerup', center.x, center.y);
 	}}
 />
@@ -2316,6 +2362,7 @@
 		expect(event.defaultPrevented).toBe(true);
 		const canvas = within(canvasElement);
 		expect(canvas.getByRole('menuitem', { name: 'Add node/edge' })).toBeInTheDocument();
+		expect(canvas.getByRole('menuitem', { name: 'Merge' })).toBeInTheDocument();
 		expect(canvas.getByRole('menuitem', { name: 'Pin' })).toBeInTheDocument();
 		expect(canvas.getByRole('menuitem', { name: 'Focus' })).toBeInTheDocument();
 		expect(canvas.getByRole('menuitem', { name: 'Edit' })).toBeInTheDocument();
@@ -2388,11 +2435,11 @@
 		expect(activeElementText()).toBe('Add node/edge');
 
 		dispatchKeydown(document.activeElement, 'ArrowRight');
-		expect(activeElementText()).toBe('Pin');
+		expect(activeElementText()).toBe('Merge');
 		dispatchKeydown(document.activeElement, 'ArrowDown');
-		expect(activeElementText()).toBe('Focus');
-		dispatchKeydown(document.activeElement, 'ArrowLeft');
 		expect(activeElementText()).toBe('Pin');
+		dispatchKeydown(document.activeElement, 'ArrowLeft');
+		expect(activeElementText()).toBe('Merge');
 		dispatchKeydown(document.activeElement, 'ArrowUp');
 		expect(activeElementText()).toBe('Add node/edge');
 
@@ -2412,6 +2459,34 @@
 			'tabindex',
 			'-1'
 		);
+	}}
+/>
+
+<Story
+	name="UserLeavesActionMenuWithTab"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1 }),
+		defaultPrimaryNodeId: 'n0'
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const toolbarButton = within(canvasElement).getByRole('button', { name: 'Tag colors' });
+		toolbarButton.focus();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+
+		dispatchContextMenu(circle, center.x, center.y);
+		await tick();
+		expect(activeElementText()).toBe('Add node/edge');
+
+		// Roving tabindex means the browser would otherwise tab clean out of the
+		// page, leaving the menu layer up: Tab must close the menu itself.
+		const event = dispatchKeydown(document.activeElement, 'Tab');
+		await tick();
+
+		expect(event.defaultPrevented).toBe(true);
+		expect(within(canvasElement).queryByRole('menu')).not.toBeInTheDocument();
+		expect(document.activeElement).toBe(toolbarButton);
 	}}
 />
 
@@ -2602,6 +2677,264 @@
 		expect(changedGraph.nodes).toHaveLength(3);
 		expect(changedGraph.edges).toHaveLength(3);
 		expect(changedGraph.edges[2]).toMatchObject({ sourceNodeId: 'n0', targetNodeId: 'n2' });
+	}}
+/>
+
+<Story
+	name="MergingANodeOntoAnotherLeavesOneNodeCarryingBothTagSets"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'n0', title: 'Node 0', description: '', tags: ['alpha'] },
+				{ id: 'n1', title: 'Node 1', description: '', tags: ['beta'] }
+			],
+			pinned: ['n0', 'n1'],
+			posByNodeId: {
+				n0: { x: -160, y: 0 },
+				n1: { x: 160, y: 0 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { enterExitDurationMs: 0, relaxIterations: 1 },
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const absorbedCircle = getCircle(canvasElement, 'n0');
+		const absorbedCenter = getCenter(absorbedCircle);
+		const survivorCenter = getCenter(getCircle(canvasElement, 'n1'));
+
+		dispatchContextMenu(absorbedCircle, absorbedCenter.x, absorbedCenter.y);
+		await sleep();
+		within(canvasElement).getByRole('menuitem', { name: 'Merge' }).click();
+		await sleep();
+
+		// The merge preview reads as "absorb into", not "connect to": no preview
+		// node is ever offered, and the node about to swallow n0 wears the ring.
+		dispatchPointer(stage, 'pointermove', survivorCenter.x, survivorCenter.y);
+		await sleep();
+		expect(canvasElement.querySelector('[data-creation-preview-node]')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-creation-preview-edge]')).toHaveAttribute(
+			'data-creation-preview-mode',
+			'merge'
+		);
+		expect(getNodeWrapper(canvasElement, 'n1')).toHaveAttribute('data-merge-target', 'true');
+
+		dispatchPointer(stage, 'pointerdown', survivorCenter.x, survivorCenter.y);
+		dispatchPointer(stage, 'pointerup', survivorCenter.x, survivorCenter.y);
+		await sleep();
+		await waitForLayout();
+
+		// Nothing lossy happened, so the merge committed without stopping to ask.
+		expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
+
+		const changedGraph = lastChangedGraph(args);
+		expect(changedGraph.nodes.map((node) => node.id)).toEqual(['n1']);
+		// The survivor keeps its own title and leads with its own tags.
+		expect(changedGraph.nodes[0].title).toBe('Node 1');
+		expect(changedGraph.nodes[0].tags).toEqual(['beta', 'alpha']);
+		expect(changedGraph.posByNodeId.n0).toBeUndefined();
+		expect(canvasElement.querySelector('[data-node-id="n0"]')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-creation-preview-edge]')).not.toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="ReleasingAMergeOverBackgroundChangesNothing"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'n0', title: 'Node 0', description: '', tags: ['alpha'] },
+				{ id: 'n1', title: 'Node 1', description: '', tags: ['beta'] }
+			],
+			pinned: ['n0', 'n1'],
+			posByNodeId: {
+				n0: { x: -160, y: 0 },
+				n1: { x: 160, y: 0 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { enterExitDurationMs: 0, relaxIterations: 1 },
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const stageRect = stage.getBoundingClientRect();
+		const absorbedCircle = getCircle(canvasElement, 'n0');
+		const absorbedCenter = getCenter(absorbedCircle);
+		const bgX = stageRect.right - 20;
+		const bgY = stageRect.bottom - 20;
+
+		dispatchContextMenu(absorbedCircle, absorbedCenter.x, absorbedCenter.y);
+		await sleep();
+		within(canvasElement).getByRole('menuitem', { name: 'Merge' }).click();
+		await sleep();
+
+		// Empty canvas holds nothing to absorb into, so nothing is offered there.
+		dispatchPointer(stage, 'pointermove', bgX, bgY);
+		await sleep();
+		expect(canvasElement.querySelector('[data-creation-preview-node]')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-merge-target]')).not.toBeInTheDocument();
+
+		dispatchPointer(stage, 'pointerdown', bgX, bgY);
+		dispatchPointer(stage, 'pointerup', bgX, bgY);
+		await sleep();
+		await waitForLayout();
+
+		expect(canvasElement.querySelector('[data-creation-preview-edge]')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-node-id="n0"]')).toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-node-id="n1"]')).toBeInTheDocument();
+		const changeSpy = args.onMultigraphChange as ChangeSpy | undefined;
+		expect(changeSpy?.mock.calls).toHaveLength(0);
+	}}
+/>
+
+<Story
+	name="CancelingAMergeThatWouldOverwriteEdgeDirectionChangesNothing"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'n0', title: 'Node 0', description: '', tags: [] },
+				{ id: 'n1', title: 'Node 1', description: '', tags: [] },
+				{ id: 'n2', title: 'Node 2', description: '', tags: [] },
+				{ id: 'n3', title: 'Node 3', description: '', tags: [] }
+			],
+			// Both of n0's edges point the opposite way from n1's edge to the same
+			// neighbour, so folding n0 into n1 discards two direction assertions.
+			edges: [
+				{ id: 'e0', source: 'n0', target: 'n2', directed: true },
+				{ id: 'e1', source: 'n2', target: 'n1', directed: true },
+				{ id: 'e2', source: 'n0', target: 'n3', directed: true },
+				{ id: 'e3', source: 'n3', target: 'n1', directed: true }
+			],
+			pinned: ['n0', 'n1', 'n2', 'n3'],
+			posByNodeId: {
+				n0: { x: -160, y: 0 },
+				n1: { x: 160, y: 0 },
+				n2: { x: 0, y: -200 },
+				n3: { x: 0, y: 200 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { enterExitDurationMs: 0, relaxIterations: 1 },
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const absorbedCircle = getCircle(canvasElement, 'n0');
+		const absorbedCenter = getCenter(absorbedCircle);
+		const survivorCenter = getCenter(getCircle(canvasElement, 'n1'));
+
+		dispatchContextMenu(absorbedCircle, absorbedCenter.x, absorbedCenter.y);
+		await sleep();
+		within(canvasElement).getByRole('menuitem', { name: 'Merge' }).click();
+		await sleep();
+
+		dispatchPointer(stage, 'pointermove', survivorCenter.x, survivorCenter.y);
+		await sleep();
+		dispatchPointer(stage, 'pointerdown', survivorCenter.x, survivorCenter.y);
+		dispatchPointer(stage, 'pointerup', survivorCenter.x, survivorCenter.y);
+		await sleep();
+
+		// The count is the plan's own, so it is the number of edges a confirm
+		// would rewrite — not an estimate made separately from the merge.
+		const dialog = canvasElement.querySelector('[role="dialog"]');
+		expect(dialog).toBeInTheDocument();
+		expect(dialog?.querySelector('.merge-confirm-dialog-message')).toHaveTextContent(
+			'Merge nodes?'
+		);
+		expect(dialog?.querySelector('.merge-confirm-dialog-detail')).toHaveTextContent(
+			'2 edges will lose their direction.'
+		);
+		expect(
+			Array.from(dialog!.querySelectorAll('button')).map((button) => button.textContent?.trim())
+		).toEqual(['Cancel', 'Merge']);
+		expect(canvasElement.querySelector('[data-node-id="n0"]')).toBeInTheDocument();
+
+		(canvasElement.querySelector('.merge-confirm-dialog-cancel') as HTMLElement).click();
+		await sleep();
+		await waitForLayout();
+
+		// Cancel mutated nothing: the plan was only ever held, never committed.
+		expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-node-id="n0"]')).toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-edge-id="e0"]')).toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-edge-id="e2"]')).toBeInTheDocument();
+		const changeSpy = args.onMultigraphChange as ChangeSpy | undefined;
+		expect(changeSpy?.mock.calls ?? []).toHaveLength(0);
+	}}
+/>
+
+<Story
+	name="ConfirmingAMergeThatOverwritesEdgeDirectionCommitsTheMerge"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'n0', title: 'Node 0', description: '', tags: [] },
+				{ id: 'n1', title: 'Node 1', description: '', tags: [] },
+				{ id: 'n2', title: 'Node 2', description: '', tags: [] },
+				{ id: 'n3', title: 'Node 3', description: '', tags: [] }
+			],
+			edges: [
+				{ id: 'e0', source: 'n0', target: 'n2', directed: true },
+				{ id: 'e1', source: 'n2', target: 'n1', directed: true },
+				{ id: 'e2', source: 'n0', target: 'n3', directed: true },
+				{ id: 'e3', source: 'n3', target: 'n1', directed: true }
+			],
+			pinned: ['n0', 'n1', 'n2', 'n3'],
+			posByNodeId: {
+				n0: { x: -160, y: 0 },
+				n1: { x: 160, y: 0 },
+				n2: { x: 0, y: -200 },
+				n3: { x: 0, y: 200 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { enterExitDurationMs: 0, relaxIterations: 1 },
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const absorbedCircle = getCircle(canvasElement, 'n0');
+		const absorbedCenter = getCenter(absorbedCircle);
+		const survivorCenter = getCenter(getCircle(canvasElement, 'n1'));
+
+		dispatchContextMenu(absorbedCircle, absorbedCenter.x, absorbedCenter.y);
+		await sleep();
+		within(canvasElement).getByRole('menuitem', { name: 'Merge' }).click();
+		await sleep();
+
+		dispatchPointer(stage, 'pointermove', survivorCenter.x, survivorCenter.y);
+		await sleep();
+		dispatchPointer(stage, 'pointerdown', survivorCenter.x, survivorCenter.y);
+		dispatchPointer(stage, 'pointerup', survivorCenter.x, survivorCenter.y);
+		await sleep();
+
+		const dialog = canvasElement.querySelector('[role="dialog"]');
+		expect(dialog?.querySelector('.merge-confirm-dialog-detail')).toHaveTextContent(
+			'2 edges will lose their direction.'
+		);
+
+		(canvasElement.querySelector('.merge-confirm-dialog-confirm') as HTMLElement).click();
+		await sleep();
+		await waitForLayout();
+
+		expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
+		const changedGraph = lastChangedGraph(args);
+		expect(changedGraph.nodes.map((node) => node.id)).toEqual(['n1', 'n2', 'n3']);
+		// Exactly the two edges the dialog counted collapsed, and the survivor's
+		// direction is what remains on each.
+		expect(
+			changedGraph.edges.map((edge) => [edge.id, edge.sourceNodeId, edge.targetNodeId])
+		).toEqual([
+			['e1', 'n2', 'n1'],
+			['e3', 'n3', 'n1']
+		]);
+		expect(canvasElement.querySelector('[data-node-id="n0"]')).not.toBeInTheDocument();
 	}}
 />
 
@@ -4799,7 +5132,7 @@
 		);
 		expect(initialFadedPositions).toHaveLength(2);
 
-		dispatchWheel(stage, 250);
+		dispatchWheel(stage, wheelFactor(0.5));
 		await waitFor(() => {
 			expect(getStageTransform(canvasElement)).toContain('scale(0.5)');
 		});
@@ -5110,7 +5443,7 @@
 		const stage = getStage(canvasElement);
 		const center = getCenter(getCircle(canvasElement, 'n0'));
 
-		dispatchWheel(stage, -800, center.x, center.y);
+		dispatchWheel(stage, wheelFactor(2.6), center.x, center.y);
 		await within(canvasElement).findByRole('dialog');
 
 		const defineButton = await waitFor(() => {
@@ -5196,7 +5529,7 @@
 		expect(canvasTitle.textContent).not.toContain('$');
 
 		const stage = getStage(canvasElement);
-		dispatchWheel(stage, -800, getCenter(getCircle(canvasElement, 'n0')).x, 0);
+		dispatchWheel(stage, wheelFactor(2.6), getCenter(getCircle(canvasElement, 'n0')).x, 0);
 		const dialog = await within(canvasElement).findByRole('dialog');
 
 		// The heading names the dialog, so the name a screen reader announces is

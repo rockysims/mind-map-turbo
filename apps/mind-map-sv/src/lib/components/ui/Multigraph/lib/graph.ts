@@ -10,7 +10,7 @@ import { mathPlainText } from '../../MathText/lib/mathPlainText';
 import { symbolFor } from '../../MathText/lib/mathSymbols';
 import { parseTitleSyntax } from './titleSyntax';
 
-export interface AddNodeInput {
+interface AddNodeInput {
 	id?: string;
 	title?: string;
 	description?: string;
@@ -21,7 +21,7 @@ export interface AddNodeInput {
 	outputs?: QuantityDesignation[];
 }
 
-export interface AddEdgeInput {
+interface AddEdgeInput {
 	id?: string;
 	tags?: string[];
 	directed?: boolean;
@@ -492,7 +492,7 @@ function otherEndpoint(edge: EdgeData, nodeId: string): string {
 	return edge.sourceNodeId === nodeId ? edge.targetNodeId : edge.sourceNodeId;
 }
 
-function nextId(prefix: string, existingIds: string[]): string {
+export function nextId(prefix: string, existingIds: string[]): string {
 	const usedIds = new Set(existingIds);
 	let index = 0;
 

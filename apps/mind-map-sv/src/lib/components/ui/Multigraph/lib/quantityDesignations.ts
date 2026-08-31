@@ -41,7 +41,7 @@ export interface DesignationView {
 }
 
 /** Confirmed designations for one node, as they are stored. */
-export interface NodeDesignations {
+interface NodeDesignations {
 	inputs?: readonly QuantityDesignation[];
 	outputs?: readonly QuantityDesignation[];
 }

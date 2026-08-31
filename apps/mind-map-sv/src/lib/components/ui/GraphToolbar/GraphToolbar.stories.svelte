@@ -1,6 +1,6 @@
 <script module lang="ts">
 	import { defineMeta } from '@storybook/addon-svelte-csf';
-	import { expect, fn, within } from 'storybook/test';
+	import { expect, fn, userEvent, waitFor, within } from 'storybook/test';
 	import GraphToolbar from './GraphToolbar.svelte';
 
 	const { Story } = defineMeta({
@@ -9,10 +9,12 @@
 		tags: [],
 		argTypes: {
 			notice: { control: 'text' },
+			severity: { control: 'radio', options: ['info', 'warning'] },
 			settingsOpen: { control: 'boolean' },
 			onNewGraph: { control: false },
 			onOpenGraphFilePicker: { control: false },
-			onDownload: { control: false },
+			onImportGraphFile: { control: false },
+			onSave: { control: false },
 			onOpenSettings: { control: false }
 		},
 		parameters: {
@@ -30,13 +32,19 @@
 		canvasElement: HTMLElement;
 		args: {
 			notice?: string;
+			severity?: 'info' | 'warning';
 			settingsOpen?: boolean;
 			onNewGraph?: () => void;
 			onOpenGraphFilePicker?: () => void;
-			onDownload?: () => void;
+			onImportGraphFile?: (file: File) => void;
+			onSave?: () => void;
 			onOpenSettings?: () => void;
 		};
 	};
+
+	function graphFile(name: string): File {
+		return new File(['<!doctype html><html lang="en"></html>'], name, { type: 'text/html' });
+	}
 
 	function spyFor(callback: unknown): CallbackSpy {
 		return callback as CallbackSpy;
@@ -46,41 +54,57 @@
 <Story
 	name="UserSeesDocumentControlsOnly"
 	args={{
-		notice: 'Draft differs from opened file. Download needed.',
+		notice: 'Differs from the opened file. Save to keep the changes.',
 		onNewGraph: fn(),
 		onOpenGraphFilePicker: fn(),
-		onDownload: fn()
+		onImportGraphFile: fn(),
+		onSave: fn()
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		const canvas = within(canvasElement);
 
 		await expect(canvas.getByRole('button', { name: 'New' })).toBeInTheDocument();
 		await expect(canvas.getByText('Open')).toBeInTheDocument();
-		await expect(canvas.getByRole('button', { name: 'Download' })).toBeInTheDocument();
-		await expect(canvas.getByRole('status')).toHaveTextContent(
-			'Draft differs from opened file. Download needed.'
+		await expect(canvas.getByRole('button', { name: 'Import…' })).toBeInTheDocument();
+		await expect(canvas.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+
+		// Each control says what it does beyond its one-word label. Import and Open
+		// both take a file, so their tooltips have to separate "adds to this graph"
+		// from "opens somewhere else".
+		await expect(canvas.getByRole('button', { name: 'Import…' })).toHaveAttribute(
+			'title',
+			'Add a saved graph file to this graph, keeping both'
 		);
-		await expect(canvas.queryByLabelText('Import graph from file')).not.toBeInTheDocument();
+		await expect(canvas.getByRole('button', { name: 'Open' })).toHaveAttribute(
+			'title',
+			'Open a saved graph file in a new tab'
+		);
+		for (const name of ['New', 'Save']) {
+			await expect(canvas.getByRole('button', { name })).toHaveAttribute('title');
+		}
+		await expect(canvas.getByRole('status')).toHaveTextContent(
+			'Differs from the opened file. Save to keep the changes.'
+		);
 		await expect(canvas.queryByRole('button', { name: 'Delete graph' })).not.toBeInTheDocument();
 	}}
 />
 
 <Story
-	name="UserClicksNewAndDownload"
+	name="UserClicksNewAndSave"
 	args={{
-		notice: 'Matches downloaded file.',
+		notice: 'Matches saved file.',
 		onNewGraph: fn(),
 		onOpenGraphFilePicker: fn(),
-		onDownload: fn()
+		onSave: fn()
 	}}
 	play={async ({ canvasElement, args }: PlayContext) => {
 		const canvas = within(canvasElement);
 
 		canvas.getByRole('button', { name: 'New' }).click();
-		canvas.getByRole('button', { name: 'Download' }).click();
+		canvas.getByRole('button', { name: 'Save' }).click();
 
 		expect(spyFor(args.onNewGraph).mock.calls).toHaveLength(1);
-		expect(spyFor(args.onDownload).mock.calls).toHaveLength(1);
+		expect(spyFor(args.onSave).mock.calls).toHaveLength(1);
 	}}
 />
 
@@ -90,7 +114,7 @@
 		notice: 'Matches opened file.',
 		onNewGraph: fn(),
 		onOpenGraphFilePicker: fn(),
-		onDownload: fn()
+		onSave: fn()
 	}}
 	play={async ({ canvasElement, args }: PlayContext) => {
 		const canvas = within(canvasElement);
@@ -102,13 +126,89 @@
 />
 
 <Story
+	name="UserChoosesAFileToImport"
+	args={{
+		notice: 'Matches opened file.',
+		onNewGraph: fn(),
+		onOpenGraphFilePicker: fn(),
+		onImportGraphFile: fn(),
+		onSave: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		const canvas = within(canvasElement);
+		const input = canvas.getByLabelText('Graph file to import') as HTMLInputElement;
+		// The button only opens the file picker, which the browser refuses to do
+		// without a real user gesture — so the reader's part is played directly on
+		// the input, and this only checks the button is inert until a file arrives.
+		canvas.getByRole('button', { name: 'Import…' }).click();
+		expect(spyFor(args.onImportGraphFile).mock.calls).toHaveLength(0);
+
+		await userEvent.upload(input, graphFile('other-graph.html'));
+
+		await waitFor(() => expect(spyFor(args.onImportGraphFile).mock.calls).toHaveLength(1));
+		expect((spyFor(args.onImportGraphFile).mock.calls[0][0] as File).name).toBe('other-graph.html');
+		// Reset on change, so picking the same file again is picked up again.
+		expect(input.value).toBe('');
+	}}
+/>
+
+<Story
+	name="UserSeesUnsavedWorkWarning"
+	args={{
+		notice: 'Caching is blocked here. Save to a file to keep it.',
+		severity: 'warning',
+		onNewGraph: fn(),
+		onOpenGraphFilePicker: fn(),
+		onSave: fn()
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const canvas = within(canvasElement);
+
+		const alert = canvas.getByRole('alert');
+		await expect(alert).toHaveTextContent('Caching is blocked here. Save to a file to keep it.');
+		await expect(alert).toHaveAttribute('aria-live', 'assertive');
+		// A sentence longer than the notice column wraps inside it rather than
+		// stretching the toolbar or being clipped.
+		await expect(getComputedStyle(alert).whiteSpace).toBe('normal');
+		await expect(canvas.queryByRole('status')).not.toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="UserSeesNoticeSentencesStacked"
+	args={{
+		notice: 'Draft cached in this browser. Save to keep it.',
+		onNewGraph: fn(),
+		onOpenGraphFilePicker: fn(),
+		onSave: fn()
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const canvas = within(canvasElement);
+
+		const status = canvas.getByRole('status');
+		await expect(status).toHaveTextContent('Draft cached in this browser. Save to keep it.');
+		// Stacked, not run together: the toolbar stays narrow enough to sit beside
+		// the buttons instead of stretching across the viewport.
+		const lines = Array.from(status.querySelectorAll('span'));
+		// Each line carries a trailing space so the sentences do not run together
+		// in the accessible text; the visible wording is what is asserted here.
+		await expect(lines.map((line) => line.textContent?.trim())).toEqual([
+			'Draft cached in this browser.',
+			'Save to keep it.'
+		]);
+		await expect(getComputedStyle(lines[0]).display).toBe('block');
+	}}
+/>
+
+<Story
 	name="UserOpensSettingsFromTheSecondPill"
 	args={{
-		notice: 'Draft differs from opened file. Download needed.',
+		notice: 'Draft cached in this browser. Save to keep it.',
 		settingsOpen: false,
 		onNewGraph: fn(),
 		onOpenGraphFilePicker: fn(),
-		onDownload: fn(),
+		onImportGraphFile: fn(),
+		onSave: fn(),
 		onOpenSettings: fn()
 	}}
 	play={async ({ canvasElement, args }: PlayContext) => {
@@ -120,37 +220,18 @@
 		await expect(settings).toHaveAttribute('aria-haspopup', 'dialog');
 		await expect(settings).toHaveAttribute('aria-expanded', 'false');
 
-		// One wrapper holds both pills, so the variable-width notice can never
-		// position the Settings button independently of the document controls.
+		// One row holds both pills, so Settings cannot drift away from the document
+		// controls however the toolbar's contents change.
 		const row = settings.closest('.toolbar-row');
 		await expect(row).not.toBeNull();
-		await expect(row).toContainElement(canvas.getByRole('button', { name: 'Download' }));
+		await expect(row).toContainElement(canvas.getByRole('button', { name: 'Save' }));
 		await expect(row).toContainElement(canvas.getByRole('status'));
 
 		settings.click();
 
 		expect(spyFor(args.onOpenSettings).mock.calls).toHaveLength(1);
 		expect(spyFor(args.onNewGraph).mock.calls).toHaveLength(0);
-	}}
-/>
-
-<Story
-	name="UserSeesTheSettingsPillMarkedOpen"
-	args={{
-		notice: 'Matches downloaded file.',
-		settingsOpen: true,
-		onNewGraph: fn(),
-		onOpenGraphFilePicker: fn(),
-		onDownload: fn(),
-		onOpenSettings: fn()
-	}}
-	play={async ({ canvasElement }: PlayContext) => {
-		const canvas = within(canvasElement);
-
-		await expect(canvas.getByRole('button', { name: 'Settings' })).toHaveAttribute(
-			'aria-expanded',
-			'true'
-		);
+		expect(spyFor(args.onSave).mock.calls).toHaveLength(0);
 	}}
 />
 

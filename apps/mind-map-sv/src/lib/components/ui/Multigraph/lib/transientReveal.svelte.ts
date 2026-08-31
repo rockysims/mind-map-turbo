@@ -17,8 +17,6 @@ import {
 	type NavStackEntry
 } from './navStack';
 
-export type { NavStackEntry } from './navStack';
-
 export class TransientRevealController {
 	#entries = $state<readonly NavStackEntry[]>([]);
 	/**

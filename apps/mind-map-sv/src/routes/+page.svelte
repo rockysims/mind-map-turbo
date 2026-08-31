@@ -10,16 +10,18 @@
 		OPEN_HTML_FILE_TEXT_SESSION_KEY,
 		OPEN_HTML_FILE_WINDOW_NAME_PREFIX,
 		openHtmlFilePickerInNewTab,
-		openHtmlTextInNewTab
+		openHtmlTextInNewTab,
+		readFileText
 	} from '$lib/browserGraphFile';
 	import {
 		usePersistedGraph,
 		type PersistedGraph
 	} from '$lib/components/ui/GraphPersistence/usePersistedGraph.svelte';
-	import { readSettingsSeed } from '$lib/config/settingsSeed';
 	import GraphToolbar from '$lib/components/ui/GraphToolbar/GraphToolbar.svelte';
 	import Multigraph from '$lib/components/ui/Multigraph/Multigraph.svelte';
+	import RevertBanner from '$lib/components/ui/RevertBanner/RevertBanner.svelte';
 	import { createDefaultGraph, shouldEditInitialRootTitle } from '$lib/defaultGraph';
+	import { documentStatusHasUnsavedChanges } from '$lib/documentStatus';
 	import type { EmbeddedDocumentConflictChoice } from '$lib/graphPersistenceController';
 	import {
 		GRAPH_HTML_PAYLOAD_SCRIPT_ID,
@@ -27,11 +29,13 @@
 		type GraphFileDocument
 	} from '$lib/graphFile';
 	import {
+		appUrlWithoutGraphRoute,
 		DEFAULT_GRAPH_ID,
 		graphHash,
 		graphIdFromUrl,
 		graphRouteModeForProtocol,
-		graphSearch
+		graphSearch,
+		urlWithoutHash
 	} from '$lib/graphRoute';
 	import {
 		cleanExportHtmlShell,
@@ -39,11 +43,17 @@
 		isSelfContainedHtmlShell,
 		OFFLINE_APP_SHELL_PATH
 	} from '$lib/htmlShell';
+	import { readSettingsSeed } from '$lib/config/settingsSeed';
 	import { createPersistence, estimateNamespaceUsageBytes } from '$lib/persistence';
 	import { SaveScheduler } from '$lib/saveScheduler';
+	import { resolveGraphStorage, type StorageDurability } from '$lib/storageAvailability';
 
 	const EDIT_ROOT_PARAM = 'editRoot';
 	const RESET_SETTINGS_PARAM = 'resetSettings';
+	// Written as short sentences: the toolbar stacks one per line, so each has to
+	// stand on its own in a notice column narrower than the message used to be.
+	const STARTUP_ERROR_NOTICE =
+		'The app could not start. Try reloading the page. Another browser may work.';
 
 	let persisted = $state<PersistedGraph | null>(null);
 	/**
@@ -52,6 +62,8 @@
 	 * `Multigraph` inside it.
 	 */
 	let settingsPanelOpen = $state(false);
+	let storageDurability = $state<StorageDurability>('durable');
+	let startupError = $state<string | null>(null);
 	let graphAssetStore = $state<IndexedDbGraphAssetStore | null>(null);
 	let selectedGraphId = $state(graphIdFromUrl(page.url));
 	let initialTitleEditNodeId = $state<string | null>(null);
@@ -62,114 +74,167 @@
 	const defaultPrimaryNodeId = $derived(persisted?.graph.nodes[0]?.id ?? '');
 
 	onMount(() => {
-		selectedGraphId = graphIdFromUrl(
-			new URL(window.location.href),
-			graphRouteModeForProtocol(window.location.protocol)
-		);
+		try {
+			selectedGraphId = graphIdFromUrl(
+				new URL(window.location.href),
+				graphRouteModeForProtocol(window.location.protocol)
+			);
 
-		const persistence = createPersistence('local', {
-			storage: localStorage,
-			namespace: APP_CONFIG.persistence.storageNamespace
-		});
-		const assetStore = new IndexedDbGraphAssetStore();
-		graphAssetStore = assetStore;
+			// Reading window.localStorage throws outright in browsers configured to
+			// block site data, so the app never touches it directly: it runs on
+			// whatever storage this resolves to, in memory if it has to.
+			const { storage, durability } = resolveGraphStorage();
+			storageDurability = durability;
 
-		const selectedGraphFileText = consumeOpenFileWindowName() ?? consumeOpenFileText();
-		const embeddedGraph =
-			readSelectedGraphDocument(selectedGraphFileText) ?? readEmbeddedGraphDocument();
-		const openedFromFilePicker = selectedGraphFileText !== null || consumeOpenFileFromPickerFlag();
+			const persistence = createPersistence('local', {
+				storage,
+				namespace: APP_CONFIG.persistence.storageNamespace
+			});
+			const assetStore = new IndexedDbGraphAssetStore();
+			graphAssetStore = assetStore;
 
-		const persistedGraph = usePersistedGraph({
-			persistence,
-			createScheduler: (onStatus) =>
-				new SaveScheduler({
-					persistence,
-					debounceMs: APP_CONFIG.persistence.saveDebounceMs,
-					estimateUsageBytes: () =>
-						estimateNamespaceUsageBytes(localStorage, APP_CONFIG.persistence.storageNamespace),
-					quotaBudgetBytes: APP_CONFIG.persistence.quotaBudgetBytes,
-					quotaWarningRatio: APP_CONFIG.persistence.quotaWarningRatio,
-					onStatus
-				}),
-			createDefaultGraph,
-			navigate: async (graphId) => {
-				selectedGraphId = graphId;
-				const routeMode = graphRouteModeForProtocol(window.location.protocol);
-				if (routeMode === 'hash') {
+			const selectedGraphFileText = consumeOpenFileWindowName() ?? consumeOpenFileText();
+			const embeddedGraph =
+				readSelectedGraphDocument(selectedGraphFileText) ?? readEmbeddedGraphDocument();
+			const openedFromFilePicker =
+				selectedGraphFileText !== null || consumeOpenFileFromPickerFlag();
+
+			const persistedGraph = usePersistedGraph({
+				persistence,
+				createScheduler: (onStatus) =>
+					new SaveScheduler({
+						persistence,
+						debounceMs: APP_CONFIG.persistence.saveDebounceMs,
+						estimateUsageBytes: () =>
+							estimateNamespaceUsageBytes(storage, APP_CONFIG.persistence.storageNamespace),
+						quotaBudgetBytes: APP_CONFIG.persistence.quotaBudgetBytes,
+						quotaWarningRatio: APP_CONFIG.persistence.quotaWarningRatio,
+						onStatus
+					}),
+				createDefaultGraph,
+				navigate: async (graphId) => {
+					selectedGraphId = graphId;
+					const routeMode = graphRouteModeForProtocol(window.location.protocol);
+					if (routeMode === 'hash') {
+						window.history.pushState(
+							window.history.state,
+							'',
+							`${urlWithoutHash(window.location.href)}${graphHash(graphId)}`
+						);
+						return;
+					}
+
+					const currentPath = appUrlWithoutGraphRoute(window.location.href);
 					window.history.pushState(
 						window.history.state,
 						'',
-						`${window.location.href.split('#')[0]}${graphHash(graphId)}`
+						`${currentPath}${graphId === DEFAULT_GRAPH_ID ? '' : graphSearch(graphId)}`
 					);
-					return;
-				}
+				},
+				storageNamespace: APP_CONFIG.persistence.storageNamespace,
+				durability,
+				// Read once per `createGraph` call, never stored: the seed is stamped
+				// into a new graph's own overrides and never consulted again, so
+				// changing or clearing it later cannot retune a graph that already
+				// exists ("Use as seed for new graphs" writes this same key).
+				createSettingsSeed: () =>
+					readSettingsSeed(localStorage, APP_CONFIG.persistence.storageNamespace),
+				confirmGraphImportReplace: ({ loadedGraphId }) =>
+					window.confirm(
+						`Replace the current graph "${loadedGraphId}" with the imported graph? This cannot be undone.`
+					),
+				// Shipped defaults, not the graph's own settings: a file's zoom bounds
+				// cannot clamp the parse that loads them.
+				minScale: APP_CONFIG.multigraph.zoom.minScale,
+				maxScale: APP_CONFIG.multigraph.zoom.maxScale,
+				assetStore,
+				createDocumentId: () =>
+					typeof crypto.randomUUID === 'function'
+						? crypto.randomUUID()
+						: `doc-${Date.now().toString(36)}`,
+				openUnsupportedHtmlFile: openHtmlTextInNewTab,
+				chooseEmbeddedDocumentConflict: ({ documentId }) =>
+					new Promise<EmbeddedDocumentConflictChoice>((resolve) => {
+						embeddedDocumentConflict = { documentId, resolve };
+					})
+			});
+			persisted = persistedGraph;
+			void loadRouteGraph(persistedGraph, embeddedGraph, {
+				flushCurrent: false,
+				openedFromPicker: openedFromFilePicker
+			});
 
-				const currentWithoutHash = window.location.href.split('#')[0];
-				const currentPath = currentWithoutHash.split('?')[0];
-				window.history.pushState(
-					window.history.state,
-					'',
-					`${currentPath}${graphId === DEFAULT_GRAPH_ID ? '' : graphSearch(graphId)}`
-				);
-			},
-			storageNamespace: APP_CONFIG.persistence.storageNamespace,
-			// Read once per `createGraph` call, never stored: the seed is stamped
-			// into a new graph's own overrides and never consulted again, so
-			// changing or clearing it later cannot retune a graph that already
-			// exists (T09's "Use as seed for new graphs" writes this same key via
-			// `SettingsPanel`'s own default `onSaveSeed`).
-			createSettingsSeed: () =>
-				readSettingsSeed(localStorage, APP_CONFIG.persistence.storageNamespace),
-			confirmGraphImportReplace: ({ loadedGraphId }) =>
-				window.confirm(
-					`Replace the current graph "${loadedGraphId}" with the imported graph? This cannot be undone.`
-				),
-			// Shipped defaults, not the graph's own settings: a file's zoom bounds
-			// cannot clamp the parse that loads them.
-			minScale: APP_CONFIG.multigraph.zoom.minScale,
-			maxScale: APP_CONFIG.multigraph.zoom.maxScale,
-			assetStore,
-			createDocumentId: () =>
-				typeof crypto.randomUUID === 'function'
-					? crypto.randomUUID()
-					: `doc-${Date.now().toString(36)}`,
-			openUnsupportedHtmlFile: openHtmlTextInNewTab,
-			chooseEmbeddedDocumentConflict: ({ documentId }) =>
-				new Promise<EmbeddedDocumentConflictChoice>((resolve) => {
-					embeddedDocumentConflict = { documentId, resolve };
-				})
-		});
-		persisted = persistedGraph;
-		void loadRouteGraph(persistedGraph, embeddedGraph, {
-			flushCurrent: false,
-			openedFromPicker: openedFromFilePicker
-		});
+			const onStorage = (event: StorageEvent) => {
+				void persistedGraph.handleStorageEvent({ key: event.key });
+			};
+			const onRouteChange = () => {
+				void loadRouteGraph(persistedGraph, embeddedGraph, { flushCurrent: true });
+			};
+			const onBeforeUnload = (event: BeforeUnloadEvent) => {
+				if (!hasUnsafeUnsavedChanges()) return;
+				event.preventDefault();
+				event.returnValue = '';
+			};
+			// Camera moves no longer schedule a cache write of their own, so leaving
+			// the page is where the current pan/zoom (and any still-debounced edit)
+			// has to reach the cache. 'visibilitychange' covers mobile, where a tab
+			// can be discarded without ever firing 'pagehide'.
+			const onPageHide = () => {
+				void persistedGraph.flushPendingSave();
+			};
+			const onVisibilityChange = () => {
+				if (document.visibilityState === 'hidden') onPageHide();
+			};
 
-		const onStorage = (event: StorageEvent) => {
-			void persistedGraph.handleStorageEvent({ key: event.key });
-		};
-		const onRouteChange = () => {
-			void loadRouteGraph(persistedGraph, embeddedGraph, { flushCurrent: true });
-		};
+			window.addEventListener('storage', onStorage);
+			window.addEventListener('hashchange', onRouteChange);
+			window.addEventListener('popstate', onRouteChange);
+			window.addEventListener('beforeunload', onBeforeUnload);
+			window.addEventListener('pagehide', onPageHide);
+			document.addEventListener('visibilitychange', onVisibilityChange);
 
-		window.addEventListener('storage', onStorage);
-		window.addEventListener('hashchange', onRouteChange);
-		window.addEventListener('popstate', onRouteChange);
-
-		return () => {
-			persistedGraph.dispose();
-			window.removeEventListener('storage', onStorage);
-			window.removeEventListener('hashchange', onRouteChange);
-			window.removeEventListener('popstate', onRouteChange);
-		};
+			return () => {
+				persistedGraph.dispose();
+				window.removeEventListener('storage', onStorage);
+				window.removeEventListener('hashchange', onRouteChange);
+				window.removeEventListener('popstate', onRouteChange);
+				window.removeEventListener('beforeunload', onBeforeUnload);
+				window.removeEventListener('pagehide', onPageHide);
+				document.removeEventListener('visibilitychange', onVisibilityChange);
+			};
+		} catch {
+			// Startup itself failed. Say so instead of leaving a blank page that
+			// looks like it is still loading.
+			startupError = STARTUP_ERROR_NOTICE;
+			return undefined;
+		}
 	});
+
+	/**
+	 * True only when leaving would lose work: unsaved changes that are not even
+	 * safely cached. Refreshing a cached draft must stay silent.
+	 */
+	function hasUnsafeUnsavedChanges(): boolean {
+		if (persisted === null) return false;
+		if (!documentStatusHasUnsavedChanges(persisted.documentStatus)) return false;
+		return !persisted.draftCached || storageDurability === 'memory-only';
+	}
 
 	function createNewGraph(): void {
 		openNewGraphInNewTab();
 	}
 
 	function openGraphFilePicker(): void {
-		openHtmlFilePickerInNewTab(currentAppUrlWithoutGraphRoute());
+		openHtmlFilePickerInNewTab(appUrlWithoutGraphRoute(window.location.href));
+	}
+
+	/**
+	 * Fold a chosen file into the graph on screen. Read here rather than through
+	 * the picker tab Open uses: that tab reloads the app to hand the file over,
+	 * and this import is meant to keep the reader exactly where they are.
+	 */
+	async function importGraphFile(file: File): Promise<void> {
+		await persisted?.importGraphIntoCurrentFromReader(() => readFileText(file));
 	}
 
 	function consumeOpenFileFromPickerFlag(): boolean {
@@ -243,7 +308,7 @@
 		if (requestedRootEdit) removeEditRootTitleFlagFromUrl();
 	}
 
-	async function handleDownload(): Promise<void> {
+	async function handleSave(): Promise<void> {
 		if (!persisted) return;
 		downloadFileArtifact(await persisted.exportGraphDocument(await exportHtmlShell()));
 	}
@@ -251,8 +316,6 @@
 	function readEmbeddedGraphDocument(): GraphFileDocument | null {
 		if (document.getElementById(GRAPH_HTML_PAYLOAD_SCRIPT_ID) === null) return null;
 		try {
-			// Shipped defaults, for the same reason: a file's own settings cannot
-			// clamp the parse that loads them.
 			return parseGraphFileText(currentHtmlShell(), {
 				minScale: APP_CONFIG.multigraph.zoom.minScale,
 				maxScale: APP_CONFIG.multigraph.zoom.maxScale
@@ -265,8 +328,6 @@
 	function readSelectedGraphDocument(text: string | null): GraphFileDocument | null {
 		if (text === null) return null;
 		try {
-			// Shipped defaults, for the same reason: a file's own settings cannot
-			// clamp the parse that loads them.
 			return parseGraphFileText(text, {
 				minScale: APP_CONFIG.multigraph.zoom.minScale,
 				maxScale: APP_CONFIG.multigraph.zoom.maxScale
@@ -303,11 +364,6 @@
 		return `<!doctype html>\n${html.outerHTML}`;
 	}
 
-	function currentAppUrlWithoutGraphRoute(): string {
-		const currentWithoutHash = window.location.href.split('#')[0];
-		return currentWithoutHash.split('?')[0];
-	}
-
 	function openNewGraphInNewTab(): void {
 		const graphId =
 			typeof crypto.randomUUID === 'function'
@@ -318,8 +374,10 @@
 			routeMode === 'hash' &&
 			(window.location.protocol === 'file:' || window.location.protocol === 'blob:')
 		) {
-			const currentWithoutHash = window.location.href.split('#')[0];
-			window.open(`${currentWithoutHash}${graphHash(graphId, { editRoot: true })}`, '_blank');
+			window.open(
+				`${urlWithoutHash(window.location.href)}${graphHash(graphId, { editRoot: true })}`,
+				'_blank'
+			);
 			return;
 		}
 		if (routeMode === 'hash' && isSelfContainedHtmlShell(currentHtmlShell())) {
@@ -330,8 +388,7 @@
 			return;
 		}
 
-		const currentWithoutHash = window.location.href.split('#')[0];
-		const currentPath = currentWithoutHash.split('?')[0];
+		const currentPath = appUrlWithoutGraphRoute(window.location.href);
 		window.open(
 			`${currentPath}${
 				routeMode === 'hash'
@@ -340,44 +397,6 @@
 			}`,
 			'_blank'
 		);
-	}
-
-	function shouldEditRootTitleFromUrl(): boolean {
-		const url = new URL(window.location.href);
-		const routeMode = graphRouteModeForProtocol(window.location.protocol);
-		if (routeMode === 'hash') {
-			const hash = url.hash.slice(1);
-			if (hash.startsWith('/')) {
-				return new URL(hash, 'https://hash-route.local').searchParams.get(EDIT_ROOT_PARAM) === '1';
-			}
-			const params = new SvelteURLSearchParams(hash.startsWith('?') ? hash.slice(1) : hash);
-			return params.get(EDIT_ROOT_PARAM) === '1';
-		}
-		return url.searchParams.get(EDIT_ROOT_PARAM) === '1';
-	}
-
-	function removeEditRootTitleFlagFromUrl(): void {
-		const url = new URL(window.location.href);
-		const routeMode = graphRouteModeForProtocol(window.location.protocol);
-		if (routeMode === 'hash') {
-			const hash = url.hash.slice(1);
-			if (hash.startsWith('/')) {
-				const hashRoute = new URL(hash, 'https://hash-route.local');
-				hashRoute.searchParams.delete(EDIT_ROOT_PARAM);
-				window.history.replaceState(
-					window.history.state,
-					'',
-					`${url.href.split('#')[0]}#${hashRoute.pathname}${hashRoute.search}`
-				);
-				return;
-			}
-			const params = new SvelteURLSearchParams(hash.startsWith('?') ? hash.slice(1) : hash);
-			params.delete(EDIT_ROOT_PARAM);
-			window.history.replaceState(window.history.state, '', `${url.href.split('#')[0]}#${params}`);
-			return;
-		}
-		url.searchParams.delete(EDIT_ROOT_PARAM);
-		window.history.replaceState(window.history.state, '', url);
 	}
 
 	/**
@@ -464,6 +483,48 @@
 		setTimeout(() => removeResetSettingsFlagFromUrl(), APP_CONFIG.persistence.saveDebounceMs + 50);
 	}
 
+	function shouldEditRootTitleFromUrl(): boolean {
+		const url = new URL(window.location.href);
+		const routeMode = graphRouteModeForProtocol(window.location.protocol);
+		if (routeMode === 'hash') {
+			const hash = url.hash.slice(1);
+			if (hash.startsWith('/')) {
+				return new URL(hash, 'https://hash-route.local').searchParams.get(EDIT_ROOT_PARAM) === '1';
+			}
+			const params = new SvelteURLSearchParams(hash.startsWith('?') ? hash.slice(1) : hash);
+			return params.get(EDIT_ROOT_PARAM) === '1';
+		}
+		return url.searchParams.get(EDIT_ROOT_PARAM) === '1';
+	}
+
+	function removeEditRootTitleFlagFromUrl(): void {
+		const url = new URL(window.location.href);
+		const routeMode = graphRouteModeForProtocol(window.location.protocol);
+		if (routeMode === 'hash') {
+			const hash = url.hash.slice(1);
+			if (hash.startsWith('/')) {
+				const hashRoute = new URL(hash, 'https://hash-route.local');
+				hashRoute.searchParams.delete(EDIT_ROOT_PARAM);
+				window.history.replaceState(
+					window.history.state,
+					'',
+					`${urlWithoutHash(url.href)}#${hashRoute.pathname}${hashRoute.search}`
+				);
+				return;
+			}
+			const params = new SvelteURLSearchParams(hash.startsWith('?') ? hash.slice(1) : hash);
+			params.delete(EDIT_ROOT_PARAM);
+			window.history.replaceState(
+				window.history.state,
+				'',
+				`${urlWithoutHash(url.href)}#${params}`
+			);
+			return;
+		}
+		url.searchParams.delete(EDIT_ROOT_PARAM);
+		window.history.replaceState(window.history.state, '', url);
+	}
+
 	async function exportHtmlShell(): Promise<string> {
 		const capturedShell = capturedExportHtmlShell();
 		if (capturedShell !== null && isSelfContainedHtmlShell(capturedShell)) {
@@ -485,13 +546,26 @@
 
 <div class="page-shell">
 	<GraphToolbar
-		notice={persisted?.notice ?? 'Loading graph...'}
+		notice={startupError ?? persisted?.notice ?? 'Loading graph...'}
+		severity={startupError !== null ? 'warning' : (persisted?.noticeSeverity ?? 'info')}
 		onNewGraph={createNewGraph}
 		onOpenGraphFilePicker={openGraphFilePicker}
-		onDownload={() => void handleDownload()}
+		onImportGraphFile={(file) => void importGraphFile(file)}
+		onSave={() => void handleSave()}
 		settingsOpen={settingsPanelOpen}
 		onOpenSettings={() => (settingsPanelOpen = !settingsPanelOpen)}
 	/>
+
+	{#if persisted !== null && persisted.snapshot !== null}
+		<RevertBanner
+			label={persisted.snapshot.label}
+			createdAt={persisted.snapshot.createdAt}
+			snapshotNodeCount={persisted.snapshot.nodeCount}
+			currentNodeCount={persisted.graph.nodes.length}
+			onRevert={() => void persisted?.revertToSnapshot()}
+			onDismiss={() => persisted?.dismissSnapshot()}
+		/>
+	{/if}
 
 	{#if embeddedDocumentConflict !== null}
 		<div
@@ -501,11 +575,11 @@
 			aria-modal="true"
 		>
 			<section class="conflict-panel">
-				<h2 id="conflict-title">Local edits found</h2>
-				<p>This browser has local edits for this graph. What do you want to open?</p>
+				<h2 id="conflict-title">Cached edits found</h2>
+				<p>This browser has cached edits for this graph. What do you want to open?</p>
 				<div class="conflict-actions">
 					<button type="button" onclick={() => resolveEmbeddedDocumentConflict('recover-draft')}>
-						Recover local edits
+						Recover cached edits
 					</button>
 					<button
 						type="button"
@@ -520,15 +594,11 @@
 	{/if}
 
 	{#if persisted !== null}
-		<!--
-			Settings are deliberately absent from this key. `notifySettingsChanged`
-			leaves `graphGeneration` alone precisely so a slider release cannot remount
-			the canvas and throw away the layout the reader was looking at.
-		-->
 		{#key `${persisted.loadedGraphId}:${persisted.graphGeneration}`}
 			<Multigraph
 				multigraphData={persisted.graph}
 				graphGeneration={persisted.graphGeneration}
+				graphRevision={persisted.graphRevision}
 				initialViewState={persisted.viewState}
 				{initialTitleEditNodeId}
 				{defaultPrimaryNodeId}
@@ -536,7 +606,8 @@
 				assetScope={persisted.loadedGraphId}
 				settings={persisted.settings}
 				{settingsPanelOpen}
-				onMultigraphChange={(graph) => persisted?.notifyGraphChanged(graph, { syncView: true })}
+				onMultigraphChange={(graph, generation) =>
+					persisted?.notifyGraphChanged(graph, { syncView: true, generation })}
 				onViewStateChange={(viewState) =>
 					persisted?.notifyViewStateChanged(viewState, { syncView: true })}
 				onSettingsChange={(next) => persisted?.notifySettingsChanged(next, { syncView: true })}

@@ -13,7 +13,7 @@
 	import NodeChrome from './NodeChrome.svelte';
 	import NodeCompactContent from './NodeCompactContent.svelte';
 
-	const {
+	let {
 		nodeData = {
 			id: 'id_fallback',
 			title: 'title_fallback',
@@ -35,7 +35,7 @@
 		borderWidthPx = NODE_BORDER_WIDTH,
 		pinnedBorderWidthPx = PINNED_NODE_BORDER_WIDTH,
 		fontSizePx = NODE_TEXT_FONT_SIZE
-	} = $props<{
+	}: {
 		nodeData: NodeData;
 		isTitleEditing?: boolean;
 		/** Caret offset for the opening title input; omitted means select-all. */
@@ -54,7 +54,7 @@
 		pinnedBorderWidthPx?: number;
 		/** Title font size inside the compact circle. */
 		fontSizePx?: number;
-	}>();
+	} = $props();
 
 	const borderBackground = $derived(tagBorderBackground(borderSegments));
 </script>

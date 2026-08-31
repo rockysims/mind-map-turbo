@@ -14,7 +14,7 @@ const PERCENT_PRECISION_FACTOR = 10_000;
 
 export type RenderableEdgeVisibility = Exclude<EdgeVisibility, { kind: 'hidden' }>;
 
-export interface EdgeBackgroundOptions {
+interface EdgeBackgroundOptions {
 	occlusionWindows?: readonly EdgeOcclusionWindow[];
 	edgeLengthPx?: number;
 	edgeArrowLengthPx?: number;

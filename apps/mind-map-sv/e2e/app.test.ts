@@ -110,7 +110,9 @@ test('persists edited nodes across reloads in one document tab', async ({ page }
 
 	await page.reload();
 	await expect(page.getByText('Persisted Node')).toBeVisible();
-	await expect(page.getByRole('status')).toContainText('Download needed');
+	await expect(page.getByRole('status')).toContainText(
+		'Draft cached in this browser. Save to keep it.'
+	);
 
 	const storedPayload = await page.evaluate((graphId) => {
 		const key = `mind-map:graph:${encodeURIComponent(graphId)}`;
@@ -129,7 +131,9 @@ test('persists edited nodes across reloads in one document tab', async ({ page }
 	await expect(newGraphPage).toHaveURL(/graph=graph-/);
 
 	await expect(page.getByText('Persisted Node')).toBeVisible();
-	await expect(page.getByRole('status')).toContainText('Download needed');
+	await expect(page.getByRole('status')).toContainText(
+		'Draft cached in this browser. Save to keep it.'
+	);
 });
 
 test('exports HTML graph document containing schemaVersion, graph data, and viewState', async ({
@@ -148,11 +152,11 @@ test('exports HTML graph document containing schemaVersion, graph data, and view
 	// Dispatch a wheel event directly on the stage to trigger a zoom and produce
 	// a non-default viewState before exporting.
 	await page.locator('.stage').dispatchEvent('wheel', { deltaY: -300 });
-	await waitForStoredViewState(page, graphId, { scaleDifferentFrom: 1 });
+	await waitForStageScale(page, { differentFrom: 1 });
 
-	// Capture the Download artifact.
+	// Capture the saved file artifact.
 	const downloadPromise = page.waitForEvent('download');
-	await page.getByRole('button', { name: 'Download' }).click();
+	await toolbarSaveButton(page).click();
 	const download = await downloadPromise;
 	const downloadedPath = await download.path();
 	if (!downloadedPath) throw new Error('Download did not produce a file');
@@ -171,7 +175,7 @@ test('exports HTML graph document containing schemaVersion, graph data, and view
 	});
 	// Wheel zoom should have changed scale away from the neutral value of 1.
 	expect(doc.viewState.scale).not.toBe(1);
-	await expect(page.getByRole('status')).toHaveText('Matches downloaded file.');
+	await expect(page.getByRole('status')).toHaveText(`Saved ${graphId}.html. Check your downloads.`);
 });
 
 test('downloaded HTML documents propagate a clean live shell to descendants', async ({ page }) => {
@@ -375,7 +379,7 @@ test('opened HTML save file recovers dirty local draft before embedded data', as
 
 	await expect(page.getByText('Recovered Draft Node')).toBeVisible();
 	await expect(page.getByText('Fresh File Node')).not.toBeVisible();
-	await expect(page.getByRole('status')).toHaveText('Recovered local edits. Download needed.');
+	await expect(page.getByRole('status')).toHaveText('Recovered cached edits. Save to keep them.');
 });
 
 test('new opens a fresh graph from an opened HTML save file', async ({ page }) => {
@@ -427,12 +431,33 @@ test('browser back restores embedded graph after opened file hash route', async 
 	await expect(page.getByText('Root')).not.toBeVisible();
 });
 
+test('still renders the graph when the browser blocks site data', async ({ page }) => {
+	// Chrome's "Don't allow sites to save data" and Safari's "Block all cookies"
+	// make the window.localStorage GETTER itself throw, which used to abort the
+	// whole startup and leave a permanently blank "Loading graph..." page.
+	await page.addInitScript(() => {
+		Object.defineProperty(window, 'localStorage', {
+			configurable: true,
+			get() {
+				throw new Error('Access is denied for this document.');
+			}
+		});
+	});
+
+	await page.goto('/');
+
+	await expect(page.locator('.title-input')).toHaveValue('Root');
+	const alert = page.getByRole('alert');
+	await expect(alert).toHaveText('Caching is blocked here. Save to a file to keep it.');
+	await expect(toolbarSaveButton(page)).toBeVisible();
+});
+
 test('single-document toolbar omits graph library controls', async ({ page }) => {
 	await page.goto('/');
 
 	await expect(page.getByRole('button', { name: 'New' })).toBeVisible();
 	await expect(page.getByRole('button', { name: 'Open' })).toBeVisible();
-	await expect(page.getByRole('button', { name: 'Download' })).toBeVisible();
+	await expect(toolbarSaveButton(page)).toBeVisible();
 	await expect(page.getByLabel('Load graph', { exact: true })).toHaveCount(0);
 	await expect(page.getByLabel('Import graph from file')).toHaveCount(0);
 	await expect(page.getByRole('button', { name: 'Delete graph' })).toHaveCount(0);
@@ -462,7 +487,7 @@ test('load opens an HTML save file in a new tab', async ({ page }) => {
 	await expect(popup).not.toHaveURL('about:blank');
 	await expect(popup).not.toHaveURL(/^blob:/);
 	await expect(popup.getByText('Loaded File Node')).toBeVisible();
-	await expect(popup.getByText('Local edits found')).not.toBeVisible();
+	await expect(popup.getByText('Cached edits found')).not.toBeVisible();
 	await expect(page.getByText('Root')).toBeVisible();
 });
 
@@ -503,7 +528,7 @@ test('load opens selected HTML file instead of stale local document draft', asyn
 	await popup.waitForLoadState('domcontentloaded');
 	await expect(popup).not.toHaveURL('about:blank');
 	await expect(popup).not.toHaveURL(/^blob:/);
-	await expect(popup.getByText('Local edits found')).toBeVisible();
+	await expect(popup.getByText('Cached edits found')).toBeVisible();
 	await popup.getByRole('button', { name: 'Open selected file' }).click();
 
 	await expect(popup.getByText('Fresh Loaded Node')).toBeVisible();
@@ -511,7 +536,7 @@ test('load opens selected HTML file instead of stale local document draft', asyn
 	await waitForStoredTitle(popup, documentDraftGraphId(documentId), 'Fresh Loaded Node');
 });
 
-test('load can recover local edits instead of opening selected HTML file', async ({ page }) => {
+test('load can recover cached edits instead of opening selected HTML file', async ({ page }) => {
 	const documentId = `doc-load-recover-${Date.now()}`;
 	const tmpFile = join(tmpdir(), `e2e-load-recover-save-${Date.now()}.html`);
 	const filePayload = graphDocumentPayload({ documentId, title: 'Selected File Node' });
@@ -548,8 +573,8 @@ test('load can recover local edits instead of opening selected HTML file', async
 	await popup.waitForLoadState('domcontentloaded');
 	await expect(popup).not.toHaveURL('about:blank');
 	await expect(popup).not.toHaveURL(/^blob:/);
-	await expect(popup.getByText('Local edits found')).toBeVisible();
-	await popup.getByRole('button', { name: 'Recover local edits' }).click();
+	await expect(popup.getByText('Cached edits found')).toBeVisible();
+	await popup.getByRole('button', { name: 'Recover cached edits' }).click();
 
 	await expect(popup.getByText('Recovered Draft Node')).toBeVisible();
 	await expect(popup.getByText('Selected File Node')).not.toBeVisible();
@@ -569,20 +594,10 @@ test('reload restores graph data and viewState from localStorage without file im
 	await editFirstNodeTitle(page, 'Refresh Test Node');
 	await waitForStoredTitle(page, graphId, 'Refresh Test Node');
 
-	// Zoom with a wheel event to create a non-default viewState.
+	// Zoom with a wheel event to create a non-default viewState. Zooming does not
+	// write to the cache by itself; leaving the page is what flushes the camera.
 	await page.locator('.stage').dispatchEvent('wheel', { deltaY: -300 });
-	await waitForStoredViewState(page, graphId, { scaleDifferentFrom: 1 });
-
-	// Capture the saved viewState before reloading.
-	const savedViewState = await page.evaluate((id) => {
-		const item = localStorage.getItem(`mind-map:graph:${encodeURIComponent(id)}`);
-		if (!item) return null;
-		return (
-			(JSON.parse(item) as { viewState?: { panX: number; panY: number; scale: number } })
-				.viewState ?? null
-		);
-	}, graphId);
-	if (!savedViewState) throw new Error('viewState was not saved to localStorage before reload');
+	const zoomedScale = await waitForStageScale(page, { differentFrom: 1 });
 
 	// Reload without any file import; localStorage is the only source of truth.
 	await page.reload();
@@ -599,14 +614,14 @@ test('reload restores graph data and viewState from localStorage without file im
 		)
 	).toBe(true);
 
-	// viewState should also be restored from localStorage.
-	expect(restoredPayload?.viewState).toMatchObject(savedViewState);
+	// The camera the user left with reached the cache on unload...
+	const storedScale = (restoredPayload as { viewState?: { scale?: number } } | null)?.viewState
+		?.scale;
+	expect(storedScale).toBeCloseTo(zoomedScale, 5);
 
-	// Stage transform should reflect the restored viewState.
-	const transform = await page
-		.locator('.stage-content')
-		.evaluate((el) => (el as HTMLElement).style.transform);
-	expect(transform).toContain(`scale(${savedViewState.scale})`);
+	// ...and the reloaded stage is rendering it. The rendered transform is
+	// rounded for the style attribute, so compare numbers rather than strings.
+	expect(await readStageScale(page)).toBeCloseTo(zoomedScale, 4);
 });
 
 test('deep zoom enters node focus and exits by wheel gestures', async ({ page }) => {
@@ -950,7 +965,7 @@ async function editFirstNodeTitle(page: Page, title: string) {
 	await page.getByRole('menuitem', { name: 'Edit' }).click();
 	await expect(page.getByLabel('Title')).toBeVisible();
 	await page.getByLabel('Title').fill(title);
-	await page.getByRole('button', { name: 'Save' }).click();
+	await page.getByRole('dialog').getByRole('button', { name: 'Done' }).click();
 	await expect(page.getByText(title)).toBeVisible();
 }
 
@@ -1057,26 +1072,33 @@ async function waitForStoredTitle(page: Page, graphId: string, title: string) {
 	);
 }
 
-async function waitForStoredViewState(
-	page: Page,
-	graphId: string,
-	opts: { scaleDifferentFrom: number }
-) {
-	await page.waitForFunction(
-		({ graphId, scaleDifferentFrom }) => {
-			const item = localStorage.getItem(`mind-map:graph:${encodeURIComponent(graphId)}`);
-			if (!item) return false;
-			const payload = JSON.parse(item) as { viewState?: { scale?: number } };
-			const scale = payload.viewState?.scale;
-			return scale !== undefined && scale !== scaleDifferentFrom;
-		},
-		{ graphId, scaleDifferentFrom: opts.scaleDifferentFrom }
-	);
+/**
+ * The live camera scale off the stage transform. Panning and zooming are not
+ * document edits, so they no longer write to the cache on their own: the DOM,
+ * not localStorage, is where a fresh camera shows up first.
+ */
+async function readStageScale(page: Page): Promise<number> {
+	const transform = await page
+		.locator('.stage-content')
+		.evaluate((el) => (el as HTMLElement).style.transform);
+	const scale = Number(/scale\(([-0-9.e]+)\)/.exec(transform)?.[1]);
+	if (!Number.isFinite(scale)) throw new Error(`No scale in stage transform: "${transform}"`);
+	return scale;
+}
+
+async function waitForStageScale(page: Page, opts: { differentFrom: number }): Promise<number> {
+	await expect.poll(async () => readStageScale(page)).not.toBeCloseTo(opts.differentFrom, 5);
+	return readStageScale(page);
+}
+
+/** The toolbar's Save writes the file; the node edit sheet has a Save of its own. */
+function toolbarSaveButton(page: Page) {
+	return page.getByLabel('Graph persistence controls').getByRole('button', { name: 'Save' });
 }
 
 async function downloadHtml(page: Page): Promise<{ html: string; suggestedFilename: string }> {
 	const downloadPromise = page.waitForEvent('download');
-	await page.getByRole('button', { name: 'Download' }).click();
+	await toolbarSaveButton(page).click();
 	const download = await downloadPromise;
 	const downloadedPath = await download.path();
 	if (!downloadedPath) throw new Error('Download did not produce a file');
@@ -1111,7 +1133,7 @@ async function brokenSelfContainedGraphHtml(payload: unknown): Promise<string> {
 	if (scriptEnd === -1) throw new Error('Expected a boot script before </body>');
 	const insertAt = scriptEnd + '</script>'.length;
 	return `${html.slice(0, insertAt)}
-<!----><div class="page-shell"><div class="graph-toolbar"><button type="button">New</button><button type="button">Open</button><button type="button">Download</button></div><div class="graph">stale rendered graph</div></div><div id="svelte-announcer" aria-live="assertive"></div>
+<!----><div class="page-shell"><div class="graph-toolbar"><button type="button">New</button><button type="button">Open</button><button type="button">Save</button></div><div class="graph">stale rendered graph</div></div><div id="svelte-announcer" aria-live="assertive"></div>
 ${html.slice(insertAt)}`;
 }
 

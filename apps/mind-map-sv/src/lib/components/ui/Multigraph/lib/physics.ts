@@ -2,20 +2,31 @@ import type { Point } from '../../types/multigraph';
 
 const OVERLAP_EPSILON = 0.001;
 
-export interface EdgeDistanceSettings {
+/**
+ * Clear space two nodes in different components hold open, as a fraction of
+ * their radius sum — the same unit every other gap in this file is measured in.
+ *
+ * Deliberately well under `edgeGapMinRadiusFactor`, so an unrelated pair never
+ * rests further apart than a connected one: with no path between them there is
+ * no relationship whose length the layout could be expressing, only enough of a
+ * seam to read two circles as two.
+ */
+const CROSS_COMPONENT_EXTRA_GAP_RADIUS_FACTOR = 0.1;
+
+interface EdgeDistanceSettings {
 	edgeGapMinRadiusFactor: number;
 	edgeGapMaxRadiusFactor: number;
 	edgeSpringStrength: number;
 }
 
-export interface HopRepulsionSettings {
+interface HopRepulsionSettings {
 	hopRepulsionStrength: number;
 	hopRepulsionMinHops: number;
 	hopRepulsionMaxHops: number;
 	hopRepulsionMaxExtraGapRadiusFactor: number;
 }
 
-export type GraphPhysicsSettings = EdgeDistanceSettings & HopRepulsionSettings;
+type GraphPhysicsSettings = EdgeDistanceSettings & HopRepulsionSettings;
 
 export interface EdgeEndpointIds {
 	sourceNodeId: string;
@@ -31,7 +42,7 @@ export interface EdgeEndpointIds {
 	springFactor?: number;
 }
 
-export function nodeMobility(
+function nodeMobility(
 	nodeId: string,
 	anchoredIds: Set<string>,
 	mobilityByNodeId?: Record<string, number>
@@ -137,15 +148,15 @@ export function relaxHopRepulsionStep(
 			const targetId = nodeIds[targetIndex];
 			if (!pairParticipates(sourceId, targetId, participatingNodeIds)) continue;
 			const hops = shortestPathHops[sourceId]?.[targetId] ?? shortestPathHops[targetId]?.[sourceId];
-			const progress = hopRepulsionProgress(hops, minHops, maxHops);
-			if (progress === 0) continue;
+			if (hops === undefined || hops < minHops) continue;
 
 			const source = nextPositions[sourceId];
 			const target = nextPositions[targetId];
 			const sourceRadius = radii[sourceId];
 			const targetRadius = radii[targetId];
 			const radiusSum = sourceRadius + targetRadius;
-			const preferredDistance = radiusSum + radiusSum * maxExtraGapFactor * progress;
+			const preferredDistance =
+				radiusSum + extraHopGap(radiusSum, hops, minHops, maxHops, maxExtraGapFactor);
 			const shares = displacementShares(sourceId, targetId, anchoredIds, mobilityByNodeId);
 			if (shares === null) continue;
 
@@ -403,10 +414,35 @@ function clamp(value: number, min: number, max: number): number {
 	return Math.min(max, Math.max(min, value));
 }
 
-function hopRepulsionProgress(hops: number | undefined, minHops: number, maxHops: number): number {
-	if (hops === undefined || hops < minHops) return 0;
-	const clampedHops = Number.isFinite(hops) ? Math.min(hops, maxHops) : maxHops;
-	return (clampedHops - minHops + 1) / (maxHops - minHops + 1);
+/**
+ * Clear space a pair holds open beyond touching, on top of their radius sum.
+ *
+ * `Infinity` hops mean there is no path at all, not a very long one. The finite
+ * ramp has to clamp somewhere — otherwise a wide graph keeps ramping forever —
+ * and clamping an unreachable pair to `maxHops` handed the one pair whose hop
+ * count carries no distance the strongest push in the graph, far enough to
+ * fling a freshly imported component off the side of the host it was parked
+ * beside. Separate components hold no relationship whose length the layout
+ * could be expressing, so they buy a fixed seam and nothing more; overlap
+ * relaxation still keeps their circles off each other.
+ */
+function extraHopGap(
+	radiusSum: number,
+	hops: number,
+	minHops: number,
+	maxHops: number,
+	maxExtraGapFactor: number
+): number {
+	if (!Number.isFinite(hops)) {
+		// Still under the configured cap, so a caller asking for tighter spacing
+		// than the seam gets it rather than having disconnection widen the gap.
+		return radiusSum * Math.min(CROSS_COMPONENT_EXTRA_GAP_RADIUS_FACTOR, maxExtraGapFactor);
+	}
+	return radiusSum * maxExtraGapFactor * hopRepulsionProgress(hops, minHops, maxHops);
+}
+
+function hopRepulsionProgress(hops: number, minHops: number, maxHops: number): number {
+	return (Math.min(hops, maxHops) - minHops + 1) / (maxHops - minHops + 1);
 }
 
 function nodeParticipates(nodeId: string, participatingNodeIds?: ReadonlySet<string>): boolean {

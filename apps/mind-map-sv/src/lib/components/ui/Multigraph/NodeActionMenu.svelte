@@ -7,6 +7,7 @@
 		node,
 		position,
 		onAddNodeEdge,
+		onMergeNode,
 		onTogglePinned,
 		onFocus,
 		onEdit,
@@ -17,6 +18,8 @@
 		node: NodeData;
 		position: Point;
 		onAddNodeEdge: () => void;
+		/** Arm the merge gesture: drag this node onto the one that should survive. */
+		onMergeNode: () => void;
 		onTogglePinned: () => void;
 		onFocus: () => void;
 		onEdit: () => void;
@@ -41,12 +44,42 @@
 	// Not reactive on purpose: `bind:this` writes here, but nothing renders from it.
 	const itemRefs: Array<HTMLButtonElement | null> = [];
 
+	/**
+	 * Labels stay one or two words; the `hint` carries what they cannot say.
+	 * Native `title`, so the browser exposes it as each button's accessible
+	 * description and the label still names it — hover only, which is logged as
+	 * debt in `docs/debt/2026-08-30-tooltips-are-hover-only.md`.
+	 *
+	 * The two gesture items describe what to do next, because activating them
+	 * arms a drag rather than changing anything; the rest describe what happens.
+	 */
 	const items = $derived([
-		{ label: 'Add node/edge', activate: onAddNodeEdge },
-		{ label: node.pinned ? 'Unpin' : 'Pin', activate: onTogglePinned },
-		{ label: 'Focus', activate: onFocus },
-		{ label: 'Edit', activate: onEdit },
-		{ label: 'Delete', activate: onDelete }
+		{
+			label: 'Add node/edge',
+			hint: 'Drag to empty space to add a node, or onto another node to connect',
+			activate: onAddNodeEdge
+		},
+		// Sits next to Add node/edge because it is the same drag, aimed the other
+		// way: one grows the graph from this node, the other folds it away.
+		{
+			label: 'Merge',
+			hint: 'Drag onto the node this one should merge into; the other node survives',
+			activate: onMergeNode
+		},
+		{
+			label: node.pinned ? 'Unpin' : 'Pin',
+			hint: node.pinned
+				? 'Release this anchor'
+				: 'Anchor the node here; nearby nodes stay large and visible',
+			activate: onTogglePinned
+		},
+		{ label: 'Focus', hint: 'Zoom in to this node and read its details', activate: onFocus },
+		{ label: 'Edit', hint: 'Change the title, description, tags, etc.', activate: onEdit },
+		{
+			label: 'Delete',
+			hint: 'Remove this node and every edge attached to it',
+			activate: onDelete
+		}
 	]);
 	/** Changes on open and on every re-target onto another node/point. */
 	const openKey = $derived(`${node.id}:${position.x}:${position.y}`);
@@ -89,6 +122,15 @@
 	function handleKeydown(event: KeyboardEvent) {
 		switch (event.key) {
 			case 'Escape':
+				event.preventDefault();
+				onClose();
+				return;
+			// Roving tabindex leaves the other items out of the tab order, so an
+			// unhandled Tab walks straight past the menu — out of the page and into
+			// the browser chrome, with this viewport-covering layer still up. Per the
+			// menu pattern Tab leaves the menu: close it and let the teardown effect
+			// put focus back where it was, so the tab sequence resumes from there.
+			case 'Tab':
 				event.preventDefault();
 				onClose();
 				return;
@@ -153,6 +195,7 @@
 				tabindex={index === activeIndex ? 0 : -1}
 				onfocus={() => (activeIndex = index)}
 				onclick={item.activate}
+				title={item.hint}
 			>
 				{item.label}
 			</button>

@@ -275,7 +275,12 @@
 <style>
 	.settings-panel {
 		position: absolute;
-		z-index: 30;
+		/* Above the persistence toolbar (z-index 40), for the reason the Find /
+		   Filter panel is: at narrower viewports the centred toolbar reaches over
+		   this panel's top-right corner and would swallow clicks on Close. The
+		   reader summoned the panel and can dismiss it, so while open it wins;
+		   the focus overlay (60) stays above both. */
+		z-index: 45;
 		left: 0.75rem;
 		top: 0.75rem;
 		display: grid;

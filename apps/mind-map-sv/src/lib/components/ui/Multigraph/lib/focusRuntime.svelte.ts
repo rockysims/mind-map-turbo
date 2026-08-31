@@ -20,7 +20,7 @@ export interface FocusLevel {
 	phase: FocusLevelPhase;
 }
 
-export interface PushFocusLevelInput {
+interface PushFocusLevelInput {
 	subjectKind: FocusSubjectKind;
 	subjectId: string;
 	sourceRect: Rect;
@@ -32,7 +32,7 @@ export interface PushFocusLevelInput {
 	phase?: FocusLevelPhase;
 }
 
-export interface OpenFocusInput {
+interface OpenFocusInput {
 	borderWidthPx?: number;
 	morphProgress?: number;
 	phase?: FocusLevelPhase;

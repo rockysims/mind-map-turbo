@@ -47,7 +47,7 @@ export interface GraphLayoutOptions {
 	mobilityByNodeId?: Record<string, number>;
 }
 
-export interface GraphRelaxationStep {
+interface GraphRelaxationStep {
 	data: MultigraphData;
 	maxPositionDelta: number;
 }

@@ -202,7 +202,7 @@ export function evaluateGraphQuery(
 	};
 }
 
-export function computeGraphQueryRegions(
+function computeGraphQueryRegions(
 	data: MultigraphData,
 	nodeStateById: Record<string, GraphQueryElementState>,
 	edgeStateById: Record<string, GraphQueryElementState>

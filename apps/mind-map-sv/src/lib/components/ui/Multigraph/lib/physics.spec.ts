@@ -349,6 +349,78 @@ describe('physics', () => {
 			expect(next.n2.y).toBe(0);
 		});
 
+		// The ramp is `(hops - minHops + 1) / (maxHops - minHops + 1)` of
+		// `hopRepulsionMaxExtraGapRadiusFactor`, over the radius sum, and has been
+		// since repulsion existed. Nothing about unreachable pairs may move a pair
+		// that has a path between it.
+		it('holds a reachable pair to the hop ramp it has always used', () => {
+			const positions = { n0: { x: 0, y: 0 }, n3: { x: 40, y: 0 } };
+			const radii = { n0: 20, n3: 20 };
+			const radiusSum = radii.n0 + radii.n3;
+
+			const next = relaxHopRepulsionStep(
+				positions,
+				radii,
+				{ n0: { n3: 3 }, n3: { n0: 3 } },
+				HOP_REPULSION_SETTINGS
+			);
+
+			const { hopRepulsionMinHops, hopRepulsionMaxHops, hopRepulsionMaxExtraGapRadiusFactor } =
+				HOP_REPULSION_SETTINGS;
+			const progress =
+				(3 - hopRepulsionMinHops + 1) / (hopRepulsionMaxHops - hopRepulsionMinHops + 1);
+			expect(next.n3.x - next.n0.x).toBeCloseTo(
+				radiusSum + radiusSum * hopRepulsionMaxExtraGapRadiusFactor * progress,
+				10
+			);
+			expect(next.n0).toEqual({ x: -13.333333333333329, y: 0 });
+			expect(next.n3).toEqual({ x: 53.33333333333333, y: 0 });
+		});
+
+		// Unreachable is not "very far": clamping `Infinity` to the hop cap gave the
+		// one pair whose hop count carries no distance the strongest push in the
+		// graph, which flung a freshly imported component away from its host.
+		describe('nodes in different components', () => {
+			const radii = { n0: 20, far: 20 };
+			const radiusSum = radii.n0 + radii.far;
+			const UNREACHABLE = { n0: { far: Infinity }, far: { n0: Infinity } };
+
+			it('parts them by a seam rather than the full hop-ramp gap', () => {
+				const positions = { n0: { x: 0, y: 0 }, far: { x: 40, y: 0 } };
+
+				const next = relaxHopRepulsionStep(positions, radii, UNREACHABLE, HOP_REPULSION_SETTINGS);
+
+				expect(next.far.x - next.n0.x).toBeCloseTo(radiusSum * 1.1, 10);
+			});
+
+			it('stops pushing once they clear the seam, where the hop cap still would', () => {
+				const positions = { n0: { x: 0, y: 0 }, far: { x: 60, y: 0 } };
+
+				expect(relaxHopRepulsionStep(positions, radii, UNREACHABLE, HOP_REPULSION_SETTINGS)).toBe(
+					positions
+				);
+				expect(
+					relaxHopRepulsionStep(
+						positions,
+						radii,
+						{ n0: { far: HOP_REPULSION_SETTINGS.hopRepulsionMaxHops }, far: { n0: 4 } },
+						HOP_REPULSION_SETTINGS
+					)
+				).not.toBe(positions);
+			});
+
+			it('never opens a wider gap than the configured cap', () => {
+				const positions = { n0: { x: 0, y: 0 }, far: { x: 40, y: 0 } };
+
+				const next = relaxHopRepulsionStep(positions, radii, UNREACHABLE, {
+					...HOP_REPULSION_SETTINGS,
+					hopRepulsionMaxExtraGapRadiusFactor: 0.02
+				});
+
+				expect(next.far.x - next.n0.x).toBeCloseTo(radiusSum * 1.02, 10);
+			});
+		});
+
 		it('does not repel directly connected neighbors', () => {
 			const positions = { n0: { x: 0, y: 0 }, n1: { x: 40, y: 0 } };
 			const radii = { n0: 20, n1: 20 };

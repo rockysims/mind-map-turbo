@@ -1,11 +1,24 @@
 import { describe, expect, it, vi } from 'vitest';
+import { blobToBase64 } from './assets/assetEncoding';
+import { MemoryGraphAssetStore } from './assets/assetStore';
+import type { GraphAssetStore } from './assets/assetStore';
 import { makeGraph } from './components/ui/Multigraph/lib/testFixtures';
 import type { MultigraphData } from './components/ui/types/multigraph';
-import { GRAPH_HTML_READER_VERSION, parseGraphFileText, serializeGraphHtmlFile } from './graphFile';
 import type { ConfigOverrides } from './config/configOverrides';
+import {
+	GRAPH_HTML_READER_VERSION,
+	parseGraphFileText,
+	serializeGraphHtmlFile,
+	type GraphFileEmbeddedAsset
+} from './graphFile';
+import { readGraphSnapshot } from './graphSnapshot';
+import { graphFingerprint } from './documentStatus';
 import { CURRENT_SCHEMA_VERSION, NEUTRAL_VIEW_STATE, type ViewState } from './migrations';
 import {
 	GraphPersistenceController,
+	MEMORY_ONLY_STORAGE_NOTICE,
+	controllerNotice,
+	controllerNoticeSeverity,
 	statusToNotice,
 	type ControllerStatus,
 	type EmbeddedDocumentConflictChoice,
@@ -17,7 +30,8 @@ import {
 	graphStorageKey,
 	type GraphSummary,
 	type PersistedGraphRecord,
-	type Persistence
+	type Persistence,
+	type StorageLike
 } from './persistence';
 import type { SaveStatus } from './saveScheduler';
 
@@ -48,6 +62,7 @@ class MemoryPersistence implements Persistence {
 class TestScheduler implements GraphSaveScheduler {
 	private pending: { id: string; graph: PersistedGraphRecord } | null = null;
 	failFlushOnce = false;
+	warnOnFlush = false;
 	dispose = vi.fn();
 
 	constructor(
@@ -75,8 +90,43 @@ class TestScheduler implements GraphSaveScheduler {
 		this.events.push('save');
 		await this.persistence.save(save.id, save.graph);
 		this.pending = null;
-		this.onStatus({ state: 'saved', savedAt: 123 });
+		const fingerprint = graphFingerprint(save.graph.data);
+		if (this.warnOnFlush) {
+			this.onStatus({
+				state: 'warning',
+				savedAt: 123,
+				fingerprint,
+				message: 'Local cache is 85% full.'
+			});
+			return;
+		}
+		this.onStatus({ state: 'saved', savedAt: 123, fingerprint });
 	});
+}
+
+/** Stands in for `localStorage`, which the node test environment does not have. */
+class MemoryStorage implements StorageLike {
+	private readonly items = new Map<string, string>();
+
+	get length(): number {
+		return this.items.size;
+	}
+
+	getItem(key: string): string | null {
+		return this.items.get(key) ?? null;
+	}
+
+	setItem(key: string, value: string): void {
+		this.items.set(key, value);
+	}
+
+	removeItem(key: string): void {
+		this.items.delete(key);
+	}
+
+	key(index: number): string | null {
+		return Array.from(this.items.keys())[index] ?? null;
+	}
 }
 
 function createDefaultGraph(): MultigraphData {
@@ -85,6 +135,51 @@ function createDefaultGraph(): MultigraphData {
 
 function nonNeutralViewState(): ViewState {
 	return { panX: 120, panY: -80, scale: 1.5 };
+}
+
+/** A graph whose nodes each carry one image block, so the asset ids are referenced. */
+function imageGraph(assetIds: string[]): MultigraphData {
+	return makeGraph({
+		nodes: assetIds.map((assetId, index) => ({
+			id: `n${index}`,
+			title: `Image ${index}`,
+			description: '',
+			content: [{ type: 'image' as const, assetId, alt: '' }]
+		}))
+	});
+}
+
+async function embeddedAsset(assetId: string, body: string): Promise<GraphFileEmbeddedAsset> {
+	const blob = new Blob([body], { type: 'image/png' });
+	return {
+		assetId,
+		mimeType: 'image/png',
+		name: `${assetId}.png`,
+		size: blob.size,
+		base64: await blobToBase64(blob)
+	};
+}
+
+async function storeAsset(store: GraphAssetStore, scope: string, assetId: string, body: string) {
+	const blob = new Blob([body], { type: 'image/png' });
+	await store.put({
+		scope,
+		assetId,
+		blob,
+		mimeType: 'image/png',
+		name: `${assetId}.png`,
+		size: blob.size,
+		updatedAt: 1
+	});
+}
+
+async function readAsset(
+	store: GraphAssetStore,
+	scope: string,
+	assetId: string
+): Promise<string | null> {
+	const result = await store.get(scope, assetId);
+	return result.ok ? await result.value.blob.text() : null;
 }
 
 function setup(
@@ -104,6 +199,9 @@ function setup(
 			fileGraph: MultigraphData;
 		}) => EmbeddedDocumentConflictChoice | Promise<EmbeddedDocumentConflictChoice>;
 		createSettingsSeed?: () => ConfigOverrides;
+		assetStore?: GraphAssetStore;
+		snapshotStorage?: StorageLike | null;
+		durability?: 'durable' | 'memory-only';
 	} = {}
 ) {
 	const persistence = new MemoryPersistence();
@@ -121,10 +219,13 @@ function setup(
 		createDefaultGraph,
 		navigate,
 		storageNamespace: 'test',
+		durability: options.durability,
 		confirmGraphImportReplace: options.confirmGraphImportReplace,
 		confirmNewGraphReplace: options.confirmNewGraphReplace,
 		chooseEmbeddedDocumentConflict: options.chooseEmbeddedDocumentConflict,
 		createSettingsSeed: options.createSettingsSeed,
+		assetStore: options.assetStore,
+		snapshotStorage: options.snapshotStorage ?? null,
 		createDocumentId: () => 'doc-new',
 		now: () => 456,
 		createGraphId: () => 'graph-new'
@@ -242,7 +343,7 @@ describe('GraphPersistenceController', () => {
 		});
 	});
 
-	it('does not confirm before replacing a graph that matches the last download', async () => {
+	it('does not confirm before replacing a graph that matches the last saved file', async () => {
 		const confirmNewGraphReplace = vi.fn(() => true);
 		const { controller } = setup({ confirmNewGraphReplace });
 		await controller.load('active');
@@ -350,7 +451,7 @@ describe('GraphPersistenceController', () => {
 		});
 	});
 
-	it('loads embedded HTML documents when no local draft exists', async () => {
+	it('loads embedded HTML documents when no cached draft exists', async () => {
 		const { controller, persistence } = setup();
 		const graph = makeGraph({ nodeCount: 2 });
 		const viewState = nonNeutralViewState();
@@ -367,7 +468,7 @@ describe('GraphPersistenceController', () => {
 		expect(persistence.save).not.toHaveBeenCalled();
 	});
 
-	it('prefers a dirty local document draft over the embedded file payload', async () => {
+	it('prefers a dirty cached document draft over the embedded file payload', async () => {
 		const { controller, persistence } = setup();
 		const fileGraph = makeGraph({ nodeCount: 1 });
 		const draftGraph = makeGraph({ nodeCount: 3 });
@@ -392,7 +493,7 @@ describe('GraphPersistenceController', () => {
 		expect(persistence.save).toHaveBeenCalledTimes(1);
 	});
 
-	it('can prefer an opened embedded file over a dirty local document draft', async () => {
+	it('can prefer an opened embedded file over a dirty cached document draft', async () => {
 		const chooseEmbeddedDocumentConflict = vi.fn(() => 'open-file' as const);
 		const { controller, persistence, scheduler } = setup({ chooseEmbeddedDocumentConflict });
 		const fileGraph = makeGraph({ nodeCount: 1 });
@@ -435,7 +536,7 @@ describe('GraphPersistenceController', () => {
 		});
 	});
 
-	it('recovers a dirty local document draft when the opened file conflict is declined', async () => {
+	it('recovers a dirty cached document draft when the opened file conflict is declined', async () => {
 		const chooseEmbeddedDocumentConflict = vi.fn(() => 'recover-draft' as const);
 		const { controller, persistence, scheduler } = setup({ chooseEmbeddedDocumentConflict });
 		const fileGraph = makeGraph({ nodeCount: 1 });
@@ -493,7 +594,7 @@ describe('GraphPersistenceController', () => {
 			documentStatus: 'new-dirty',
 			status: {
 				state: 'notice',
-				message: 'Kept local draft; another tab changed this document.'
+				message: 'Changed in another tab. Kept your cached draft.'
 			}
 		});
 	});
@@ -531,6 +632,31 @@ describe('GraphPersistenceController', () => {
 		});
 	});
 
+	it('confirms the save by naming the file it wrote', async () => {
+		const { controller } = setup();
+		await controller.load('active');
+		controller.notifyGraphChanged(makeGraph({ nodeCount: 2 }), { syncView: true });
+
+		await controller.exportGraphDocument('<!doctype html><html><body></body></html>');
+
+		expect(controller.getView().status).toEqual({ state: 'exported', filename: 'active.html' });
+		expect(controllerNotice(controller.getView())).toBe('Saved active.html. Check your downloads.');
+		expect(controllerNoticeSeverity(controller.getView())).toBe('info');
+	});
+
+	it('keeps the blocked-storage warning above the save confirmation', async () => {
+		const { controller } = setup({ durability: 'memory-only' });
+		await controller.load('active');
+
+		await controller.exportGraphDocument('<!doctype html><html><body></body></html>');
+
+		// The file is safe, but this browser is still caching nothing: the standing
+		// condition outranks the confirmation.
+		expect(controller.getView().status).toEqual({ state: 'exported', filename: 'active.html' });
+		expect(controllerNotice(controller.getView())).toBe(MEMORY_ONLY_STORAGE_NOTICE);
+		expect(controllerNoticeSeverity(controller.getView())).toBe('warning');
+	});
+
 	it('imports a valid graph file into the active graph id and refreshes summaries', async () => {
 		const confirmReplace = vi.fn(() => true);
 		const { controller, persistence } = setup({ confirmGraphImportReplace: confirmReplace });
@@ -558,7 +684,7 @@ describe('GraphPersistenceController', () => {
 			viewState: importedViewState,
 			documentId: 'doc-imported',
 			graphGeneration: generationBeforeImport + 1,
-			status: { state: 'notice', message: 'Imported graph into "active".' }
+			status: { state: 'notice', message: 'Imported into "active".' }
 		});
 		expect(persistence.save).toHaveBeenLastCalledWith('active', {
 			data: importedGraph,
@@ -635,27 +761,112 @@ describe('GraphPersistenceController', () => {
 		expect(openUnsupportedHtmlFile).toHaveBeenCalledWith(html);
 		expect(controller.getView().status).toEqual({
 			state: 'notice',
-			message: 'Opened newer graph file in a new tab.'
+			sticky: true,
+			message: 'Newer graph file. Opened in a new tab.'
 		});
 	});
 
-	it('autosaves pan and zoom changes without mutating graph positions', async () => {
+	it('keeps pan and zoom out of the cache write path', async () => {
 		const { controller, persistence, scheduler } = setup();
 		await controller.load('active');
 		const graphBefore = controller.getView().graph;
 		const positionsBefore = graphBefore.posByNodeId;
+		const saveCallsBefore = persistence.save.mock.calls.length;
+		scheduler.schedule.mockClear();
+
+		controller.notifyViewStateChanged({ panX: 25, panY: 10, scale: 0.8 }, { syncView: true });
+
+		expect(scheduler.schedule).not.toHaveBeenCalled();
+		expect(persistence.save.mock.calls).toHaveLength(saveCallsBefore);
+		// The camera is a view concern: the document must be untouched by it, and
+		// the toolbar must not claim a cache write is happening.
+		expect(controller.getView().graph).toEqual(graphBefore);
+		expect(controller.getView().graph.posByNodeId).toEqual(positionsBefore);
+		expect(controllerNotice(controller.getView())).not.toBe('Caching draft...');
+	});
+
+	it('carries the latest camera along with the next edit', async () => {
+		const { controller, persistence, scheduler } = setup();
+		await controller.load('active');
+		const updatedViewState = { panX: 25, panY: 10, scale: 0.8 };
+		const edited = makeGraph({ nodeCount: 2 });
+
+		controller.notifyViewStateChanged(updatedViewState, { syncView: true });
+		controller.notifyGraphChanged(edited, { syncView: true });
+		await scheduler.flush();
+
+		expect(persistence.save).toHaveBeenLastCalledWith('active', {
+			data: edited,
+			viewState: updatedViewState
+		});
+	});
+
+	it('flushes a camera-only change so leaving the page does not lose it', async () => {
+		const { controller, persistence } = setup();
+		await controller.load('active');
+		const graphBefore = controller.getView().graph;
 		const updatedViewState = { panX: 25, panY: 10, scale: 0.8 };
 
 		controller.notifyViewStateChanged(updatedViewState, { syncView: true });
-		await scheduler.flush();
+		await controller.flushPendingSave();
 
-		expect(controller.getView().graph).toEqual(graphBefore);
-		expect(controller.getView().graph.posByNodeId).toEqual(positionsBefore);
 		expect(persistence.save).toHaveBeenLastCalledWith('active', {
 			data: graphBefore,
 			viewState: updatedViewState
 		});
-		expect(controller.getView().graphSummaries).toEqual([{ id: 'active', updatedAt: 2 }]);
+		// A second flush has nothing left to write.
+		const saveCallsAfter = persistence.save.mock.calls.length;
+		await controller.flushPendingSave();
+		expect(persistence.save.mock.calls).toHaveLength(saveCallsAfter);
+	});
+
+	it('ignores an edit committed by the graph that was just replaced', async () => {
+		const { controller, persistence, scheduler } = setup();
+		await persistence.save('active', {
+			data: makeGraph({ nodeCount: 3 }),
+			viewState: NEUTRAL_VIEW_STATE
+		});
+		await controller.load('first');
+		const staleGeneration = controller.getView().graphGeneration;
+		await controller.load('active');
+		const loaded = controller.getView().graph;
+		scheduler.schedule.mockClear();
+
+		// The canvas for 'first' blurs a title edit while it is being torn down.
+		controller.notifyGraphChanged(makeGraph({ nodeCount: 1 }), {
+			syncView: true,
+			generation: staleGeneration
+		});
+
+		expect(scheduler.schedule).not.toHaveBeenCalled();
+		expect(controller.getView().graph).toEqual(loaded);
+	});
+
+	it('accepts an edit committed by the current graph', async () => {
+		const { controller, scheduler } = setup();
+		await controller.load('active');
+		const edited = makeGraph({ nodeCount: 2 });
+
+		controller.notifyGraphChanged(edited, {
+			syncView: true,
+			generation: controller.getView().graphGeneration
+		});
+
+		expect(scheduler.schedule).toHaveBeenLastCalledWith('active', edited, NEUTRAL_VIEW_STATE);
+	});
+
+	it('skips a cache write for a change event that matches the cached graph', async () => {
+		const { controller, scheduler } = setup();
+		await controller.load('active');
+		const edited = makeGraph({ nodeCount: 2 });
+		controller.notifyGraphChanged(edited, { syncView: true });
+		await scheduler.flush();
+		scheduler.schedule.mockClear();
+
+		controller.notifyGraphChanged(edited, { syncView: true });
+
+		expect(scheduler.schedule).not.toHaveBeenCalled();
+		expect(controller.getView().draftCached).toBe(true);
 	});
 
 	it('cancels import when replacement confirmation is declined for non-empty graphs', async () => {
@@ -716,7 +927,8 @@ describe('GraphPersistenceController', () => {
 		expect(result).toBe('read-failed');
 		expect(controller.getView().status).toEqual({
 			state: 'notice',
-			message: 'Import failed: unable to read file.'
+			sticky: true,
+			message: 'Import failed. Could not read the file.'
 		});
 	});
 
@@ -828,14 +1040,115 @@ describe('GraphPersistenceController', () => {
 			settings
 		});
 
+		// A camera move schedules no write of its own — it is folded into the next
+		// flush — so the settings have to survive that path too, not just the
+		// scheduled one above.
 		const viewState = nonNeutralViewState();
 		controller.notifyViewStateChanged(viewState, { syncView: true });
+		await controller.flushPendingSave();
 		await scheduler.flush();
 		expect(persistence.save).toHaveBeenLastCalledWith('active', {
 			data: edited,
 			viewState,
 			settings
 		});
+	});
+
+	it('treats a graph read back from storage as already cached', async () => {
+		const { controller, persistence } = setup();
+		const graph = makeGraph({ nodeCount: 2 });
+		await persistence.save('saved', { data: graph, viewState: NEUTRAL_VIEW_STATE });
+
+		await controller.load('saved');
+
+		expect(controller.getView().draftCached).toBe(true);
+		expect(controllerNotice(controller.getView())).toBe(
+			'Draft cached in this browser. Save to keep it.'
+		);
+		expect(controllerNoticeSeverity(controller.getView())).toBe('info');
+	});
+
+	it('calls an edit cached only once the write has landed', async () => {
+		const { controller, scheduler } = setup();
+		await controller.load('active');
+		expect(controller.getView().draftCached).toBe(true);
+
+		controller.notifyGraphChanged(makeGraph({ nodeCount: 2 }), { syncView: true });
+
+		// Debounce window: the write is owed but not yet attempted, so the notice
+		// reads as in-flight rather than flashing an alarm between keystrokes.
+		expect(controller.getView()).toMatchObject({ draftCached: false, cachePending: true });
+		expect(controllerNotice(controller.getView())).toBe('Caching draft...');
+		expect(controllerNoticeSeverity(controller.getView())).toBe('info');
+
+		await scheduler.flush();
+
+		expect(controller.getView()).toMatchObject({ draftCached: true, cachePending: false });
+		expect(controllerNotice(controller.getView())).toBe(
+			'Draft cached in this browser. Save to keep it.'
+		);
+		expect(controllerNoticeSeverity(controller.getView())).toBe('info');
+	});
+
+	it('does not call a draft cached after the cache write fails', async () => {
+		const { controller, scheduler } = setup();
+		await controller.load('active');
+		controller.notifyGraphChanged(makeGraph({ nodeCount: 2 }), { syncView: true });
+		scheduler.failFlushOnce = true;
+
+		await controller.selectGraph('next');
+
+		// The failure clears the pending flag, which is what lets the warning
+		// through instead of leaving a permanent 'Caching draft...'.
+		expect(controller.getView()).toMatchObject({ draftCached: false, cachePending: false });
+		expect(controllerNotice(controller.getView())).toBe('Could not cache draft. quota exceeded');
+		expect(controllerNoticeSeverity(controller.getView())).toBe('warning');
+	});
+
+	it('keeps a pending cache write calm while a quota warning is standing', async () => {
+		const { controller, scheduler } = setup();
+		await controller.load('active');
+		scheduler.warnOnFlush = true;
+		controller.notifyGraphChanged(makeGraph({ nodeCount: 2 }), { syncView: true });
+		await scheduler.flush();
+
+		expect(controllerNotice(controller.getView())).toBe('Local cache is 85% full.');
+		expect(controllerNoticeSeverity(controller.getView())).toBe('warning');
+
+		controller.notifyGraphChanged(makeGraph({ nodeCount: 3 }), { syncView: true });
+
+		// Text and styling must agree during the debounce window: 'Caching draft...'
+		// is not amber, even though the quota warning status is still standing by.
+		expect(controllerNotice(controller.getView())).toBe('Caching draft...');
+		expect(controllerNoticeSeverity(controller.getView())).toBe('info');
+	});
+
+	it('leads with the storage warning when the browser blocks site data', async () => {
+		const { controller, persistence } = setup({ durability: 'memory-only' });
+		await persistence.save('saved', {
+			data: makeGraph({ nodeCount: 2 }),
+			viewState: NEUTRAL_VIEW_STATE
+		});
+
+		await controller.load('saved');
+
+		// A write to tab-lifetime storage is not caching, and the warning outranks
+		// the transient 'Loaded "saved".' that would otherwise reassure the user.
+		expect(controller.getView().draftCached).toBe(false);
+		expect(controllerNotice(controller.getView())).toBe(MEMORY_ONLY_STORAGE_NOTICE);
+		expect(controllerNoticeSeverity(controller.getView())).toBe('warning');
+	});
+
+	it('still surfaces cache failures over the blocked-storage warning', async () => {
+		const { controller, scheduler } = setup({ durability: 'memory-only' });
+		await controller.load('active');
+		controller.notifyGraphChanged(makeGraph({ nodeCount: 2 }), { syncView: true });
+		scheduler.failFlushOnce = true;
+
+		await controller.selectGraph('next');
+
+		expect(controllerNotice(controller.getView())).toBe('Could not cache draft. quota exceeded');
+		expect(controllerNoticeSeverity(controller.getView())).toBe('warning');
 	});
 
 	it('disposes the scheduler and stops future listener notifications', async () => {
@@ -851,20 +1164,478 @@ describe('GraphPersistenceController', () => {
 	});
 });
 
+describe('GraphPersistenceController additive import', () => {
+	const snapshotOptions = (storage: StorageLike) => ({ storage, namespace: 'test' });
+
+	/** A loaded 'active' graph of two nodes, viewed at a non-neutral pan and zoom. */
+	async function loadedHost(storage: StorageLike) {
+		const context = setup({ snapshotStorage: storage });
+		await context.persistence.save('active', {
+			data: makeGraph({ nodeCount: 2, edges: [[0, 1]] }),
+			viewState: NEUTRAL_VIEW_STATE
+		});
+		await context.controller.load('active');
+		context.controller.notifyViewStateChanged(nonNeutralViewState(), { syncView: true });
+		return { ...context, before: context.controller.getView() };
+	}
+
+	it('keeps every existing node and adds the incoming ones', async () => {
+		const storage = new MemoryStorage();
+		const { controller, persistence, before } = await loadedHost(storage);
+
+		const result = await controller.importGraphIntoCurrent(
+			serializeGraphHtmlFile({
+				documentId: 'doc-incoming',
+				data: makeGraph({ nodeCount: 3, edges: [[0, 1]] }),
+				viewState: { panX: 900, panY: 900, scale: 0.5 }
+			})
+		);
+
+		expect(result).toEqual({ outcome: 'imported', importedNodeCount: 3, snapshotStored: true });
+		const after = controller.getView();
+		expect(after.graph.nodes.slice(0, 2)).toEqual(before.graph.nodes);
+		expect(after.graph.nodes).toHaveLength(5);
+		expect(new Set(after.graph.nodes.map((node) => node.id)).size).toBe(5);
+		expect(after.graph.edges).toHaveLength(2);
+		expect(persistence.save).toHaveBeenLastCalledWith('active', {
+			data: after.graph,
+			viewState: nonNeutralViewState()
+		});
+	});
+
+	it('leaves the reader where they were: no remount, no view state change', async () => {
+		const storage = new MemoryStorage();
+		const { controller, before } = await loadedHost(storage);
+
+		await controller.importGraphIntoCurrent(
+			serializeGraphHtmlFile({
+				documentId: 'doc-incoming',
+				data: makeGraph({ nodeCount: 1 }),
+				viewState: { panX: 900, panY: 900, scale: 0.5 }
+			})
+		);
+
+		expect(controller.getView()).toMatchObject({
+			graphGeneration: before.graphGeneration,
+			viewState: nonNeutralViewState(),
+			documentId: before.documentId,
+			loadedGraphId: 'active'
+		});
+	});
+
+	it('bumps the graph revision exactly once so the mounted canvas adopts the nodes', async () => {
+		const storage = new MemoryStorage();
+		const { controller, before } = await loadedHost(storage);
+		const revisions: number[] = [];
+		controller.subscribe((view) => revisions.push(view.graphRevision));
+
+		await controller.importGraphIntoCurrent(
+			serializeGraphHtmlFile({
+				data: makeGraph({ nodeCount: 2 }),
+				viewState: NEUTRAL_VIEW_STATE
+			})
+		);
+
+		const after = controller.getView();
+		expect(after.graphRevision).toBe(before.graphRevision + 1);
+		// One step, not a run of them: every emission is either the old value or the
+		// new one, so no listener ever saw the revision move twice for one import.
+		expect(new Set(revisions)).toEqual(new Set([before.graphRevision, before.graphRevision + 1]));
+		// The revision is what makes the import visible without a remount, so the
+		// generation must stay exactly where it was.
+		expect(after.graphGeneration).toBe(before.graphGeneration);
+	});
+
+	it('leaves the revision alone for loads, reverts and changes coming from the canvas', async () => {
+		const storage = new MemoryStorage();
+		const { controller, persistence } = await loadedHost(storage);
+		await controller.importGraphIntoCurrent(
+			serializeGraphHtmlFile({ data: makeGraph({ nodeCount: 2 }), viewState: NEUTRAL_VIEW_STATE })
+		);
+		const afterImport = controller.getView();
+
+		// From the canvas: echoing this back as a revision would tell the canvas to
+		// re-adopt what it just committed.
+		controller.notifyGraphChanged(makeGraph({ nodeCount: 4 }), { syncView: true });
+		expect(controller.getView().graphRevision).toBe(afterImport.graphRevision);
+
+		// A revert replaces the document wholesale; the remount it triggers
+		// supersedes any in-place adoption.
+		await controller.revertToSnapshot();
+		expect(controller.getView()).toMatchObject({
+			graphRevision: afterImport.graphRevision,
+			graphGeneration: afterImport.graphGeneration + 1
+		});
+
+		await persistence.save('other', {
+			data: makeGraph({ nodeCount: 1 }),
+			viewState: NEUTRAL_VIEW_STATE
+		});
+		await controller.load('other');
+		expect(controller.getView().graphRevision).toBe(afterImport.graphRevision);
+	});
+
+	it('snapshots the graph as it stood before the import', async () => {
+		const storage = new MemoryStorage();
+		const { controller, before } = await loadedHost(storage);
+
+		await controller.importGraphIntoCurrent(
+			serializeGraphHtmlFile({
+				data: makeGraph({ nodeCount: 1 }),
+				viewState: NEUTRAL_VIEW_STATE
+			})
+		);
+
+		expect(readGraphSnapshot('active', snapshotOptions(storage))).toEqual({
+			label: 'import',
+			createdAt: 456,
+			data: before.graph,
+			viewState: nonNeutralViewState()
+		});
+	});
+
+	it('imports a version 1 payload through the migration path', async () => {
+		const storage = new MemoryStorage();
+		const { controller, before } = await loadedHost(storage);
+
+		const result = await controller.importGraphIntoCurrent(
+			JSON.stringify({
+				schemaVersion: 1,
+				data: {
+					nodes: [{ id: 'n0', title: 'Ancient', description: 'From a version 1 file' }],
+					edges: [],
+					posByNodeId: { n0: { x: 0, y: 0 } }
+				}
+			})
+		);
+
+		expect(result).toEqual({ outcome: 'imported', importedNodeCount: 1, snapshotStored: true });
+		const titles = controller.getView().graph.nodes.map((node) => node.title);
+		expect(titles).toEqual([...before.graph.nodes.map((node) => node.title), 'Ancient']);
+	});
+
+	it('changes nothing and leaves no snapshot when the file will not parse', async () => {
+		const storage = new MemoryStorage();
+		const { controller, persistence, before } = await loadedHost(storage);
+		const saveCallsBefore = persistence.save.mock.calls.length;
+
+		const result = await controller.importGraphIntoCurrent(
+			JSON.stringify({ schemaVersion: CURRENT_SCHEMA_VERSION, data: { nodes: [] } })
+		);
+
+		expect(result).toEqual({ outcome: 'invalid' });
+		expect(controller.getView()).toMatchObject({
+			graph: before.graph,
+			viewState: before.viewState,
+			graphGeneration: before.graphGeneration,
+			status: { state: 'notice', sticky: true, message: 'Import failed. Not a valid graph file.' }
+		});
+		expect(readGraphSnapshot('active', snapshotOptions(storage))).toBeNull();
+		expect(persistence.save).toHaveBeenCalledTimes(saveCallsBefore);
+	});
+
+	it('reports an unsupported version without touching the graph', async () => {
+		const storage = new MemoryStorage();
+		const { controller, before } = await loadedHost(storage);
+
+		const result = await controller.importGraphIntoCurrent(
+			JSON.stringify({ schemaVersion: 999, data: makeGraph({ nodeCount: 1 }) })
+		);
+
+		expect(result).toEqual({ outcome: 'unsupported' });
+		expect(controller.getView()).toMatchObject({
+			graph: before.graph,
+			status: {
+				state: 'notice',
+				sticky: true,
+				message: 'Import failed. Unsupported file version.'
+			}
+		});
+		expect(readGraphSnapshot('active', snapshotOptions(storage))).toBeNull();
+	});
+
+	it('reports a file it cannot read without touching the graph', async () => {
+		const storage = new MemoryStorage();
+		const { controller, before } = await loadedHost(storage);
+
+		const result = await controller.importGraphIntoCurrentFromReader(async () => {
+			throw new Error('read failed');
+		});
+
+		expect(result).toEqual({ outcome: 'read-failed' });
+		expect(controller.getView()).toMatchObject({
+			graph: before.graph,
+			status: {
+				state: 'notice',
+				sticky: true,
+				message: 'Import failed. Could not read the file.'
+			}
+		});
+		expect(readGraphSnapshot('active', snapshotOptions(storage))).toBeNull();
+	});
+
+	it('copies the incoming assets in without sweeping the host graph own images', async () => {
+		const assetStore = new MemoryGraphAssetStore();
+		const { controller } = setup({ assetStore, snapshotStorage: new MemoryStorage() });
+		await controller.load('active');
+		controller.notifyGraphChanged(imageGraph(['host-asset']), { syncView: true });
+		await storeAsset(assetStore, 'active', 'host-asset', 'host bytes');
+
+		const result = await controller.importGraphIntoCurrent(
+			serializeGraphHtmlFile({
+				data: imageGraph(['incoming-asset']),
+				viewState: NEUTRAL_VIEW_STATE,
+				embeddedAssets: [await embeddedAsset('incoming-asset', 'incoming bytes')]
+			})
+		);
+
+		expect(result).toMatchObject({ outcome: 'imported' });
+		expect(await readAsset(assetStore, 'active', 'host-asset')).toBe('host bytes');
+		expect(await readAsset(assetStore, 'active', 'incoming-asset')).toBe('incoming bytes');
+	});
+
+	it('imports without a snapshot when storage will not take one', async () => {
+		const { controller } = setup({ snapshotStorage: null });
+		await controller.load('active');
+
+		const result = await controller.importGraphIntoCurrent(
+			serializeGraphHtmlFile({ data: makeGraph({ nodeCount: 2 }), viewState: NEUTRAL_VIEW_STATE })
+		);
+
+		expect(result).toEqual({ outcome: 'imported', importedNodeCount: 2, snapshotStored: false });
+		expect(controller.getView().graph.nodes).toHaveLength(3);
+	});
+});
+
+describe('GraphPersistenceController revert', () => {
+	const snapshotOptions = (storage: StorageLike) => ({ storage, namespace: 'test' });
+
+	/** A loaded 'active' graph with one import already folded into it. */
+	async function importedInto(storage: StorageLike) {
+		const context = setup({ snapshotStorage: storage });
+		await context.persistence.save('active', {
+			data: makeGraph({ nodeCount: 2, edges: [[0, 1]] }),
+			viewState: NEUTRAL_VIEW_STATE
+		});
+		await context.controller.load('active');
+		context.controller.notifyViewStateChanged(nonNeutralViewState(), { syncView: true });
+		const beforeImport = context.controller.getView();
+		await context.controller.importGraphIntoCurrent(
+			serializeGraphHtmlFile({
+				data: makeGraph({ nodeCount: 3, edges: [[0, 1]] }),
+				viewState: { panX: 900, panY: 900, scale: 0.5 }
+			})
+		);
+		return { ...context, beforeImport };
+	}
+
+	it('surfaces the snapshot in the view once an import has written one', async () => {
+		const storage = new MemoryStorage();
+		const { controller } = await importedInto(storage);
+
+		expect(controller.getView().snapshot).toEqual({
+			label: 'import',
+			createdAt: 456,
+			nodeCount: 2
+		});
+	});
+
+	it('rediscovers the snapshot on a later load, the way a reload would', async () => {
+		const storage = new MemoryStorage();
+		const { controller } = await importedInto(storage);
+
+		const reloaded = setup({ snapshotStorage: storage });
+		await reloaded.controller.load('active');
+
+		expect(reloaded.controller.getView().snapshot).toEqual({
+			label: 'import',
+			createdAt: 456,
+			nodeCount: 2
+		});
+		expect(controller.getView().snapshot).not.toBeNull();
+	});
+
+	it('offers no revert for a graph that has no snapshot of its own', async () => {
+		const storage = new MemoryStorage();
+		const { controller } = await importedInto(storage);
+
+		await controller.load('other');
+
+		expect(controller.getView().snapshot).toBeNull();
+	});
+
+	it('restores the pre-import graph exactly, clears the snapshot and remounts', async () => {
+		const storage = new MemoryStorage();
+		const { controller, persistence, beforeImport } = await importedInto(storage);
+		controller.notifyViewStateChanged({ panX: 5, panY: 5, scale: 2 }, { syncView: true });
+		const generationBeforeRevert = controller.getView().graphGeneration;
+
+		const reverted = await controller.revertToSnapshot();
+
+		expect(reverted).toBe(true);
+		const after = controller.getView();
+		expect(after.graph).toEqual(beforeImport.graph);
+		expect(after.viewState).toEqual(nonNeutralViewState());
+		expect(after.graphGeneration).toBe(generationBeforeRevert + 1);
+		expect(after.snapshot).toBeNull();
+		expect(readGraphSnapshot('active', snapshotOptions(storage))).toBeNull();
+		expect(persistence.save).toHaveBeenLastCalledWith('active', {
+			data: beforeImport.graph,
+			viewState: nonNeutralViewState()
+		});
+	});
+
+	it('leaves both the host and the imported assets in place', async () => {
+		const assetStore = new MemoryGraphAssetStore();
+		const { controller } = setup({ assetStore, snapshotStorage: new MemoryStorage() });
+		await controller.load('active');
+		controller.notifyGraphChanged(imageGraph(['host-asset']), { syncView: true });
+		await storeAsset(assetStore, 'active', 'host-asset', 'host bytes');
+		await controller.importGraphIntoCurrent(
+			serializeGraphHtmlFile({
+				data: imageGraph(['incoming-asset']),
+				viewState: NEUTRAL_VIEW_STATE,
+				embeddedAssets: [await embeddedAsset('incoming-asset', 'incoming bytes')]
+			})
+		);
+
+		await controller.revertToSnapshot();
+
+		expect(controller.getView().graph).toEqual(imageGraph(['host-asset']));
+		expect(await readAsset(assetStore, 'active', 'host-asset')).toBe('host bytes');
+		expect(await readAsset(assetStore, 'active', 'incoming-asset')).toBe('incoming bytes');
+	});
+
+	it('reports that there was nothing to revert to', async () => {
+		const { controller } = setup({ snapshotStorage: new MemoryStorage() });
+		await controller.load('active');
+		const before = controller.getView();
+
+		const reverted = await controller.revertToSnapshot();
+
+		expect(reverted).toBe(false);
+		expect(controller.getView()).toMatchObject({
+			graph: before.graph,
+			graphGeneration: before.graphGeneration,
+			snapshot: null
+		});
+	});
+
+	it('drops the snapshot on dismiss, leaving the imported graph alone', async () => {
+		const storage = new MemoryStorage();
+		const { controller } = await importedInto(storage);
+		const imported = controller.getView();
+
+		controller.dismissSnapshot();
+
+		expect(controller.getView()).toMatchObject({
+			graph: imported.graph,
+			graphGeneration: imported.graphGeneration,
+			snapshot: null
+		});
+		expect(readGraphSnapshot('active', snapshotOptions(storage))).toBeNull();
+		expect(await controller.revertToSnapshot()).toBe(false);
+	});
+});
+
+describe('GraphPersistenceController embedded assets', () => {
+	it('keeps the host scope assets when hydrating an imported document', async () => {
+		const assetStore = new MemoryGraphAssetStore();
+		const { controller } = setup({ assetStore });
+		await controller.load('host');
+		await storeAsset(assetStore, 'host', 'host-asset', 'host bytes');
+
+		await controller.hydrateImportedAssets('host', {
+			data: imageGraph(['incoming-asset']),
+			viewState: NEUTRAL_VIEW_STATE,
+			embeddedAssets: [await embeddedAsset('incoming-asset', 'incoming bytes')]
+		});
+
+		expect(await readAsset(assetStore, 'host', 'host-asset')).toBe('host bytes');
+		expect(await readAsset(assetStore, 'host', 'incoming-asset')).toBe('incoming bytes');
+	});
+
+	it('keeps the host asset when an imported asset reuses its id', async () => {
+		const assetStore = new MemoryGraphAssetStore();
+		const { controller } = setup({ assetStore });
+		await controller.load('host');
+		await storeAsset(assetStore, 'host', 'shared-asset', 'host bytes');
+
+		await controller.hydrateImportedAssets('host', {
+			data: imageGraph(['shared-asset']),
+			viewState: NEUTRAL_VIEW_STATE,
+			embeddedAssets: [await embeddedAsset('shared-asset', 'incoming bytes')]
+		});
+
+		expect(await readAsset(assetStore, 'host', 'shared-asset')).toBe('host bytes');
+	});
+
+	it('sweeps unreferenced scope assets when a replacing document load hydrates', async () => {
+		const assetStore = new MemoryGraphAssetStore();
+		const { controller } = setup({ assetStore });
+		const scope = documentDraftGraphId('doc-sweep');
+		await storeAsset(assetStore, scope, 'stale-asset', 'stale bytes');
+
+		await controller.loadEmbeddedDocument({
+			documentId: 'doc-sweep',
+			data: imageGraph(['kept-asset']),
+			viewState: NEUTRAL_VIEW_STATE,
+			embeddedAssets: [await embeddedAsset('kept-asset', 'kept bytes')]
+		});
+
+		expect(await readAsset(assetStore, scope, 'stale-asset')).toBeNull();
+		expect(await readAsset(assetStore, scope, 'kept-asset')).toBe('kept bytes');
+	});
+
+	it('sweeps unreferenced scope assets when a replacing file import hydrates', async () => {
+		const assetStore = new MemoryGraphAssetStore();
+		const { controller } = setup({ assetStore });
+		await controller.load('active');
+		await storeAsset(assetStore, 'active', 'stale-asset', 'stale bytes');
+
+		const result = await controller.importGraphDocument(
+			serializeGraphHtmlFile({
+				data: imageGraph(['kept-asset']),
+				viewState: nonNeutralViewState(),
+				documentId: 'doc-import',
+				embeddedAssets: [await embeddedAsset('kept-asset', 'kept bytes')]
+			})
+		);
+
+		expect(result).toBe('imported');
+		expect(await readAsset(assetStore, 'active', 'stale-asset')).toBeNull();
+		expect(await readAsset(assetStore, 'active', 'kept-asset')).toBe('kept bytes');
+	});
+
+	it('leaves the scope untouched when no asset store is configured', async () => {
+		const { controller } = setup();
+		await controller.load('host');
+
+		await expect(
+			controller.hydrateImportedAssets('host', {
+				data: imageGraph(['incoming-asset']),
+				viewState: NEUTRAL_VIEW_STATE,
+				embeddedAssets: [await embeddedAsset('incoming-asset', 'incoming bytes')]
+			})
+		).resolves.toBeUndefined();
+	});
+});
+
 describe('statusToNotice', () => {
 	it('maps every controller status to deterministic notice text', () => {
 		const cases: Array<[ControllerStatus, string]> = [
 			[{ state: 'loading', graphId: 'graph' }, 'Loading graph...'],
 			[{ state: 'loaded', graphId: 'graph' }, 'Loaded "graph".'],
-			[{ state: 'reloaded', graphId: 'graph' }, 'Reloaded "graph" from another tab.'],
-			[{ state: 'saving' }, 'Saving...'],
-			[{ state: 'saved', savedAt: 1 }, 'Saved.'],
+			[{ state: 'reloaded', graphId: 'graph' }, 'Reloaded from another tab.'],
+			[{ state: 'saving' }, 'Caching draft...'],
+			[{ state: 'saved', savedAt: 1 }, 'Draft cached.'],
 			[
-				{ state: 'warning', savedAt: 1, message: 'Stored graphs use 81% of the local budget.' },
-				'Stored graphs use 81% of the local budget.'
+				{ state: 'warning', savedAt: 1, message: 'Local cache is 81% full.' },
+				'Local cache is 81% full.'
 			],
 			[{ state: 'notice', message: 'Import cancelled.' }, 'Import cancelled.'],
-			[{ state: 'error', message: 'quota exceeded' }, 'Save failed: quota exceeded']
+			[{ state: 'exported', filename: 'graph.html' }, 'Saved graph.html. Check your downloads.'],
+			[{ state: 'error', message: 'quota exceeded' }, 'Could not cache draft. quota exceeded']
 		];
 
 		for (const [status, notice] of cases) {

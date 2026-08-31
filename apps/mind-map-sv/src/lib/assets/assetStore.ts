@@ -119,6 +119,7 @@ export class IndexedDbGraphAssetStore implements GraphAssetStore {
 	}
 }
 
+/** In-memory stand-in for specs, so asset behaviour is testable without IndexedDB. */
 export class MemoryGraphAssetStore implements GraphAssetStore {
 	private readonly records = new Map<string, StoredGraphAsset>();
 
@@ -162,11 +163,11 @@ export class MemoryGraphAssetStore implements GraphAssetStore {
 	}
 }
 
-export function assetKey(scope: string, assetId: string): string {
+function assetKey(scope: string, assetId: string): string {
 	return `${encodeURIComponent(scope)}:${encodeURIComponent(assetId)}`;
 }
 
-export function classifyAssetStoreError(error: unknown): AssetStoreResult<never> {
+function classifyAssetStoreError(error: unknown): AssetStoreResult<never> {
 	if (
 		error instanceof DOMException &&
 		(error.name === 'QuotaExceededError' || error.name === 'NS_ERROR_DOM_QUOTA_REACHED')
