@@ -1424,18 +1424,16 @@ export function controllerNoticeSeverity(view: ControllerView): 'info' | 'warnin
 	// not be amber, even while a quota warning status is standing by.
 	if (view.status.state === 'exported') return 'info';
 	if (view.status.state === 'loading' || view.status.state === 'saving') return 'info';
-	// Mirrors the sticky-notice tier above: the app answering the reader directly
-	// is information, not an alarm — the message says what went wrong when
-	// something did.
-	if (view.status.state === 'notice' && view.status.sticky === true) return 'info';
+	// Mirrors the sticky-notice tier above — the tier where controllerNotice
+	// hands the sticky message the line, so the colour is decided on the message
+	// actually shown. The app answering the reader directly is information, not
+	// an alarm; a sticky notice that names its own severity keeps it, because
+	// some of them (the newer-app warning) are about work at risk.
+	if (view.status.state === 'notice' && view.status.sticky === true) {
+		return view.status.severity ?? 'info';
+	}
 	if (view.cachePending) return 'info';
 	if (view.status.state === 'warning') return 'warning';
-	// A sticky notice may name its own severity, at the same point in the order
-	// where controllerNotice hands it the line. Notices that name none keep
-	// falling through to the document-status rule, as they always have.
-	if (view.status.state === 'notice' && view.status.sticky === true) {
-		if (view.status.severity !== undefined) return view.status.severity;
-	}
 	// Only escalate when the notice is the document-status one saying the work
 	// is not saved.
 	if (!view.draftCached && documentStatusHasUnsavedChanges(view.documentStatus)) {
