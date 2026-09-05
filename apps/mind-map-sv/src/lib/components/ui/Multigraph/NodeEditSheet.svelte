@@ -3,13 +3,22 @@
 	import { SvelteSet } from 'svelte/reactivity';
 	import type { EdgeData } from '../types/edge';
 	import type { GraphAssetMetadata } from '../types/multigraph';
-	import type { NodeData, NodeImageContent, QuantityDesignation } from '../types/node';
+	import type {
+		NodeContentBlock,
+		NodeData,
+		NodeFileContent,
+		NodeImageContent,
+		QuantityDesignation
+	} from '../types/node';
+	import { APP_CONFIG } from '$lib/appConfig';
 	import { prefersReducedMotion } from '$lib/reducedMotion';
 	import MathText from '../MathText/MathText.svelte';
 	import { hasMath } from '../MathText/lib/mathSegments';
 	import { mathPlainText } from '../MathText/lib/mathPlainText';
 	import type { QuantitySymbol } from '../MathText/lib/mathSymbols';
 	import { normalizeNodeTitle, type EdgePatch } from './lib/graph';
+	import { formatByteSize } from './lib/byteSize';
+	import { isRegisteredAddon, NODE_ADDON_REGISTRY, type NodeAddonName } from './lib/nodeAddons';
 	import { normalizeTagList } from './lib/titleSyntax';
 	import { nodeQuantities } from './lib/nodeQuantities';
 	import { cycleDesignation, designateAs, designationView } from './lib/quantityDesignations';
@@ -31,14 +40,18 @@
 		edges,
 		assets = {},
 		onSave,
-		onAddImage,
+		onAddAttachment,
 		onSaveImage,
-		onMoveImage,
-		onDeleteImage,
+		onSaveFile,
+		onMoveAttachment,
+		onDeleteAttachment,
+		onToggleAddon,
 		onSaveEdge,
 		onCancel,
 		onTogglePinned,
-		onDelete
+		onDelete,
+		confirmAttachment = (message: string) => window.confirm(message),
+		warnBytesPerFile = APP_CONFIG.multigraph.attachments.warnBytesPerFile
 	}: {
 		node: NodeData;
 		nodes: NodeData[];
@@ -51,17 +64,31 @@
 			inputs: QuantityDesignation[];
 			outputs: QuantityDesignation[];
 		}) => void;
-		onAddImage?: (
-			file: File,
-			details: { alt: string; caption?: string }
-		) => Promise<'added' | 'unsupported' | 'store-failed'>;
+		/**
+		 * Store one picked file. The MIME type decides what it becomes, so both
+		 * upload buttons hand the file to the same callback and a PNG picked
+		 * through Add file is still an image.
+		 */
+		onAddAttachment?: (file: File) => Promise<'added' | 'store-failed'>;
 		onSaveImage?: (assetId: string, details: { alt: string; caption?: string }) => void;
-		onMoveImage?: (fromIndex: number, direction: -1 | 1) => void;
-		onDeleteImage?: (assetId: string) => void;
+		onSaveFile?: (assetId: string, details: { caption?: string }) => void;
+		/** Indices are into the node's whole content list, not the images in it. */
+		onMoveAttachment?: (fromIndex: number, direction: -1 | 1) => void;
+		onDeleteAttachment?: (assetId: string) => void;
+		onToggleAddon?: (name: NodeAddonName, enabled: boolean) => void;
 		onSaveEdge: (edgeId: string, patch: EdgePatch) => void;
 		onCancel: () => void;
 		onTogglePinned: () => void;
 		onDelete: () => void;
+		/**
+		 * Asks before attaching a file over the per-file size threshold. Injectable
+		 * so a story can answer it; a size warning rather than a destructive
+		 * confirm, which is why it stays after milestone 12 made undo the safety
+		 * net for the destructive ones.
+		 */
+		confirmAttachment?: (message: string) => boolean;
+		/** File size over which `confirmAttachment` is asked. A test pins it. */
+		warnBytesPerFile?: number;
 	} = $props();
 
 	let activeTab = $state<ActiveTab>('node');
@@ -71,11 +98,10 @@
 	let draftInputs = $state<QuantityDesignation[]>([]);
 	let draftOutputs = $state<QuantityDesignation[]>([]);
 	let edgeTagTextById = $state<Record<string, string>>({});
-	let imageDraftByAssetId = $state<Record<string, { alt: string; caption: string }>>({});
-	let imageStatus = $state('');
+	let attachmentDraftByAssetId = $state<Record<string, { alt: string; caption: string }>>({});
+	let attachmentStatus = $state('');
 	let titleInput = $state<HTMLInputElement | null>(null);
 	let descriptionInput = $state<HTMLTextAreaElement | null>(null);
-	let imageInput = $state<HTMLInputElement | null>(null);
 	let insertStatus = $state('');
 
 	type TextField = 'title' | 'description';
@@ -129,9 +155,21 @@
 	const incidentEdges = $derived(
 		edges.filter((edge) => edge.sourceNodeId === node.id || edge.targetNodeId === node.id)
 	);
-	const imageBlocks = $derived(
-		(node.content ?? []).filter((block): block is NodeImageContent => block.type === 'image')
-	);
+	/**
+	 * Every attachment in one list, in the order the node stores them.
+	 *
+	 * Images and files share the list rather than getting one each, because the
+	 * reorder buttons move a block within `node.content` — so the index a row
+	 * hands back has to be its index there. Two filtered lists would each count
+	 * from zero and move the wrong block as soon as a node carried both kinds.
+	 */
+	const attachmentBlocks = $derived(node.content ?? []);
+
+	const addonEntries = Object.keys(NODE_ADDON_REGISTRY)
+		// A type guard rather than a cast: `Object.keys` widens to `string[]`, and
+		// the registry's own membership test narrows each key back to its union.
+		.filter(isRegisteredAddon)
+		.map((name) => ({ name, label: NODE_ADDON_REGISTRY[name].label }));
 
 	$effect(() => {
 		title = node.title;
@@ -170,11 +208,14 @@
 	});
 
 	$effect(() => {
-		const currentDrafts = untrack(() => imageDraftByAssetId);
-		imageDraftByAssetId = Object.fromEntries(
-			imageBlocks.map((image) => [
-				image.assetId,
-				currentDrafts[image.assetId] ?? { alt: image.alt, caption: image.caption ?? '' }
+		const currentDrafts = untrack(() => attachmentDraftByAssetId);
+		attachmentDraftByAssetId = Object.fromEntries(
+			attachmentBlocks.map((block) => [
+				block.assetId,
+				currentDrafts[block.assetId] ?? {
+					alt: block.type === 'image' ? block.alt : '',
+					caption: block.caption ?? ''
+				}
 			])
 		);
 	});
@@ -383,28 +424,81 @@
 		onSaveEdge(edge.id, { tags: normalizeTagList(edgeTagTextById[edge.id] ?? '') });
 	}
 
-	async function addSelectedImage(event: Event) {
+	/**
+	 * Both upload buttons land here. The file's own type decides what it becomes,
+	 * so the only difference between them is the `accept` filter — which is what
+	 * keeps Add image offering a phone's camera.
+	 */
+	async function addSelectedAttachment(event: Event) {
 		// Svelte types currentTarget broadly, but this handler is attached to the file input.
 		const input = event.currentTarget as HTMLInputElement;
 		const file = input.files?.[0];
-		if (!file || !onAddImage) return;
-		imageStatus = '';
-		const result = await onAddImage(file, { alt: file.name, caption: '' });
-		if (result === 'unsupported') imageStatus = 'Unsupported image type.';
-		if (result === 'store-failed') imageStatus = 'Unable to store image.';
-		if (result === 'added') imageStatus = 'Image added.';
-		if (imageInput) imageInput.value = '';
+		if (!file || !onAddAttachment) return;
+		attachmentStatus = '';
+
+		if (file.size > warnBytesPerFile && !confirmAttachment(sizeWarningFor(file))) {
+			attachmentStatus = 'Attachment cancelled.';
+			input.value = '';
+			return;
+		}
+
+		const result = await onAddAttachment(file);
+		attachmentStatus = result === 'added' ? 'Attachment added.' : 'Unable to store attachment.';
+		input.value = '';
+	}
+
+	/**
+	 * Why a big file is worth a question: it is copied into the document, and the
+	 * single-file export writes it as base64, which costs about a third again.
+	 */
+	function sizeWarningFor(file: File): string {
+		return `${file.name} is ${formatByteSize(file.size)}. It is stored inside this document and makes a saved file about a third larger again. Attach it anyway?`;
+	}
+
+	function draftFor(block: NodeContentBlock): { alt: string; caption: string } {
+		return (
+			attachmentDraftByAssetId[block.assetId] ?? {
+				alt: block.type === 'image' ? block.alt : '',
+				caption: block.caption ?? ''
+			}
+		);
+	}
+
+	function editDraft(assetId: string, patch: Partial<{ alt: string; caption: string }>) {
+		const current = attachmentDraftByAssetId[assetId] ?? { alt: '', caption: '' };
+		attachmentDraftByAssetId = {
+			...attachmentDraftByAssetId,
+			[assetId]: { ...current, ...patch }
+		};
+	}
+
+	/** An empty caption is absent rather than blank, so it never reaches a save file. */
+	function captionOf(draft: { caption: string }): string | undefined {
+		return draft.caption.trim() ? draft.caption : undefined;
 	}
 
 	function saveImage(image: NodeImageContent) {
-		const draft = imageDraftByAssetId[image.assetId] ?? {
-			alt: image.alt,
-			caption: image.caption ?? ''
-		};
-		onSaveImage?.(image.assetId, {
-			alt: draft.alt,
-			caption: draft.caption.trim() ? draft.caption : undefined
-		});
+		const draft = draftFor(image);
+		onSaveImage?.(image.assetId, { alt: draft.alt, caption: captionOf(draft) });
+	}
+
+	function saveFile(file: NodeFileContent) {
+		onSaveFile?.(file.assetId, { caption: captionOf(draftFor(file)) });
+	}
+
+	/**
+	 * Applied straight away, the way Pin and the attachment controls are, rather
+	 * than waiting for Done: an add-on is a capability the node either has or
+	 * does not, not text being drafted. No confirm on the way off — milestone
+	 * 12's undo is the safety net, and the commit says which add-on it removed.
+	 */
+	function toggleAddon(name: NodeAddonName, enabled: boolean) {
+		onToggleAddon?.(name, enabled);
+	}
+
+	function labelFor(block: NodeContentBlock): string {
+		if (block.type === 'file') return block.name;
+		return assets[block.assetId]?.name ?? block.assetId;
 	}
 
 	function edgeTagsFor(edge: EdgeData): string[] {
@@ -573,87 +667,100 @@
 					<input bind:value={nodeTags} name="node-tags" placeholder="abc urgent" />
 				</label>
 
-				<section class="images-panel" aria-label="Image attachments">
-					<div class="images-header">
-						<h3>Images</h3>
-						<label class="image-upload">
-							Add image
+				<fieldset class="addons-group" data-addons-group>
+					<legend>Add-ons</legend>
+					{#each addonEntries as entry (entry.name)}
+						<label class="addon-toggle">
 							<input
-								bind:this={imageInput}
-								type="file"
-								accept="image/*"
-								onchange={addSelectedImage}
+								type="checkbox"
+								name={`addon-${entry.name}`}
+								checked={node.addons?.[entry.name] !== undefined}
+								onchange={(event) => toggleAddon(entry.name, event.currentTarget.checked)}
 							/>
+							{entry.label}
 						</label>
+					{/each}
+				</fieldset>
+
+				<section class="attachments-panel" aria-label="Attachments">
+					<div class="attachments-header">
+						<h3>Attachments</h3>
+						<div class="attachment-uploads">
+							<label class="attachment-upload">
+								Add image
+								<input type="file" accept="image/*" onchange={addSelectedAttachment} />
+							</label>
+							<label class="attachment-upload">
+								Add file
+								<input type="file" onchange={addSelectedAttachment} />
+							</label>
+						</div>
 					</div>
 
-					{#if imageBlocks.length === 0}
-						<p class="empty-state">No images attached.</p>
+					{#if attachmentBlocks.length === 0}
+						<p class="empty-state">No attachments.</p>
 					{:else}
-						<ol class="image-list" aria-label="Attached images">
-							{#each imageBlocks as image, index (image.assetId)}
-								{@const asset = assets[image.assetId]}
-								{@const draft = imageDraftByAssetId[image.assetId] ?? {
-									alt: image.alt,
-									caption: image.caption ?? ''
-								}}
-								<li>
-									<div class="image-meta">
-										<strong>{asset?.name ?? image.assetId}</strong>
-										<span>{asset?.mimeType ?? 'image'}</span>
+						<ol class="attachment-list" aria-label="Attached files">
+							{#each attachmentBlocks as block, index (block.assetId)}
+								{@const asset = assets[block.assetId]}
+								{@const draft = draftFor(block)}
+								<li data-attachment-kind={block.type} data-attachment-asset-id={block.assetId}>
+									<div class="attachment-meta">
+										<strong data-attachment-name>{labelFor(block)}</strong>
+										<span data-attachment-type>{asset?.mimeType ?? block.type}</span>
+										<span data-attachment-size>{formatByteSize(asset?.size ?? 0)}</span>
 									</div>
-									<label>
-										Alt text
-										<input
-											value={draft.alt}
-											oninput={(event) =>
-												(imageDraftByAssetId = {
-													...imageDraftByAssetId,
-													[image.assetId]: {
-														...draft,
-														alt: event.currentTarget.value
-													}
-												})}
-										/>
-									</label>
+									{#if block.type === 'image'}
+										<label>
+											Alt text
+											<input
+												value={draft.alt}
+												oninput={(event) =>
+													editDraft(block.assetId, { alt: event.currentTarget.value })}
+											/>
+										</label>
+									{/if}
 									<label>
 										Caption
 										<input
 											value={draft.caption}
 											oninput={(event) =>
-												(imageDraftByAssetId = {
-													...imageDraftByAssetId,
-													[image.assetId]: {
-														...draft,
-														caption: event.currentTarget.value
-													}
-												})}
+												editDraft(block.assetId, { caption: event.currentTarget.value })}
 										/>
 									</label>
-									<div class="image-actions">
+									<div class="attachment-actions">
 										<button
 											type="button"
 											class="secondary"
 											disabled={index === 0}
-											onclick={() => onMoveImage?.(index, -1)}
+											aria-label={`Move ${labelFor(block)} earlier`}
+											onclick={() => onMoveAttachment?.(index, -1)}
 										>
 											Up
 										</button>
 										<button
 											type="button"
 											class="secondary"
-											disabled={index === imageBlocks.length - 1}
-											onclick={() => onMoveImage?.(index, 1)}
+											disabled={index === attachmentBlocks.length - 1}
+											aria-label={`Move ${labelFor(block)} later`}
+											onclick={() => onMoveAttachment?.(index, 1)}
 										>
 											Down
 										</button>
-										<button type="button" class="secondary" onclick={() => saveImage(image)}>
-											Save image
-										</button>
+										{#if block.type === 'image'}
+											<button type="button" class="secondary" onclick={() => saveImage(block)}>
+												Save image
+											</button>
+										{:else}
+											<button type="button" class="secondary" onclick={() => saveFile(block)}>
+												Save file
+											</button>
+										{/if}
 										<button
 											type="button"
 											class="danger"
-											onclick={() => onDeleteImage?.(image.assetId)}
+											aria-label={`Remove ${labelFor(block)}`}
+											onclick={() => onDeleteAttachment?.(block.assetId)}
 										>
 											Remove
 										</button>
@@ -663,8 +770,8 @@
 						</ol>
 					{/if}
 
-					{#if imageStatus}
-						<p class="image-status" role="status">{imageStatus}</p>
+					{#if attachmentStatus}
+						<p class="attachment-status" role="status">{attachmentStatus}</p>
 					{/if}
 				</section>
 
@@ -934,29 +1041,31 @@
 		list-style: none;
 	}
 
-	.images-panel,
-	.image-list {
+	.attachments-panel,
+	.attachment-list {
 		display: grid;
 		gap: 0.75rem;
 	}
 
-	.images-header,
-	.image-actions {
+	.attachments-header,
+	.attachment-uploads,
+	.attachment-actions {
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
 	}
 
-	.images-header {
+	.attachments-header {
 		justify-content: space-between;
+		flex-wrap: wrap;
 	}
 
-	.images-header h3,
-	.image-status {
+	.attachments-header h3,
+	.attachment-status {
 		margin: 0;
 	}
 
-	.image-upload {
+	.attachment-upload {
 		display: inline-flex;
 		min-height: 44px;
 		align-items: center;
@@ -968,7 +1077,7 @@
 		cursor: pointer;
 	}
 
-	.image-upload input,
+	.attachment-upload input,
 	.visually-hidden {
 		position: absolute;
 		width: 1px;
@@ -977,13 +1086,13 @@
 		clip: rect(0 0 0 0);
 	}
 
-	.image-list {
+	.attachment-list {
 		padding: 0;
 		margin: 0;
 		list-style: none;
 	}
 
-	.image-list li {
+	.attachment-list li {
 		display: grid;
 		gap: 0.625rem;
 		border: 1px solid #e2e8f0;
@@ -991,16 +1100,48 @@
 		padding: 0.75rem;
 	}
 
-	.image-meta {
+	.attachment-meta {
 		display: flex;
 		justify-content: space-between;
 		gap: 0.75rem;
 		color: #475569;
 	}
 
-	.image-actions {
+	.attachment-actions {
 		justify-content: flex-end;
 		flex-wrap: wrap;
+	}
+
+	.addons-group {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+		border: 1px solid #e2e8f0;
+		border-radius: 0.875rem;
+		padding: 0.75rem 0.875rem;
+	}
+
+	.addons-group legend {
+		padding: 0 0.375rem;
+		color: #475569;
+		font-size: 0.8125rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+
+	.addon-toggle {
+		display: inline-flex;
+		min-height: 44px;
+		align-items: center;
+		gap: 0.5rem;
+		cursor: pointer;
+	}
+
+	.addon-toggle input {
+		width: 1.125rem;
+		height: 1.125rem;
 	}
 
 	.edge-tag-list li,

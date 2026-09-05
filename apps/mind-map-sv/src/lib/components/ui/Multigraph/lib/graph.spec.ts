@@ -4,6 +4,7 @@ import {
 	addNode,
 	addNodeContentBlock,
 	commitInlineTitleSyntax,
+	commitSheetTitleSyntax,
 	deleteTagEverywhere,
 	duplicateEdgeIdentifier,
 	findExistingEdge,
@@ -24,6 +25,7 @@ import {
 	togglePinned,
 	updateEdge,
 	updateNodeContent,
+	updateNodeFileContent,
 	updateNodeImageContent
 } from './graph';
 import { makeGraph } from './testFixtures';
@@ -599,6 +601,104 @@ describe('graph mutations', () => {
 		});
 	});
 
+	describe('commitSheetTitleSyntax', () => {
+		const taskNode = (addons?: { task: { done: boolean; doneAt?: number } }) =>
+			makeGraph({
+				nodes: [
+					{
+						id: 'n0',
+						title: 'Old title',
+						description: 'kept',
+						tags: ['x'],
+						...(addons ? { addons } : {})
+					}
+				]
+			});
+
+		it('takes the node markers out of the title and adds what they name', () => {
+			const next = commitSheetTitleSyntax(taskNode(), 'n0', '#lab !task Buy filters', ['x']);
+
+			expect(next.nodes[0]).toMatchObject({
+				title: 'Buy filters',
+				// Listed tags first, then what the title introduced.
+				tags: ['x', 'lab'],
+				addons: { task: { done: false } },
+				description: 'kept'
+			});
+		});
+
+		it('leaves an edge tag in the title, since the sheet has no created edge', () => {
+			const next = commitSheetTitleSyntax(taskNode(), 'n0', '@bench Buy filters', ['x']);
+
+			expect(next.nodes[0]).toMatchObject({ title: '@bench Buy filters', tags: ['x'] });
+			expect(next.nodes[0].addons).toBeUndefined();
+		});
+
+		it('leaves a direction prefix in the title for the same reason', () => {
+			expect(commitSheetTitleSyntax(taskNode(), 'n0', '> Title', ['x']).nodes[0].title).toBe(
+				'> Title'
+			);
+			expect(commitSheetTitleSyntax(taskNode(), 'n0', '< Title', ['x']).nodes[0].title).toBe(
+				'< Title'
+			);
+		});
+
+		it('ends the marker run at an edge tag rather than reading past it', () => {
+			const next = commitSheetTitleSyntax(taskNode(), 'n0', '#lab @bench !task Go', ['x']);
+
+			expect(next.nodes[0]).toMatchObject({ title: '@bench !task Go', tags: ['x', 'lab'] });
+			expect(next.nodes[0].addons).toBeUndefined();
+		});
+
+		it('leaves the data of an add-on the node already carries alone', () => {
+			const graph = taskNode({ task: { done: true, doneAt: 1_700_000_000_000 } });
+
+			const next = commitSheetTitleSyntax(graph, 'n0', '!task Buy filters', ['x']);
+
+			expect(next.nodes[0].addons).toEqual({ task: { done: true, doneAt: 1_700_000_000_000 } });
+			expect(next.nodes[0].title).toBe('Buy filters');
+		});
+
+		it('changes neither tags nor add-ons for a title with no markers', () => {
+			const graph = taskNode();
+
+			const next = commitSheetTitleSyntax(graph, 'n0', 'Buy filters', ['x']);
+
+			expect(next.nodes[0]).toMatchObject({ title: 'Buy filters', tags: ['x'] });
+			expect(next.nodes[0].addons).toBeUndefined();
+		});
+
+		it('does not repeat a tag the sheet already lists', () => {
+			expect(
+				commitSheetTitleSyntax(taskNode(), 'n0', '#x Buy filters', ['x']).nodes[0].tags
+			).toEqual(['x']);
+		});
+
+		it('falls back to the default title when the markers were the whole field', () => {
+			expect(commitSheetTitleSyntax(taskNode(), 'n0', '#lab !task', ['x']).nodes[0]).toMatchObject({
+				title: NEW_NODE_TITLE,
+				tags: ['x', 'lab'],
+				addons: { task: { done: false } }
+			});
+		});
+
+		it('does not mutate the graph it was handed', () => {
+			const graph = taskNode();
+
+			const next = commitSheetTitleSyntax(graph, 'n0', '#lab !task Buy filters', ['x']);
+
+			expect(next).not.toBe(graph);
+			expect(graph.nodes[0]).toMatchObject({ title: 'Old title', tags: ['x'] });
+			expect(graph.nodes[0].addons).toBeUndefined();
+		});
+
+		it('is a no-op for missing node ids', () => {
+			const graph = taskNode();
+
+			expect(commitSheetTitleSyntax(graph, 'missing', '#lab Buy filters', ['x'])).toBe(graph);
+		});
+	});
+
 	describe('setNodeAddon', () => {
 		it('creates the add-on at its default without mutating the original graph', () => {
 			const graph = makeGraph({ nodeCount: 2 });
@@ -886,6 +986,45 @@ describe('graph mutations', () => {
 				const graph = makeGraph({ nodeCount: 1 });
 
 				expect(updateNodeImageContent(graph, 'missing', 'a1', { alt: 'x' })).toBe(graph);
+			});
+		});
+
+		describe('updateNodeFileContent', () => {
+			it('rewrites a file caption without mutating the original graph', () => {
+				const graph = addNodeContentBlock(
+					makeGraph({ nodeCount: 1 }),
+					'n0',
+					fileBlock('f1'),
+					fileAsset('f1')
+				);
+
+				const next = updateNodeFileContent(graph, 'n0', 'f1', { caption: 'Bench run 3' });
+
+				expect(next).not.toBe(graph);
+				expect(next.nodes[0].content).toEqual([
+					{ type: 'file', assetId: 'f1', name: 'f1.csv', caption: 'Bench run 3' }
+				]);
+				expect(graph.nodes[0].content).toEqual([fileBlock('f1')]);
+			});
+
+			// The mirror of updateNodeImageContent: each kind edits only its own.
+			it('leaves an image block sharing the asset id untouched', () => {
+				const graph = addNodeContentBlock(
+					makeGraph({ nodeCount: 1 }),
+					'n0',
+					imageBlock('a1'),
+					imageAsset('a1')
+				);
+
+				expect(
+					updateNodeFileContent(graph, 'n0', 'a1', { caption: 'Changed' }).nodes[0].content
+				).toEqual([imageBlock('a1')]);
+			});
+
+			it('is a no-op for missing node ids', () => {
+				const graph = makeGraph({ nodeCount: 1 });
+
+				expect(updateNodeFileContent(graph, 'missing', 'f1', { caption: 'x' })).toBe(graph);
 			});
 		});
 

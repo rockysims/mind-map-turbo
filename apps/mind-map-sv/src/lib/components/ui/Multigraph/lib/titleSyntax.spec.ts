@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeTagList, parseTitleSyntax } from './titleSyntax';
+import { normalizeTagList, parseSheetTitleSyntax, parseTitleSyntax } from './titleSyntax';
 
 describe('parseTitleSyntax', () => {
 	it('returns an undirected plain title when no syntax is present', () => {
@@ -262,6 +262,64 @@ describe('parseTitleSyntax', () => {
 					addonMarker: '%'
 				})
 			).toMatchObject({ displayTitle: 'Custom marker', addons: ['task'] });
+		});
+	});
+});
+
+describe('parseSheetTitleSyntax', () => {
+	it('reads node tags and add-ons the way the full parser does', () => {
+		expect(parseSheetTitleSyntax('#lab !task Buy filters')).toEqual({
+			displayTitle: 'Buy filters',
+			nodeTags: ['lab'],
+			addons: ['task']
+		});
+		expect(parseSheetTitleSyntax('!task#lab Buy filters')).toEqual({
+			displayTitle: 'Buy filters',
+			nodeTags: ['lab'],
+			addons: ['task']
+		});
+	});
+
+	it('leaves an edge tag in the title instead of consuming it', () => {
+		expect(parseSheetTitleSyntax('@bench Buy filters')).toEqual({
+			displayTitle: '@bench Buy filters',
+			nodeTags: [],
+			addons: []
+		});
+	});
+
+	it('ends the run at an edge tag, so later markers stay in the title too', () => {
+		expect(parseSheetTitleSyntax('#lab @bench !task Go')).toEqual({
+			displayTitle: '@bench !task Go',
+			nodeTags: ['lab'],
+			addons: []
+		});
+	});
+
+	it('leaves a direction prefix in the title', () => {
+		expect(parseSheetTitleSyntax('> Title').displayTitle).toBe('> Title');
+		expect(parseSheetTitleSyntax('< Title').displayTitle).toBe('< Title');
+		// Nor does the prefix let the markers behind it through.
+		expect(parseSheetTitleSyntax('>#lab Title')).toEqual({
+			displayTitle: '>#lab Title',
+			nodeTags: [],
+			addons: []
+		});
+	});
+
+	it('keeps an unregistered add-on name as prose, run and all', () => {
+		expect(parseSheetTitleSyntax('!important #lab Read this')).toEqual({
+			displayTitle: '!important #lab Read this',
+			nodeTags: [],
+			addons: []
+		});
+	});
+
+	it('returns a plain title unchanged', () => {
+		expect(parseSheetTitleSyntax('Buy filters')).toEqual({
+			displayTitle: 'Buy filters',
+			nodeTags: [],
+			addons: []
 		});
 	});
 });

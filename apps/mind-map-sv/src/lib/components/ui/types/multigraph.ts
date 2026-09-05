@@ -17,8 +17,9 @@ export interface GraphAssetMetadata {
 	id: string;
 	/**
 	 * What the asset is *for*, not what it is: the MIME type says PNG, the kind
-	 * says whether the node renders it inline or offers it as a download. A PNG
-	 * attached through Add file is `'file'` with an `image/png` MIME type.
+	 * says whether the node renders it inline or offers it as a download. The
+	 * MIME type decides, not the button that added it, so a PNG picked through
+	 * Add file is still `'image'`; `'file'` is what everything else becomes.
 	 */
 	kind: 'image' | 'file';
 	mimeType: string;

@@ -8,13 +8,14 @@ import type {
 import type {
 	NodeContentBlock,
 	NodeData,
+	NodeFileContent,
 	NodeImageContent,
 	QuantityDesignation
 } from '../../types/node';
 import { withNodeAddon, type NodeAddonName } from './nodeAddons';
 import { mathPlainText } from '../../MathText/lib/mathPlainText';
 import { symbolFor } from '../../MathText/lib/mathSymbols';
-import { parseTitleSyntax } from './titleSyntax';
+import { parseSheetTitleSyntax, parseTitleSyntax } from './titleSyntax';
 
 interface AddNodeInput {
 	id?: string;
@@ -360,6 +361,33 @@ export function updateNodeImageContent(
 	};
 }
 
+/**
+ * Edit a file block's caption. A file has no alt text — it is opened rather
+ * than rendered — so the caption is the only thing about it the reader writes.
+ */
+export function updateNodeFileContent(
+	data: MultigraphData,
+	nodeId: string,
+	assetId: string,
+	patch: Partial<Pick<NodeFileContent, 'caption'>>
+): MultigraphData {
+	if (!hasNode(data, nodeId)) return data;
+
+	return {
+		...data,
+		nodes: data.nodes.map((node) =>
+			node.id === nodeId
+				? {
+						...node,
+						content: (node.content ?? []).map((block) =>
+							block.type === 'file' && block.assetId === assetId ? { ...block, ...patch } : block
+						)
+					}
+				: node
+		)
+	};
+}
+
 export function moveNodeContentBlock(
 	data: MultigraphData,
 	nodeId: string,
@@ -518,6 +546,56 @@ export function commitInlineTitleSyntax(
 		tags: parsed.edgeTags,
 		directed: parsed.direction === 'undirected' ? false : true
 	});
+}
+
+/**
+ * Apply the edit sheet's title field, markers and all.
+ *
+ * Additive where the inline editor is wholesale: the sheet has its own tags
+ * field, so a `#lab` typed in the title *adds* to what is listed there rather
+ * than replacing it, and the sheet's own field stays the way to remove a tag.
+ * Same for add-ons — a saved title never carries a marker, so the toggle is the
+ * only way off, and re-typing `!task` on a done task leaves its data alone.
+ *
+ * `@` and a leading `<`/`>` are not markers here: there is no created edge to
+ * apply them to, so they stay in the title as typed (`parseSheetTitleSyntax`).
+ */
+export function commitSheetTitleSyntax(
+	data: MultigraphData,
+	nodeId: string,
+	rawTitle: string,
+	tags: string[]
+): MultigraphData {
+	if (!hasNode(data, nodeId)) return data;
+
+	const parsed = parseSheetTitleSyntax(rawTitle);
+	const nextTags = unionTags(tags, parsed.nodeTags);
+	let next: MultigraphData = {
+		...data,
+		nodes: data.nodes.map((node) =>
+			node.id === nodeId
+				? { ...node, title: normalizeNodeTitle(parsed.displayTitle), tags: nextTags }
+				: node
+		)
+	};
+
+	for (const addon of parsed.addons) {
+		next = setNodeAddon(next, nodeId, addon);
+	}
+
+	return next;
+}
+
+/** The listed tags first, then any the title introduced, each name once. */
+function unionTags(existing: string[], added: string[]): string[] {
+	const seen = new Set(existing);
+	const result = [...existing];
+	for (const tag of added) {
+		if (seen.has(tag)) continue;
+		seen.add(tag);
+		result.push(tag);
+	}
+	return result;
 }
 
 export function moveNode(data: MultigraphData, nodeId: string, point: Point): MultigraphData {

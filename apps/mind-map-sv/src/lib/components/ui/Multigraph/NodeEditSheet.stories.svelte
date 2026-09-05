@@ -1,9 +1,12 @@
 <script module lang="ts">
 	import { defineMeta } from '@storybook/addon-svelte-csf';
-	import { expect, fn, within } from 'storybook/test';
+	import { expect, fn, userEvent, waitFor, within } from 'storybook/test';
 	import NodeEditSheet from './NodeEditSheet.svelte';
+	import NodeEditSheetHarness from './NodeEditSheetHarness.svelte';
 	import type { NodeData, QuantityDesignation } from '../types/node';
+	import type { MultigraphData } from '../types/multigraph';
 	import { APP_CONFIG } from '$lib/appConfig';
+	import { makeGraph } from './lib/testFixtures';
 	import { symbolFor } from '../MathText/lib/mathSymbols';
 
 	const NODE: NodeData = {
@@ -291,6 +294,80 @@
 			throw new Error(`no element for ${selector}`);
 		}
 		return getComputedStyle(found).touchAction;
+	}
+
+	/**
+	 * What the size warning asked, recorded by the story that answers yes. Module
+	 * scope rather than a spy arg, because the answer is given inside the
+	 * template's own callback, which the play function cannot reach into.
+	 */
+	const sizePrompts: string[] = [];
+
+	/** `text/csv`, eight bytes, so the row's size reads `8 B`. */
+	function csvFile(name = 'measurements.csv'): File {
+		return new File(['a,b\n1,2\n'], name, { type: 'text/csv' });
+	}
+
+	/** Three bytes of nothing in particular, declared `image/png`. */
+	function pngFile(name = 'photo.png'): File {
+		return new File([new Uint8Array([1, 2, 3])], name, { type: 'image/png' });
+	}
+
+	function uploadTo(canvasElement: HTMLElement, label: string, file: File): Promise<void> {
+		const input = within(canvasElement).getByLabelText(label);
+		if (!(input instanceof HTMLInputElement)) throw new Error(`no ${label} input`);
+		return userEvent.upload(input, file);
+	}
+
+	function harnessState(canvasElement: HTMLElement): HTMLElement {
+		const found = canvasElement.querySelector('[data-edit-sheet-harness]');
+		if (!(found instanceof HTMLElement)) throw new Error('no harness state element');
+		return found;
+	}
+
+	function attachmentRows(canvasElement: HTMLElement): HTMLElement[] {
+		return [...canvasElement.querySelectorAll('[data-attachment-kind]')].filter(
+			(row): row is HTMLElement => row instanceof HTMLElement
+		);
+	}
+
+	function cellText(row: HTMLElement, attribute: string): string {
+		return row.querySelector(`[${attribute}]`)?.textContent?.trim() ?? '';
+	}
+
+	/** A node with one tag, so a tag parsed out of the title has something to join. */
+	function taggedGraph(node: Partial<NodeData> = {}): MultigraphData {
+		return makeGraph({
+			nodes: [
+				{
+					id: 'node-1',
+					title: 'Kinematics',
+					description: 'Plain prose with no math.',
+					tags: ['x'],
+					...node
+				}
+			]
+		});
+	}
+
+	/**
+	 * Run `act` with `window.confirm` replaced by a counter, so a story can prove
+	 * that removing an add-on asks nothing — undo is the safety net for that one,
+	 * and a dialog in the way is the regression worth catching.
+	 */
+	async function countingConfirms(act: () => Promise<void> | void): Promise<number> {
+		const original = window.confirm;
+		let calls = 0;
+		window.confirm = () => {
+			calls += 1;
+			return true;
+		};
+		try {
+			await act();
+		} finally {
+			window.confirm = original;
+		}
+		return calls;
 	}
 </script>
 
@@ -770,3 +847,245 @@
 		expect(statusText(canvasElement)).toBe('Wrote m into the title.');
 	}}
 />
+
+<Story
+	name="UserAttachesACsvThroughAddFile"
+	play={async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		expect(canvas.getByRole('heading', { name: 'Attachments' })).toBeInTheDocument();
+		expect(canvas.getByText('No attachments.')).toBeInTheDocument();
+
+		await uploadTo(canvasElement, 'Add file', csvFile());
+
+		await waitFor(() => expect(attachmentRows(canvasElement)).toHaveLength(1));
+		const [row] = attachmentRows(canvasElement);
+		expect(row).toHaveAttribute('data-attachment-kind', 'file');
+		expect(cellText(row, 'data-attachment-name')).toBe('measurements.csv');
+		expect(cellText(row, 'data-attachment-type')).toBe('text/csv');
+		expect(cellText(row, 'data-attachment-size')).toBe('8 B');
+		// A file is opened, not rendered, so there is nothing for alt text to say.
+		expect(within(row).queryByLabelText('Alt text')).not.toBeInTheDocument();
+		expect(within(row).getByLabelText('Caption')).toBeInTheDocument();
+		expect(harnessState(canvasElement)).toHaveAttribute('data-last-intent', 'add file');
+	}}
+>
+	{#snippet template()}
+		<NodeEditSheetHarness baseGraph={taggedGraph()} nodeId="node-1" />
+	{/snippet}
+</Story>
+
+<Story
+	name="UserAttachesAPngThroughAddImage"
+	play={async ({ canvasElement }) => {
+		await uploadTo(canvasElement, 'Add image', pngFile());
+
+		await waitFor(() => expect(attachmentRows(canvasElement)).toHaveLength(1));
+		const [row] = attachmentRows(canvasElement);
+		expect(row).toHaveAttribute('data-attachment-kind', 'image');
+		expect(cellText(row, 'data-attachment-name')).toBe('photo.png');
+		expect(cellText(row, 'data-attachment-type')).toBe('image/png');
+		// Alt starts as the filename, the way it did before files existed here.
+		expect(within(row).getByLabelText('Alt text')).toHaveValue('photo.png');
+		expect(harnessState(canvasElement)).toHaveAttribute('data-last-intent', 'add image');
+	}}
+>
+	{#snippet template()}
+		<NodeEditSheetHarness baseGraph={taggedGraph()} nodeId="node-1" />
+	{/snippet}
+</Story>
+
+<Story
+	name="APngPickedThroughAddFileIsStillAnImage"
+	play={async ({ canvasElement }) => {
+		// The type decides, not the button: Add image exists for its `image/*`
+		// filter, which is what makes a phone offer the camera.
+		await uploadTo(canvasElement, 'Add file', pngFile('camera.png'));
+
+		await waitFor(() => expect(attachmentRows(canvasElement)).toHaveLength(1));
+		const [row] = attachmentRows(canvasElement);
+		expect(row).toHaveAttribute('data-attachment-kind', 'image');
+		expect(within(row).getByLabelText('Alt text')).toHaveValue('camera.png');
+		expect(harnessState(canvasElement)).toHaveAttribute('data-last-intent', 'add image');
+	}}
+>
+	{#snippet template()}
+		<NodeEditSheetHarness baseGraph={taggedGraph()} nodeId="node-1" />
+	{/snippet}
+</Story>
+
+<Story
+	name="ReorderMovesTheBlockWithinTheWholeContentList"
+	play={async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await uploadTo(canvasElement, 'Add file', csvFile());
+		await waitFor(() => expect(attachmentRows(canvasElement)).toHaveLength(1));
+		await uploadTo(canvasElement, 'Add image', pngFile());
+		await waitFor(() => expect(attachmentRows(canvasElement)).toHaveLength(2));
+
+		// The image is second in `content`. Counting only images would call it
+		// index 0 and move nothing — the reason both kinds share one list.
+		canvas.getByRole('button', { name: 'Move photo.png earlier' }).click();
+
+		await waitFor(() =>
+			expect(
+				attachmentRows(canvasElement).map((row) => cellText(row, 'data-attachment-name'))
+			).toEqual(['photo.png', 'measurements.csv'])
+		);
+		expect(harnessState(canvasElement)).toHaveAttribute('data-last-intent', 'move attachment');
+	}}
+>
+	{#snippet template()}
+		<NodeEditSheetHarness baseGraph={taggedGraph()} nodeId="node-1" />
+	{/snippet}
+</Story>
+
+<Story
+	name="UserTogglesTheTaskAddOnOn"
+	play={async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const toggle = canvas.getByRole('checkbox', { name: 'Task' });
+		expect(toggle).not.toBeChecked();
+
+		toggle.click();
+
+		await waitFor(() =>
+			expect(harnessState(canvasElement)).toHaveAttribute('data-node-addons', 'task')
+		);
+		// Applied on the spot, like Pin — an add-on is a capability, not a draft.
+		expect(harnessState(canvasElement)).toHaveAttribute('data-last-intent', 'add task add-on');
+		expect(canvas.getByRole('checkbox', { name: 'Task' })).toBeChecked();
+	}}
+>
+	{#snippet template()}
+		<NodeEditSheetHarness baseGraph={taggedGraph()} nodeId="node-1" />
+	{/snippet}
+</Story>
+
+<Story
+	name="UserTogglesADoneTaskOffWithoutADialog"
+	play={async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const toggle = canvas.getByRole('checkbox', { name: 'Task' });
+		expect(toggle).toBeChecked();
+
+		const confirms = await countingConfirms(async () => {
+			toggle.click();
+			await waitFor(() =>
+				expect(harnessState(canvasElement)).toHaveAttribute('data-node-addons', '')
+			);
+		});
+
+		// No confirm even though the task was done and its data goes with it:
+		// milestone 12's undo is the safety net, and the label says what to undo.
+		expect(confirms).toBe(0);
+		expect(harnessState(canvasElement)).toHaveAttribute('data-last-intent', 'remove task add-on');
+		expect(canvas.getByRole('checkbox', { name: 'Task' })).not.toBeChecked();
+	}}
+>
+	{#snippet template()}
+		<NodeEditSheetHarness
+			baseGraph={taggedGraph({ addons: { task: { done: true, doneAt: 1_700_000_000_000 } } })}
+			nodeId="node-1"
+		/>
+	{/snippet}
+</Story>
+
+<Story
+	name="UserTypesTitleMarkersAndSaves"
+	play={async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const title = fieldOf(canvasElement, 'title');
+		title.value = '#lab !task Buy filters';
+		title.dispatchEvent(new Event('input', { bubbles: true }));
+		await settle();
+
+		canvas.getByRole('button', { name: 'Done' }).click();
+
+		await waitFor(() =>
+			expect(harnessState(canvasElement)).toHaveAttribute('data-node-title', 'Buy filters')
+		);
+		// Additive: the tag the title named joins the ones already listed.
+		expect(harnessState(canvasElement)).toHaveAttribute('data-node-tags', 'x lab');
+		expect(harnessState(canvasElement)).toHaveAttribute('data-node-addons', 'task');
+	}}
+>
+	{#snippet template()}
+		<NodeEditSheetHarness baseGraph={taggedGraph()} nodeId="node-1" />
+	{/snippet}
+</Story>
+
+<Story
+	name="ATitleKeepsAnEdgeTagAndADirectionPrefixAsTyped"
+	play={async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const title = fieldOf(canvasElement, 'title');
+		title.value = '> @bench Buy filters';
+		title.dispatchEvent(new Event('input', { bubbles: true }));
+		await settle();
+
+		canvas.getByRole('button', { name: 'Done' }).click();
+
+		// The sheet edits a node that already exists, with no edge created beside
+		// it, so neither marker names anything here and both stay as typed.
+		await waitFor(() =>
+			expect(harnessState(canvasElement)).toHaveAttribute('data-node-title', '> @bench Buy filters')
+		);
+		expect(harnessState(canvasElement)).toHaveAttribute('data-node-tags', 'x');
+	}}
+>
+	{#snippet template()}
+		<NodeEditSheetHarness baseGraph={taggedGraph()} nodeId="node-1" />
+	{/snippet}
+</Story>
+
+<Story
+	name="DecliningTheSizeWarningAttachesNothing"
+	play={async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+
+		await uploadTo(canvasElement, 'Add file', csvFile('huge.csv'));
+
+		await waitFor(() => expect(canvas.getByText('Attachment cancelled.')).toBeInTheDocument());
+		expect(attachmentRows(canvasElement)).toHaveLength(0);
+		expect(canvas.getByText('No attachments.')).toBeInTheDocument();
+		// Nothing was committed, so the harness never saw an intent.
+		expect(harnessState(canvasElement)).toHaveAttribute('data-last-intent', '');
+	}}
+>
+	{#snippet template()}
+		<NodeEditSheetHarness
+			baseGraph={taggedGraph()}
+			nodeId="node-1"
+			warnBytesPerFile={4}
+			confirmAttachment={() => false}
+		/>
+	{/snippet}
+</Story>
+
+<Story
+	name="AcceptingTheSizeWarningAttachesTheFile"
+	play={async ({ canvasElement }) => {
+		sizePrompts.length = 0;
+
+		await uploadTo(canvasElement, 'Add file', csvFile('huge.csv'));
+
+		await waitFor(() => expect(attachmentRows(canvasElement)).toHaveLength(1));
+		expect(sizePrompts).toHaveLength(1);
+		// The question names the file and its size, and says why the size matters.
+		expect(sizePrompts[0]).toContain('huge.csv');
+		expect(sizePrompts[0]).toContain('8 B');
+		expect(sizePrompts[0]).toContain('a third larger');
+	}}
+>
+	{#snippet template()}
+		<NodeEditSheetHarness
+			baseGraph={taggedGraph()}
+			nodeId="node-1"
+			warnBytesPerFile={4}
+			confirmAttachment={(message) => {
+				sizePrompts.push(message);
+				return true;
+			}}
+		/>
+	{/snippet}
+</Story>

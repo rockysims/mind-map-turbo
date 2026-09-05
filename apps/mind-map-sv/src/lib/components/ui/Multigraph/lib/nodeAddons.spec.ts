@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { NODE_ADDON_REGISTRY, isRegisteredAddon, withNodeAddon } from './nodeAddons';
+import {
+	NODE_ADDON_REGISTRY,
+	addonIntentLabel,
+	isRegisteredAddon,
+	withNodeAddon
+} from './nodeAddons';
 
 describe('node add-on registry', () => {
 	it('registers task with a label, a glyph, and an undone default', () => {
@@ -27,6 +32,13 @@ describe('isRegisteredAddon', () => {
 	it('rejects inherited object properties', () => {
 		expect(isRegisteredAddon('toString')).toBe(false);
 		expect(isRegisteredAddon('constructor')).toBe(false);
+	});
+});
+
+describe('addonIntentLabel', () => {
+	it('names the toggle in the words Undo shows', () => {
+		expect(addonIntentLabel('task', 'add')).toBe('add task add-on');
+		expect(addonIntentLabel('task', 'remove')).toBe('remove task add-on');
 	});
 });
 

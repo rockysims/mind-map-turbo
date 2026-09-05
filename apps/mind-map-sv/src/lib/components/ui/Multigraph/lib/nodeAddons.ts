@@ -38,6 +38,16 @@ export function isRegisteredAddon(name: string): name is NodeAddonName {
 }
 
 /**
+ * The words Undo uses for an add-on toggle, e.g. "remove task add-on".
+ *
+ * Built from the registry label rather than written at the call site, so a new
+ * entry names itself in the history list without the toggle knowing about it.
+ */
+export function addonIntentLabel(name: NodeAddonName, action: 'add' | 'remove'): string {
+	return `${action} ${NODE_ADDON_REGISTRY[name].label.toLowerCase()} add-on`;
+}
+
+/**
  * Returns `addons` with `name` present at its registry default, leaving an
  * add-on that is already there untouched (its data outlives a re-typed marker).
  *
