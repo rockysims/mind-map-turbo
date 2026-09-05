@@ -1,6 +1,6 @@
 # Milestone 13: Node add-ons and file attachments
 
-**Status:** proposed
+**Status:** complete
 **Depends on:** milestone 12 (undo; merged first, it is why removing an
 add-on that holds data needs no confirm and why asset removal tombstones
 rather than deletes), 04e (title syntax), 04f (tag colours), 06 (node content

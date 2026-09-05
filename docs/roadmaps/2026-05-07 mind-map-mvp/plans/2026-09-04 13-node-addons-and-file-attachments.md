@@ -3,7 +3,7 @@
 **Created:** 2026-09-04
 **Author:** Claude (Fable 5.1)
 **Milestone:** [milestones/13-node-addons-and-file-attachments.md](../milestones/13-node-addons-and-file-attachments.md)
-**Status:** draft
+**Status:** done
 **Total estimated effort:** M
 
 ## Summary
@@ -312,3 +312,25 @@ is why T04 waits a wave.
   needed pinning. All folded in above. The user's example for the rule:
   `!task #nodish @edgish !ai Test` reads as title "Test" with the rest
   special.
+- 2026-09-04: executed. Six tasks, each by an Opus agent and reviewed by
+  Fable with the gates re-run before its commit; T05 and T06 ran in their
+  own worktrees. Deviations from the plan as written: add-on toggles commit
+  at once rather than on Save (they behave like Pin); images and files share
+  one attachment list so reorder indices stay honest; `@` or a direction
+  prefix in the sheet's title ends the marker run (everything after stays as
+  typed); badges are derived inside `Node.svelte` from the node's own data
+  rather than threaded as a prop; the attachment badge shows a count; the
+  export-size sentence is appended to whichever notice won rather than being
+  a tier. Two debt entries filed: the sheet resets in-flight text on any
+  immediate commit (pre-existing), and the canvas badges are not announced
+  because the node's own accessible name overrides them.
+- 2026-09-04: Fable's smoke test in the dev app. Editing the root's title to
+  `#lab !task Buy filters` saved the title "Buy filters", the tag `lab`, and
+  an unchecked task badge with no pointer events; the undo control read
+  "Undo edit node". A CSV through Add file appeared as a row with type and
+  size, the canvas showed the paperclip with a count, and the details view
+  listed the file with an Open link whose href was a `blob:` URL. The large
+  task control flipped to done, the badge to the checked box, the undo label
+  to "Undo mark task done", and the draft carried `doneAt`. Not exercised by
+  hand: Download and reopening in a fresh profile and in an older shell, which
+  the controller and graph-file specs cover.
