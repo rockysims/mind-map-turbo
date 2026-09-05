@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { evaluateGraphQuery, parseGraphQuery } from './graphQuery';
+import { fallbackTagColor } from './tagColors';
 import { makeGraph } from './testFixtures';
 
 describe('graphQuery', () => {
@@ -42,13 +43,12 @@ describe('graphQuery', () => {
 		]);
 	});
 
-	it('parses configured node and edge tag markers', () => {
+	it('parses configured node tag, edge tag, and add-on markers', () => {
 		expect(
-			parseGraphQuery('+:nodal;link :dialog-:modal -;edgo text', {
+			parseGraphQuery('+:nodal;link :dialog-:modal -;edgo %task text', {
 				nodeTagMarker: ':',
 				edgeTagMarker: ';',
-				// The query parser does not read this marker yet (milestone 13 T05).
-				addonMarker: '!'
+				addonMarker: '%'
 			})
 		).toEqual([
 			{ mode: 'spotlight', target: 'nodeTag', value: 'nodal' },
@@ -56,6 +56,7 @@ describe('graphQuery', () => {
 			{ mode: 'focus', target: 'nodeTag', value: 'dialog' },
 			{ mode: 'exclude', target: 'nodeTag', value: 'modal' },
 			{ mode: 'exclude', target: 'edgeTag', value: 'edgo' },
+			{ mode: 'focus', target: 'addon', value: 'task' },
 			{ mode: 'focus', target: 'text', value: 'text' }
 		]);
 	});
@@ -203,6 +204,121 @@ describe('graphQuery', () => {
 			{ id: 'region-1', nodeIds: ['d'], edgeIds: [] },
 			{ id: 'region-2', nodeIds: ['b', 'c'], edgeIds: ['bc'] }
 		]);
+	});
+
+	describe('add-on tokens', () => {
+		const addonGraph = makeGraph({
+			nodes: [
+				{
+					id: 't1',
+					title: 'Open chore',
+					description: '',
+					tags: ['lab'],
+					addons: { task: { done: false } }
+				},
+				{
+					id: 't2',
+					title: 'Closed chore',
+					description: '',
+					tags: [],
+					addons: { task: { done: true, doneAt: 1 } }
+				},
+				{ id: 'p1', title: 'Bench note', description: '', tags: ['lab'] },
+				{ id: 'p2', title: 'Loose note', description: '', tags: [] }
+			],
+			edges: [
+				{ id: 't1p1', source: 't1', target: 'p1', tags: [] },
+				{ id: 'p1p2', source: 'p1', target: 'p2', tags: [] }
+			]
+		});
+
+		it('parses the add-on marker with focus, spotlight, and exclude prefixes', () => {
+			expect(parseGraphQuery('!task')).toEqual([{ mode: 'focus', target: 'addon', value: 'task' }]);
+			expect(parseGraphQuery('+!task')).toEqual([
+				{ mode: 'spotlight', target: 'addon', value: 'task' }
+			]);
+			expect(parseGraphQuery('-!task')).toEqual([
+				{ mode: 'exclude', target: 'addon', value: 'task' }
+			]);
+		});
+
+		it('keeps an unregistered add-on name as a token rather than dropping it', () => {
+			expect(parseGraphQuery('!nothing')).toEqual([
+				{ mode: 'focus', target: 'addon', value: 'nothing' }
+			]);
+		});
+
+		it('combines an add-on token with a node tag token', () => {
+			expect(parseGraphQuery('!task #lab')).toEqual([
+				{ mode: 'focus', target: 'addon', value: 'task' },
+				{ mode: 'focus', target: 'nodeTag', value: 'lab' }
+			]);
+		});
+
+		it('ends a text token at the add-on marker the way it does at a tag marker', () => {
+			expect(parseGraphQuery('hello#lab')).toEqual([
+				{ mode: 'focus', target: 'text', value: 'hello' },
+				{ mode: 'focus', target: 'nodeTag', value: 'lab' }
+			]);
+			expect(parseGraphQuery('hello!task')).toEqual([
+				{ mode: 'focus', target: 'text', value: 'hello' },
+				{ mode: 'focus', target: 'addon', value: 'task' }
+			]);
+		});
+
+		it('leaves a quoted add-on marker as literal text', () => {
+			expect(parseGraphQuery('"!task"')).toEqual([
+				{ mode: 'focus', target: 'text', value: '!task' }
+			]);
+		});
+
+		it('focuses exactly the nodes carrying the add-on', () => {
+			const result = evaluateGraphQuery(addonGraph, '!task');
+
+			expect(result.nodeStateById.t1.role).toBe('focus');
+			expect(result.nodeStateById.t2.role).toBe('focus');
+			expect(result.nodeStateById.p1.role).toBe('background');
+			expect(result.nodeStateById.p2.role).toBe('background');
+			expect(result.focusedNodeIds).toEqual(['t1', 't2']);
+		});
+
+		it('excludes add-on nodes and their incident edges', () => {
+			const result = evaluateGraphQuery(addonGraph, '-!task');
+
+			expect(result.hasActiveQuery).toBe(true);
+			expect(result.dimsBackground).toBe(false);
+			expect(result.nodeStateById.t1.role).toBe('excluded');
+			expect(result.nodeStateById.t2.role).toBe('excluded');
+			expect(result.edgeStateById.t1p1.role).toBe('excluded');
+			expect(result.edgeStateById.p1p2.role).toBe('background');
+		});
+
+		it('spotlights add-on nodes with the name-derived fallback colour', () => {
+			const result = evaluateGraphQuery(addonGraph, '+!task');
+
+			expect(result.nodeStateById.t1).toEqual({
+				role: 'spotlight',
+				spotlightColor: fallbackTagColor('task')
+			});
+			expect(result.nodeStateById.p1.role).toBe('background');
+		});
+
+		it('matches no node for an unregistered add-on name', () => {
+			const result = evaluateGraphQuery(addonGraph, '!nothing');
+
+			expect(result.hasActiveQuery).toBe(true);
+			expect(result.focusedNodeIds).toEqual([]);
+			expect(result.nodeStateById.t1.role).toBe('background');
+		});
+
+		it('unions an add-on token with a node tag token the way two tag tokens do', () => {
+			const addonAndTag = evaluateGraphQuery(addonGraph, '!task #lab');
+			const twoTags = evaluateGraphQuery(addonGraph, '#lab #lab');
+
+			expect(addonAndTag.focusedNodeIds).toEqual(['t1', 't2', 'p1']);
+			expect(addonAndTag.nodeStateById.p2.role).toBe('background');
+			expect(twoTags.focusedNodeIds).toEqual(['t1', 'p1']);
+		});
 	});
 
 	it('evaluates a 1000-node graph under the milestone perf budget', () => {

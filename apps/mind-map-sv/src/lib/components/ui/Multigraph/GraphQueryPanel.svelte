@@ -27,6 +27,7 @@
 	const tagSyntax = APP_CONFIG.multigraph.tagSyntax;
 	const nodeTagMarker = tagSyntax.nodeTagMarker;
 	const edgeTagMarker = tagSyntax.edgeTagMarker;
+	const addonMarker = tagSyntax.addonMarker;
 	const tokens = $derived(parseGraphQuery(query, tagSyntax));
 	const nodeTags = $derived(tags.filter((tag) => tag.namespace === 'nodeTags'));
 	const edgeTags = $derived(tags.filter((tag) => tag.namespace === 'edgeTags'));
@@ -46,7 +47,13 @@
 	function tokenLabel(token: GraphQueryToken): string {
 		const prefix = token.mode === 'spotlight' ? '+' : token.mode === 'exclude' ? '-' : '';
 		const marker =
-			token.target === 'nodeTag' ? nodeTagMarker : token.target === 'edgeTag' ? edgeTagMarker : '';
+			token.target === 'nodeTag'
+				? nodeTagMarker
+				: token.target === 'edgeTag'
+					? edgeTagMarker
+					: token.target === 'addon'
+						? addonMarker
+						: '';
 		return `${prefix}${marker}${token.value}`;
 	}
 </script>
@@ -61,7 +68,7 @@
 		<span class="sr-only">Graph query</span>
 		<input
 			value={query}
-			placeholder={`${nodeTagMarker}tag ${edgeTagMarker}edge "quoted phrase" +${nodeTagMarker}spotlight -${edgeTagMarker}hide`}
+			placeholder={`${nodeTagMarker}tag ${edgeTagMarker}edge ${addonMarker}task "quoted phrase" +${nodeTagMarker}spotlight -${edgeTagMarker}hide`}
 			oninput={(event) => updateQuery(event.currentTarget.value)}
 		/>
 	</label>
