@@ -268,6 +268,42 @@ describe('buildRefineRequest', () => {
 		expect(text.indexOf('Add a log scale on y.')).toBeLessThan(text.indexOf(REFINE_INSTRUCTION));
 	});
 
+	it('carries the traceback of a failed re-run, after the instruction', () => {
+		const traceback = "Traceback (most recent call last):\nKeyError: 'ch2'";
+		const request = buildRefineRequest({
+			prompt: 'Fix it.',
+			inputs: [],
+			digests: [],
+			settings,
+			previousScript: 'print(frame["ch2"])',
+			traceback
+		});
+
+		const text = userText(request);
+		expect(text).toContain(traceback);
+		expect(text.indexOf(REFINE_INSTRUCTION)).toBeLessThan(text.indexOf(traceback));
+		// And before the script it is about, so the model reads the failure and
+		// then the code that produced it.
+		expect(text.indexOf(traceback)).toBeLessThan(text.indexOf('Previous analysis.py:'));
+	});
+
+	it('says nothing about a failure when there is no traceback', () => {
+		const build = {
+			prompt: 'Log scale.',
+			inputs: [],
+			digests: [],
+			settings,
+			previousScript: 'print(1)'
+		};
+
+		// Whitespace is not a traceback: a stderr holding only a newline must not
+		// tell the model its script crashed.
+		expect(userText(buildRefineRequest({ ...build, traceback: '  \n ' }))).toBe(
+			userText(buildRefineRequest(build))
+		);
+		expect(userText(buildRefineRequest(build))).not.toContain('failed');
+	});
+
 	it('keeps the system prompt byte-identical to analyse, so the cached prefix survives', () => {
 		const build = {
 			prompt: 'Plot it.',

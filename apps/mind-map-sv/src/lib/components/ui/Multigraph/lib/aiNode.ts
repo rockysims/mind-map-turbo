@@ -10,7 +10,7 @@
  */
 
 import { APP_CONFIG } from '$lib/appConfig';
-import type { GraphAssetMetadata, MultigraphData } from '../../types/multigraph';
+import type { GraphAssetMetadata, MultigraphData, Point } from '../../types/multigraph';
 import type {
 	AiAddon,
 	AiRun,
@@ -19,7 +19,7 @@ import type {
 	NodeContentBlock,
 	NodeData
 } from '../../types/node';
-import { referencedAssetIds } from './graph';
+import { addEdge, addNode, nextId, referencedAssetIds } from './graph';
 
 /**
  * The statuses a stored run may carry. All four are terminal: a run in flight
@@ -294,6 +294,90 @@ export function refreshPromotedOutputs(
 
 	if (!nodesChanged && !bindingsChanged) return { graph: data, staleOutputNames };
 	return { graph: { ...data, nodes }, staleOutputNames };
+}
+
+/** Where the promoted node lands, and — for a caller that needs to name it — its id. */
+interface PromoteAiOutputOptions {
+	/** The canvas position for the new node, chosen by the caller that has a layout. */
+	position: Point;
+	/**
+	 * The id the new node takes, for a caller that wants to name it. Ignored when
+	 * the graph already holds that id, because two nodes with one id is a worse
+	 * outcome than a generated name.
+	 */
+	nodeId?: string;
+}
+
+/**
+ * Give one of the latest run's outputs a node of its own.
+ *
+ * The new node is titled by the output's filename, carries that output's asset
+ * as its only content block, and hangs off a directed edge *from* the AI node:
+ * the direction says which way the data went, and it is also what keeps the
+ * promoted node out of `collectAiInputs` — an outgoing neighbour is skipped, so
+ * a run never feeds itself its own figures.
+ *
+ * Idempotent per output name. A second press on a name already bound to a node
+ * that still exists returns the same graph object, which is what stops a
+ * double-tap from making two nodes and what keeps the press out of the undo
+ * list. A binding whose node the reader deleted is *not* one of those cases: the
+ * name is promoted again into a new node, because a binding pointing at nothing
+ * is exactly the state a re-promote is meant to repair. (`refreshPromotedOutputs`
+ * drops such a binding on the next run; this repairs it now.)
+ *
+ * The graph comes back untouched when the name is not among the latest done
+ * run's outputs — a stale binding's name, or a name from a run that has since
+ * been evicted. There is no asset to hang on a node for those, and promoting the
+ * *previous* run's figure under a name the latest run stopped producing would
+ * quietly disagree with the workbench, which already marks it stale.
+ *
+ * No asset metadata is registered here: the run record that names the output is
+ * committed with it (`replaceAiRun`), so `data.assets` already carries it, and
+ * inventing an entry from what an `AiRunOutput` happens to hold would mean
+ * guessing at a size and a creation time.
+ */
+export function promoteAiOutput(
+	data: MultigraphData,
+	aiNodeId: string,
+	outputName: string,
+	options: PromoteAiOutputOptions
+): MultigraphData {
+	const ai = aiAddonOf(data, aiNodeId);
+	if (ai === undefined) return data;
+
+	const output = latestDoneRun(ai)?.outputs.find((candidate) => candidate.name === outputName);
+	if (output === undefined) return data;
+
+	const nodeIds = data.nodes.map((node) => node.id);
+	const bound = ai.promoted[outputName];
+	if (bound !== undefined && nodeIds.includes(bound)) return data;
+
+	const requested = options.nodeId;
+	const newNodeId =
+		requested !== undefined && !nodeIds.includes(requested) ? requested : nextId('n', nodeIds);
+
+	const withNode = addNode(data, {
+		id: newNodeId,
+		title: outputName,
+		description: '',
+		position: options.position
+	});
+	// The block is written here rather than through `addNodeContentBlock`, which
+	// registers asset metadata this graph already carries (see above).
+	const withBlock: MultigraphData = {
+		...withNode,
+		nodes: withNode.nodes.map((node) =>
+			node.id === newNodeId
+				? { ...node, content: [contentBlockForOutput(output, undefined)] }
+				: node
+		)
+	};
+	const withEdge = addEdge(withBlock, aiNodeId, newNodeId, { directed: true, tags: [] });
+
+	return withAiAddon(withEdge, aiNodeId, {
+		...ai,
+		promoted: { ...ai.promoted, [outputName]: newNodeId }
+	});
 }
 
 /**

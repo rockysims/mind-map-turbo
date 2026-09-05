@@ -3,6 +3,7 @@ import {
 	AI_RUN_STATUSES,
 	isAiRunStatus,
 	markInterruptedRuns,
+	promoteAiOutput,
 	recordAiRun,
 	refreshPromotedOutputs,
 	replaceAiRun,
@@ -445,6 +446,167 @@ describe('markInterruptedRuns', () => {
 		markInterruptedRuns(before);
 
 		expect(aiAddon(before).runs[0].status).toBe('running');
+	});
+});
+
+describe('promoteAiOutput', () => {
+	const AT = { x: 120, y: -40 };
+
+	/** An AI node whose latest done run produced one PNG and one CSV. */
+	function promotableGraph(promoted: Record<string, string> = {}): MultigraphData {
+		return graphWithAi({
+			runs: [
+				makeRun({
+					id: 'r1',
+					outputs: [makeOutput('plot.png', 'a1'), makeOutput('table.csv', 'a2', 'text/csv')]
+				})
+			],
+			promoted
+		});
+	}
+
+	function nodeOf(graph: MultigraphData, nodeId: string): NodeData {
+		const node = graph.nodes.find((candidate) => candidate.id === nodeId);
+		if (node === undefined) throw new Error(`no node ${nodeId}`);
+		return node;
+	}
+
+	it('creates a node titled by the output, holding its asset, at the given position', () => {
+		const graph = promoteAiOutput(promotableGraph(), 'ai', 'plot.png', {
+			position: AT,
+			nodeId: 'promoted'
+		});
+
+		expect(nodeOf(graph, 'promoted').title).toBe('plot.png');
+		expect(contentOf(graph, 'promoted')).toEqual([
+			{ type: 'image', assetId: 'a1', alt: 'plot.png' }
+		]);
+		expect(graph.posByNodeId.promoted).toEqual(AT);
+	});
+
+	it('joins it to the AI node with a directed edge pointing away from the AI node', () => {
+		const graph = promoteAiOutput(promotableGraph(), 'ai', 'plot.png', {
+			position: AT,
+			nodeId: 'promoted'
+		});
+
+		expect(graph.edges).toHaveLength(1);
+		expect(graph.edges[0]).toMatchObject({
+			sourceNodeId: 'ai',
+			targetNodeId: 'promoted',
+			directed: true,
+			tags: []
+		});
+	});
+
+	it('records the binding under the output name', () => {
+		const graph = promoteAiOutput(promotableGraph(), 'ai', 'plot.png', {
+			position: AT,
+			nodeId: 'promoted'
+		});
+
+		expect(aiAddon(graph).promoted).toEqual({ 'plot.png': 'promoted' });
+	});
+
+	it('writes a file block when the output is not an image', () => {
+		const graph = promoteAiOutput(promotableGraph(), 'ai', 'table.csv', {
+			position: AT,
+			nodeId: 'promoted'
+		});
+
+		expect(contentOf(graph, 'promoted')).toEqual([
+			{ type: 'file', assetId: 'a2', name: 'table.csv' }
+		]);
+	});
+
+	it('is idempotent per output name while the promoted node exists', () => {
+		const once = promoteAiOutput(promotableGraph(), 'ai', 'plot.png', { position: AT });
+
+		expect(promoteAiOutput(once, 'ai', 'plot.png', { position: { x: 900, y: 900 } })).toBe(once);
+	});
+
+	it('promotes the name again when its promoted node was deleted', () => {
+		const before = promotableGraph({ 'plot.png': 'gone-node' });
+		const graph = promoteAiOutput(before, 'ai', 'plot.png', { position: AT, nodeId: 'fresh' });
+
+		expect(aiAddon(graph).promoted).toEqual({ 'plot.png': 'fresh' });
+		expect(contentOf(graph, 'fresh')).toEqual([{ type: 'image', assetId: 'a1', alt: 'plot.png' }]);
+	});
+
+	it('returns the same graph when the latest done run did not produce that name', () => {
+		const before = promotableGraph();
+
+		expect(promoteAiOutput(before, 'ai', 'drift.png', { position: AT })).toBe(before);
+	});
+
+	it('reads the latest done run rather than a cancelled attempt after it', () => {
+		const before = graphWithAi({
+			runs: [
+				makeRun({ id: 'r1', outputs: [makeOutput('plot.png', 'a1')] }),
+				makeRun({ id: 'r2', status: 'cancelled', outputs: [] })
+			]
+		});
+
+		expect(contentOf(promoteAiOutput(before, 'ai', 'plot.png', { position: AT }), 'n0')).toEqual([
+			{ type: 'image', assetId: 'a1', alt: 'plot.png' }
+		]);
+	});
+
+	it('names the new node itself when the caller’s id is already taken', () => {
+		const graph = promoteAiOutput(promotableGraph(), 'ai', 'plot.png', {
+			position: AT,
+			nodeId: 'ai'
+		});
+
+		expect(aiAddon(graph).promoted).toEqual({ 'plot.png': 'n0' });
+		expect(graph.nodes.map((node) => node.id)).toEqual(['ai', 'n0']);
+	});
+
+	it('returns the same graph object for a node without the add-on', () => {
+		const before = makeGraph({ nodeCount: 1 });
+
+		expect(promoteAiOutput(before, 'n0', 'plot.png', { position: AT })).toBe(before);
+	});
+
+	it('does not mutate the graph it was handed', () => {
+		const before = promotableGraph();
+		promoteAiOutput(before, 'ai', 'plot.png', { position: AT });
+
+		expect(before.nodes).toHaveLength(1);
+		expect(before.edges).toEqual([]);
+		expect(aiAddon(before).promoted).toEqual({});
+	});
+
+	it('leaves the promoted node ready for the next run to refresh in place', () => {
+		const promoted = promoteAiOutput(promotableGraph(), 'ai', 'plot.png', {
+			position: AT,
+			nodeId: 'promoted'
+		});
+		const ai = aiAddon(promoted);
+		const withNewRun: MultigraphData = {
+			...promoted,
+			nodes: promoted.nodes.map((node) =>
+				node.id === 'ai'
+					? {
+							...node,
+							addons: {
+								...node.addons,
+								ai: {
+									...ai,
+									runs: [...ai.runs, makeRun({ id: 'r2', outputs: [makeOutput('plot.png', 'a9')] })]
+								}
+							}
+						}
+					: node
+			)
+		};
+
+		const { graph, staleOutputNames } = refreshPromotedOutputs(withNewRun, 'ai');
+
+		expect(staleOutputNames).toEqual([]);
+		expect(contentOf(graph, 'promoted')).toEqual([
+			{ type: 'image', assetId: 'a9', alt: 'plot.png' }
+		]);
 	});
 });
 

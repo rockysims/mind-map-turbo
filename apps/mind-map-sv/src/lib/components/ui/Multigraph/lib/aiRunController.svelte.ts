@@ -105,6 +105,17 @@ export interface AiRunController {
 	 */
 	digest(nodeId: string): Promise<void>;
 	run(nodeId: string, mode: AiRunMode): Promise<AiRunOutcome>;
+	/**
+	 * "Fix with AI": a refine run carrying the traceback the last failed re-run
+	 * printed, recorded as `mode: 'refine'` because that is what it is — an edit
+	 * to the stored script, with the failure as the thing to satisfy.
+	 *
+	 * The traceback comes off this node's run state rather than a store of its
+	 * own: the state is what put the button on screen, so the request cannot
+	 * carry a different failure from the one the reader is looking at. A node
+	 * with none is an ordinary refine.
+	 */
+	runFix(nodeId: string): Promise<AiRunOutcome>;
 	/** Abort the run in flight on this node. Does nothing when there is none. */
 	cancel(nodeId: string): void;
 }
@@ -339,7 +350,21 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 		deps.commit(next, AI_RUN_COMMIT_LABEL);
 	}
 
-	async function run(nodeId: string, mode: AiRunMode): Promise<AiRunOutcome> {
+	function run(nodeId: string, mode: AiRunMode): Promise<AiRunOutcome> {
+		return runWith(nodeId, mode);
+	}
+
+	function runFix(nodeId: string): Promise<AiRunOutcome> {
+		// Read before the run starts: the first `putState` a run makes clears the
+		// state the traceback is on.
+		return runWith(nodeId, 'refine', stateFor(nodeId).traceback);
+	}
+
+	async function runWith(
+		nodeId: string,
+		mode: AiRunMode,
+		traceback?: string
+	): Promise<AiRunOutcome> {
 		if (inFlight[nodeId] !== undefined) return 'busy';
 
 		const startGraph = deps.graph();
@@ -429,7 +454,8 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 							prompt: ai.prompt,
 							previousScript: storedScript,
 							signal: abort.signal,
-							progress
+							progress,
+							...(traceback === undefined ? {} : { traceback })
 						});
 
 			const { runOutputs, assets } = await storeOutputs(finished.outputs);
@@ -452,7 +478,8 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 				thinking: progress.thinking,
 				steps: progress.steps,
 				...(finished.error === undefined ? {} : { error: finished.error }),
-				...(finished.refusal === true ? { refusal: true } : {})
+				...(finished.refusal === true ? { refusal: true } : {}),
+				...(finished.traceback === undefined ? {} : { traceback: finished.traceback })
 			});
 			return terminal.status;
 		} catch (error) {
@@ -498,15 +525,25 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 			timeoutMs: APP_CONFIG.ai.scriptTimeoutMs,
 			signal
 		});
-		progress.steps = [{ stdoutTail: tail(result.stdout), exitCode: result.exitCode }];
+		// stderr when the script printed nothing, because a failed script's output
+		// *is* its traceback and an empty step would say nothing at all.
+		progress.steps = [
+			{ stdoutTail: tail(result.stdout || result.stderr), exitCode: result.exitCode }
+		];
 		putState(nodeId, { phase: 'running', ...progress });
 
 		if (result.exitCode !== 0) {
+			// The traceback rides back whole rather than tailed: the workbench shows
+			// it and the fix run sends it, and a cut-off traceback is a cut-off
+			// diagnosis. The tailed copy in the step above is the glance; this is the
+			// evidence.
+			const traceback = result.stderr.replace(/\n+$/, '');
 			return {
 				summary: '',
 				outputs: [],
 				toolCalls: 0,
-				error: `The stored script failed with exit code ${result.exitCode}.`
+				error: `The stored script failed with exit code ${result.exitCode}.`,
+				...(traceback === '' ? {} : { traceback })
 			};
 		}
 		return { summary: '', outputs: result.outputs, toolCalls: 0, script };
@@ -524,6 +561,8 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 		previousScript: string;
 		signal: AbortSignal;
 		progress: RunProgress;
+		/** The failure a "Fix with AI" refine is answering. Absent for every other run. */
+		traceback?: string;
 	}
 
 	async function runModelLoop(input: ModelLoopInput): Promise<FinishedRun> {
@@ -537,7 +576,11 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 		const build = { prompt: input.prompt, inputs, digests, settings, previewRows };
 		let request: AiRequest =
 			input.mode === 'refine'
-				? buildRefineRequest({ ...build, previousScript: input.previousScript })
+				? buildRefineRequest({
+						...build,
+						previousScript: input.previousScript,
+						...(input.traceback === undefined ? {} : { traceback: input.traceback })
+					})
 				: buildAnalyseRequest(build);
 
 		let toolCalls = 0;
@@ -639,7 +682,7 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 		inFlight[nodeId]?.abort();
 	}
 
-	return { stateFor, digestsFor, digest, run, cancel };
+	return { stateFor, digestsFor, digest, run, runFix, cancel };
 }
 
 /** What the loop hands back, whichever way it ended. */
@@ -655,6 +698,8 @@ interface FinishedRun {
 	error?: string;
 	/** `true` when `error` is Claude declining rather than something breaking. */
 	refusal?: boolean;
+	/** A failed re-run's stderr, which is what "Fix with AI" sends. */
+	traceback?: string;
 }
 
 const EMPTY_DIGESTS: Record<string, FileDigest> = {};

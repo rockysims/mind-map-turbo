@@ -14,7 +14,7 @@
 	import { untrack } from 'svelte';
 	import AiNodeContent from './AiNodeContent.svelte';
 	import { collectAiInputs } from './lib/aiInputs';
-	import { setAiPrompt } from './lib/aiNode';
+	import { promoteAiOutput, setAiPrompt } from './lib/aiNode';
 	import { IDLE_RUN_STATE, type AiRunState } from './lib/aiWorkbenchView';
 	import type { GraphAssetStore } from '$lib/assets/assetStore';
 	import type { FileDigest } from '$lib/ai/probeScript';
@@ -47,6 +47,7 @@
 	let cancels = $state(0);
 	let lastPromote = $state('');
 	let lastJump = $state('');
+	let fixes = $state(0);
 	let settingsOpens = $state(0);
 	/** Wheels that reached the stage — the zoom world's whole input in focus mode. */
 	let stageWheels = $state(0);
@@ -77,6 +78,7 @@
 		data-cancels={cancels}
 		data-last-promote={lastPromote}
 		data-last-jump={lastJump}
+		data-fixes={fixes}
 		data-settings-opens={settingsOpens}
 		data-stage-wheels={stageWheels}
 		data-stage-pan-starts={stagePanStarts}
@@ -108,7 +110,15 @@
 			}}
 			onRun={(mode: AiRunMode) => (lastRunMode = mode)}
 			onCancel={() => (cancels += 1)}
-			onPromote={(outputName) => (lastPromote = outputName)}
+			onPromote={(outputName) => {
+				// The real mutation, as `Multigraph` commits it, so a story can watch
+				// the output row answer the press it made. The position is arbitrary
+				// here: the harness has no layout, and nothing on this surface draws
+				// one.
+				graph = promoteAiOutput(graph, nodeId, outputName, { position: { x: 0, y: 120 } });
+				lastPromote = outputName;
+			}}
+			onFix={() => (fixes += 1)}
 			onOpenSettings={() => (settingsOpens += 1)}
 			onJumpToNode={(target) => (lastJump = target)}
 		/>

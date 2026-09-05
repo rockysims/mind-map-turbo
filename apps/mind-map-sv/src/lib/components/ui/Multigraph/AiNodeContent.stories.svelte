@@ -75,6 +75,10 @@
 	const SCRIPT =
 		'import pandas as pd\n\nframe = pd.read_csv("measurements.csv")\nprint(frame.shape)\n';
 
+	/** What the stored script prints when the data it was written for has moved on. */
+	const FAILED_TRACEBACK =
+		'Traceback (most recent call last):\n  File "analysis.py", line 4\nKeyError: \'ch2\'';
+
 	function makeRun(patch: Partial<AiRun> & Pick<AiRun, 'id'>): AiRun {
 		return {
 			startedAt: STARTED,
@@ -393,6 +397,16 @@
 		await userEvent.click(required(canvasElement, '[data-ai-promote="channel2.png"]'));
 		expect(harnessState(canvasElement)).toHaveAttribute('data-last-promote', 'channel2.png');
 
+		// The press lands on the graph, so the row answers it: Promote is gone and
+		// the node it made is named, titled by the filename it was promoted under.
+		const justPromoted = required(canvasElement, '[data-ai-output="channel2.png"]');
+		await waitFor(() => {
+			expect(justPromoted.querySelector('[data-ai-promote]')).toBeNull();
+			expect(justPromoted.querySelector('[data-ai-jump]')?.textContent?.trim()).toBe(
+				'channel2.png'
+			);
+		});
+
 		// An output already promoted names its node instead of offering again.
 		const promoted = required(canvasElement, '[data-ai-output="residuals.png"]');
 		expect(promoted.querySelector('[data-ai-promote]')).toBeNull();
@@ -494,6 +508,98 @@
 
 		await userEvent.click(required(canvasElement, '[data-ai-connect]'));
 		expect(spyFor(args.onOpenSettings).mock.calls).toHaveLength(1);
+	}}
+/>
+
+<!--
+	Both of the cheap modes work *from* the stored script, so a node that has
+	never run has neither, and says why rather than leaving two dead buttons.
+-->
+<Story
+	name="WithoutAStoredScriptRefineAndReRunSayWhyTheyAreOutOfReach"
+	play={async ({ canvasElement }) => {
+		const refine = required(canvasElement, '[data-ai-mode="refine"]');
+		expect(refine).toBeDisabled();
+		expect(refine).toHaveAttribute('title', 'No stored script yet — run an analysis first.');
+		expect(required(canvasElement, '[data-ai-mode="rerun"]')).toBeDisabled();
+
+		// A disabled button's tooltip is not reliably reachable, so the reason is
+		// on the screen too.
+		expect(text(canvasElement, '[data-ai-mode-note]')).toBe(
+			'No stored script yet — run an analysis first.'
+		);
+
+		// Pressing one anyway changes nothing: the switch stays where the node is.
+		await userEvent.click(refine);
+		expect(required(canvasElement, '[data-ai-mode="analyse"]')).toHaveAttribute(
+			'aria-pressed',
+			'true'
+		);
+	}}
+/>
+
+<Story
+	name="WithAStoredScriptAndAnUnchangedPromptTheDefaultIsTheFreeMode"
+	play={async ({ canvasElement }) => {
+		// The prompt is exactly the one that produced the script, so the only
+		// reason to run is new data — and that needs no model at all.
+		expect(required(canvasElement, '[data-ai-mode="rerun"]')).toBeEnabled();
+		expect(required(canvasElement, '[data-ai-mode="rerun"]')).toHaveAttribute(
+			'aria-pressed',
+			'true'
+		);
+		expect(required(canvasElement, '[data-ai-mode="refine"]')).toBeEnabled();
+		expect(workbench(canvasElement).querySelector('[data-ai-mode-note]')).toBeNull();
+	}}
+>
+	{#snippet template()}
+		<AiNodeHarness
+			baseGraph={aiGraph({ script: SCRIPT, runs: [DONE_RUN] })}
+			nodeId="ai"
+			digests={DIGESTS}
+		/>
+	{/snippet}
+</Story>
+
+<!--
+	A re-run calls no model, so when its script fails nobody has explained the
+	failure: the traceback is the whole of what is known, and the one action is
+	to hand it back to Claude.
+-->
+<Story
+	name="AFailedReRunShowsTheTracebackAndOffersToFixIt"
+	play={async ({ canvasElement }) => {
+		expect(text(canvasElement, '[data-ai-traceback]')).toContain("KeyError: 'ch2'");
+		expect(text(canvasElement, '[data-ai-error-text]')).toContain('exit code 1');
+
+		await userEvent.click(required(canvasElement, '[data-ai-fix]'));
+		expect(harnessState(canvasElement)).toHaveAttribute('data-fixes', '1');
+	}}
+>
+	{#snippet template()}
+		<AiNodeHarness
+			baseGraph={aiGraph({ script: SCRIPT, runs: [DONE_RUN] })}
+			nodeId="ai"
+			digests={DIGESTS}
+			runState={runState({
+				phase: 'error',
+				error: 'The stored script failed with exit code 1.',
+				traceback: FAILED_TRACEBACK,
+				steps: [{ stdoutTail: FAILED_TRACEBACK, exitCode: 1 }]
+			})}
+		/>
+	{/snippet}
+</Story>
+
+<!-- An ordinary failure has no traceback to hand back, so there is nothing to fix. -->
+<Story
+	name="AFailureWithNoTracebackOffersNoFix"
+	args={{
+		runState: runState({ phase: 'error', error: 'Rate limited. Wait a minute and run again.' })
+	}}
+	play={async ({ canvasElement }) => {
+		expect(workbench(canvasElement).querySelector('[data-ai-fix]')).toBeNull();
+		expect(workbench(canvasElement).querySelector('[data-ai-traceback]')).toBeNull();
 	}}
 />
 

@@ -100,7 +100,22 @@ interface AiRequestBuild {
 interface AiRefineRequestBuild extends AiRequestBuild {
 	/** `analysis.py` as the last completed run left it. */
 	previousScript: string;
+	/**
+	 * What the stored script printed to stderr when it last failed, for the "Fix
+	 * with AI" path. Absent for an ordinary refine, where nothing broke and a
+	 * traceback would be describing a failure that did not happen.
+	 */
+	traceback?: string;
 }
+
+/**
+ * What a fix adds on top of the refine instruction. Separate from
+ * `REFINE_INSTRUCTION` rather than folded into it, because the request only
+ * carries it when a re-run actually failed — a refine that says a script
+ * crashed when it did not is a lie the model would then try to act on.
+ */
+const FIX_INSTRUCTION =
+	'Running the previous analysis.py failed. Its traceback follows; fix what caused it.';
 
 /** A fresh analysis: no script to build on, so the model writes one. */
 export function buildAnalyseRequest(build: AiRequestBuild): AiRequest {
@@ -108,12 +123,18 @@ export function buildAnalyseRequest(build: AiRequestBuild): AiRequest {
 	return baseRequest(build, effort, userMessageText(build));
 }
 
-/** A refine: the same request with the previous script and the edit instruction. */
+/**
+ * A refine: the same request with the previous script and the edit instruction,
+ * and — when the reader got here from a failed re-run — the traceback that
+ * failure printed, between the instruction and the script it is about.
+ */
 export function buildRefineRequest(build: AiRefineRequestBuild): AiRequest {
 	const { effort = APP_CONFIG.ai.effort.refine } = build;
+	const traceback = build.traceback?.trim() ?? '';
 	const text = [
 		userMessageText(build),
 		REFINE_INSTRUCTION,
+		...(traceback === '' ? [] : [`${FIX_INSTRUCTION}\n\n\`\`\`\n${traceback}\n\`\`\``]),
 		`Previous analysis.py:\n\`\`\`python\n${build.previousScript}\n\`\`\``
 	].join('\n\n');
 	return baseRequest(build, effort, text);

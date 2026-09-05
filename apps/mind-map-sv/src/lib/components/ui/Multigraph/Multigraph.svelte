@@ -38,8 +38,8 @@
 	import { tombstoneAsset } from '$lib/assets/assetTrash';
 	import { prefersReducedMotion } from '$lib/reducedMotion';
 	import { collectAiInputs } from './lib/aiInputs';
-	import { setAiPrompt } from './lib/aiNode';
-	import { createAiRunController } from './lib/aiRunController.svelte';
+	import { promoteAiOutput, setAiPrompt } from './lib/aiNode';
+	import { createAiRunController, type AiRunOutcome } from './lib/aiRunController.svelte';
 	import type { AiRunMode, NodeContentBlock, NodeData } from '../types/node';
 	import type { EdgeData } from '../types/edge';
 	import type { GraphCommitIntent } from '../types/history';
@@ -297,8 +297,7 @@
 		aiClient = null,
 		aiExecutor = null,
 		aiSettings = defaultAiSettings(),
-		onOpenAiSettings,
-		onPromoteAiOutput
+		onOpenAiSettings
 	}: {
 		multigraphData: MultigraphData;
 		/** Bumped when the document is swapped: this component is keyed on it and remounts. */
@@ -368,12 +367,6 @@
 		 * is how a run stopped by a missing key resumes without a second press.
 		 */
 		onOpenAiSettings?: (afterConnect?: () => void) => void;
-		/**
-		 * Give one AI output a node of its own. A no-op until T09 implements it:
-		 * accepted here so the workbench's Promote action is wired from the start
-		 * and T09 changes one call site rather than the whole surface.
-		 */
-		onPromoteAiOutput?: (nodeId: string, outputName: string) => void;
 	} = $props();
 
 	let graph = $state<MultigraphData>({
@@ -565,10 +558,54 @@
 	 * than a state machine that has to remember where it stopped.
 	 */
 	function runAiNode(nodeId: string, mode: AiRunMode): void {
-		void aiRun.run(nodeId, mode).then((outcome) => {
+		startAiRun(() => aiRun.run(nodeId, mode));
+	}
+
+	/**
+	 * The "Fix with AI" press: a refine run carrying the traceback the last
+	 * execution printed. Routed through the same missing-key retry as Run,
+	 * because a reader whose script just failed is exactly the reader who should
+	 * not have to press twice.
+	 */
+	function fixAiNode(nodeId: string): void {
+		startAiRun(() => aiRun.runFix(nodeId));
+	}
+
+	/** One attempt, retried once behind the key sheet when that is what it needed. */
+	function startAiRun(attempt: () => Promise<AiRunOutcome>): void {
+		void attempt().then((outcome) => {
 			if (outcome !== 'needs-key') return;
-			onOpenAiSettings?.(() => void aiRun.run(nodeId, mode));
+			onOpenAiSettings?.(() => void attempt());
 		});
+	}
+
+	/**
+	 * Give one of an AI node's outputs a node of its own.
+	 *
+	 * Placed exactly where `createDefiningNode` places the node it makes — below
+	 * the node that asked for it, by the same 2.5 radii — because both are the
+	 * same act: a node created *from* another one, with no pointer to say where.
+	 * The layout takes it from there; the reader never dropped it anywhere, so
+	 * there is nothing to honour.
+	 *
+	 * The reader stays in the workbench they pressed from. A promote is a filing
+	 * action, not a journey: they are looking at the figure and saying where it
+	 * belongs, and the workbench row they pressed answers by naming the node it
+	 * landed in, with a jump for when they do want to go. Unpinned for the same
+	 * reason — it hangs off the AI node, so it is inside that component's
+	 * neighbourhood rather than a beacon of its own, and the row's jump reveals
+	 * it if the hop budget does not.
+	 *
+	 * `promoteAiOutput` is idempotent, so a second press commits nothing: the
+	 * identity check is what keeps a double-tap out of the undo list.
+	 */
+	function promoteAiOutputToNode(aiNodeId: string, outputName: string): void {
+		const origin = graphLayout.posByNodeId[aiNodeId] ?? CENTERED_POSITION;
+		const next = promoteAiOutput(graph, aiNodeId, outputName, {
+			position: { x: origin.x, y: origin.y + NODE_RADIUS * 2.5 }
+		});
+		if (next === graph) return;
+		commitUserGraph(layoutRuntime.relaxAfterMutation(next), editIntent('promote AI output'));
 	}
 
 	/** Internal enter animations for nodes added by the user (scale 0 → target). */
@@ -3097,7 +3134,8 @@
 								)}
 							onRun={(mode) => runAiNode(detailsNode.id, mode)}
 							onCancel={() => aiRun.cancel(detailsNode.id)}
-							onPromote={(outputName) => onPromoteAiOutput?.(detailsNode.id, outputName)}
+							onPromote={(outputName) => promoteAiOutputToNode(detailsNode.id, outputName)}
+							onFix={() => fixAiNode(detailsNode.id)}
 							onOpenSettings={() => onOpenAiSettings?.()}
 							onJumpToNode={(nodeId) => jumpToNode(detailsNode.id, nodeId)}
 						/>

@@ -55,6 +55,9 @@
 	 * rather than naming the mode, because "Refine" alone does not tell a reader
 	 * that the stored script is the thing being refined.
 	 */
+	/** Why Refine and Re-run are out of reach, said once and shown twice. */
+	const NO_SCRIPT_REASON = 'No stored script yet — run an analysis first.';
+
 	const MODES: { mode: AiRunMode; label: string; hint: string }[] = [
 		{ mode: 'analyse', label: 'Analyse', hint: 'Write a new script for this prompt' },
 		{ mode: 'refine', label: 'Refine', hint: 'Edit the stored script for the changed prompt' },
@@ -80,6 +83,7 @@
 		onRun,
 		onCancel,
 		onPromote,
+		onFix,
 		onOpenSettings,
 		onJumpToNode
 	}: {
@@ -113,8 +117,13 @@
 		onPromptChange?: (prompt: string) => void;
 		onRun?: (mode: AiRunMode) => void;
 		onCancel?: () => void;
-		/** Give one output a node of its own, bound by its name (T09). */
+		/** Give one output a node of its own, bound by its name. */
 		onPromote?: (outputName: string) => void;
+		/**
+		 * Start a refine run against the traceback on screen. Offered only when
+		 * `runState.traceback` is there to send.
+		 */
+		onFix?: () => void;
 		/** Open the key sheet — the only thing offered when there is no key. */
 		onOpenSettings?: () => void;
 		/** Leave for a promoted node without pinning it, as the details view does. */
@@ -149,8 +158,16 @@
 	let assetUrls = $state<Record<string, string>>({});
 
 	const fallbackMode = $derived(defaultRunMode(ai));
+	/**
+	 * The reader's pick, or what the node calls for. A pick that needs the stored
+	 * script falls back once the script goes — an undo can take it away while the
+	 * switch is sitting on Refine, and running an analyse in Refine's clothing
+	 * would be worse than moving the highlight.
+	 */
 	const mode = $derived<AiRunMode>(
-		modeOverride === null || (modeOverride === 'rerun' && !hasScript) ? fallbackMode : modeOverride
+		modeOverride === null || (modeOverride !== 'analyse' && !hasScript)
+			? fallbackMode
+			: modeOverride
 	);
 
 	$effect(() => {
@@ -353,20 +370,29 @@
 	<section class="run-section" data-ai-run-controls>
 		<div class="modes" role="group" aria-label="Run mode">
 			{#each MODES as option (option.mode)}
-				{@const disabled = option.mode === 'rerun' && !hasScript}
+				<!-- Both of the other modes work *from* the stored script, so both are
+				     out of reach until a run has written one. -->
+				{@const disabled = option.mode !== 'analyse' && !hasScript}
 				<button
 					type="button"
 					class="mode"
 					data-ai-mode={option.mode}
 					aria-pressed={mode === option.mode}
 					{disabled}
-					title={disabled ? 'No stored script to run yet' : option.hint}
+					title={disabled ? NO_SCRIPT_REASON : option.hint}
 					onclick={() => (modeOverride = option.mode)}
 				>
 					{option.label}
 				</button>
 			{/each}
 		</div>
+
+		{#if !hasScript}
+			<!-- The disabled buttons carry the reason as a tooltip, and a disabled
+			     button does not reliably show one — so the reason is also on the
+			     screen, where a reader who cannot hover will find it. -->
+			<p class="mode-note" data-ai-mode-note>{NO_SCRIPT_REASON}</p>
+		{/if}
 
 		<div class="run-actions">
 			{#if hasKey}
@@ -452,20 +478,33 @@
 				<!-- Refusals and failures land in the same place the response would,
 				     which is the milestone's rule; the flag is what separates "Claude
 				     declined" from "something broke" without parsing the sentence. -->
-				<p
+				<div
 					class="error"
 					class:refusal={runState.refusal === true}
 					data-ai-error
 					data-ai-refusal={runState.refusal === true ? 'true' : 'false'}
 					role="alert"
 				>
-					<strong
-						>{runState.refusal === true
-							? 'Claude declined this request.'
-							: 'The run failed.'}</strong
-					>
-					<span data-ai-error-text>{runState.error}</span>
-				</p>
+					<p>
+						<strong
+							>{runState.refusal === true
+								? 'Claude declined this request.'
+								: 'The run failed.'}</strong
+						>
+						<span data-ai-error-text>{runState.error}</span>
+					</p>
+					{#if runState.traceback !== undefined}
+						<!-- A re-run calls no model, so nothing has explained this failure
+						     to the reader: the traceback is the whole of what is known,
+						     and the button hands exactly it to a refine run. -->
+						<pre class="stdout" data-ai-traceback>{runState.traceback}</pre>
+						<div class="fix-actions">
+							<button type="button" data-ai-fix disabled={busy} onclick={() => onFix?.()}>
+								Fix with AI
+							</button>
+						</div>
+					{/if}
+				</div>
 			{/if}
 		</section>
 	{/if}
@@ -759,7 +798,8 @@
 		font-size: 1rem;
 	}
 
-	.no-key {
+	.no-key,
+	.mode-note {
 		color: #64748b;
 		font-size: 0.875rem;
 	}
@@ -858,12 +898,32 @@
 
 	.error {
 		display: grid;
-		gap: 0.2rem;
+		gap: 0.45rem;
+		justify-items: start;
 		padding: 0.6rem 0.75rem;
 		border-left: 3px solid #ef4444;
 		background: #fef2f2;
 		font-size: 0.95rem;
 		white-space: pre-wrap;
+	}
+
+	/* The sentence keeps the two rows it had before the traceback joined it: what
+	   happened, then what was said about it. */
+	.error p {
+		display: grid;
+		gap: 0.2rem;
+	}
+
+	.error .stdout {
+		justify-self: stretch;
+	}
+
+	/* The one action inside a failure, on its own row so it is not read as part
+	   of the traceback above it. */
+	.fix-actions button {
+		border-color: #b91c1c;
+		background: #ffffff;
+		color: #b91c1c;
 	}
 
 	/* A refusal is an answer, not a failure, so it takes the informational edge

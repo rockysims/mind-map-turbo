@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest';
 import type Anthropic from '@anthropic-ai/sdk';
 import { APP_CONFIG } from '$lib/appConfig';
-import type { AiTurn } from '$lib/ai/aiClient';
+import type { AiRequest, AiTurn } from '$lib/ai/aiClient';
 import { createFakeAiClient } from '$lib/ai/fakeClient';
 import { createFakeExecutor } from '$lib/ai/fakeExecutor';
 import type { ExecutionResult } from '$lib/ai/pyExecutor';
@@ -19,6 +19,7 @@ import { MemoryGraphAssetStore } from '$lib/assets/assetStore';
 import type { GraphAssetStore } from '$lib/assets/assetStore';
 import type { MultigraphData } from '../../types/multigraph';
 import type { AiAddon, AiRun } from '../../types/node';
+import { promoteAiOutput } from './aiNode';
 import {
 	AI_RUN_COMMIT_LABEL,
 	createAiRunController,
@@ -102,6 +103,16 @@ function endTurn(summary: string): AiTurn {
 		usage: { inputTokens: 200, outputTokens: 40 },
 		model: 'claude-opus-5'
 	};
+}
+
+/** What a stored script that no longer matches its data prints. */
+const FAILING_TRACEBACK =
+	'Traceback (most recent call last):\n  File "analysis.py", line 3\nKeyError: \'ch2\'';
+
+/** The prompt half of a request: the first user message, which is always text. */
+function userText(request: AiRequest): string {
+	const content = request.messages[0]?.content;
+	return typeof content === 'string' ? content : '';
 }
 
 function pngResult(name: string, exitCode = 0): ExecutionResult {
@@ -258,6 +269,37 @@ describe('createAiRunController', () => {
 		expect(stored?.ok).toBe(true);
 	});
 
+	it('points a promoted node at the figure the next run drew under the same name', async () => {
+		const earlier: AiRun = {
+			id: 'run-0',
+			startedAt: 1,
+			finishedAt: 2,
+			status: 'done',
+			mode: 'analyse',
+			runtime: APP_CONFIG.ai.runtime.version,
+			inputs: [],
+			summary: '',
+			outputs: [{ name: 'plot.png', assetId: 'old-plot', mimeType: 'image/png' }],
+			toolCalls: 0
+		};
+		const h = await harness({
+			graph: promoteAiOutput(baseGraph({ runs: [earlier] }), 'ai', 'plot.png', {
+				position: { x: 0, y: 120 },
+				nodeId: 'promoted'
+			}),
+			turns: [toolTurn('print("redraw")'), endTurn('Redrew it.')],
+			script: () => pngResult('plot.png')
+		});
+
+		await h.controller.run('ai', 'analyse');
+
+		// One commit, so one undo: the run, its script and the promoted node's new
+		// figure land together.
+		const promoted = h.graph.nodes.find((node) => node.id === 'promoted');
+		expect(promoted?.content).toEqual([{ type: 'image', assetId: 'id-2', alt: 'plot.png' }]);
+		expect(h.addon()?.promoted).toEqual({ 'plot.png': 'promoted' });
+	});
+
 	it('returns needs-key without committing anything when there is no client', async () => {
 		const h = await harness({ withClient: false });
 
@@ -283,6 +325,68 @@ describe('createAiRunController', () => {
 		expect(run.model).toBeUndefined();
 		expect(run.usage).toBeUndefined();
 		expect(run.outputs).toHaveLength(1);
+	});
+
+	it('keeps a failed re-run’s traceback on the state, where Fix with AI reads it', async () => {
+		const h = await harness({
+			graph: baseGraph({ script: 'print(frame["ch2"])' }),
+			script: () => ({
+				exitCode: 1,
+				stdout: '',
+				stderr: FAILING_TRACEBACK,
+				durationMs: 4,
+				outputs: []
+			})
+		});
+
+		expect(await h.controller.run('ai', 'rerun')).toBe('error');
+
+		const state = h.controller.stateFor('ai');
+		expect(state.phase).toBe('error');
+		expect(state.traceback).toBe(FAILING_TRACEBACK);
+		// The sentence stays a sentence; the traceback is the evidence beside it.
+		expect(state.error).toBe('The stored script failed with exit code 1.');
+		// And the step shows what the script printed, which for a failure is stderr.
+		expect(state.steps).toEqual([{ stdoutTail: FAILING_TRACEBACK, exitCode: 1 }]);
+	});
+
+	it('sends one refine request carrying that traceback when the fix is asked for', async () => {
+		const h = await harness({
+			graph: baseGraph({ script: 'print(frame["ch2"])' }),
+			turns: [endTurn('Fixed the column name.')],
+			script: () => ({
+				exitCode: 1,
+				stdout: '',
+				stderr: FAILING_TRACEBACK,
+				durationMs: 4,
+				outputs: []
+			})
+		});
+		await h.controller.run('ai', 'rerun');
+
+		expect(await h.controller.runFix('ai')).toBe('done');
+
+		expect(h.client.requests).toHaveLength(1);
+		const text = userText(h.client.requests[0]);
+		expect(text).toContain(FAILING_TRACEBACK);
+		expect(text).toContain('print(frame["ch2"])');
+
+		// Recorded as what it is: an edit to the stored script.
+		const fix = h.runs()[1];
+		expect(fix.mode).toBe('refine');
+		expect(fix.model).toBe('claude-opus-5');
+	});
+
+	it('runs a plain refine when the fix is asked for with no traceback in hand', async () => {
+		const h = await harness({
+			graph: baseGraph({ script: 'print("stored")' }),
+			turns: [endTurn('Nothing to fix.')]
+		});
+
+		expect(await h.controller.runFix('ai')).toBe('done');
+
+		expect(userText(h.client.requests[0])).not.toContain('failed');
+		expect(h.runs()[0].mode).toBe('refine');
 	});
 
 	it('records a cancelled run with no outputs when the run is cancelled mid-script', async () => {

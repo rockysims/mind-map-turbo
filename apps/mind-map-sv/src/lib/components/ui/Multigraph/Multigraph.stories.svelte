@@ -24,7 +24,7 @@
 		withRandomTagsAndDirections
 	} from './lib/testFixtures';
 	import type { MultigraphData, Point } from '../types/multigraph';
-	import type { QuantityDesignation } from '../types/node';
+	import type { AiRun, QuantityDesignation } from '../types/node';
 	import type { GraphCommitIntent } from '../types/history';
 	import type { ViewState } from '$lib/migrations';
 	import type { ExitingBuffer } from './lib/elementTransitions';
@@ -729,6 +729,76 @@
 				}
 			]
 		);
+	}
+
+	/* ---------------------------------------------------------------------- *
+	 * The same node, one run later: a finished analysis with a figure to file.
+	 * ---------------------------------------------------------------------- */
+
+	const AI_PLOT_ASSET_ID = 'ai-plot-asset';
+	const AI_PLOT_NAME = 'drift.png';
+	const AI_SCRIPT = 'plt.savefig("outputs/drift.png")\n';
+
+	const AI_DONE_RUN: AiRun = {
+		id: 'run-1',
+		startedAt: 1_700_000_000_000,
+		finishedAt: 1_700_000_012_000,
+		status: 'done',
+		mode: 'analyse',
+		prompt: 'Plot channel 2 against time.',
+		model: 'claude-opus-5',
+		runtime: APP_CONFIG.ai.runtime.version,
+		inputs: [],
+		summary: 'Channel 2 rises steadily across the sweep.',
+		outputs: [{ name: AI_PLOT_NAME, assetId: AI_PLOT_ASSET_ID, mimeType: 'image/png' }],
+		toolCalls: 1
+	};
+
+	const AI_PROMOTE_GRAPH: MultigraphData = {
+		...makeGraph({
+			nodes: [
+				{
+					id: 'ai',
+					title: 'Drift analysis',
+					description: '',
+					addons: {
+						ai: {
+							prompt: 'Plot channel 2 against time.',
+							script: AI_SCRIPT,
+							runs: [AI_DONE_RUN],
+							promoted: {}
+						}
+					}
+				}
+			],
+			pinned: ['ai'],
+			posByNodeId: { ai: { x: 0, y: 0 } }
+		}),
+		assets: {
+			[AI_PLOT_ASSET_ID]: {
+				id: AI_PLOT_ASSET_ID,
+				kind: 'image',
+				mimeType: 'image/png',
+				name: AI_PLOT_NAME,
+				size: AI_PLOT_BYTES.length,
+				createdAt: 1
+			}
+		}
+	};
+
+	/** The store the finished run left behind: one figure, ready to be filed. */
+	function aiPlotStore(): GraphAssetStore {
+		const store = new MemoryGraphAssetStore();
+		void store.put({
+			scope: AI_SCOPE,
+			assetId: AI_PLOT_ASSET_ID,
+			blob: new Blob([AI_PLOT_BYTES], { type: 'image/png' }),
+			mimeType: 'image/png',
+			name: AI_PLOT_NAME,
+			size: AI_PLOT_BYTES.length,
+			updatedAt: 1
+		});
+		return store;
 	}
 
 	/** `reader` needs g; `gravity` defines it, three authored hops away. */
@@ -6245,5 +6315,68 @@
 		expect(canvasElement.querySelector('[data-ai-stream-text]')).toHaveTextContent(
 			'Channel 2 rises steadily'
 		);
+	}}
+/>
+
+<!--
+	Promote, from the map: an output the reader wants to keep becomes a node of
+	its own, joined to the analysis that drew it. The commit goes through the
+	same write path every other edit takes, so what this pins is the shape of
+	what lands — a node titled by the filename, carrying the figure, on a
+	directed edge out of the AI node — and that the reader stays where they were.
+-->
+<Story
+	name="PromotingAnOutputGivesItANodeOfItsOwn"
+	args={{
+		multigraphData: AI_PROMOTE_GRAPH,
+		defaultPrimaryNodeId: 'ai',
+		layoutSettings: { relaxIterations: 0 },
+		assetStore: aiPlotStore(),
+		assetScope: AI_SCOPE,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		await enterFocusOn(canvasElement, 'ai');
+
+		const workbench = await waitFor(() => {
+			const found = canvasElement.querySelector('[data-ai-workbench]');
+			expect(found).toBeInTheDocument();
+			return found as HTMLElement;
+		});
+		(workbench.querySelector(`[data-ai-promote="${AI_PLOT_NAME}"]`) as HTMLElement).click();
+
+		// A node titled by the filename, holding the run's figure, and a directed
+		// edge saying which way the data went.
+		const promotedNodeId = await waitFor(() => {
+			const graph = lastChangedGraph(args);
+			const node = graph.nodes.find((candidate) => candidate.title === AI_PLOT_NAME);
+			expect(node?.content).toEqual([
+				{ type: 'image', assetId: AI_PLOT_ASSET_ID, alt: AI_PLOT_NAME }
+			]);
+			expect(graph.edges).toEqual([
+				expect.objectContaining({
+					sourceNodeId: 'ai',
+					targetNodeId: node?.id,
+					directed: true,
+					tags: []
+				})
+			]);
+			return node?.id ?? '';
+		});
+		// And the binding, which is what the next run refreshes in place.
+		const ai = lastChangedGraph(args).nodes.find((node) => node.id === 'ai')?.addons?.ai;
+		expect(ai?.promoted).toEqual({ [AI_PLOT_NAME]: promotedNodeId });
+
+		// The reader has not gone anywhere: they are still in the workbench, and
+		// the row they pressed now names where the figure lives.
+		await expectFocusOn(canvasElement, 'ai');
+		await waitFor(() => {
+			const row = canvasElement.querySelector(`[data-ai-output="${AI_PLOT_NAME}"]`);
+			expect(row?.querySelector('[data-ai-promote]')).toBeNull();
+			expect(row?.querySelector(`[data-ai-jump="${promotedNodeId}"]`)).toHaveTextContent(
+				AI_PLOT_NAME
+			);
+		});
 	}}
 />

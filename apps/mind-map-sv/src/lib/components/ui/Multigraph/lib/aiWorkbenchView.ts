@@ -52,6 +52,16 @@ export interface AiRunState {
 	error?: string;
 	/** `true` when `error` is Claude refusing the request rather than a failure. */
 	refusal?: boolean;
+	/**
+	 * What the stored script printed to stderr when a re-run of it failed.
+	 *
+	 * Set on that path alone, because it is the one failure nobody has explained
+	 * to the reader: no model was in the loop, so the traceback is the whole of
+	 * what is known. Its presence is what puts "Fix with AI" on the error block,
+	 * and its text is what that refine run carries — one value, so what is on
+	 * screen and what goes in the request cannot disagree.
+	 */
+	traceback?: string;
 }
 
 /** The state a workbench with nothing in flight is handed. */
