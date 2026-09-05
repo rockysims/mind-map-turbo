@@ -29,6 +29,14 @@ export const NODE_ADDON_REGISTRY: NodeAddonRegistry = {
 		label: 'Task',
 		glyph: '☐',
 		createDefault: () => ({ done: false })
+	},
+	ai: {
+		label: 'AI',
+		// A four-pointed star rather than a robot or a sparkle emoji: it draws in
+		// the same monochrome text weight as the task box, so a node carrying both
+		// shows two glyphs of one family instead of a box beside a colour picture.
+		glyph: '✦',
+		createDefault: () => ({ prompt: '', runs: [], promoted: {} })
 	}
 };
 
@@ -58,5 +66,7 @@ export function withNodeAddon(addons: NodeAddons | undefined, name: NodeAddonNam
 	switch (name) {
 		case 'task':
 			return { ...addons, task: addons?.task ?? NODE_ADDON_REGISTRY.task.createDefault() };
+		case 'ai':
+			return { ...addons, ai: addons?.ai ?? NODE_ADDON_REGISTRY.ai.createDefault() };
 	}
 }

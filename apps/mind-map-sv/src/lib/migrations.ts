@@ -8,6 +8,10 @@ import type {
 	TagColorConfig
 } from './components/ui/types/multigraph';
 import type {
+	AiAddon,
+	AiRun,
+	AiRunInput,
+	AiRunOutput,
 	NodeAddons,
 	NodeContentBlock,
 	NodeData,
@@ -15,8 +19,9 @@ import type {
 	TaskAddon
 } from './components/ui/types/node';
 import { isRegisteredAddon, type NodeAddonName } from './components/ui/Multigraph/lib/nodeAddons';
+import { isAiRunStatus } from './components/ui/Multigraph/lib/aiNode';
 
-export const CURRENT_SCHEMA_VERSION = 7;
+export const CURRENT_SCHEMA_VERSION = 8;
 
 const EMPTY_TAG_COLOR_CONFIG: TagColorConfig = {
 	nodeTags: {},
@@ -184,8 +189,10 @@ function unwrapPersistedGraphData(payload: unknown): MultigraphData {
 		) {
 			throw new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload');
 		}
-		return migrateGraphDataToV7(
-			migrateGraphDataToV6(migrateGraphDataToV5(migrateGraphDataToV4(payload.data)))
+		return migrateGraphDataToV8(
+			migrateGraphDataToV7(
+				migrateGraphDataToV6(migrateGraphDataToV5(migrateGraphDataToV4(payload.data)))
+			)
 		);
 	}
 
@@ -198,7 +205,9 @@ function unwrapPersistedGraphData(payload: unknown): MultigraphData {
 		) {
 			throw new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload');
 		}
-		return migrateGraphDataToV7(migrateGraphDataToV6(migrateGraphDataToV5(payload.data)));
+		return migrateGraphDataToV8(
+			migrateGraphDataToV7(migrateGraphDataToV6(migrateGraphDataToV5(payload.data)))
+		);
 	}
 
 	if (payload.schemaVersion === 5) {
@@ -210,7 +219,7 @@ function unwrapPersistedGraphData(payload: unknown): MultigraphData {
 		) {
 			throw new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload');
 		}
-		return migrateGraphDataToV7(migrateGraphDataToV6(payload.data));
+		return migrateGraphDataToV8(migrateGraphDataToV7(migrateGraphDataToV6(payload.data)));
 	}
 
 	if (payload.schemaVersion === 6) {
@@ -222,7 +231,19 @@ function unwrapPersistedGraphData(payload: unknown): MultigraphData {
 		) {
 			throw new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload');
 		}
-		return migrateGraphDataToV7(payload.data);
+		return migrateGraphDataToV8(migrateGraphDataToV7(payload.data));
+	}
+
+	if (payload.schemaVersion === 7) {
+		if (
+			!isMultigraphData(payload.data, {
+				allowMissingContent: true,
+				allowMissingAssets: true
+			})
+		) {
+			throw new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload');
+		}
+		return migrateGraphDataToV8(payload.data);
 	}
 
 	if (payload.schemaVersion !== CURRENT_SCHEMA_VERSION) {
@@ -257,18 +278,20 @@ function migrateLegacyGraphData(
 	data: MultigraphData,
 	options: { allowMissingTags?: boolean } = {}
 ): MultigraphData {
-	return migrateGraphDataToV7(
-		migrateGraphDataToV6(
-			migrateGraphDataToV5(
-				migrateGraphDataToV4({
-					...data,
-					nodes: data.nodes.map((node) => ({
-						...node,
-						tags: options.allowMissingTags ? (node.tags ?? []) : node.tags
-					})),
-					edges: data.edges.map(migrateLegacyEdge),
-					tagColorConfig: { ...EMPTY_TAG_COLOR_CONFIG }
-				})
+	return migrateGraphDataToV8(
+		migrateGraphDataToV7(
+			migrateGraphDataToV6(
+				migrateGraphDataToV5(
+					migrateGraphDataToV4({
+						...data,
+						nodes: data.nodes.map((node) => ({
+							...node,
+							tags: options.allowMissingTags ? (node.tags ?? []) : node.tags
+						})),
+						edges: data.edges.map(migrateLegacyEdge),
+						tagColorConfig: { ...EMPTY_TAG_COLOR_CONFIG }
+					})
+				)
 			)
 		)
 	);
@@ -316,6 +339,19 @@ function migrateGraphDataToV6(data: MultigraphData): MultigraphData {
  * same and v8 has a place to hang.
  */
 function migrateGraphDataToV7(data: MultigraphData): MultigraphData {
+	return data;
+}
+
+/**
+ * v8 adds the `ai` add-on. Additive again — a v7 graph carries no `ai` key and
+ * a node without one is unchanged — so there is nothing to rewrite, and the
+ * version exists for the *other* direction: `isNodeAddons` refuses an add-on
+ * name it does not know, so a v7 app meeting an `!ai` node would call the file
+ * malformed. Stamping 8 (and reader version 4 in `graphFile.ts`) sends it down
+ * the "written by a newer app" route instead, which opens the document in its
+ * own embedded shell.
+ */
+function migrateGraphDataToV8(data: MultigraphData): MultigraphData {
 	return data;
 }
 
@@ -417,6 +453,8 @@ function isAddonData(name: NodeAddonName, value: unknown): boolean {
 	switch (name) {
 		case 'task':
 			return isTaskAddon(value);
+		case 'ai':
+			return isAiAddon(value);
 	}
 }
 
@@ -427,6 +465,74 @@ function isTaskAddon(value: unknown): value is TaskAddon {
 		(value.doneAt === undefined ||
 			(typeof value.doneAt === 'number' && Number.isFinite(value.doneAt)))
 	);
+}
+
+/**
+ * Every field of the `ai` add-on is checked, including inside each run.
+ *
+ * Strict on purpose, and strictest about `status`: a run is never *persisted*
+ * as running, so a record saying it is describes a state this app has no way to
+ * resume and no way to draw. Refusing the document is the honest answer —
+ * loading it and quietly rewriting the status would re-save a file whose
+ * history no longer matches what happened.
+ */
+function isAiAddon(value: unknown): value is AiAddon {
+	return (
+		isRecord(value) &&
+		typeof value.prompt === 'string' &&
+		(value.model === undefined || typeof value.model === 'string') &&
+		(value.script === undefined || typeof value.script === 'string') &&
+		Array.isArray(value.runs) &&
+		value.runs.every(isAiRun) &&
+		isStringRecord(value.promoted)
+	);
+}
+
+function isAiRun(value: unknown): value is AiRun {
+	return (
+		isRecord(value) &&
+		typeof value.id === 'string' &&
+		isFiniteNumber(value.startedAt) &&
+		(value.finishedAt === undefined || isFiniteNumber(value.finishedAt)) &&
+		isAiRunStatus(value.status) &&
+		(value.mode === 'analyse' || value.mode === 'refine' || value.mode === 'rerun') &&
+		(value.model === undefined || typeof value.model === 'string') &&
+		typeof value.runtime === 'string' &&
+		Array.isArray(value.inputs) &&
+		value.inputs.every(isAiRunInput) &&
+		typeof value.summary === 'string' &&
+		Array.isArray(value.outputs) &&
+		value.outputs.every(isAiRunOutput) &&
+		(value.usage === undefined || isAiRunUsage(value.usage)) &&
+		isFiniteNumber(value.toolCalls) &&
+		(value.error === undefined || typeof value.error === 'string')
+	);
+}
+
+function isAiRunInput(value: unknown): value is AiRunInput {
+	return (
+		isRecord(value) &&
+		typeof value.nodeId === 'string' &&
+		(value.assetId === undefined || typeof value.assetId === 'string') &&
+		(value.label === undefined || typeof value.label === 'string')
+	);
+}
+
+function isAiRunOutput(value: unknown): value is AiRunOutput {
+	return (
+		isRecord(value) &&
+		typeof value.name === 'string' &&
+		typeof value.assetId === 'string' &&
+		typeof value.mimeType === 'string'
+	);
+}
+
+function isAiRunUsage(value: unknown): value is NonNullable<AiRun['usage']> {
+	return isRecord(value) && isFiniteNumber(value.inputTokens) && isFiniteNumber(value.outputTokens);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+	return typeof value === 'number' && Number.isFinite(value);
 }
 
 function isDesignationArray(value: unknown): value is QuantityDesignation[] {

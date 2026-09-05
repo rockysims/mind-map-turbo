@@ -105,6 +105,49 @@ describe('serializeGraphFile', () => {
 		expect(parseGraphFileText(serializeGraphHtmlFile(doc)).data).toEqual(doc.data);
 	});
 
+	it('round-trips an ai add-on with a run and a promoted binding through JSON and HTML', () => {
+		const base = makeGraph({ nodeCount: 2, edges: [[0, 1]], pinned: [0] });
+		const doc = makeDoc({
+			data: {
+				...base,
+				nodes: base.nodes.map((node, index) =>
+					index === 0
+						? {
+								...node,
+								addons: {
+									ai: {
+										prompt: 'plot channel 2 against time',
+										model: 'claude-opus-5',
+										script: 'import pandas as pd\n',
+										runs: [
+											{
+												id: 'run-1',
+												startedAt: 1_700_000_000_000,
+												finishedAt: 1_700_000_030_000,
+												status: 'done' as const,
+												mode: 'analyse' as const,
+												model: 'claude-opus-5',
+												runtime: '0.27.7',
+												inputs: [{ nodeId: 'n1', assetId: 'f1', label: 'baseline' }],
+												summary: 'Plotted channel 2.',
+												outputs: [{ name: 'plot.png', assetId: 'p1', mimeType: 'image/png' }],
+												usage: { inputTokens: 1200, outputTokens: 340 },
+												toolCalls: 2
+											}
+										],
+										promoted: { 'plot.png': 'n1' }
+									}
+								}
+							}
+						: node
+				)
+			}
+		});
+
+		expect(parseGraphFile(serializeGraphFile(doc)).data).toEqual(doc.data);
+		expect(parseGraphFileText(serializeGraphHtmlFile(doc)).data).toEqual(doc.data);
+	});
+
 	it('does not include updatedAt in the exported file', () => {
 		const json = serializeGraphFile(makeDoc());
 		expect(json).not.toContain('updatedAt');
@@ -230,8 +273,21 @@ describe('HTML graph files', () => {
 	});
 
 	it('stamps the current reader version on what it writes', () => {
-		expect(GRAPH_HTML_READER_VERSION).toBe(3);
-		expect(serializeGraphHtmlFile(makeDoc())).toContain('"minReaderVersion": 3');
+		expect(GRAPH_HTML_READER_VERSION).toBe(4);
+		expect(serializeGraphHtmlFile(makeDoc())).toContain('"minReaderVersion": 4');
+	});
+
+	// Schema 8's reader version is 4, so a document asking for 5 was written by
+	// an app ahead of this one and must take the embedded-shell route.
+	it('refuses a document asking for reader version 5 as unsupported-app-version', () => {
+		const html = serializeGraphHtmlFile(makeDoc()).replace(
+			'"minReaderVersion": 4',
+			'"minReaderVersion": 5'
+		);
+
+		expect(() => parseGraphFileText(html)).toThrow(
+			new PersistedGraphError('Unsupported graph HTML reader version: 5', 'unsupported-app-version')
+		);
 	});
 
 	it('creates HTML file artifacts by default', () => {

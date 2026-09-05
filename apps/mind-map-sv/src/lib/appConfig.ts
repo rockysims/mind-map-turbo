@@ -7,7 +7,21 @@ export const APP_CONFIG = {
 		previewRows: 5, // rows of each input file a request may carry by default
 		previewRowChoices: [0, 5, 20], // preview-row depths the settings sheet offers
 		sendPlots: true, // send rendered plots back so Claude can check its own figure
-		rememberKey: true // keep the API key in this browser between sessions
+		rememberKey: true, // keep the API key in this browser between sessions
+		historyLength: 3, // runs kept on a node before the oldest is evicted
+		effort: { analyse: 'high', refine: 'medium' }, // thinking effort per run mode
+		maxToolCalls: 8, // script executions one run may ask for before the loop ends
+		scriptTimeoutMs: 120000, // wall clock a single script execution may take
+		stdoutTailChars: 4000, // trailing stdout/stderr characters a tool result carries
+		maxImagesPerResult: 4, // rendered plots sent back per script execution
+		maxImageBytes: 1_000_000, // largest rendered plot sent back, per image
+		summaryMaxChars: 4000, // summary length a run record stores, truncated on the way in
+		maxTokens: 32000, // output-token ceiling per Messages call
+		runtime: {
+			version: '0.27.7', // Pyodide version pinned so a run is reproducible
+			indexUrl: 'https://cdn.jsdelivr.net/pyodide/v0.27.7/full/', // CDN the runtime loads from
+			packages: ['pandas', 'numpy', 'scipy', 'matplotlib'] // packages loaded with it
+		}
 	},
 	interaction: {
 		doubleClickMs: 250, // max gap between clicks to count as double-click

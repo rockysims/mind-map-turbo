@@ -480,12 +480,23 @@ export function removeNodeContentBlock(
  * collection. Every content block kind carries one, so this counts images and
  * files alike; a block type without an asset would fail to type-check here,
  * which is the reminder to revisit it.
+ *
+ * An `!ai` node's run outputs count too, even though nothing renders them as a
+ * content block: the workbench shows a run's output grid straight from the run
+ * record, so a plot from two runs ago is on screen without any block naming it.
+ * Counting them here is what makes the trash sweep leave them alone and the
+ * exporter embed them, so a downloaded document still opens its history.
  */
 export function referencedAssetIds(data: MultigraphData): Set<string> {
 	const ids = new Set<string>();
 	for (const node of data.nodes) {
 		for (const block of node.content ?? []) {
 			ids.add(block.assetId);
+		}
+		for (const run of node.addons?.ai?.runs ?? []) {
+			for (const output of run.outputs) {
+				ids.add(output.assetId);
+			}
 		}
 	}
 	return ids;
