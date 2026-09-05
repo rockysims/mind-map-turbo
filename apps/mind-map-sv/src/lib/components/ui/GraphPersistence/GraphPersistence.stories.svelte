@@ -1,7 +1,7 @@
 <script module lang="ts">
 	import { defineMeta } from '@storybook/addon-svelte-csf';
 	import { expect, userEvent, waitFor, within } from 'storybook/test';
-	import { DBL_CLICK_MS } from '$lib/constants';
+	import { DBL_CLICK_MS, LONG_PRESS_MS } from '$lib/constants';
 	import { makeGraph } from '$lib/components/ui/Multigraph/lib/testFixtures';
 	import {
 		rectContainsRect,
@@ -86,20 +86,71 @@
 
 	function dispatchPointer(
 		target: HTMLElement,
-		type: 'pointerdown' | 'pointerup',
+		type: 'pointerdown' | 'pointermove' | 'pointerup',
 		clientX: number,
 		clientY: number,
-		pointerId = 1
+		pointerId = 1,
+		pointerType = ''
 	) {
 		target.dispatchEvent(
 			new PointerEvent(type, {
 				clientX,
 				clientY,
 				pointerId,
+				pointerType,
 				bubbles: true,
 				cancelable: true
 			})
 		);
+	}
+
+	/** Touch long-press: the only pointer type that still opens the menu by holding. */
+	async function dispatchLongPress(target: HTMLElement, x: number, y: number): Promise<void> {
+		dispatchPointer(target, 'pointerdown', x, y, 1, 'touch');
+		await sleep(LONG_PRESS_MS + 20);
+	}
+
+	/**
+	 * A pinned chain of three, so the whole graph stays inside the displayed
+	 * layers and every node is there to be deleted, dragged or focused.
+	 */
+	function undoChainGraph(): MultigraphData {
+		return makeGraph({
+			nodeCount: 3,
+			pinned: [0],
+			edges: [
+				[0, 1],
+				[1, 2]
+			],
+			posByNodeId: { n0: { x: -320, y: 0 }, n1: { x: 0, y: 0 }, n2: { x: 320, y: 0 } }
+		});
+	}
+
+	/** Delete a node the way a reader does: hold it, then pick Delete. */
+	async function deleteNodeFromMenu(canvasElement: HTMLElement, nodeId: string): Promise<void> {
+		const circle = getCircle(canvasElement, nodeId);
+		const center = getCenter(circle);
+		await dispatchLongPress(circle, center.x, center.y);
+		within(canvasElement).getByRole('menuitem', { name: 'Delete' }).click();
+	}
+
+	function dispatchKey(
+		target: HTMLElement,
+		key: string,
+		modifiers: { metaKey?: boolean; ctrlKey?: boolean } = {}
+	): void {
+		target.dispatchEvent(
+			new KeyboardEvent('keydown', { key, ...modifiers, bubbles: true, cancelable: true })
+		);
+	}
+
+	/** The toolbar's undo control, by the half of its name that never changes. */
+	function undoButton(canvasElement: HTMLElement): HTMLElement {
+		return within(canvasElement).getByRole('button', { name: /^Undo/ });
+	}
+
+	function redoButton(canvasElement: HTMLElement): HTMLElement {
+		return within(canvasElement).getByRole('button', { name: /^Redo/ });
 	}
 
 	async function dispatchDoubleClick(target: HTMLElement, x: number, y: number): Promise<void> {
@@ -687,7 +738,8 @@
 		expect(banner).toHaveTextContent('Imported 3 nodes');
 		expect(banner).toHaveTextContent('from moments ago');
 		expect(harness.dataset.snapshotLabel).toBe('import');
-		expect(harness.dataset.snapshotNodeCount).toBe('3');
+		// Exact, not inferred: the entry holds the graph on both sides of the import.
+		expect(harness.dataset.snapshotAddedNodeCount).toBe('3');
 	}}
 />
 
@@ -716,9 +768,15 @@
 
 		await waitFor(() => expect(harness.dataset.nodeCount).toBe('3'));
 		expect(harness.dataset.primaryTitle).toBe('Host Graph');
-		expect(Number(harness.dataset.graphGeneration)).toBe(Number(generationBeforeRevert) + 1);
+		// A history operation now, not a document swap: the canvas stays mounted
+		// and the reader keeps their pan, zoom, focus and nav.
+		expect(harness.dataset.graphGeneration).toBe(generationBeforeRevert);
 		await waitFor(() => expect(queryRevertBanner(canvasElement)).toBeNull());
 		expect(harness.dataset.snapshotLabel).toBe('');
+
+		// And, for the first time, the revert itself is redoable.
+		await userEvent.click(canvas.getByRole('button', { name: /^Undo/ }));
+		await waitFor(() => expect(harness.dataset.nodeCount).toBe('6'));
 	}}
 />
 
@@ -773,11 +831,225 @@
 		await waitFor(() => expect(queryRevertBanner(canvasElement)).toBeNull());
 		expect(harness.dataset.nodeCount).toBe('6');
 
-		// A later edit reloads nothing and re-offers nothing: the snapshot is gone.
+		// A later edit re-offers nothing: dismissing is per-entry and permanent.
 		await userEvent.click(canvas.getByRole('button', { name: 'Simulate graph change' }));
 		await waitFor(() => expect(harness.dataset.primaryTitle).toBe('Changed Node'));
 		expect(queryRevertBanner(canvasElement)).toBeNull();
 		expect(harness.dataset.snapshotLabel).toBe('');
+	}}
+/>
+
+<Story
+	name="UndoRestoresADeletedNodeWithoutRemounting"
+	args={{
+		initialGraphId: 'undo-delete',
+		graphs: { 'undo-delete': undoChainGraph() },
+		layoutSettings: { enterExitDurationMs: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const harness = getHarness(canvasElement);
+		await waitForHarnessData(canvasElement, 'loadedGraphId', 'undo-delete');
+		await waitForLayout();
+
+		const generationBefore = harness.dataset.graphGeneration;
+		const cameraBefore = persistedViewState(harness);
+		await deleteNodeFromMenu(canvasElement, 'n1');
+		await waitFor(() => expect(harness.dataset.nodeCount).toBe('2'));
+
+		expect(undoButton(canvasElement)).toHaveAccessibleName('Undo delete node');
+		await userEvent.click(undoButton(canvasElement));
+
+		await waitFor(() => expect(harness.dataset.nodeCount).toBe('3'));
+		await waitFor(() => expect(renderedNodeIds(canvasElement)).toContain('n1'));
+		// Its edges come back with it, and nothing about the reader's place moves:
+		// the canvas adopts the older graph in place rather than remounting.
+		expect(canvasElement.querySelectorAll('[data-edge-id]').length).toBeGreaterThan(0);
+		expect(harness.dataset.graphGeneration).toBe(generationBefore);
+		expect(persistedViewState(harness)).toEqual(cameraBefore);
+	}}
+/>
+
+<Story
+	name="UndoClosesFocusWhenTheRestoreRemovesItsSubject"
+	args={{
+		initialGraphId: 'undo-focus',
+		graphs: { 'undo-focus': undoChainGraph() },
+		layoutSettings: { enterExitDurationMs: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const harness = getHarness(canvasElement);
+		await waitForHarnessData(canvasElement, 'loadedGraphId', 'undo-focus');
+		await waitForLayout();
+
+		await deleteNodeFromMenu(canvasElement, 'n1');
+		await waitFor(() => expect(harness.dataset.nodeCount).toBe('2'));
+
+		await userEvent.click(undoButton(canvasElement));
+		await waitFor(() => expect(renderedNodeIds(canvasElement)).toContain('n1'));
+
+		// Focus the node that just came back, then take it away again with a redo.
+		const restored = getCircle(canvasElement, 'n1');
+		const restoredCenter = getCenter(restored);
+		await dispatchLongPress(restored, restoredCenter.x, restoredCenter.y);
+		within(canvasElement).getByRole('menuitem', { name: 'Focus' }).click();
+		await waitFor(() =>
+			expect(canvasElement.querySelector('.deep-zoom-stack')).toBeInTheDocument()
+		);
+
+		await userEvent.click(redoButton(canvasElement));
+
+		// Nothing today closes focus on a vanished subject, because until now
+		// nothing could vanish one — the overlay would render empty instead.
+		await waitFor(() => expect(harness.dataset.nodeCount).toBe('2'));
+		await waitFor(() => expect(canvasElement.querySelector('.deep-zoom-stack')).toBeNull());
+	}}
+/>
+
+<Story
+	name="UndoStandsDownWhileTheEditSheetIsOpen"
+	args={{
+		initialGraphId: 'undo-sheet',
+		graphs: { 'undo-sheet': undoChainGraph() },
+		layoutSettings: { enterExitDurationMs: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const harness = getHarness(canvasElement);
+		await waitForHarnessData(canvasElement, 'loadedGraphId', 'undo-sheet');
+		await waitForLayout();
+
+		await deleteNodeFromMenu(canvasElement, 'n2');
+		await waitFor(() => expect(harness.dataset.nodeCount).toBe('2'));
+		expect(undoButton(canvasElement)).toHaveAttribute('aria-disabled', 'false');
+
+		const circle = getCircle(canvasElement, 'n1');
+		const center = getCenter(circle);
+		await dispatchLongPress(circle, center.x, center.y);
+		within(canvasElement).getByRole('menuitem', { name: 'Edit' }).click();
+		await waitFor(() =>
+			expect(canvasElement.querySelector('.node-edit-sheet')).toBeInTheDocument()
+		);
+
+		// The sheet's draft-reset effect would discard unsaved text without a word,
+		// and the toolbar sits above the sheet — the button is one tap away.
+		await waitFor(() => expect(undoButton(canvasElement)).toHaveAttribute('aria-disabled', 'true'));
+		await userEvent.click(undoButton(canvasElement));
+
+		expect(harness.dataset.nodeCount).toBe('2');
+		await waitFor(() => expect(harness.dataset.notice).toBe('Finish editing first.'));
+	}}
+/>
+
+<Story
+	name="UndoIsInertWhileANodeDragIsInFlight"
+	args={{
+		initialGraphId: 'undo-drag',
+		graphs: { 'undo-drag': undoChainGraph() },
+		layoutSettings: { enterExitDurationMs: 0, relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const harness = getHarness(canvasElement);
+		await waitForHarnessData(canvasElement, 'loadedGraphId', 'undo-drag');
+		await waitForLayout();
+
+		await deleteNodeFromMenu(canvasElement, 'n2');
+		await waitFor(() => expect(harness.dataset.nodeCount).toBe('2'));
+
+		const stage = getStage(canvasElement);
+		const circle = getCircle(canvasElement, 'n1');
+		const center = getCenter(circle);
+		dispatchPointer(circle, 'pointerdown', center.x, center.y);
+		dispatchPointer(stage, 'pointermove', center.x + 60, center.y + 40);
+
+		// The stage holds pointer capture and re-commits the finger's position on
+		// the next move, so a mid-drag restore would be half-overwritten at once —
+		// and the drag's own end would then scale a node that may no longer exist.
+		await waitFor(() => expect(undoButton(canvasElement)).toHaveAttribute('aria-disabled', 'true'));
+		expect(harness.dataset.nodeCount).toBe('2');
+
+		dispatchPointer(stage, 'pointerup', center.x + 60, center.y + 40);
+		await waitFor(() =>
+			expect(undoButton(canvasElement)).toHaveAttribute('aria-disabled', 'false')
+		);
+	}}
+/>
+
+<Story
+	name="DisabledUndoWritesItsReasonToTheNotice"
+	args={{
+		initialGraphId: 'undo-empty',
+		graphs: { 'undo-empty': undoChainGraph() }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const harness = getHarness(canvasElement);
+		await waitForHarnessData(canvasElement, 'loadedGraphId', 'undo-empty');
+
+		const undo = undoButton(canvasElement);
+		expect(undo).toHaveAttribute('aria-disabled', 'true');
+		expect(undo).toHaveAccessibleName('Undo');
+		expect(undo).toHaveAccessibleDescription('Nothing to undo. Opened files start fresh.');
+
+		// `aria-disabled`, not `disabled`, so the tap still lands and can answer:
+		// `title` is hover-only and this app is mobile-first.
+		await userEvent.click(undo);
+
+		await waitFor(() =>
+			expect(harness.dataset.notice).toBe('Nothing to undo. Opened files start fresh.')
+		);
+	}}
+/>
+
+<Story
+	name="KeyboardUndoStandsDownInsideTextEntry"
+	args={{
+		initialGraphId: 'undo-typing',
+		graphs: { 'undo-typing': undoChainGraph() },
+		layoutSettings: { enterExitDurationMs: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const canvas = within(canvasElement);
+		const harness = getHarness(canvasElement);
+		await waitForHarnessData(canvasElement, 'loadedGraphId', 'undo-typing');
+		await waitForLayout();
+
+		await deleteNodeFromMenu(canvasElement, 'n2');
+		await waitFor(() => expect(harness.dataset.nodeCount).toBe('2'));
+
+		const stage = getStage(canvasElement);
+		dispatchKey(stage, 'k', { metaKey: true });
+		await waitFor(() => expect(canvas.getByLabelText('Graph query')).toBeInTheDocument());
+		const queryInput = canvas.getByLabelText('Graph query') as HTMLInputElement;
+		queryInput.focus();
+
+		dispatchKey(queryInput, 'z', { metaKey: true });
+		await waitForLayout();
+
+		// The field's own undo belongs to whoever is typing; the graph's does not.
+		expect(harness.dataset.nodeCount).toBe('2');
+	}}
+/>
+
+<Story
+	name="KeyboardUndoAndRedoStepTheGraph"
+	args={{
+		initialGraphId: 'undo-keys',
+		graphs: { 'undo-keys': undoChainGraph() },
+		layoutSettings: { enterExitDurationMs: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const harness = getHarness(canvasElement);
+		await waitForHarnessData(canvasElement, 'loadedGraphId', 'undo-keys');
+		await waitForLayout();
+
+		await deleteNodeFromMenu(canvasElement, 'n2');
+		await waitFor(() => expect(harness.dataset.nodeCount).toBe('2'));
+
+		const stage = getStage(canvasElement);
+		dispatchKey(stage, 'z', { metaKey: true });
+		await waitFor(() => expect(harness.dataset.nodeCount).toBe('3'));
+
+		// `Ctrl+Y` is the redo Windows hands expect, beside `Shift+Cmd/Ctrl+Z`.
+		dispatchKey(stage, 'y', { ctrlKey: true });
+		await waitFor(() => expect(harness.dataset.nodeCount).toBe('2'));
 	}}
 />
 

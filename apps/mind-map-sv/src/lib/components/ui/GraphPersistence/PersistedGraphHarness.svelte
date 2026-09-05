@@ -10,7 +10,7 @@
 	import { createDefaultGraph, shouldEditInitialRootTitle } from '$lib/defaultGraph';
 	import { DEFAULT_GRAPH_ID } from '$lib/graphRoute';
 	import { NEUTRAL_VIEW_STATE } from '$lib/migrations';
-	import { graphStorageKey, type StorageLike } from '$lib/persistence';
+	import { graphStorageKey } from '$lib/persistence';
 	import { SaveScheduler } from '$lib/saveScheduler';
 	import { InMemoryPersistence } from './inMemoryPersistence';
 	import { usePersistedGraph } from './usePersistedGraph.svelte';
@@ -39,11 +39,6 @@
 
 	let now = 0;
 	const namespace = `storybook-${initialGraphIdAtMount()}`;
-	/**
-	 * Snapshots live in a Map here rather than in the real `localStorage`, so a
-	 * story that imports leaves no revert offer behind for the next one.
-	 */
-	const snapshotStorage: StorageLike = createMemoryStorage();
 	const persistence = new InMemoryPersistence(graphsAtMount(), () => {
 		now += 1;
 		return now;
@@ -53,6 +48,18 @@
 	let lastImportResult = $state('');
 	let lastImportIntoCurrent = $state('');
 	let initialTitleEditNodeId = $state<string | null>(null);
+	/**
+	 * Why the canvas is refusing an undo right now, or `null`. Reported outward by
+	 * the canvas so the toolbar disables and explains from exactly the judgement
+	 * the keyboard shortcut obeys.
+	 */
+	let historyGuardReason = $state<string | null>(null);
+
+	const undoBlockedReason = $derived(
+		historyGuardReason ?? 'Nothing to undo. Opened files start fresh.'
+	);
+	const redoBlockedReason = $derived(historyGuardReason ?? 'Nothing to redo.');
+
 	const persisted = usePersistedGraph({
 		appVersion: appVersionAtMount(),
 		persistence,
@@ -75,7 +82,6 @@
 			await persisted.load(graphId, { flushCurrent: false });
 		},
 		storageNamespace: namespace,
-		snapshotStorage,
 		createGraphId: () => 'graph-new',
 		confirmNewGraphReplace: () => confirmResponse,
 		confirmGraphImportReplace: () => confirmResponse,
@@ -97,23 +103,6 @@
 
 	function initialGraphIdAtMount(): string {
 		return initialGraphId;
-	}
-
-	function createMemoryStorage(): StorageLike {
-		const items: Record<string, string> = {};
-		return {
-			get length() {
-				return Object.keys(items).length;
-			},
-			getItem: (key) => items[key] ?? null,
-			setItem: (key, value) => {
-				items[key] = value;
-			},
-			removeItem: (key) => {
-				delete items[key];
-			},
-			key: (index) => Object.keys(items)[index] ?? null
-		};
 	}
 
 	function graphsAtMount(): Record<string, MultigraphData> {
@@ -139,7 +128,10 @@
 
 	function changeGraph(): void {
 		persisted.notifyGraphChanged(renamePrimaryNode(persisted.graph, 'Changed Node'), {
-			syncView: true
+			syncView: true,
+			// Stands in for a canvas edit, so it names an intent the way every real
+			// commit does — without one it would never reach the history.
+			intent: { label: 'rename node', primaryNodeId: 'n0', severedBeaconPreference: [] }
 		});
 	}
 
@@ -197,7 +189,7 @@
 	data-last-import-result={lastImportResult}
 	data-last-import-into-current={lastImportIntoCurrent}
 	data-snapshot-label={persisted.snapshot?.label ?? ''}
-	data-snapshot-node-count={persisted.snapshot?.nodeCount ?? ''}
+	data-snapshot-added-node-count={persisted.snapshot?.addedNodeCount ?? ''}
 	data-view-pan-x={persisted.viewState.panX}
 	data-view-pan-y={persisted.viewState.panY}
 	data-view-scale={persisted.viewState.scale}
@@ -207,14 +199,22 @@
 		onNewGraph={() => void persisted.createGraph()}
 		onImportGraphFile={(file) => void handleImportFileIntoCurrent(file)}
 		onSave={() => void handleSave()}
+		canUndo={persisted.canUndo && historyGuardReason === null}
+		canRedo={persisted.canRedo && historyGuardReason === null}
+		undoLabel={persisted.undoLabel}
+		redoLabel={persisted.redoLabel}
+		{undoBlockedReason}
+		{redoBlockedReason}
+		onUndo={() => persisted.undo()}
+		onRedo={() => persisted.redo()}
+		onBlockedAction={(reason) => persisted.reportBlockedAction(reason)}
 	/>
 
 	{#if persisted.snapshot !== null}
 		<RevertBanner
 			label={persisted.snapshot.label}
 			createdAt={persisted.snapshot.createdAt}
-			snapshotNodeCount={persisted.snapshot.nodeCount}
-			currentNodeCount={persisted.graph.nodes.length}
+			addedNodeCount={persisted.snapshot.addedNodeCount}
 			onRevert={() => void persisted.revertToSnapshot()}
 			onDismiss={() => persisted.dismissSnapshot()}
 		/>
@@ -238,13 +238,17 @@
 			multigraphData={persisted.graph}
 			graphGeneration={persisted.graphGeneration}
 			graphRevision={persisted.graphRevision}
+			restoredCanvasState={persisted.restoredCanvasState}
 			initialViewState={persisted.viewState}
 			{initialTitleEditNodeId}
 			{defaultPrimaryNodeId}
 			{layoutSettings}
-			onMultigraphChange={(graph) => persisted.notifyGraphChanged(graph, { syncView: true })}
+			onMultigraphChange={(graph, _generation, intent) =>
+				persisted.notifyGraphChanged(graph, { syncView: true, intent })}
 			onViewStateChange={(viewState) =>
 				persisted.notifyViewStateChanged(viewState, { syncView: true })}
+			onHistoryGuardChange={(reason) => (historyGuardReason = reason)}
+			onHistoryStep={(direction) => (direction === 'undo' ? persisted.undo() : persisted.redo())}
 		/>
 	{/key}
 </div>

@@ -2,11 +2,11 @@
 	/**
 	 * The way back out of an import.
 	 *
-	 * Shown for as long as a snapshot exists, which is longer than the operation
-	 * that wrote it — the snapshot survives a reload, so the banner has to say how
-	 * old it is rather than assume the reader just watched the import happen. The
-	 * age is re-derived on a coarse interval so a banner left sitting does not
-	 * keep claiming "moments ago" an hour later.
+	 * Shown while the import entry is still on the undo side of the history, which
+	 * is longer than the operation that wrote it — a draft's tail survives a
+	 * reload, so the banner has to say how old it is rather than assume the reader
+	 * just watched the import happen. The age is re-derived on a coarse interval
+	 * so a banner left sitting does not keep claiming "moments ago" an hour later.
 	 *
 	 * Reverting is gated behind its own confirmation because it is not the inverse
 	 * of the import alone: everything done since the snapshot goes with it.
@@ -21,21 +21,18 @@
 	let {
 		label,
 		createdAt,
-		snapshotNodeCount,
-		currentNodeCount,
+		addedNodeCount,
 		onRevert,
 		onDismiss,
 		now = Date.now,
 		ageRefreshMs = SNAPSHOT_AGE_REFRESH_MS
 	}: {
-		/** The snapshot's operation label, e.g. `'import'`. */
+		/** The operation's label, e.g. `'import'`. */
 		label: string;
-		/** Epoch ms the snapshot was taken. */
+		/** Epoch ms the operation happened. */
 		createdAt: number;
-		/** Node count captured in the snapshot. */
-		snapshotNodeCount: number;
-		/** Node count in the graph on screen, which names what the import added. */
-		currentNodeCount: number;
+		/** Nodes the operation added, exactly — both sides of it are recorded. */
+		addedNodeCount: number;
 		onRevert: () => void;
 		onDismiss: () => void;
 		now?: () => number;
@@ -45,7 +42,7 @@
 	let nowMs = $state(untrack(() => now()));
 	let confirming = $state(false);
 
-	const headline = $derived(snapshotOfferHeadline(label, snapshotNodeCount, currentNodeCount));
+	const headline = $derived(snapshotOfferHeadline(label, addedNodeCount));
 	const age = $derived(formatSnapshotAge(createdAt, nowMs));
 
 	$effect(() => {

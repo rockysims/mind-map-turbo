@@ -60,6 +60,11 @@ BUGS:
 
 - Edit dialog background (click to close) has very rounded edges and padding so it doesn't cover the full Stage.
 - Pinned node doesn't show description.
+- e2e `deep zoom nests a node image as a second level and pops back to the node`
+  fails: after the first wheel-in the node world's `data-zoom-world-scale` stays
+  at 1, so the scrub never leaves the stage. Confirmed pre-existing on a clean
+  tree at 5517f5c (checked while landing milestone 12, which does not touch the
+  zoom path).
 
 MAYBE:
 

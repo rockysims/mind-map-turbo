@@ -2,8 +2,10 @@ import type { MultigraphData } from './components/ui/types/multigraph';
 import {
 	NEUTRAL_VIEW_STATE,
 	unwrapPersistedGraph,
+	unwrapPersistedHistory,
 	wrapPersistedGraph,
 	type PersistedGraphPayload,
+	type PersistedHistoryTail,
 	type ViewState
 } from './migrations';
 
@@ -30,6 +32,11 @@ type StoredGraphPayload = PersistedGraphPayload & {
 export type PersistedGraphRecord = {
 	data: MultigraphData;
 	viewState: ViewState;
+	/**
+	 * The recent undo tail, in the draft only. Absent on a record that never had
+	 * one, and on every exported file — see `PersistedHistoryTail`.
+	 */
+	history?: PersistedHistoryTail | null;
 };
 
 export function graphStorageKey(namespace: string, graphId: string): string {
@@ -57,15 +64,17 @@ export class LocalStoragePersistence implements Persistence {
 		const item = this.storage.getItem(graphStorageKey(this.namespace, id));
 		if (item === null) return null;
 		const raw = JSON.parse(item) as unknown;
+		const history = unwrapPersistedHistory(raw);
 		return {
 			data: unwrapPersistedGraph(raw),
-			viewState: readViewState(raw)
+			viewState: readViewState(raw),
+			...(history === null ? {} : { history })
 		};
 	}
 
 	async save(id: string, graph: PersistedGraphRecord): Promise<void> {
 		const payload: StoredGraphPayload = {
-			...wrapPersistedGraph(graph.data),
+			...wrapPersistedGraph(graph.data, graph.history ?? undefined),
 			viewState: graph.viewState,
 			updatedAt: this.now()
 		};
@@ -108,9 +117,11 @@ export class ServerPersistence implements Persistence {
 		if (response.status === 404) return null;
 		if (!response.ok) throw new Error(`Failed to load graph ${id}: ${response.status}`);
 		const payload = (await response.json()) as unknown;
+		const history = unwrapPersistedHistory(payload);
 		return {
 			data: unwrapPersistedGraph(payload),
-			viewState: readViewState(payload)
+			viewState: readViewState(payload),
+			...(history === null ? {} : { history })
 		};
 	}
 
@@ -119,7 +130,7 @@ export class ServerPersistence implements Persistence {
 			method: 'PUT',
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify({
-				...wrapPersistedGraph(graph.data),
+				...wrapPersistedGraph(graph.data, graph.history ?? undefined),
 				viewState: graph.viewState
 			})
 		});

@@ -10,6 +10,16 @@ export interface TagColorSegment {
 	endTurn: number;
 }
 
+/**
+ * Which half of a colour swatch's gesture a change came from.
+ *
+ * A native `<input type="color">` fires `input` per scrub frame and `change`
+ * once the picker closes. The canvas previews every frame either way; the
+ * distinction exists so the history can fold a whole scrub into one entry and
+ * still know when the scrub ended.
+ */
+export type TagColorChangePhase = 'scrub' | 'commit';
+
 export interface LegendTag {
 	namespace: TagColorNamespace;
 	tag: string;

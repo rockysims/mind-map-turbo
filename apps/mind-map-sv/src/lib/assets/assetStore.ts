@@ -6,6 +6,12 @@ export interface StoredGraphAsset {
 	name?: string;
 	size: number;
 	updatedAt: number;
+	/**
+	 * Epoch ms this blob stopped being referenced by the document, or absent
+	 * while it still is. A tombstoned blob is readable and restorable — see
+	 * `assetTrash.ts` — until a sweep decides no history entry can reach it.
+	 */
+	trashedAt?: number;
 }
 
 export type AssetStoreResult<T = void> =
@@ -199,6 +205,7 @@ function withoutKey(record: StoredGraphAsset & { key: string }): StoredGraphAsse
 		mimeType: record.mimeType,
 		name: record.name,
 		size: record.size,
-		updatedAt: record.updatedAt
+		updatedAt: record.updatedAt,
+		...(record.trashedAt === undefined ? {} : { trashedAt: record.trashedAt })
 	};
 }

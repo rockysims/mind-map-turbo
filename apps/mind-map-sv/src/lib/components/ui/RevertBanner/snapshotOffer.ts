@@ -35,21 +35,15 @@ function countedPhrase(count: number, unit: string): string {
 }
 
 /**
- * What the operation behind the snapshot did, as a headline.
+ * What the operation behind the offer did, as a headline.
  *
- * The snapshot itself only records a label, so the size of an import is
- * recovered by subtracting the node count it captured from the graph on screen.
- * That arithmetic stops being true the moment the reader adds or deletes a node,
- * and the banner outlives reloads, so anything but a plain positive difference
- * falls back to the honest vague answer rather than stating a number that is
- * quietly wrong.
+ * The count is exact rather than defensive. The offer is now a view of the undo
+ * history, and the entry holds the graph on both sides of the import, so what
+ * arrived is a subtraction between two recorded states rather than between a
+ * remembered count and the graph on screen — which stopped being true the moment
+ * the reader added a node, while the banner outlived reloads.
  */
-export function snapshotOfferHeadline(
-	label: string,
-	snapshotNodeCount: number,
-	currentNodeCount: number
-): string {
-	const addedNodeCount = currentNodeCount - snapshotNodeCount;
+export function snapshotOfferHeadline(label: string, addedNodeCount: number): string {
 	if (label !== 'import' || addedNodeCount <= 0) return 'Graph changed';
 	return `Imported ${addedNodeCount} ${addedNodeCount === 1 ? 'node' : 'nodes'}`;
 }

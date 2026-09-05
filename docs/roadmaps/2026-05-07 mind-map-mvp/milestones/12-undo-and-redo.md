@@ -1,6 +1,6 @@
 # Milestone 12: Undo and redo
 
-**Status:** proposed
+**Status:** complete
 **Depends on:** milestone 04 (persistence), milestone 04c (import/export),
 milestone 04l (self-contained HTML save files), the additive-import revert
 (`graphSnapshot.ts`, `RevertBanner`, commit c248061).

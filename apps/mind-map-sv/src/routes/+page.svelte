@@ -63,6 +63,18 @@
 	let appBuildStamp: string | null = null;
 
 	let persisted = $state<PersistedGraph | null>(null);
+	/**
+	 * Why the canvas is refusing an undo right now, or `null`. Reported outward by
+	 * the canvas so the toolbar disables and explains from exactly the judgement
+	 * the keyboard shortcut obeys.
+	 */
+	let historyGuardReason = $state<string | null>(null);
+
+	const undoBlockedReason = $derived(
+		historyGuardReason ?? 'Nothing to undo. Opened files start fresh.'
+	);
+	const redoBlockedReason = $derived(historyGuardReason ?? 'Nothing to redo.');
+
 	let storageDurability = $state<StorageDurability>('durable');
 	let startupError = $state<string | null>(null);
 	let graphAssetStore = $state<IndexedDbGraphAssetStore | null>(null);
@@ -471,14 +483,22 @@
 		onOpenGraphFilePicker={openGraphFilePicker}
 		onImportGraphFile={(file) => void importGraphFile(file)}
 		onSave={() => void handleSave()}
+		canUndo={(persisted?.canUndo ?? false) && historyGuardReason === null}
+		canRedo={(persisted?.canRedo ?? false) && historyGuardReason === null}
+		undoLabel={persisted?.undoLabel ?? null}
+		redoLabel={persisted?.redoLabel ?? null}
+		{undoBlockedReason}
+		{redoBlockedReason}
+		onUndo={() => persisted?.undo()}
+		onRedo={() => persisted?.redo()}
+		onBlockedAction={(reason) => persisted?.reportBlockedAction(reason)}
 	/>
 
 	{#if persisted !== null && persisted.snapshot !== null}
 		<RevertBanner
 			label={persisted.snapshot.label}
 			createdAt={persisted.snapshot.createdAt}
-			snapshotNodeCount={persisted.snapshot.nodeCount}
-			currentNodeCount={persisted.graph.nodes.length}
+			addedNodeCount={persisted.snapshot.addedNodeCount}
 			onRevert={() => void persisted?.revertToSnapshot()}
 			onDismiss={() => persisted?.dismissSnapshot()}
 		/>
@@ -516,15 +536,19 @@
 				multigraphData={persisted.graph}
 				graphGeneration={persisted.graphGeneration}
 				graphRevision={persisted.graphRevision}
+				restoredCanvasState={persisted.restoredCanvasState}
 				initialViewState={persisted.viewState}
 				{initialTitleEditNodeId}
 				{defaultPrimaryNodeId}
 				assetStore={graphAssetStore}
 				assetScope={persisted.loadedGraphId}
-				onMultigraphChange={(graph, generation) =>
-					persisted?.notifyGraphChanged(graph, { syncView: true, generation })}
+				onMultigraphChange={(graph, generation, intent) =>
+					persisted?.notifyGraphChanged(graph, { syncView: true, generation, intent })}
 				onViewStateChange={(viewState) =>
 					persisted?.notifyViewStateChanged(viewState, { syncView: true })}
+				onHistoryGuardChange={(reason) => (historyGuardReason = reason)}
+				onHistoryStep={(direction) =>
+					direction === 'undo' ? persisted?.undo() : persisted?.redo()}
 			/>
 		{/key}
 	{/if}
