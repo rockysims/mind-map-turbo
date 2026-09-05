@@ -16,6 +16,7 @@ import { APP_CONFIG } from '$lib/appConfig';
 import { formatByteSize } from '$lib/components/ui/Multigraph/lib/byteSize';
 import type { AiInput } from '$lib/components/ui/Multigraph/lib/aiInputs';
 import type { AiEffort, AiRequest, AiTurn } from './aiClient';
+import { executorInputName } from './inputFileName';
 import type { AiSettings } from './aiSettings';
 import { renderDigest, type FileDigest } from './probeScript';
 
@@ -145,7 +146,11 @@ function baseRequest(build: AiRequestBuild, effort: AiEffort, text: string): AiR
 	return {
 		model: settings.model,
 		max_tokens: maxTokens,
-		system: buildSystemPrompt(fileInputs(build.inputs).map((input) => input.name)),
+		// The names the runtime will actually write, not the names the graph
+		// stores: a script that opens the latter would not find the file.
+		system: buildSystemPrompt(
+			fileInputs(build.inputs).map((input) => executorInputName(input.name))
+		),
 		messages: [{ role: 'user', content: text }],
 		tools: [RUN_ANALYSIS_TOOL],
 		thinking: { type: 'adaptive', display: 'summarized' },
@@ -174,9 +179,14 @@ function userMessageText(build: AiRequestBuild): string {
 
 	const files = fileInputs(inputs);
 	if (files.length > 0) {
-		const byName = new Map(digests.map((digest) => [digest.name, digest]));
+		// The probe names each digest after the file the runtime wrote, so an
+		// input whose stored name carries a directory or stray whitespace is
+		// matched by that same normalisation rather than dropping its measurement.
+		const byName = new Map(
+			digests.map((digest) => [executorInputName(digest.name), digest] as const)
+		);
 		const rendered = files.map((input) =>
-			renderFileInput(input, byName.get(input.name), previewRows)
+			renderFileInput(input, byName.get(executorInputName(input.name)), previewRows)
 		);
 		sections.push(`Attached files:\n\n${rendered.join('\n\n')}`);
 	}
@@ -208,7 +218,7 @@ function renderFileInput(
 		? renderDigest(digest, previewRows)
 		: // No digest means the probe could not measure it; the name and size are
 			// still worth sending, because the script has to open the file by name.
-			`${input.name} — ${formatByteSize(input.size)}`;
+			`${executorInputName(input.name)} — ${formatByteSize(input.size)}`;
 
 	if (input.label === undefined) return body;
 	const [first, ...rest] = body.split('\n');

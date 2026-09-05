@@ -256,6 +256,12 @@
 
 			return () => {
 				persistedGraph.dispose();
+				// Terminal, and the page is going: a disposed executor throws from
+				// every later call, which is why no run ever disposes it and the
+				// controller leaves it alone on cancel. Without this the worker and
+				// whatever runtime it downloaded outlive the page.
+				aiExecutor?.dispose();
+				aiExecutor = null;
 				window.removeEventListener('storage', onStorage);
 				window.removeEventListener('hashchange', onRouteChange);
 				window.removeEventListener('popstate', onRouteChange);

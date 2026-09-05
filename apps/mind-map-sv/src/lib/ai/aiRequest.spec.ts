@@ -247,6 +247,26 @@ describe('buildAnalyseRequest', () => {
 		expect(request.output_config).toEqual({ effort: 'high' });
 		expect(request.max_tokens).toBe(32000);
 	});
+
+	it('names files and matches digests by the name the runtime writes, not the stored one', () => {
+		// The graph keeps whatever the filesystem handed it; the executor writes
+		// the basename. A request that used the stored name would list a file the
+		// script cannot open and would drop the digest that was measured for it.
+		const request = buildAnalyseRequest({
+			prompt: 'Plot it.',
+			inputs: [fileInput('bench/2026-09/sweep.csv'), fileInput('  ref.csv ')],
+			digests: [tableDigest('sweep.csv', 1000, 2), tableDigest('ref.csv', 40, 2)],
+			settings,
+			previewRows: 2
+		});
+
+		expect(request.system).toContain('- sweep.csv');
+		expect(request.system).toContain('- ref.csv');
+		expect(request.system).not.toContain('bench/2026-09');
+		// The digest, not the bare `name — size` line a missing measurement gives.
+		expect(userText(request)).toContain('1000 rows');
+		expect(userText(request)).toContain('40 rows');
+	});
 });
 
 describe('buildRefineRequest', () => {

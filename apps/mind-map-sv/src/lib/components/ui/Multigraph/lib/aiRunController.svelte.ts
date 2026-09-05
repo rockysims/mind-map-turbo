@@ -47,6 +47,7 @@ import {
 	RUN_ANALYSIS_TOOL
 } from '$lib/ai/aiRequest';
 import type { AiSettings } from '$lib/ai/aiSettings';
+import { executorInputName } from '$lib/ai/inputFileName';
 import type { FileDigest } from '$lib/ai/probeScript';
 import type { ExecutionOutput, ExecutorFile, PyExecutor } from '$lib/ai/pyExecutor';
 import type { GraphAssetStore } from '$lib/assets/assetStore';
@@ -190,10 +191,11 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 	/**
 	 * Measure `files` and remember the answers against the assets they came from.
 	 *
-	 * The probe reports each digest under the *basename* the executor wrote it
-	 * as, which is how it is matched back to an asset id; the request builder
-	 * matches the same way, so what the workbench shows and what the request
-	 * carries are the same rendering of the same measurement.
+	 * The probe reports each digest under the name the executor wrote the file
+	 * as, which is how it is matched back to an asset id; `executorInputName` is
+	 * that rule, and the request builder applies the same one, so what the
+	 * workbench shows and what the request carries are the same rendering of the
+	 * same measurement.
 	 */
 	async function measure(
 		nodeId: string,
@@ -207,13 +209,13 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 		const assetIdByName: Record<string, string> = {};
 		for (const input of inputs) {
 			if (input.kind !== 'file') continue;
-			const key = basename(input.name);
+			const key = executorInputName(input.name);
 			if (assetIdByName[key] === undefined) assetIdByName[key] = input.assetId;
 		}
 
 		const byAssetId: Record<string, FileDigest> = {};
 		for (const digest of digests) {
-			const assetId = assetIdByName[basename(digest.name)];
+			const assetId = assetIdByName[executorInputName(digest.name)];
 			if (assetId !== undefined) byAssetId[assetId] = digest;
 		}
 		digestCache = { ...digestCache, [nodeId]: { previewRows, byAssetId } };
@@ -714,11 +716,6 @@ function toRunInput(input: AiInput): AiRunInput {
 		...(input.kind === 'file' ? { assetId: input.assetId } : {}),
 		...(input.label === undefined ? {} : { label: input.label })
 	};
-}
-
-/** The name the runtime wrote a file under, which is how a digest is matched back. */
-function basename(name: string): string {
-	return name.split(/[\\/]/).pop() ?? name;
 }
 
 function tail(text: string, limit: number = APP_CONFIG.ai.stdoutTailChars): string {

@@ -38,6 +38,8 @@ stored is only the words that are left:
   `baseline`. It applies to that edge, not to the node.
 - `!task Filter rig` gives the node the task add-on: a done checkbox in its
   details view and a small box on the canvas.
+- `!ai Channel drift` gives the node the AI add-on: a prompt, a Run button and
+  the analysis it produces. See [AI nodes](#ai-nodes) below.
 
 The markers may be combined in any order, may abut, and may repeat, so
 `!task #lab @bench Buy filters` and `#lab!task@bench Buy filters` both mean the
@@ -48,14 +50,93 @@ typing, `<` draws it back the other way, and without either the edge is
 undirected.
 
 Unlike `#` and `@`, which take any word you invent, `!` picks from a closed
-list of add-ons — `task` is the only one today. An unrecognised name is not an
-error and does not vanish: `!important Read this` ends the marker run and stays
-in the title exactly as typed.
+list of add-ons — `task` and `ai` today. An unrecognised name is not an error
+and does not vanish: `!important Read this` ends the marker run and stays in
+the title exactly as typed.
 
 The node edit sheet's title field reads `#` and `!` too, and adds to what is
 already there rather than replacing it — the sheet's own tag list and add-on
 toggles stay the way to remove one. It leaves `@` and a leading `>` or `<`
 alone, because an existing node has no newly created edge to apply them to.
+
+## AI nodes
+
+`!ai Channel drift` gives a node the AI add-on. Open it and you get a
+workbench: a prompt, the files and notes it can see, a Run button, and — once
+a run finishes — a summary, the plots and tables it produced, and the Python
+script that produced them.
+
+What actually happens on a run is worth being precise about, because it is
+unusual: **Claude writes a script, and your browser runs it.** Nothing is
+executed on a server. The node collects its inputs (attachments on the node
+itself, and attachments and text on the nodes one edge away), measures each
+file locally, and sends Claude the prompt, those measurements and the
+neighbours' text. Claude replies with a complete `analysis.py`, which runs
+here, in a Python runtime inside a Web Worker in this tab. What it printed and
+what it saved go back to Claude, which looks at its own plots and can fix the
+script and run it again — up to a small cap — before writing the summary. The
+script is stored on the node, so a run can always be reproduced from the
+document alone.
+
+### Connecting a key
+
+AI nodes need your own Anthropic API key; the toolbar's AI control opens the
+one-screen setup for it. Two things about that screen are deliberate:
+
+- **Use a key from its own workspace, with a spending limit.** That is the
+  only thing that bounds what a mistake — or a leaked key — can cost, and it
+  takes a minute to set up in the Anthropic console.
+- **"Remember on this browser"** decides where the key lives. Left on, it is
+  saved in this browser's storage, so it survives a reload and every graph you
+  open here shares it. Turned off, it is held in memory for this tab only and
+  you retype it next time. Either way it is never written into a graph file:
+  a `.html` you send someone carries no key.
+
+Under "Model, cost and data" the same screen picks the model, how many rows of
+each file a request may carry, whether rendered plots are sent back for Claude
+to check, and Forget key.
+
+### The three modes
+
+- **Analyse** — write a new script for the prompt as it stands. This is the
+  first run, and the one to use when the question has changed.
+- **Refine** — edit the *stored* script for the changed prompt, keeping its
+  output filenames so the node's figures update in place rather than
+  accumulating. Cheaper and steadier than starting over.
+- **Re-run script** — run the stored script again with **no model call at
+  all**. Free, and the right button after changing the data behind an
+  attachment.
+
+An output can be promoted to a node of its own; a later run that produces the
+same filename swaps the image on that node, and one that stops producing it
+leaves the last figure in place, marked stale.
+
+### What leaves your machine
+
+Only what a request needs, and it is built in one place so it can be checked:
+
+- the prompt you wrote, and the title and description of connected nodes;
+- a **digest** of each attached file — its name, size, column names and
+  types, row count, and the first few rows (zero, five or twenty, your
+  choice);
+- while a run is working, the tail of what the script printed to stdout and
+  stderr, and the plots it rendered, if "send plots" is on.
+
+**The files themselves never leave.** Neither does the rest of the graph. The
+runtime that runs the script has no network access of its own.
+
+### The first run is a big download
+
+The Python runtime is not in the app — it would triple its size. The first run
+in a browser fetches it from a CDN: roughly 39 MB for the runtime plus pandas,
+numpy and matplotlib, about ten seconds on a decent connection, and anything
+else a script imports on top of that. It is cached afterwards, so later runs
+start in about a second — though browsers do evict the largest files, and a
+run can occasionally pay for one again.
+
+So: a run needs the network twice over — once for Claude, once for the
+runtime. **Re-run script** needs neither Claude nor, once the runtime is
+cached, anything else, which makes it the mode that still works on a plane.
 
 ## Writing math in node descriptions
 

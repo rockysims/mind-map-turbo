@@ -18,6 +18,7 @@
  */
 
 import { APP_CONFIG } from '$lib/appConfig';
+import { executorInputName } from './inputFileName';
 import { PROBE_SCRIPT, parseProbeOutput, type FileDigest } from './probeScript';
 import { pyWorkerSource, type PyRuntimeConfig } from './pyWorker';
 
@@ -392,7 +393,7 @@ export function createPyExecutor(
 	async function writeFiles(channel: PyWorkerChannel, files: ExecutorFile[]): Promise<string[]> {
 		const paths: string[] = [];
 		for (const file of files) {
-			const path = `${INPUT_DIR}/${inputName(file.name)}`;
+			const path = `${INPUT_DIR}/${executorInputName(file.name)}`;
 			// A copy, then a transfer: transferring the caller's own buffer would
 			// detach the asset bytes it still holds — and digest is routinely
 			// called with the same files a run is about to use.
@@ -445,19 +446,6 @@ export function createPyExecutor(
 			active?.channel.close(new PyExecutorError('aborted', 'The executor was disposed.'));
 		}
 	};
-}
-
-/**
- * The name a file takes inside `/inputs`.
- *
- * Attachment names come from the user's filesystem and travel through the
- * graph file, so a path separator in one must not decide where the runtime
- * writes. Only the basename survives.
- */
-function inputName(name: string): string {
-	const base = name.split(/[\\/]/).pop() ?? '';
-	const trimmed = base.trim();
-	return trimmed === '' || trimmed === '.' || trimmed === '..' ? 'input' : trimmed;
 }
 
 function toExecutionResult(payload: ResultPayload): ExecutionResult {
