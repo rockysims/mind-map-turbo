@@ -403,6 +403,37 @@ describe('refreshPromotedOutputs', () => {
 		);
 	}
 
+	it('judges staleness by the latest done run, not a cancelled one after it', () => {
+		const graph = twoRunGraph();
+		const aiNode = graph.nodes.find((node) => node.id === 'ai');
+		const ai = aiNode?.addons?.ai;
+		if (ai === undefined) throw new Error('fixture has no ai add-on');
+		const withCancelled: MultigraphData = {
+			...graph,
+			nodes: graph.nodes.map((node) =>
+				node.id === 'ai'
+					? {
+							...node,
+							addons: {
+								...node.addons,
+								ai: {
+									...ai,
+									runs: [...ai.runs, makeRun({ id: 'r3', status: 'cancelled', outputs: [] })]
+								}
+							}
+						}
+					: node
+			)
+		};
+
+		const { graph: refreshed, staleOutputNames } = refreshPromotedOutputs(withCancelled, 'ai');
+
+		expect(staleOutputNames).toEqual([]);
+		expect(contentOf(refreshed, 'promoted')).toEqual([
+			{ type: 'image', assetId: 'a2', alt: 'plot.png' }
+		]);
+	});
+
 	it('swaps the promoted node’s image for the one the latest run produced', () => {
 		const { graph, staleOutputNames } = refreshPromotedOutputs(twoRunGraph(), 'ai');
 

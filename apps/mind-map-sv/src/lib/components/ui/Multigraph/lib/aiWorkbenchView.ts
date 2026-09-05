@@ -8,6 +8,7 @@
  * markup.
  */
 
+import { latestDoneRun } from './aiNode';
 import type { AiAddon, AiRun, AiRunMode } from '../../types/node';
 
 /**
@@ -54,23 +55,9 @@ export interface AiRunState {
 }
 
 /** The state a workbench with nothing in flight is handed. */
-export const IDLE_RUN_STATE: AiRunState = { phase: 'idle', text: '', thinking: '', steps: [] };
+export { latestDoneRun };
 
-/**
- * The most recent run that finished with something to show. Runs are stored
- * oldest first, so this walks backwards.
- *
- * `done` alone: a cancelled, errored or interrupted run produced no summary the
- * node stands behind, and the workbench's outputs, script panel and metadata
- * line all describe the run whose results are on screen.
- */
-export function latestDoneRun(ai: AiAddon): AiRun | undefined {
-	for (let index = ai.runs.length - 1; index >= 0; index -= 1) {
-		const run = ai.runs[index];
-		if (run.status === 'done') return run;
-	}
-	return undefined;
-}
+export const IDLE_RUN_STATE: AiRunState = { phase: 'idle', text: '', thinking: '', steps: [] };
 
 /**
  * The mode the switch starts on.

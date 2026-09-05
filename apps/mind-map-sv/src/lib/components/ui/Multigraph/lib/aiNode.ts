@@ -185,6 +185,19 @@ export function markInterruptedRuns(data: MultigraphData): MultigraphData {
  * to the run that produced it, and it is that run falling out of history
  * (`recordAiRun`) that decides whether it can be collected.
  */
+/**
+ * The most recent run that finished with something to show. Runs are stored
+ * oldest first, so this walks backwards. `done` alone: a cancelled, errored or
+ * interrupted run produced nothing the node stands behind.
+ */
+export function latestDoneRun(ai: AiAddon): AiRun | undefined {
+	for (let index = ai.runs.length - 1; index >= 0; index -= 1) {
+		const run = ai.runs[index];
+		if (run.status === 'done') return run;
+	}
+	return undefined;
+}
+
 export function refreshPromotedOutputs(
 	data: MultigraphData,
 	nodeId: string
@@ -193,7 +206,9 @@ export function refreshPromotedOutputs(
 	if (ai === undefined) return { graph: data, staleOutputNames: [] };
 
 	const nodeIds = new Set(data.nodes.map((node) => node.id));
-	const latest = ai.runs.at(-1);
+	// The latest *done* run, not the latest run: a cancelled or errored attempt
+	// after a good one produced nothing, and must not mark every binding stale.
+	const latest = latestDoneRun(ai);
 
 	const promoted: Record<string, string> = {};
 	const staleOutputNames: string[] = [];
