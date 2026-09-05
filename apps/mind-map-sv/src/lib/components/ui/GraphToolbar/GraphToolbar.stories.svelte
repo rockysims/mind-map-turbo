@@ -31,10 +31,12 @@
 		args: {
 			notice?: string;
 			severity?: 'info' | 'warning';
+			aiConnected?: boolean;
 			onNewGraph?: () => void;
 			onOpenGraphFilePicker?: () => void;
 			onImportGraphFile?: (file: File) => void;
 			onSave?: () => void;
+			onOpenAiSettings?: () => void;
 		};
 	};
 
@@ -193,6 +195,51 @@
 			'Save to keep it.'
 		]);
 		await expect(getComputedStyle(lines[0]).display).toBe('block');
+	}}
+/>
+
+<Story
+	name="UserOpensAiSettingsFromTheToolbar"
+	args={{
+		notice: 'Matches saved file.',
+		aiConnected: false,
+		onNewGraph: fn(),
+		onOpenGraphFilePicker: fn(),
+		onSave: fn(),
+		onOpenAiSettings: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		const canvas = within(canvasElement);
+
+		// Whether a key is in hand is part of the name, not colour alone.
+		const control = canvas.getByRole('button', { name: 'AI settings, not connected' });
+		await expect(control).toHaveAttribute('data-ai-connected', 'false');
+		await expect(
+			canvas.queryByRole('button', { name: 'AI settings, connected' })
+		).not.toBeInTheDocument();
+
+		control.click();
+		expect(spyFor(args.onOpenAiSettings).mock.calls).toHaveLength(1);
+	}}
+/>
+
+<Story
+	name="UserSeesAiSettingsConnected"
+	args={{
+		notice: 'Matches saved file.',
+		aiConnected: true,
+		onNewGraph: fn(),
+		onOpenGraphFilePicker: fn(),
+		onSave: fn(),
+		onOpenAiSettings: fn()
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const canvas = within(canvasElement);
+
+		await expect(canvas.getByRole('button', { name: 'AI settings, connected' })).toHaveAttribute(
+			'data-ai-connected',
+			'true'
+		);
 	}}
 />
 
