@@ -4,6 +4,14 @@
 	import { SvelteURLSearchParams } from 'svelte/reactivity';
 	import { APP_CONFIG } from '$lib/appConfig';
 	import { BUILD_STAMP_META_NAME, formatBuildStamp, parseBuildStamp } from '$lib/buildInfo';
+	import {
+		defaultAiSettings,
+		forgetAiKey,
+		loadAiSettings,
+		saveAiSettings,
+		type AiKeyValidation,
+		type AiSettings
+	} from '$lib/ai/aiSettings';
 	import { IndexedDbGraphAssetStore } from '$lib/assets/assetStore';
 	import {
 		downloadFileArtifact,
@@ -18,6 +26,7 @@
 		usePersistedGraph,
 		type PersistedGraph
 	} from '$lib/components/ui/GraphPersistence/usePersistedGraph.svelte';
+	import AiSettingsSheet from '$lib/components/ui/AiSettingsSheet/AiSettingsSheet.svelte';
 	import GraphToolbar from '$lib/components/ui/GraphToolbar/GraphToolbar.svelte';
 	import Multigraph from '$lib/components/ui/Multigraph/Multigraph.svelte';
 	import RevertBanner from '$lib/components/ui/RevertBanner/RevertBanner.svelte';
@@ -44,7 +53,11 @@
 		isSelfContainedHtmlShell,
 		OFFLINE_APP_SHELL_PATH
 	} from '$lib/htmlShell';
-	import { createPersistence, estimateNamespaceUsageBytes } from '$lib/persistence';
+	import {
+		createPersistence,
+		estimateNamespaceUsageBytes,
+		type StorageLike
+	} from '$lib/persistence';
 	import { SaveScheduler } from '$lib/saveScheduler';
 	import { resolveGraphStorage, type StorageDurability } from '$lib/storageAvailability';
 
@@ -76,6 +89,16 @@
 	const redoBlockedReason = $derived(historyGuardReason ?? 'Nothing to redo.');
 
 	let storageDurability = $state<StorageDurability>('durable');
+	/**
+	 * The AI key and run preferences, on the same storage the graph resolved to
+	 * (a browser that blocks site data keeps them for the tab and asks again),
+	 * but under their own key outside the graph namespace. Held here rather than
+	 * per graph because one key serves every `!ai` node in every graph.
+	 */
+	let aiSettings = $state<AiSettings>(defaultAiSettings());
+	let aiSettingsStorage: StorageLike | null = null;
+	let aiSheetOpen = $state(false);
+	const aiConnected = $derived((aiSettings.apiKey ?? '') !== '');
 	let startupError = $state<string | null>(null);
 	let graphAssetStore = $state<IndexedDbGraphAssetStore | null>(null);
 	let selectedGraphId = $state(graphIdFromUrl(page.url));
@@ -99,6 +122,9 @@
 			// whatever storage this resolves to, in memory if it has to.
 			const { storage, durability } = resolveGraphStorage();
 			storageDurability = durability;
+
+			aiSettingsStorage = storage;
+			aiSettings = loadAiSettings(storage).settings;
 
 			const persistence = createPersistence('local', {
 				storage,
@@ -229,6 +255,28 @@
 
 	function createNewGraph(): void {
 		openNewGraphInNewTab();
+	}
+
+	function saveAiSettingsChange(next: AiSettings): void {
+		aiSettings = next;
+		if (aiSettingsStorage === null) return;
+		saveAiSettings(aiSettingsStorage, next);
+	}
+
+	function forgetAiSettingsKey(): void {
+		aiSettings = { ...aiSettings, apiKey: undefined };
+		if (aiSettingsStorage === null) return;
+		forgetAiKey(aiSettingsStorage);
+	}
+
+	/**
+	 * A placeholder until T03 lands the Messages client: the real validator sends
+	 * a one-output-token request, because the models endpoint refuses browsers.
+	 * Everything past "is there a key at all" is guesswork until then.
+	 */
+	async function validateAiKey(key: string): Promise<AiKeyValidation> {
+		if (key === '') return { ok: false, message: 'Not connected yet.' };
+		return { ok: true };
 	}
 
 	function openGraphFilePicker(): void {
@@ -492,7 +540,21 @@
 		onUndo={() => persisted?.undo()}
 		onRedo={() => persisted?.redo()}
 		onBlockedAction={(reason) => persisted?.reportBlockedAction(reason)}
+		{aiConnected}
+		onOpenAiSettings={() => (aiSheetOpen = true)}
 	/>
+
+	{#if aiSheetOpen}
+		<AiSettingsSheet
+			settings={aiSettings}
+			connected={aiConnected}
+			validateKey={validateAiKey}
+			onSave={saveAiSettingsChange}
+			onForget={forgetAiSettingsKey}
+			onClose={() => (aiSheetOpen = false)}
+			onConnected={() => (aiSheetOpen = false)}
+		/>
+	{/if}
 
 	{#if persisted !== null && persisted.snapshot !== null}
 		<RevertBanner
