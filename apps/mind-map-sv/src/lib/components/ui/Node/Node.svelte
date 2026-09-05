@@ -12,6 +12,7 @@
 	} from '$lib/components/ui/Multigraph/lib/tagColors';
 	import NodeChrome from './NodeChrome.svelte';
 	import NodeCompactContent from './NodeCompactContent.svelte';
+	import { addonBadges } from './lib/addonBadges';
 
 	let {
 		nodeData = {
@@ -41,11 +42,20 @@
 	} = $props();
 
 	const borderBackground = $derived(tagBorderBackground(borderSegments));
+	/**
+	 * Derived here rather than handed down as a prop: a badge is a fact about the
+	 * node's own data, so every place that draws a `<Node>` — the canvas, the
+	 * ghost nodes of an exit animation, the Stage harness — gets the same answer
+	 * without a wiring step it could forget.
+	 */
+	const badges = $derived(addonBadges(nodeData));
+	const taskDone = $derived(nodeData.addons?.task?.done === true);
 </script>
 
 <div
 	class="node"
 	data-node-id={nodeData.id}
+	data-task-done={taskDone ? 'true' : undefined}
 	data-pinned={nodeData.pinned ? 'true' : undefined}
 	data-tag-border={borderSegments.length > 0 ? 'true' : undefined}
 	data-spotlight={spotlightColor ? 'true' : undefined}
@@ -70,6 +80,8 @@
 			fontSizePx={NODE_TEXT_FONT_SIZE}
 			{quantityLabels}
 			{quantityOverflowCount}
+			{badges}
+			{taskDone}
 			{onTitleCommit}
 		/>
 	</NodeChrome>

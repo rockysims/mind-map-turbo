@@ -10,7 +10,8 @@ import type {
 	NodeData,
 	NodeFileContent,
 	NodeImageContent,
-	QuantityDesignation
+	QuantityDesignation,
+	TaskAddon
 } from '../../types/node';
 import { withNodeAddon, type NodeAddonName } from './nodeAddons';
 import { mathPlainText } from '../../MathText/lib/mathPlainText';
@@ -297,6 +298,38 @@ export function removeNodeAddon(
 			delete withoutAddons.addons;
 			return withoutAddons;
 		})
+	};
+}
+
+/**
+ * Mark a task add-on done or not done.
+ *
+ * `doneAt` is written from `now` on the way to done and dropped on the way
+ * back, so an undone task carries no stale stamp — the field means "when this
+ * was finished", and a task that is not finished has no answer. A node without
+ * the add-on, and a task already in the asked-for state, both come back as the
+ * same graph object: nothing changed, so nothing should re-render or land in
+ * the undo list.
+ */
+export function setTaskDone(
+	data: MultigraphData,
+	nodeId: string,
+	done: boolean,
+	now: number = Date.now()
+): MultigraphData {
+	const node = data.nodes.find((candidate) => candidate.id === nodeId);
+	const task = node?.addons?.task;
+	if (node === undefined || task === undefined) return data;
+	if (task.done === done) return data;
+
+	const nextTask: TaskAddon = done ? { done: true, doneAt: now } : { done: false };
+	return {
+		...data,
+		nodes: data.nodes.map((candidate) =>
+			candidate.id === nodeId
+				? { ...candidate, addons: { ...candidate.addons, task: nextTask } }
+				: candidate
+		)
 	};
 }
 

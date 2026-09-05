@@ -22,6 +22,7 @@ import {
 	setNodeDesignations,
 	setNodePinned,
 	setTagColor,
+	setTaskDone,
 	togglePinned,
 	updateEdge,
 	updateNodeContent,
@@ -30,7 +31,7 @@ import {
 } from './graph';
 import { makeGraph } from './testFixtures';
 import type { GraphAssetMetadata } from '../../types/multigraph';
-import type { NodeFileContent, NodeImageContent } from '../../types/node';
+import type { NodeFileContent, NodeImageContent, TaskAddon } from '../../types/node';
 
 describe('graph mutations', () => {
 	describe('addNode', () => {
@@ -752,6 +753,67 @@ describe('graph mutations', () => {
 			});
 
 			expect(removeNodeAddon(graph, 'missing', 'task')).toBe(graph);
+		});
+	});
+
+	describe('setTaskDone', () => {
+		const taskGraph = (task: TaskAddon) =>
+			makeGraph({
+				nodes: [{ id: 'n0', title: 'Change filters', description: '', addons: { task } }]
+			});
+
+		it('marks a task done with the injected stamp, without mutating the original', () => {
+			const graph = taskGraph({ done: false });
+
+			const next = setTaskDone(graph, 'n0', true, 1234);
+
+			expect(next).not.toBe(graph);
+			expect(next.nodes[0].addons?.task).toEqual({ done: true, doneAt: 1234 });
+			expect(graph.nodes[0].addons?.task).toEqual({ done: false });
+		});
+
+		it('stamps from the clock when no time is injected', () => {
+			const before = Date.now();
+
+			const next = setTaskDone(taskGraph({ done: false }), 'n0', true);
+
+			const doneAt = next.nodes[0].addons?.task?.doneAt;
+			expect(doneAt).toBeGreaterThanOrEqual(before);
+			expect(doneAt).toBeLessThanOrEqual(Date.now());
+		});
+
+		it('clears the stamp when a done task is marked not done', () => {
+			const next = setTaskDone(taskGraph({ done: true, doneAt: 999 }), 'n0', false);
+
+			expect(next.nodes[0].addons?.task).toEqual({ done: false });
+			expect(next.nodes[0].addons?.task).not.toHaveProperty('doneAt');
+		});
+
+		it('leaves the node’s other add-on data alone', () => {
+			const graph = taskGraph({ done: false });
+
+			const next = setTaskDone(graph, 'n0', true, 7);
+
+			expect(Object.keys(next.nodes[0].addons ?? {})).toEqual(['task']);
+			expect(next.nodes[0].title).toBe('Change filters');
+		});
+
+		it('returns the same graph object when the task is already in that state', () => {
+			const graph = taskGraph({ done: true, doneAt: 12 });
+
+			expect(setTaskDone(graph, 'n0', true, 99)).toBe(graph);
+		});
+
+		it('is a no-op on a node without the task add-on', () => {
+			const graph = makeGraph({ nodeCount: 1 });
+
+			expect(setTaskDone(graph, 'n0', true, 1)).toBe(graph);
+		});
+
+		it('is a no-op for missing node ids', () => {
+			const graph = taskGraph({ done: false });
+
+			expect(setTaskDone(graph, 'missing', true, 1)).toBe(graph);
 		});
 	});
 

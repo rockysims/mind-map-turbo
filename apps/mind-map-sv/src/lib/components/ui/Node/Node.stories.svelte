@@ -114,6 +114,56 @@
 		expect(radiusPercent).toBeGreaterThanOrEqual(0.5);
 	}
 
+	function badges(canvasElement: HTMLElement): HTMLElement[] {
+		return [...canvasElement.querySelectorAll('[data-addon-badge]')].filter(
+			(el): el is HTMLElement => el instanceof HTMLElement
+		);
+	}
+
+	/** Glyph and accessible label of every badge, in the order they are drawn. */
+	function badgeSummary(canvasElement: HTMLElement): Array<[string, string, string]> {
+		return badges(canvasElement).map((badge) => [
+			badge.getAttribute('data-addon-badge') ?? '',
+			badge.textContent?.trim() ?? '',
+			badge.getAttribute('aria-label') ?? ''
+		]);
+	}
+
+	/**
+	 * The badges sit in the circle's top band, above the inscribed square the
+	 * title fills, and the quantity chips sit in the band below it. Asserted
+	 * geometrically rather than by class, because "does not collide" is the
+	 * actual requirement.
+	 */
+	function expectBadgesAboveTheTitle(canvasElement: HTMLElement) {
+		const row = canvasElement.querySelector('[data-node-addon-badges]');
+		const square = canvasElement.querySelector('.node .square');
+		const circle = canvasElement.querySelector('.node .circle');
+		expect(row).toBeInTheDocument();
+		expect(square).toBeInTheDocument();
+		const rowRect = (row as HTMLElement).getBoundingClientRect();
+		const squareRect = (square as HTMLElement).getBoundingClientRect();
+		const circleRect = (circle as HTMLElement).getBoundingClientRect();
+		expect(rowRect.bottom).toBeLessThanOrEqual(squareRect.top + 1);
+		expect(rowRect.top).toBeGreaterThanOrEqual(circleRect.top - 1);
+
+		// Display only: the canvas hit test is geometric against the circle, and
+		// the milestone rules out a tap on the badge meaning anything of its own.
+		expect(window.getComputedStyle(row as HTMLElement).pointerEvents).toBe('none');
+	}
+
+	function titleColor(canvasElement: HTMLElement): string {
+		const titleEl = canvasElement.querySelector('.node .title');
+		return window.getComputedStyle(titleEl as HTMLElement).color;
+	}
+
+	/** Two files and one image: only the files are counted. */
+	const TWO_FILES_AND_AN_IMAGE: NodeData['content'] = [
+		{ type: 'file', assetId: 'a1', name: 'measurements.csv' },
+		{ type: 'image', assetId: 'a2', alt: 'rig.png' },
+		{ type: 'file', assetId: 'a3', name: 'notes.pdf' }
+	];
+
 	async function pinnedClosedPlayHandler(ctx: PlayArgs) {
 		await playHandler(ctx);
 
@@ -190,5 +240,86 @@
 	play={async ({ canvasElement }) => {
 		const node = canvasElement.querySelector('.node');
 		expect(node).toHaveAttribute('data-tag-border', 'true');
+	}}
+/>
+
+<Story
+	name="TaskNotDone"
+	args={{
+		nodeData: {
+			id: 'node id task open',
+			title: 'Change the filters',
+			description: 'Task node description',
+			tags: [],
+			addons: { task: { done: false } }
+		}
+	}}
+	play={async ({ canvasElement }) => {
+		expect(badgeSummary(canvasElement)).toEqual([['task', '☐', 'Task, not done']]);
+		expectBadgesAboveTheTitle(canvasElement);
+		// Not done reads exactly like any other node; only done is muted.
+		expect(canvasElement.querySelector('.node')).not.toHaveAttribute('data-task-done');
+	}}
+/>
+
+<Story
+	name="TaskDone"
+	args={{
+		nodeData: {
+			id: 'node id task done',
+			title: 'Change the filters',
+			description: 'Task node description',
+			tags: [],
+			addons: { task: { done: true, doneAt: 1_700_000_000_000 } }
+		}
+	}}
+	play={async ({ canvasElement }) => {
+		expect(badgeSummary(canvasElement)).toEqual([['task', '☑', 'Task, done']]);
+		expectBadgesAboveTheTitle(canvasElement);
+		expect(canvasElement.querySelector('.node')).toHaveAttribute('data-task-done', 'true');
+		expect(titleColor(canvasElement)).toBe('rgb(100, 116, 139)');
+	}}
+/>
+
+<Story
+	name="AttachmentCount"
+	args={{
+		nodeData: {
+			id: 'node id attachments',
+			title: 'Rig measurements',
+			description: 'Data node description',
+			tags: [],
+			content: TWO_FILES_AND_AN_IMAGE
+		}
+	}}
+	play={async ({ canvasElement }) => {
+		// The image on this node is not counted: it shows itself in the details
+		// view, where a file has nothing but this glyph to announce it.
+		expect(badgeSummary(canvasElement)).toEqual([['attachments', '📎2', '2 attachments']]);
+		expectBadgesAboveTheTitle(canvasElement);
+		expect(canvasElement.querySelector('.node')).not.toHaveAttribute('data-task-done');
+	}}
+/>
+
+<Story
+	name="DoneTaskWithAttachments"
+	args={{
+		nodeData: {
+			id: 'node id task and attachments',
+			title: 'Rig measurements',
+			description: 'Both at once',
+			tags: [],
+			addons: { task: { done: true, doneAt: 1_700_000_000_000 } },
+			content: TWO_FILES_AND_AN_IMAGE
+		}
+	}}
+	play={async ({ canvasElement }) => {
+		// Two glyphs, task first — the plan's clutter budget for this milestone.
+		expect(badgeSummary(canvasElement)).toEqual([
+			['task', '☑', 'Task, done'],
+			['attachments', '📎2', '2 attachments']
+		]);
+		expectBadgesAboveTheTitle(canvasElement);
+		expect(titleColor(canvasElement)).toBe('rgb(100, 116, 139)');
 	}}
 />

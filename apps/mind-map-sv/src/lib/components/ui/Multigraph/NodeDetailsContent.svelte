@@ -3,7 +3,13 @@
 	import type { GraphAssetStore } from '$lib/assets/assetStore';
 	import MathText from '../MathText/MathText.svelte';
 	import type { GraphAssetMetadata } from '../types/multigraph';
-	import type { NodeData, NodeImageContent, QuantityDesignation } from '../types/node';
+	import type {
+		NodeData,
+		NodeFileContent,
+		NodeImageContent,
+		QuantityDesignation
+	} from '../types/node';
+	import { formatByteSize } from './lib/byteSize';
 	import type { NodeDiagnosticsView } from './lib/nodeDiagnosticsView';
 	import type { NodeQuantities } from './lib/nodeQuantities';
 	import type { QuantityIndexEntry } from './lib/quantityIndex';
@@ -85,7 +91,8 @@
 		onCycleDesignation,
 		onCreateDefiningNode,
 		onConfirmDefiner,
-		onJumpToNode
+		onJumpToNode,
+		onToggleTaskDone
 	}: {
 		node: NodeData;
 		assets?: Record<string, GraphAssetMetadata>;
@@ -145,9 +152,25 @@
 		 * like a link.
 		 */
 		onJumpToNode?: (nodeId: string) => void;
+		/**
+		 * Mark this node's task done or not done. The details view is where the
+		 * milestone puts the toggle: the canvas badge only reports, so that every
+		 * tap over the graph stays available to drag and double-tap.
+		 */
+		onToggleTaskDone?: (done: boolean) => void;
 	} = $props();
 
-	let imageUrls = $state<Record<string, string>>({});
+	/**
+	 * One object URL per attachment, image or file, revoked together when the
+	 * details view closes or its node changes.
+	 *
+	 * Files get theirs up front rather than on the press of Open, which is what
+	 * lets Open be an `<a href>`: the blob lives in IndexedDB, so building the URL
+	 * on demand means an `await` between the tap and the navigation, and that gap
+	 * is exactly what mobile Safari's popup blocker and a `file://` page's
+	 * `window.open` both refuse.
+	 */
+	let assetUrls = $state<Record<string, string>>({});
 	/**
 	 * Every peek card on screen, as one tree. This is the whole cascade's state:
 	 * the cards themselves are presentational, because N cards each holding a
@@ -371,23 +394,28 @@
 	const imageBlocks = $derived(
 		(node.content ?? []).filter((block): block is NodeImageContent => block.type === 'image')
 	);
+	const fileBlocks = $derived(
+		(node.content ?? []).filter((block): block is NodeFileContent => block.type === 'file')
+	);
+	const taskAddon = $derived(node.addons?.task);
 
 	$effect(() => {
 		let cancelled = false;
 		const urlsToRevoke: string[] = [];
-		async function loadImages() {
+		const blocks = [...imageBlocks, ...fileBlocks];
+		async function loadAssets() {
 			if (!assetStore || !assetScope) return;
 			const loaded: Record<string, string> = {};
-			for (const image of imageBlocks) {
-				const asset = await assetStore.get(assetScope, image.assetId);
+			for (const block of blocks) {
+				const asset = await assetStore.get(assetScope, block.assetId);
 				if (!asset.ok) continue;
 				const url = URL.createObjectURL(asset.value.blob);
 				urlsToRevoke.push(url);
-				loaded[image.assetId] = url;
+				loaded[block.assetId] = url;
 			}
-			if (!cancelled) imageUrls = loaded;
+			if (!cancelled) assetUrls = loaded;
 		}
-		void loadImages();
+		void loadAssets();
 		return () => {
 			cancelled = true;
 			for (const url of urlsToRevoke) URL.revokeObjectURL(url);
@@ -423,6 +451,25 @@
 {/snippet}
 
 <div class="focus-content" data-focus-zoom-scale="1">
+	{#if taskAddon}
+		<!--
+			The whole row is the control, sized for a thumb. This is the surface the
+			milestone puts the toggle on: the canvas badge reports and nothing more,
+			so a tap over the graph never quietly changes the graph.
+		-->
+		<button
+			type="button"
+			class="task-toggle"
+			data-task-toggle
+			data-task-done={taskAddon.done ? 'true' : 'false'}
+			aria-pressed={taskAddon.done}
+			onclick={() => onToggleTaskDone?.(!taskAddon.done)}
+		>
+			<span class="task-box" aria-hidden="true">{taskAddon.done ? '☑' : '☐'}</span>
+			<span class="task-label">{taskAddon.done ? 'Done' : 'Not done'}</span>
+		</button>
+	{/if}
+
 	{#if node.description.trim()}
 		<p class="description"><MathText text={node.description} /></p>
 	{/if}
@@ -562,12 +609,12 @@
 			{#each imageBlocks as image (image.assetId)}
 				{@const asset = assets[image.assetId]}
 				<figure>
-					{#if imageUrls[image.assetId]}
+					{#if assetUrls[image.assetId]}
 						<div class="image-frame" role="presentation">
 							<img
 								class="focus-image"
 								data-asset-id={image.assetId}
-								src={imageUrls[image.assetId]}
+								src={assetUrls[image.assetId]}
 								alt={image.alt}
 							/>
 						</div>
@@ -582,6 +629,47 @@
 				</figure>
 			{/each}
 		</div>
+	{/if}
+
+	{#if fileBlocks.length > 0}
+		<ul class="file-list" aria-label="Node files">
+			{#each fileBlocks as file (file.assetId)}
+				{@const asset = assets[file.assetId]}
+				{@const url = assetUrls[file.assetId]}
+				<li data-file-asset-id={file.assetId}>
+					<div class="file-meta">
+						<strong data-file-name>{file.name}</strong>
+						<span data-file-type>{asset?.mimeType ?? 'Unknown type'}</span>
+						<span data-file-size>{formatByteSize(asset?.size ?? 0)}</span>
+					</div>
+					{#if url}
+						<!--
+							An anchor rather than `window.open`, unlike the HTML opener in
+							`browserGraphFile.ts`: the blob has to come out of IndexedDB, and
+							a `window.open` after that await is a popup mobile Safari blocks
+							and a top-level blob navigation a `file://` page is refused. A
+							link click is the navigation the reader themselves made, and the
+							URL is already in hand because the effect above built it. No
+							`download`, so the browser shows what it can show and saves the
+							rest, which is what "hands the blob to the browser" means.
+						-->
+						<!--
+							A `blob:` URL is not a route: there is nothing for SvelteKit's
+							`resolve()` to resolve, and it has to reach the browser verbatim.
+						-->
+						<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+						<a class="file-open" data-file-open href={url} target="_blank" rel="noopener">Open</a>
+					{:else}
+						<span class="file-unavailable" data-file-unavailable>Unavailable</span>
+					{/if}
+					<!-- After Open rather than before it, so the row's action keeps the
+					     same place whether or not the reader wrote a caption. -->
+					{#if file.caption}
+						<p class="file-caption" data-file-caption>{file.caption}</p>
+					{/if}
+				</li>
+			{/each}
+		</ul>
 	{/if}
 </div>
 
@@ -726,6 +814,99 @@
 		border-color: #94a3b8;
 		background: #e2e8f0;
 		color: #0f172a;
+	}
+
+	/*
+	 * Large on purpose: the milestone asks for an obvious control, and this is a
+	 * surface read on a phone. The whole row is the hit target rather than a
+	 * checkbox glyph a thumb has to find.
+	 */
+	.task-toggle {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		width: 100%;
+		padding: 0.75rem 1rem;
+		border: 1px solid #cbd5e1;
+		border-radius: 0.6rem;
+		background: #f8fafc;
+		color: #0f172a;
+		font: inherit;
+		font-size: 1.0625rem;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.task-toggle[data-task-done='true'] {
+		border-color: #94a3b8;
+		background: #e2e8f0;
+		color: #475569;
+	}
+
+	.task-box {
+		font-size: 1.75rem;
+		line-height: 1;
+	}
+
+	.file-list {
+		display: grid;
+		gap: 0.5rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.file-list li {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.5rem 0.75rem;
+		padding: 0.6rem 0.75rem;
+		border: 1px solid #cbd5e1;
+		border-radius: 0.5rem;
+		background: #f8fafc;
+		font-size: 0.95rem;
+	}
+
+	.file-meta {
+		display: flex;
+		align-items: baseline;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		flex: 1 1 12rem;
+		min-width: 0;
+	}
+
+	.file-meta span {
+		color: #64748b;
+		font-size: 0.875rem;
+	}
+
+	.file-caption {
+		flex: 1 1 100%;
+		margin: 0;
+		color: #475569;
+		font-size: 0.925rem;
+	}
+
+	.file-open {
+		margin-left: auto;
+		border: 1px solid #94a3b8;
+		border-radius: 0.35rem;
+		background: #e2e8f0;
+		color: #0f172a;
+		padding: 0.4rem 0.9rem;
+		font-size: 0.95rem;
+		text-decoration: none;
+	}
+
+	/* The file row's answer to the image grid's missing frame: the document still
+	   names the attachment, the blob store just has no copy of it here. */
+	.file-unavailable {
+		margin-left: auto;
+		color: #64748b;
+		font-size: 0.875rem;
+		font-style: italic;
 	}
 
 	.image-grid {

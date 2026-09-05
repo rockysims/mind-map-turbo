@@ -80,6 +80,7 @@
 		setNodeDesignations,
 		setNodePinned,
 		setTagColor,
+		setTaskDone,
 		togglePinned,
 		updateEdge,
 		updateNodeFileContent,
@@ -1987,6 +1988,18 @@
 		);
 	}
 
+	/**
+	 * The details view's task control, routed the way every other edit is. The
+	 * intent names the direction rather than the add-on, because that is what the
+	 * undo list has to read back: "mark task done", not "edit node".
+	 */
+	function toggleNodeTaskDone(nodeId: string, done: boolean) {
+		commitUserGraph(
+			setTaskDone(graph, nodeId, done),
+			editIntent(done ? 'mark task done' : 'mark task not done')
+		);
+	}
+
 	function saveEdgeContent(edgeId: string, patch: Parameters<typeof updateEdge>[2]) {
 		commitUserGraph(updateEdge(graph, edgeId, patch), editIntent('edit edge'));
 	}
@@ -2994,6 +3007,7 @@
 								createDefiningNode(consumerNodeId ?? detailsNode.id, quantityLabel, quantityKey)}
 							onConfirmDefiner={confirmDefinerOutput}
 							onJumpToNode={(nodeId) => jumpToNode(detailsNode.id, nodeId)}
+							onToggleTaskDone={(done) => toggleNodeTaskDone(detailsNode.id, done)}
 						/>
 					</NodeDetailsLayer>
 				</div>
