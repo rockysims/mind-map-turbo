@@ -496,6 +496,10 @@ function isAiRun(value: unknown): value is AiRun {
 		(value.finishedAt === undefined || isFiniteNumber(value.finishedAt)) &&
 		isAiRunStatus(value.status) &&
 		(value.mode === 'analyse' || value.mode === 'refine' || value.mode === 'rerun') &&
+		// Optional rather than required: every run recorded before the field
+		// existed is still a valid run, and a missing prompt only costs the
+		// workbench its "unchanged" answer (it offers Refine instead of Re-run).
+		(value.prompt === undefined || typeof value.prompt === 'string') &&
 		(value.model === undefined || typeof value.model === 'string') &&
 		typeof value.runtime === 'string' &&
 		Array.isArray(value.inputs) &&

@@ -82,6 +82,17 @@ export interface AiRun {
 	finishedAt?: number;
 	status: AiRunStatus;
 	mode: AiRunMode;
+	/**
+	 * The node's prompt as it stood when this run started.
+	 *
+	 * Recorded rather than derived, because the prompt is the thing a refine
+	 * refines: the workbench chooses between "edit the stored script for a
+	 * changed prompt" and "run the stored script again" by comparing the node's
+	 * current prompt against this one, and the node's own `prompt` has by then
+	 * moved on. Absent on a record written before this field existed, which
+	 * reads as "cannot claim the prompt is unchanged".
+	 */
+	prompt?: string;
 	/** Absent on a `rerun`, which makes no model call. */
 	model?: string;
 	runtime: string;
