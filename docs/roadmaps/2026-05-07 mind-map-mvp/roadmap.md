@@ -66,6 +66,8 @@ individual PR-sized tasks.
 | 10  | LaTeX math in node titles                          | complete    | [milestone](milestones/10-latex-math-in-node-titles.md), [plan](plans/2026-08-27%2010-latex-math-in-node-titles.md)                                   |
 | 11  | Unified hop model for derived edges                | complete    | [milestone](milestones/11-unified-hop-model-for-derived-edges.md), [plan](plans/2026-08-28%2011-unified-hop-model-for-derived-edges.md)               |
 | 12  | Undo and redo                                      | proposed    | [milestone](milestones/12-undo-and-redo.md), [plan](plans/2026-08-30%2012-undo-and-redo.md)                                                           |
+| 13  | Node add-ons and file attachments                  | proposed    | [milestone](milestones/13-node-addons-and-file-attachments.md), [plan](plans/2026-09-04%2013-node-addons-and-file-attachments.md)                     |
+| 14  | AI nodes                                           | proposed    | [milestone](milestones/14-ai-nodes.md), [plan](plans/2026-09-04%2014-ai-nodes.md)                                                                     |
 
 Milestones 04a-04m deepen the local-first graph experience before multiplayer.
 Milestone 04b intentionally supersedes 04a's Fibonacci reveal and dimming
@@ -131,6 +133,18 @@ changes.
 Numeric evaluation and units stay out of scope throughout; these milestones
 visualize structure, not results.
 
+Milestones 13 and 14 bring outside data and an analysis engine into the map.
+Milestone 13 adds a third title marker, `!`, that gives a node a capability
+from a closed registry (first `!task`, a done checkbox), and lets a node attach
+files of any type with the same offline and portable guarantees images have.
+Milestone 14 builds the `!ai` add-on on both: a node with a saved prompt that
+runs Claude against the files and text on its neighbours in a server-side
+sandbox, keeps the summary, the script that produced the outputs and the
+outputs themselves, and can promote an output to its own node that refreshes
+on re-run. Its first job is turning bench measurements into readable plots.
+The API is called from the browser with the user's own key, so nothing has to
+be deployed to try it; a proxy comes with the login server.
+
 ## How this directory is organized
 
 ```
@@ -156,8 +170,9 @@ we change approach mid-stream — old plans stay as historical record.
   opens the door to general markdown.
 - Versioning / undo-redo UI (the immutable-update pattern enables it; a
   UI for it can come later).
-- AI-generated nodes / auto-suggest edges (interesting future direction;
-  no MVP commitment).
+- AI-generated graph structure (scraping a site into nodes, suggesting
+  edges, growing a map from notes). Milestone 14 deliberately limits AI to
+  analysis inside one node; letting it write the map is a later conversation.
 
 ## Pre-roadmap foundations (already done before milestone 01)
 
