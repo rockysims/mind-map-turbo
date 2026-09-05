@@ -1,4 +1,5 @@
 import { beaconNodeIds } from './components/ui/Multigraph/lib/beacons';
+import type { GraphDelta } from './graphDelta';
 import type { EdgeData } from './components/ui/types/edge';
 import type {
 	GraphAssetMetadata,
@@ -27,6 +28,38 @@ export type PersistedGraphPayload = {
 	schemaVersion: typeof CURRENT_SCHEMA_VERSION;
 	data: MultigraphData;
 	viewState?: ViewState;
+	history?: PersistedHistoryTail;
+};
+
+/** The canvas fields one recorded state carries beside its graph. */
+export type PersistedHistoryState = {
+	label: string;
+	primaryNodeId: string;
+	severedBeaconPreference: string[];
+	/** Epoch ms, so a reloaded revert offer can still say how long ago it was. */
+	createdAt: number;
+	/** The reader turned down the revert offer for this state. */
+	offerDismissed?: boolean;
+};
+
+/**
+ * The recent undo tail, as deltas chained backwards from the draft's own `data`.
+ *
+ * Draft-only, and deliberately so. An entry holds the content an edit removed,
+ * so a tail inside an exported document would send deleted material along with
+ * the document — which is why `wrapPersistedGraph` is reached only by the draft
+ * writer and never by `graphFile.ts`. The consequence is stated rather than
+ * hidden: undo does not survive carrying a file to another machine.
+ *
+ * The undo side only. The chain walks backwards from the graph the draft holds,
+ * and no chain of backwards deltas can reach a state in front of it — which is
+ * also what every mainstream editor does with redo across a reload.
+ */
+export type PersistedHistoryTail = {
+	/** The state the draft's `data` is in. */
+	head: PersistedHistoryState;
+	/** States behind it, newest first, each with the delta from the state ahead. */
+	entries: Array<PersistedHistoryState & { delta: GraphDelta }>;
 };
 
 export class PersistedGraphError extends Error {
@@ -39,10 +72,58 @@ export class PersistedGraphError extends Error {
 	}
 }
 
-export function wrapPersistedGraph(data: MultigraphData): PersistedGraphPayload {
+export function wrapPersistedGraph(
+	data: MultigraphData,
+	history?: PersistedHistoryTail
+): PersistedGraphPayload {
 	return {
 		schemaVersion: CURRENT_SCHEMA_VERSION,
-		data
+		data,
+		...(history === undefined ? {} : { history })
+	};
+}
+
+/**
+ * Read a draft's undo tail back, or `null` when there is nothing usable.
+ *
+ * A tail from another schema version is dropped rather than migrated, exactly as
+ * a snapshot from another version reads as absent: restoring a half-understood
+ * graph is not worth the risk, and the graph beside it loads regardless. So does
+ * a tail that is malformed — including one written by another tab against a
+ * graph this draft no longer holds, which is a race the draft already has and
+ * which this format cannot make better or worse.
+ */
+export function unwrapPersistedHistory(payload: unknown): PersistedHistoryTail | null {
+	if (!isRecord(payload)) return null;
+	if (payload.schemaVersion !== CURRENT_SCHEMA_VERSION) return null;
+	const history = payload.history;
+	if (!isRecord(history)) return null;
+	const head = readHistoryState(history.head);
+	if (head === null || !Array.isArray(history.entries)) return null;
+
+	const entries: PersistedHistoryTail['entries'] = [];
+	for (const candidate of history.entries) {
+		const state = readHistoryState(candidate);
+		if (state === null || !isRecord(candidate) || !isRecord(candidate.delta)) return null;
+		entries.push({ ...state, delta: candidate.delta as unknown as GraphDelta });
+	}
+
+	return { head, entries };
+}
+
+function readHistoryState(value: unknown): PersistedHistoryState | null {
+	if (!isRecord(value)) return null;
+	if (typeof value.label !== 'string') return null;
+	if (typeof value.primaryNodeId !== 'string') return null;
+	if (!Array.isArray(value.severedBeaconPreference)) return null;
+	if (value.severedBeaconPreference.some((id) => typeof id !== 'string')) return null;
+	if (typeof value.createdAt !== 'number' || !Number.isFinite(value.createdAt)) return null;
+	return {
+		label: value.label,
+		primaryNodeId: value.primaryNodeId,
+		severedBeaconPreference: [...(value.severedBeaconPreference as string[])],
+		createdAt: value.createdAt,
+		...(value.offerDismissed === true ? { offerDismissed: true } : {})
 	};
 }
 

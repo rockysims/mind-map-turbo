@@ -25,6 +25,7 @@
 	} from './lib/testFixtures';
 	import type { MultigraphData, Point } from '../types/multigraph';
 	import type { QuantityDesignation } from '../types/node';
+	import type { GraphCommitIntent } from '../types/history';
 	import type { ViewState } from '$lib/migrations';
 	import type { ExitingBuffer } from './lib/elementTransitions';
 	import type { GraphAssetStore, StoredGraphAsset } from '$lib/assets/assetStore';
@@ -58,7 +59,11 @@
 			multigraphData: MultigraphData;
 			defaultPrimaryNodeId?: string;
 			graphGeneration?: number;
-			onMultigraphChange?: (data: MultigraphData, generation: number) => void;
+			onMultigraphChange?: (
+				data: MultigraphData,
+				generation: number,
+				intent: GraphCommitIntent
+			) => void;
 			onViewStateChange?: (state: ViewState) => void;
 		};
 	};

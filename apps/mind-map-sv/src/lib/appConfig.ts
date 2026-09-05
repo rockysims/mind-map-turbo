@@ -13,6 +13,24 @@ export const APP_CONFIG = {
 		quotaBudgetBytes: 5 * 1024 * 1024, // localStorage budget before quota warnings
 		quotaWarningRatio: 0.8 // usage ratio that triggers a quota warning
 	},
+	history: {
+		// Σ (nodes.length + edges.length) over undo entries before the oldest are
+		// evicted. A ceiling rather than a depth cap: entries are structurally
+		// shared, so what a session actually retains is pointers, and two sessions
+		// at the same depth over graphs of different sizes are nothing alike. At
+		// ~8 bytes a pointer this is ~16 MB in the worst case — 10,000 edits on a
+		// 200-node graph, 2,000 on a 1,000-node one, both past any real session.
+		retainedPointerCeiling: 2_000_000,
+		// Undo entries serialized into the localStorage draft. On phones, where the
+		// OS evicts background tabs freely, this tail *is* the effective history
+		// depth — so it is the first number to revisit once a real session says
+		// what an entry weighs.
+		persistedEntryCount: 10,
+		// Pre-flight ceiling on the tail's own serialized size (UTF-16 code units).
+		// Over it, the oldest entries are dropped and the write still succeeds:
+		// losing history is a smaller harm than losing the draft.
+		persistedBudgetBytes: 256 * 1024
+	},
 	math: {
 		renderCacheMaxEntries: 500, // rendered expressions kept before eviction
 		maxSizeEm: 10, // cap on em-relative sizes so a rule cannot fill the screen

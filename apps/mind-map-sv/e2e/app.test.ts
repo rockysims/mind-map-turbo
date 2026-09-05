@@ -477,7 +477,7 @@ test('load opens an HTML save file in a new tab', async ({ page }) => {
 
 	await page.goto('/');
 	const popupPromise = page.waitForEvent('popup');
-	await page.getByText('Open').click();
+	await page.getByRole('button', { name: 'Open' }).click();
 	const popup = await popupPromise;
 	await popup.waitForLoadState('domcontentloaded');
 	await expect(popup.getByRole('button', { name: 'Choose graph file' })).toBeVisible();
@@ -522,7 +522,7 @@ test('load opens selected HTML file instead of stale local document draft', asyn
 	);
 
 	const popupPromise = page.waitForEvent('popup');
-	await page.getByText('Open').click();
+	await page.getByRole('button', { name: 'Open' }).click();
 	const popup = await popupPromise;
 	await popup.waitForLoadState('domcontentloaded');
 	const fileChooserPromise = popup.waitForEvent('filechooser');
@@ -567,7 +567,7 @@ test('load can recover cached edits instead of opening selected HTML file', asyn
 	);
 
 	const popupPromise = page.waitForEvent('popup');
-	await page.getByText('Open').click();
+	await page.getByRole('button', { name: 'Open' }).click();
 	const popup = await popupPromise;
 	await popup.waitForLoadState('domcontentloaded');
 	const fileChooserPromise = popup.waitForEvent('filechooser');
@@ -951,6 +951,244 @@ test('deep zoom exit keeps scrubbing when the cursor leaves the shrinking frame'
 	await expect(graph).not.toHaveClass(/focus-active/);
 	await expect(page.getByRole('dialog')).not.toBeVisible();
 });
+
+test('undo brings back a deleted node, and the history survives a reload', async ({ page }) => {
+	const graphId = `e2e-undo-${Date.now()}`;
+
+	await page.goto('/');
+	await page.evaluate(() => localStorage.clear());
+	await seedTwoNodeGraph(page, graphId);
+	await page.goto(graphUrl(graphId));
+	await expect(page.getByText('Second')).toBeVisible();
+
+	await deleteNodeByTitle(page, 'Second');
+	await expect(page.getByText('Second')).toBeHidden();
+
+	// Reload first: the undo has to come out of the draft's persisted tail, not
+	// out of memory, which is the whole reason the tail exists.
+	await page.reload();
+	await expect(page.getByText('Root')).toBeVisible();
+	await expect(undoControl(page)).toHaveAccessibleName('Undo delete node');
+
+	await undoControl(page).click();
+	await expect(page.getByText('Second')).toBeVisible();
+
+	// And what came back is what a second reload finds cached.
+	await waitForStoredTitle(page, graphId, 'Second');
+	await page.reload();
+	await expect(page.getByText('Second')).toBeVisible();
+});
+
+test('undo puts back a removed image, and the blob is still there after a reload', async ({
+	page
+}) => {
+	const graphId = `e2e-undo-image-${Date.now()}`;
+	const assetId = `asset-${Date.now()}`;
+	const svg =
+		'<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="#38bdf8"/></svg>';
+
+	await page.goto('/');
+	await page.evaluate(() => localStorage.clear());
+	await seedImageGraph(page, { graphId, assetId, svg, title: 'Image Node' });
+	await page.goto(graphUrl(graphId));
+	await expect(page.locator('.node-wrapper .circle').first()).toBeVisible();
+
+	await openEditSheetForFirstNode(page);
+	await page.getByRole('dialog').getByRole('button', { name: 'Remove' }).click();
+	await page.getByRole('dialog').getByRole('button', { name: 'Done' }).click();
+
+	await undoControl(page).click();
+	await page.reload();
+
+	// The blob outlives the removal because the removal only tombstoned it, and
+	// the load's sweep runs after the tail has been rebuilt — so the entry that
+	// still names the asset keeps it alive.
+	await expect.poll(() => readStoredAssetIds(page, graphId)).toEqual([assetId]);
+});
+
+test('an opened save file starts with no history, and a tap on Undo says why', async ({ page }) => {
+	const graphId = `e2e-undo-file-${Date.now()}`;
+
+	await page.goto('/');
+	await page.evaluate(() => localStorage.clear());
+	await seedTwoNodeGraph(page, graphId);
+	await page.goto(graphUrl(graphId));
+	await deleteNodeByTitle(page, 'Second');
+	await expect(undoControl(page)).toHaveAttribute('aria-disabled', 'false');
+
+	const { html } = await downloadHtml(page);
+	const filePath = join(tmpdir(), `undo-history-${Date.now()}.html`);
+	await writeFile(filePath, html, 'utf8');
+
+	// A file carries a description of a graph, never the history behind it — an
+	// entry holds the content an edit removed, and that must not travel.
+	expect(html).not.toContain('"history"');
+
+	const opened = await page.context().newPage();
+	await opened.goto(pathToFileURL(filePath).href);
+	await expect(opened.getByText('Root')).toBeVisible();
+
+	const undo = undoControl(opened);
+	await expect(undo).toHaveAttribute('aria-disabled', 'true');
+	// `force`, because Playwright's actionability check reads `aria-disabled` as
+	// disabled — which is exactly the distinction the control is making: it is
+	// `aria-disabled` rather than `disabled` so the tap still lands and can answer.
+	await undo.click({ force: true });
+	await expect(opened.getByRole('status')).toContainText(
+		'Nothing to undo. Opened files start fresh.'
+	);
+});
+
+test('undo stands down while a node drag is in flight', async ({ page }) => {
+	const graphId = `e2e-undo-drag-${Date.now()}`;
+
+	await page.goto('/');
+	await page.evaluate(() => localStorage.clear());
+	await seedTwoNodeGraph(page, graphId);
+	await page.goto(graphUrl(graphId));
+	await deleteNodeByTitle(page, 'Second');
+	await expect(undoControl(page)).toHaveAttribute('aria-disabled', 'false');
+
+	const circle = page.locator('.node-wrapper .circle').first();
+	const box = await circle.boundingBox();
+	if (!box) throw new Error('Node .circle element not found');
+	await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+	await page.mouse.down();
+	await page.mouse.move(box.x + box.width / 2 + 80, box.y + box.height / 2 + 40, { steps: 4 });
+
+	// A restore mid-drag would be overwritten by the finger's next position.
+	await expect(undoControl(page)).toHaveAttribute('aria-disabled', 'true');
+
+	await page.mouse.up();
+	await expect(undoControl(page)).toHaveAttribute('aria-disabled', 'false');
+});
+
+test('a colour scrub lands as one undo', async ({ page }) => {
+	const graphId = `e2e-undo-color-${Date.now()}`;
+
+	await page.goto('/');
+	await page.evaluate(() => localStorage.clear());
+	await seedTwoNodeGraph(page, graphId, { tags: ['topic'] });
+	await page.goto(graphUrl(graphId));
+	await page.getByRole('button', { name: 'Tag colors' }).click();
+
+	const swatch = page.getByLabel('Color for node tag topic');
+	for (const color of ['#112233', '#445566', '#778899']) {
+		await swatch.evaluate((input, value) => {
+			(input as HTMLInputElement).value = value;
+			input.dispatchEvent(new Event('input', { bubbles: true }));
+		}, color);
+	}
+	await swatch.evaluate((input) => input.dispatchEvent(new Event('change', { bubbles: true })));
+	await page
+		.getByRole('dialog', { name: 'Tag colors' })
+		.getByRole('button', { name: 'Close' })
+		.click();
+
+	await expect.poll(() => readStoredTagColor(page, graphId, 'topic')).toBe('#778899');
+	await expect(undoControl(page)).toHaveAccessibleName('Undo tag color');
+
+	// Dozens of `input` events, one entry: the whole scrub goes back at once and
+	// there is nothing behind it.
+	await undoControl(page).click();
+	await expect.poll(() => readStoredTagColor(page, graphId, 'topic')).toBeUndefined();
+	await expect(undoControl(page)).toHaveAttribute('aria-disabled', 'true');
+});
+
+function undoControl(page: Page) {
+	return page.getByRole('button', { name: /^Undo/ });
+}
+
+/** Seed a two-node graph so there is something to delete and something left over. */
+async function seedTwoNodeGraph(
+	page: Page,
+	graphId: string,
+	{ tags = [] as string[] } = {}
+): Promise<void> {
+	await page.evaluate(
+		({ graphId, schemaVersion, tags }) => {
+			localStorage.setItem(
+				`mind-map:graph:${encodeURIComponent(graphId)}`,
+				JSON.stringify({
+					schemaVersion,
+					data: {
+						nodes: [
+							{ id: 'n0', title: 'Root', description: '', tags, pinned: true },
+							{ id: 'n1', title: 'Second', description: '', tags: [] }
+						],
+						edges: [{ id: 'e0', sourceNodeId: 'n0', targetNodeId: 'n1', tags: [] }],
+						posByNodeId: { n0: { x: -220, y: 0 }, n1: { x: 220, y: 0 } },
+						tagColorConfig: { nodeTags: {}, edgeTags: {} }
+					},
+					viewState: { panX: 0, panY: 0, scale: 1 },
+					updatedAt: Date.now()
+				})
+			);
+		},
+		{ graphId, schemaVersion: CURRENT_SCHEMA_VERSION, tags }
+	);
+}
+
+async function deleteNodeByTitle(page: Page, title: string): Promise<void> {
+	const node = page.locator('.node-wrapper', { hasText: title }).first();
+	const box = await node.locator('.circle').boundingBox();
+	if (!box) throw new Error(`Node .circle element not found for ${title}`);
+	await page.mouse.click(Math.round(box.x + box.width / 2), Math.round(box.y + box.height / 2), {
+		button: 'right'
+	});
+	await page.getByRole('menuitem', { name: 'Delete' }).click();
+}
+
+async function openEditSheetForFirstNode(page: Page): Promise<void> {
+	const circle = page.locator('.node-wrapper .circle').first();
+	const box = await circle.boundingBox();
+	if (!box) throw new Error('Node .circle element not found');
+	await page.mouse.click(Math.round(box.x + box.width / 2), Math.round(box.y + box.height / 2), {
+		button: 'right'
+	});
+	await page.getByRole('menuitem', { name: 'Edit' }).click();
+	await expect(page.getByLabel('Title')).toBeVisible();
+}
+
+async function readStoredAssetIds(page: Page, scope: string): Promise<string[]> {
+	return await page.evaluate(async (scope) => {
+		const db = await new Promise<IDBDatabase>((resolve, reject) => {
+			const request = indexedDB.open('mind-map-assets', 1);
+			request.onsuccess = () => resolve(request.result);
+			request.onerror = () => reject(request.error);
+		});
+		const ids = await new Promise<string[]>((resolve, reject) => {
+			const request = db
+				.transaction('assets', 'readonly')
+				.objectStore('assets')
+				.index('scope')
+				.getAll(scope);
+			request.onsuccess = () =>
+				resolve((request.result as Array<{ assetId: string }>).map((record) => record.assetId));
+			request.onerror = () => reject(request.error);
+		});
+		db.close();
+		return ids.sort();
+	}, scope);
+}
+
+async function readStoredTagColor(
+	page: Page,
+	graphId: string,
+	tag: string
+): Promise<string | undefined> {
+	return await page.evaluate(
+		({ graphId, tag }) => {
+			const item = localStorage.getItem(`mind-map:graph:${encodeURIComponent(graphId)}`);
+			if (!item) return undefined;
+			const payload = JSON.parse(item) as {
+				data?: { tagColorConfig?: { nodeTags?: Record<string, string> } };
+			};
+			return payload.data?.tagColorConfig?.nodeTags?.[tag];
+		},
+		{ graphId, tag }
+	);
+}
 
 async function editFirstNodeTitle(page: Page, title: string) {
 	// .stage-content has pointer-events:none; all clicks pass to the stage handler.

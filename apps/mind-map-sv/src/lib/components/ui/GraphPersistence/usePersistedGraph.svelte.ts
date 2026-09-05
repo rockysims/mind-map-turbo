@@ -1,3 +1,4 @@
+import type { GraphCommitIntent } from '$lib/components/ui/types/history';
 import type { MultigraphData } from '$lib/components/ui/types/multigraph';
 import type { DocumentStatus } from '$lib/documentStatus';
 import type { ViewState } from '$lib/migrations';
@@ -20,6 +21,16 @@ export type PersistedGraph = {
 	readonly documentStatus: DocumentStatus;
 	/** The revert offer standing over this graph, refreshed on load and by every revert path. */
 	readonly snapshot: SnapshotSummary | null;
+	/** Canvas state the newest in-place change asks to restore; null for an arrival. */
+	readonly restoredCanvasState: {
+		primaryNodeId: string;
+		severedBeaconPreference: string[];
+	} | null;
+	readonly canUndo: boolean;
+	readonly canRedo: boolean;
+	/** What undo/redo would name, or null when there is nothing to do. */
+	readonly undoLabel: string | null;
+	readonly redoLabel: string | null;
 	readonly draftCached: boolean;
 	readonly notice: string;
 	readonly noticeSeverity: 'info' | 'warning';
@@ -27,7 +38,7 @@ export type PersistedGraph = {
 	loadEmbeddedDocument: GraphPersistenceController['loadEmbeddedDocument'];
 	notifyGraphChanged: (
 		data: MultigraphData,
-		options?: { syncView?: boolean; generation?: number }
+		options?: { syncView?: boolean; generation?: number; intent?: GraphCommitIntent }
 	) => void;
 	notifyViewStateChanged: (viewState: ViewState, options?: { syncView?: boolean }) => void;
 	exportGraphDocument: GraphPersistenceController['exportGraphDocument'];
@@ -35,6 +46,9 @@ export type PersistedGraph = {
 	importGraphDocumentFromReader: GraphPersistenceController['importGraphDocumentFromReader'];
 	importGraphIntoCurrent: GraphPersistenceController['importGraphIntoCurrent'];
 	importGraphIntoCurrentFromReader: GraphPersistenceController['importGraphIntoCurrentFromReader'];
+	undo: GraphPersistenceController['undo'];
+	redo: GraphPersistenceController['redo'];
+	reportBlockedAction: GraphPersistenceController['reportBlockedAction'];
 	revertToSnapshot: GraphPersistenceController['revertToSnapshot'];
 	dismissSnapshot: GraphPersistenceController['dismissSnapshot'];
 	selectGraph: GraphPersistenceController['selectGraph'];
@@ -78,6 +92,21 @@ export function usePersistedGraph(deps: GraphPersistenceControllerDeps): Persist
 		get snapshot() {
 			return view.snapshot;
 		},
+		get restoredCanvasState() {
+			return view.restoredCanvasState;
+		},
+		get canUndo() {
+			return view.canUndo;
+		},
+		get canRedo() {
+			return view.canRedo;
+		},
+		get undoLabel() {
+			return view.undoLabel;
+		},
+		get redoLabel() {
+			return view.redoLabel;
+		},
 		get draftCached() {
 			return view.draftCached;
 		},
@@ -96,6 +125,9 @@ export function usePersistedGraph(deps: GraphPersistenceControllerDeps): Persist
 		importGraphDocumentFromReader: controller.importGraphDocumentFromReader.bind(controller),
 		importGraphIntoCurrent: controller.importGraphIntoCurrent.bind(controller),
 		importGraphIntoCurrentFromReader: controller.importGraphIntoCurrentFromReader.bind(controller),
+		undo: controller.undo.bind(controller),
+		redo: controller.redo.bind(controller),
+		reportBlockedAction: controller.reportBlockedAction.bind(controller),
 		revertToSnapshot: controller.revertToSnapshot.bind(controller),
 		dismissSnapshot: controller.dismissSnapshot.bind(controller),
 		selectGraph: controller.selectGraph.bind(controller),

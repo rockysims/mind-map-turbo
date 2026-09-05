@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { LegendTag } from './lib/tagColors';
+	import type { LegendTag, TagColorChangePhase } from './lib/tagColors';
 
 	let {
 		tags = [],
@@ -8,7 +8,18 @@
 		onClose
 	}: {
 		tags: LegendTag[];
-		onColorChange?: (namespace: LegendTag['namespace'], tag: string, color: string) => void;
+		/**
+		 * Fires per scrub frame with `'scrub'`, then once with `'commit'` when the
+		 * picker closes. Both carry a colour worth previewing; only the second says
+		 * the gesture is over, which is what lets the history record one entry for
+		 * a scrub instead of dozens — or one for every scrub ever made of this tag.
+		 */
+		onColorChange?: (
+			namespace: LegendTag['namespace'],
+			tag: string,
+			color: string,
+			phase: TagColorChangePhase
+		) => void;
 		onDelete?: (namespace: LegendTag['namespace'], tag: string) => void;
 		onClose?: () => void;
 	} = $props();
@@ -79,7 +90,15 @@
 											onColorChange?.(
 												legendTag.namespace,
 												legendTag.tag,
-												event.currentTarget.value
+												event.currentTarget.value,
+												'scrub'
+											)}
+										onchange={(event) =>
+											onColorChange?.(
+												legendTag.namespace,
+												legendTag.tag,
+												event.currentTarget.value,
+												'commit'
 											)}
 									/>
 								</label>

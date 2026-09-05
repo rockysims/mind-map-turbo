@@ -37,22 +37,22 @@ describe('formatSnapshotAge', () => {
 
 describe('snapshotOfferHeadline', () => {
 	it('names how many nodes an import added', () => {
-		expect(snapshotOfferHeadline('import', 3, 17)).toBe('Imported 14 nodes');
+		expect(snapshotOfferHeadline('import', 14)).toBe('Imported 14 nodes');
 	});
 
 	it('is singular for a one-node import', () => {
-		expect(snapshotOfferHeadline('import', 3, 4)).toBe('Imported 1 node');
+		expect(snapshotOfferHeadline('import', 1)).toBe('Imported 1 node');
 	});
 
-	it('stays vague when the graph shrank since the snapshot', () => {
-		expect(snapshotOfferHeadline('import', 8, 5)).toBe('Graph changed');
+	it('stays vague when the graph shrank across the operation', () => {
+		expect(snapshotOfferHeadline('import', -3)).toBe('Graph changed');
 	});
 
 	it('stays vague when nothing was added', () => {
-		expect(snapshotOfferHeadline('import', 5, 5)).toBe('Graph changed');
+		expect(snapshotOfferHeadline('import', 0)).toBe('Graph changed');
 	});
 
 	it('stays vague for an operation it has no words for', () => {
-		expect(snapshotOfferHeadline('merge', 3, 17)).toBe('Graph changed');
+		expect(snapshotOfferHeadline('merge', 14)).toBe('Graph changed');
 	});
 });

@@ -1,6 +1,6 @@
 import type { MultigraphData } from './components/ui/types/multigraph';
 import { graphFingerprint } from './documentStatus';
-import type { ViewState } from './migrations';
+import type { PersistedHistoryTail, ViewState } from './migrations';
 import type { Persistence } from './persistence';
 
 export type SaveStatus =
@@ -25,7 +25,17 @@ type PendingSave = {
 		data: MultigraphData;
 		viewState: ViewState;
 	};
+	readHistory?: ReadHistoryTail;
 };
+
+/**
+ * Reads the undo tail to write beside the graph.
+ *
+ * A thunk, not a value: the tail is O(K·N) to build, and `schedule` is called on
+ * every commit — including every `pointermove` of a drag. Deferring it to the
+ * debounced write means it is built once per write rather than once per frame.
+ */
+export type ReadHistoryTail = () => PersistedHistoryTail | undefined;
 
 /**
  * Debounced writer for the storage layer shared with the server backend, so its
@@ -51,8 +61,13 @@ export class SaveScheduler {
 		}
 	) {}
 
-	schedule(id: string, data: MultigraphData, viewState: ViewState): void {
-		this.pending = { id, graph: { data, viewState } };
+	schedule(
+		id: string,
+		data: MultigraphData,
+		viewState: ViewState,
+		readHistory?: ReadHistoryTail
+	): void {
+		this.pending = { id, graph: { data, viewState }, readHistory };
 		this.clearPendingTimer();
 		this.timer = this.setTimer(() => {
 			this.timer = null;
@@ -80,7 +95,10 @@ export class SaveScheduler {
 		this.report({ state: 'saving' });
 
 		try {
-			await this.options.persistence.save(save.id, save.graph);
+			await this.options.persistence.save(save.id, {
+				...save.graph,
+				history: save.readHistory?.()
+			});
 			if (this.pending === save) this.pending = null;
 			const savedAt = this.now();
 			const fingerprint = graphFingerprint(save.graph.data);
@@ -106,7 +124,12 @@ export class SaveScheduler {
 		} finally {
 			this.saving = false;
 			if (this.pending !== null && this.pending !== save) {
-				this.schedule(this.pending.id, this.pending.graph.data, this.pending.graph.viewState);
+				this.schedule(
+					this.pending.id,
+					this.pending.graph.data,
+					this.pending.graph.viewState,
+					this.pending.readHistory
+				);
 			}
 		}
 	}
