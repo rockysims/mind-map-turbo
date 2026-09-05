@@ -86,6 +86,23 @@ describe('serializeGraphFile', () => {
 		expect(parseGraphFileText(serializeGraphHtmlFile(doc)).data).toEqual(doc.data);
 	});
 
+	it('round-trips node add-ons through JSON and HTML', () => {
+		const base = makeGraph({ nodeCount: 2, edges: [[0, 1]], pinned: [0] });
+		const doc = makeDoc({
+			data: {
+				...base,
+				nodes: base.nodes.map((node, index) =>
+					index === 0
+						? { ...node, addons: { task: { done: true, doneAt: 1_700_000_000_000 } } }
+						: node
+				)
+			}
+		});
+
+		expect(parseGraphFile(serializeGraphFile(doc)).data).toEqual(doc.data);
+		expect(parseGraphFileText(serializeGraphHtmlFile(doc)).data).toEqual(doc.data);
+	});
+
 	it('does not include updatedAt in the exported file', () => {
 		const json = serializeGraphFile(makeDoc());
 		expect(json).not.toContain('updatedAt');

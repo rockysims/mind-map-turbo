@@ -12,6 +12,8 @@ import {
 	normalizeNodeTitle,
 	removeEdge,
 	removeNode,
+	removeNodeAddon,
+	setNodeAddon,
 	setNodeDesignations,
 	setNodePinned,
 	setTagColor,
@@ -523,6 +525,57 @@ describe('graph mutations', () => {
 			expect(commitInlineTitleSyntax(graph, 'missing', '>#node @rel Missing', 'e0')).toBe(graph);
 		});
 
+		it('creates a parsed add-on at its registry default', () => {
+			const graph = makeGraph({ nodeCount: 1 });
+
+			const next = commitInlineTitleSyntax(graph, 'n0', '!task #lab Buy filters');
+
+			expect(next.nodes[0]).toMatchObject({
+				title: 'Buy filters',
+				tags: ['lab'],
+				addons: { task: { done: false } }
+			});
+			expect(graph.nodes[0].addons).toBeUndefined();
+		});
+
+		it('leaves the data of an existing add-on alone when the marker is typed again', () => {
+			const graph = makeGraph({
+				nodes: [
+					{
+						id: 'n0',
+						title: 'Buy filters',
+						description: '',
+						addons: { task: { done: true, doneAt: 1_700_000_000_000 } }
+					}
+				]
+			});
+
+			const next = commitInlineTitleSyntax(graph, 'n0', '!task Buy filters again');
+
+			expect(next.nodes[0].addons?.task).toBe(graph.nodes[0].addons?.task);
+		});
+
+		it('keeps an add-on the title no longer mentions, since the toggle is the way off', () => {
+			const graph = makeGraph({
+				nodes: [
+					{ id: 'n0', title: 'Buy filters', description: '', addons: { task: { done: false } } }
+				]
+			});
+
+			const next = commitInlineTitleSyntax(graph, 'n0', 'Buy filters');
+
+			expect(next.nodes[0].addons).toEqual({ task: { done: false } });
+		});
+
+		it('leaves an unregistered marker word in the title with everything after it', () => {
+			const graph = makeGraph({ nodeCount: 1 });
+
+			const next = commitInlineTitleSyntax(graph, 'n0', '!important #lab Read this');
+
+			expect(next.nodes[0]).toMatchObject({ title: '!important #lab Read this', tags: [] });
+			expect(next.nodes[0].addons).toBeUndefined();
+		});
+
 		it('does not mutate a created edge that is not incident to the node', () => {
 			const graph = makeGraph({
 				nodeCount: 3,
@@ -536,6 +589,62 @@ describe('graph mutations', () => {
 
 			expect(next.nodes[2]).toMatchObject({ title: 'Node title', tags: ['node'] });
 			expect(next.edges[0]).toEqual(graph.edges[0]);
+		});
+	});
+
+	describe('setNodeAddon', () => {
+		it('creates the add-on at its default without mutating the original graph', () => {
+			const graph = makeGraph({ nodeCount: 2 });
+
+			const next = setNodeAddon(graph, 'n1', 'task');
+
+			expect(next).not.toBe(graph);
+			expect(next.nodes).not.toBe(graph.nodes);
+			expect(next.nodes[1].addons).toEqual({ task: { done: false } });
+			expect(next.nodes[0].addons).toBeUndefined();
+			expect(graph.nodes[1].addons).toBeUndefined();
+		});
+
+		it('returns the same graph object when the node already carries the add-on', () => {
+			const graph = makeGraph({
+				nodes: [{ id: 'n0', title: 'Task', description: '', addons: { task: { done: true } } }]
+			});
+
+			expect(setNodeAddon(graph, 'n0', 'task')).toBe(graph);
+		});
+
+		it('is a no-op for missing node ids', () => {
+			const graph = makeGraph({ nodeCount: 1 });
+
+			expect(setNodeAddon(graph, 'missing', 'task')).toBe(graph);
+		});
+	});
+
+	describe('removeNodeAddon', () => {
+		it('drops the addons key entirely when the last add-on goes', () => {
+			const graph = makeGraph({
+				nodes: [{ id: 'n0', title: 'Task', description: '', addons: { task: { done: true } } }]
+			});
+
+			const next = removeNodeAddon(graph, 'n0', 'task');
+
+			expect(next).not.toBe(graph);
+			expect(next.nodes[0]).not.toHaveProperty('addons');
+			expect(graph.nodes[0].addons).toEqual({ task: { done: true } });
+		});
+
+		it('returns the same graph object when the node does not carry the add-on', () => {
+			const graph = makeGraph({ nodeCount: 1 });
+
+			expect(removeNodeAddon(graph, 'n0', 'task')).toBe(graph);
+		});
+
+		it('is a no-op for missing node ids', () => {
+			const graph = makeGraph({
+				nodes: [{ id: 'n0', title: 'Task', description: '', addons: { task: { done: false } } }]
+			});
+
+			expect(removeNodeAddon(graph, 'missing', 'task')).toBe(graph);
 		});
 	});
 

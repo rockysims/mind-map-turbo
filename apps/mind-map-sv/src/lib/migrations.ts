@@ -7,7 +7,14 @@ import type {
 	Point,
 	TagColorConfig
 } from './components/ui/types/multigraph';
-import type { NodeContentBlock, NodeData, QuantityDesignation } from './components/ui/types/node';
+import type {
+	NodeAddons,
+	NodeContentBlock,
+	NodeData,
+	QuantityDesignation,
+	TaskAddon
+} from './components/ui/types/node';
+import { isRegisteredAddon, type NodeAddonName } from './components/ui/Multigraph/lib/nodeAddons';
 
 export const CURRENT_SCHEMA_VERSION = 6;
 
@@ -360,7 +367,38 @@ function isNodeData(
 			? value.content === undefined || isNodeContent(value.content)
 			: isNodeContent(value.content)) &&
 		(value.inputs === undefined || isDesignationArray(value.inputs)) &&
-		(value.outputs === undefined || isDesignationArray(value.outputs))
+		(value.outputs === undefined || isDesignationArray(value.outputs)) &&
+		(value.addons === undefined || isNodeAddons(value.addons))
+	);
+}
+
+/**
+ * The registry is closed, so an unknown key or a badly shaped payload makes the
+ * node malformed rather than being dropped: a file written by a newer app that
+ * knows `!ai` is not a file this one can load and re-save without losing it.
+ */
+function isNodeAddons(value: unknown): value is NodeAddons {
+	return (
+		isRecord(value) &&
+		Object.entries(value).every(
+			([name, addon]) => isRegisteredAddon(name) && isAddonData(name, addon)
+		)
+	);
+}
+
+function isAddonData(name: NodeAddonName, value: unknown): boolean {
+	switch (name) {
+		case 'task':
+			return isTaskAddon(value);
+	}
+}
+
+function isTaskAddon(value: unknown): value is TaskAddon {
+	return (
+		isRecord(value) &&
+		typeof value.done === 'boolean' &&
+		(value.doneAt === undefined ||
+			(typeof value.doneAt === 'number' && Number.isFinite(value.doneAt)))
 	);
 }
 

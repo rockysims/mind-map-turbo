@@ -71,7 +71,8 @@ export const APP_CONFIG = {
 		},
 		tagSyntax: {
 			nodeTagMarker: '#', // leading marker for node tags in title/query shortcuts
-			edgeTagMarker: '@' // leading marker for edge tags in title/query shortcuts
+			edgeTagMarker: '@', // leading marker for edge tags in title/query shortcuts
+			addonMarker: '!' // leading marker for node add-ons from the closed registry
 		},
 		layout: {
 			baseRadius: NODE_RADIUS_PX, // base radius for hop-scaled layout

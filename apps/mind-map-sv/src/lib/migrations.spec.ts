@@ -295,6 +295,54 @@ describe('persisted graph migrations', () => {
 		).toThrow(new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload'));
 	});
 
+	it('reads a current-version node carrying add-ons', () => {
+		const graph = makeGraph({ nodeCount: 1, pinned: [0] });
+		const nodes = [
+			{ ...graph.nodes[0], addons: { task: { done: true, doneAt: 1_700_000_000_000 } } }
+		];
+
+		expect(
+			unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data: { ...graph, nodes } })
+				.nodes[0].addons
+		).toEqual({ task: { done: true, doneAt: 1_700_000_000_000 } });
+	});
+
+	it('rejects an add-on name that is not in the registry', () => {
+		const graph = makeGraph({ nodeCount: 1 });
+
+		expect(() =>
+			unwrapPersistedGraph({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data: { ...graph, nodes: [{ ...graph.nodes[0], addons: { nonsense: {} } }] }
+			})
+		).toThrow(new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload'));
+	});
+
+	it('rejects a registered add-on with malformed data', () => {
+		const graph = makeGraph({ nodeCount: 1 });
+
+		expect(() =>
+			unwrapPersistedGraph({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data: { ...graph, nodes: [{ ...graph.nodes[0], addons: { task: { done: 'yes' } } }] }
+			})
+		).toThrow(new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload'));
+	});
+
+	it('rejects a task add-on with a non-finite doneAt', () => {
+		const graph = makeGraph({ nodeCount: 1 });
+
+		expect(() =>
+			unwrapPersistedGraph({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data: {
+					...graph,
+					nodes: [{ ...graph.nodes[0], addons: { task: { done: true, doneAt: 'today' } } }]
+				}
+			})
+		).toThrow(new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload'));
+	});
+
 	it('rejects malformed JSON with a typed error', () => {
 		expect(() => parsePersistedGraph('{ nope')).toThrow(
 			new PersistedGraphError('Persisted graph JSON is malformed.', 'malformed-payload')

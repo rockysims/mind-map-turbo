@@ -6,6 +6,7 @@ import type {
 	TagColorNamespace
 } from '../../types/multigraph';
 import type { NodeData, NodeImageContent, QuantityDesignation } from '../../types/node';
+import { withNodeAddon, type NodeAddonName } from './nodeAddons';
 import { mathPlainText } from '../../MathText/lib/mathPlainText';
 import { symbolFor } from '../../MathText/lib/mathSymbols';
 import { parseTitleSyntax } from './titleSyntax';
@@ -237,6 +238,62 @@ export function setNodeDesignations(
 	};
 }
 
+/**
+ * Gives a node the named add-on, created at its registry default.
+ *
+ * A node that already carries the add-on keeps its data untouched and the same
+ * graph object comes back, so re-typing `!task` on a done task does not reset
+ * it.
+ */
+export function setNodeAddon(
+	data: MultigraphData,
+	nodeId: string,
+	name: NodeAddonName
+): MultigraphData {
+	const node = data.nodes.find((candidate) => candidate.id === nodeId);
+	if (!node) return data;
+	if (node.addons?.[name] !== undefined) return data;
+
+	const addons = withNodeAddon(node.addons, name);
+	return {
+		...data,
+		nodes: data.nodes.map((candidate) =>
+			candidate.id === nodeId ? { ...candidate, addons } : candidate
+		)
+	};
+}
+
+/**
+ * Takes the named add-on and its data off a node.
+ *
+ * Returns the same graph object when the node does not carry it. Dropping the
+ * last add-on drops the `addons` key too, so a node without add-ons serialises
+ * the way it did before add-ons existed rather than carrying an empty object.
+ */
+export function removeNodeAddon(
+	data: MultigraphData,
+	nodeId: string,
+	name: NodeAddonName
+): MultigraphData {
+	const node = data.nodes.find((candidate) => candidate.id === nodeId);
+	if (!node?.addons || node.addons[name] === undefined) return data;
+
+	const addons = { ...node.addons };
+	delete addons[name];
+	const hasRemaining = Object.keys(addons).length > 0;
+
+	return {
+		...data,
+		nodes: data.nodes.map((candidate) => {
+			if (candidate.id !== nodeId) return candidate;
+			if (hasRemaining) return { ...candidate, addons };
+			const withoutAddons = { ...candidate };
+			delete withoutAddons.addons;
+			return withoutAddons;
+		})
+	};
+}
+
 /** A designation's canonical identity — the key of the symbol it designates. */
 export function designationKey(designation: QuantityDesignation): string {
 	return symbolFor(designation.base, designation.subscript).key;
@@ -414,11 +471,17 @@ export function commitInlineTitleSyntax(
 	if (!hasNode(data, nodeId)) return data;
 
 	const parsed = parseTitleSyntax(rawTitle);
-	const graphWithNode = updateNodeContent(data, nodeId, {
+	let graphWithNode = updateNodeContent(data, nodeId, {
 		title: parsed.displayTitle,
 		description: data.nodes.find((node) => node.id === nodeId)?.description ?? '',
 		tags: parsed.nodeTags
 	});
+
+	// Add-ons accumulate rather than being replaced the way tags are: a saved
+	// title never contains a marker, so the edit sheet's toggle is the way off.
+	for (const addon of parsed.addons) {
+		graphWithNode = setNodeAddon(graphWithNode, nodeId, addon);
+	}
 
 	if (!createdEdgeId) return graphWithNode;
 

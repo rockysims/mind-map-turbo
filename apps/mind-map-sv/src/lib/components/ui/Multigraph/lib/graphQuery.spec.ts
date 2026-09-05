@@ -46,7 +46,9 @@ describe('graphQuery', () => {
 		expect(
 			parseGraphQuery('+:nodal;link :dialog-:modal -;edgo text', {
 				nodeTagMarker: ':',
-				edgeTagMarker: ';'
+				edgeTagMarker: ';',
+				// The query parser does not read this marker yet (milestone 13 T05).
+				addonMarker: '!'
 			})
 		).toEqual([
 			{ mode: 'spotlight', target: 'nodeTag', value: 'nodal' },

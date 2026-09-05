@@ -1,16 +1,20 @@
 import { APP_CONFIG } from '$lib/appConfig';
+import { isRegisteredAddon, type NodeAddonName } from './nodeAddons';
 
 export type ParsedTitleDirection = 'parent-to-child' | 'child-to-parent' | 'undirected';
 
 export interface TagSyntaxConfig {
 	nodeTagMarker: string;
 	edgeTagMarker: string;
+	addonMarker: string;
 }
 
 interface ParsedTitleSyntax {
 	displayTitle: string;
 	nodeTags: string[];
 	edgeTags: string[];
+	/** Registered add-on names, deduplicated, in the order they were typed. */
+	addons: NodeAddonName[];
 	direction: ParsedTitleDirection;
 }
 
@@ -33,10 +37,11 @@ export function parseTitleSyntax(
 
 	const nodeTags: string[] = [];
 	const edgeTags: string[] = [];
+	const addons: NodeAddonName[] = [];
 
 	while (remaining.length > 0) {
 		remaining = remaining.trimStart();
-		const marker = leadingTagMarker(remaining, tagSyntax);
+		const marker = leadingMarker(remaining, tagSyntax);
 		if (!marker) break;
 
 		const tagNameStart = marker.length;
@@ -44,7 +49,12 @@ export function parseTitleSyntax(
 		const tagName = remaining.slice(tagNameStart, tagNameEnd);
 		if (!isValidTagName(tagName, tagSyntax)) break;
 
-		if (marker === tagSyntax.nodeTagMarker) {
+		if (marker === tagSyntax.addonMarker) {
+			// The add-on registry is closed, so an unregistered `!word` is prose:
+			// it ends the marker run and stays in the display title with the rest.
+			if (!isRegisteredAddon(tagName)) break;
+			if (!addons.includes(tagName)) addons.push(tagName);
+		} else if (marker === tagSyntax.nodeTagMarker) {
 			nodeTags.push(tagName);
 		} else {
 			edgeTags.push(tagName);
@@ -56,23 +66,27 @@ export function parseTitleSyntax(
 		displayTitle: remaining.trim(),
 		nodeTags,
 		edgeTags,
+		addons,
 		direction
 	};
 }
 
-function leadingTagMarker(input: string, tagSyntax: TagSyntaxConfig): string | null {
+function leadingMarker(input: string, tagSyntax: TagSyntaxConfig): string | null {
 	if (tagSyntax.nodeTagMarker && input.startsWith(tagSyntax.nodeTagMarker)) {
 		return tagSyntax.nodeTagMarker;
 	}
 	if (tagSyntax.edgeTagMarker && input.startsWith(tagSyntax.edgeTagMarker)) {
 		return tagSyntax.edgeTagMarker;
 	}
+	if (tagSyntax.addonMarker && input.startsWith(tagSyntax.addonMarker)) {
+		return tagSyntax.addonMarker;
+	}
 	return null;
 }
 
 function findTagNameEnd(input: string, startIndex: number, tagSyntax: TagSyntaxConfig): number {
 	for (let index = startIndex; index < input.length; index += 1) {
-		if (/\s/.test(input[index]) || leadingTagMarker(input.slice(index), tagSyntax)) return index;
+		if (/\s/.test(input[index]) || leadingMarker(input.slice(index), tagSyntax)) return index;
 	}
 
 	return input.length;
@@ -93,6 +107,7 @@ function isValidTagName(tagName: string, tagSyntax: TagSyntaxConfig = DEFAULT_TA
 		tagName.length > 0 &&
 		!/\s/.test(tagName) &&
 		!tagName.includes(tagSyntax.nodeTagMarker) &&
-		!tagName.includes(tagSyntax.edgeTagMarker)
+		!tagName.includes(tagSyntax.edgeTagMarker) &&
+		!tagName.includes(tagSyntax.addonMarker)
 	);
 }
