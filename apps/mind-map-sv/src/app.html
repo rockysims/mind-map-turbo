@@ -2,6 +2,34 @@
 <html lang="en">
 	<head>
 		<meta charset="utf-8" />
+		<!--
+			The app holds an API key in this browser's storage and renders model
+			output and attachment names, so the page states where it may connect and
+			what may run. It travels into every downloaded file, which is where it
+			matters most: those open from file://, and in Chrome every local file
+			shares one storage.
+
+			Why each directive is as wide as it is:
+			- script-src 'unsafe-inline': the offline build inlines the whole app as
+			  one module script, and a hash would change on every build.
+			- script-src blob: and worker-src blob:: the Python executor runs in a
+			  classic worker built from a blob URL (a module worker from a blob is
+			  refused on file://, per the T01 spike).
+			- script-src 'wasm-unsafe-eval': Pyodide compiles WebAssembly. Plain
+			  'unsafe-eval' is never needed.
+			- cdn.jsdelivr.net in script-src and connect-src: the pinned Pyodide
+			  runtime and its wheels load from there on the first run.
+			- connect-src api.anthropic.com: the one endpoint the app calls.
+			- img-src blob: data:: attachments and rendered plots are object URLs;
+			  the favicon is a data URL.
+			- font-src data:: the math script font is inlined as a data URL.
+			- style-src 'unsafe-inline': Svelte writes inline style attributes, and
+			  the offline build inlines the stylesheet.
+		-->
+		<meta
+			http-equiv="Content-Security-Policy"
+			content="default-src 'self'; script-src 'self' 'unsafe-inline' blob: https://cdn.jsdelivr.net 'wasm-unsafe-eval'; worker-src blob:; connect-src 'self' https://api.anthropic.com https://cdn.jsdelivr.net; img-src 'self' blob: data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'"
+		/>
 		<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
 		%sveltekit.head%
 	</head>

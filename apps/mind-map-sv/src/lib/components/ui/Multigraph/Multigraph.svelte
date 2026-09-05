@@ -20,6 +20,7 @@
 	import GraphQueryPanel from './GraphQueryPanel.svelte';
 	import MergeConfirmDialog from './MergeConfirmDialog.svelte';
 	import NodeDetailsContent from './NodeDetailsContent.svelte';
+	import AiNodeContent from './AiNodeContent.svelte';
 	import NodeActionMenu from './NodeActionMenu.svelte';
 	import NavBreadcrumbs from './NavBreadcrumbs.svelte';
 	import { mathPlainText } from '../MathText/lib/mathPlainText';
@@ -30,10 +31,16 @@
 	import Stage from './Stage.svelte';
 	import TagColorLegend from './TagColorLegend.svelte';
 	import { APP_CONFIG } from '$lib/appConfig';
+	import type { AiClient } from '$lib/ai/aiClient';
+	import { defaultAiSettings, type AiSettings } from '$lib/ai/aiSettings';
+	import type { PyExecutor } from '$lib/ai/pyExecutor';
 	import type { GraphAssetStore } from '$lib/assets/assetStore';
 	import { tombstoneAsset } from '$lib/assets/assetTrash';
 	import { prefersReducedMotion } from '$lib/reducedMotion';
-	import type { NodeContentBlock, NodeData } from '../types/node';
+	import { collectAiInputs } from './lib/aiInputs';
+	import { promoteAiOutput, setAiPrompt } from './lib/aiNode';
+	import { createAiRunController, type AiRunOutcome } from './lib/aiRunController.svelte';
+	import type { AiRunMode, NodeContentBlock, NodeData } from '../types/node';
 	import type { EdgeData } from '../types/edge';
 	import type { GraphCommitIntent } from '../types/history';
 	import type { TagColorChangePhase } from './lib/tagColors.js';
@@ -286,7 +293,11 @@
 		exitingBuffer,
 		assetStore = null,
 		assetScope = '',
-		dataflowEnabled = true
+		dataflowEnabled = true,
+		aiClient = null,
+		aiExecutor = null,
+		aiSettings = defaultAiSettings(),
+		onOpenAiSettings
 	}: {
 		multigraphData: MultigraphData;
 		/** Bumped when the document is swapped: this component is keyed on it and remounts. */
@@ -341,6 +352,21 @@
 		assetScope?: string;
 		/** Draw dataflow edges inferred from the math in node descriptions. */
 		dataflowEnabled?: boolean;
+		/**
+		 * The Messages client, or `null` when no key has been entered. Its absence
+		 * *is* the no-key state: the page builds one only when it has a key, so
+		 * nothing down here has to hold the key to know whether a run can start.
+		 */
+		aiClient?: AiClient | null;
+		/** The page's one Python executor. `null` before it is constructed. */
+		aiExecutor?: PyExecutor | null;
+		/** Model, preview depth and whether plots go back for checking. */
+		aiSettings?: AiSettings;
+		/**
+		 * Open the key sheet. `afterConnect` runs once a key has been saved, which
+		 * is how a run stopped by a missing key resumes without a second press.
+		 */
+		onOpenAiSettings?: (afterConnect?: () => void) => void;
 	} = $props();
 
 	let graph = $state<MultigraphData>({
@@ -484,6 +510,103 @@
 		focus.levels[0]?.subjectKind === 'node' ? focus.levels[0].subjectId : null
 	);
 	const navCrumbs = $derived(navBreadcrumbs(transientReveal.entries, focusRootNodeId));
+
+	/**
+	 * Owns every `!ai` node's run: the streamed state the workbench draws, the
+	 * digests it shows, and the two commits a run makes. Fed getters for the same
+	 * reason `FocusController` is — the client arrives when a key is entered, the
+	 * asset store resolves after mount, and `graph` is a new object per commit.
+	 */
+	const aiRun = createAiRunController({
+		client: () => aiClient,
+		executor: () => aiExecutor,
+		assetStore: () => assetStore,
+		assetScope: () => assetScope,
+		graph: () => graph,
+		commit: (next, label) => commitUserGraph(next, editIntent(label)),
+		settings: () => aiSettings
+	});
+
+	/**
+	 * Measure an AI node's inputs when the reader opens it, and again whenever the
+	 * files it would send change.
+	 *
+	 * Keyed on the asset ids rather than the graph: the digest is what leaves the
+	 * machine, so it has to be current before Run is pressed, and it must not be
+	 * recomputed because a neighbour moved. `digest` is idempotent at a given
+	 * preview depth, so a re-run of this effect that changed nothing costs a
+	 * comparison.
+	 */
+	$effect(() => {
+		const nodeId = focusRootNodeId;
+		if (nodeId === null || nodeById[nodeId]?.addons?.ai === undefined) return;
+		// Read so the effect re-runs when the inputs change; the ids are the key.
+		void collectAiInputs(graph, nodeId)
+			.map((input) => (input.kind === 'file' ? input.assetId : ''))
+			.join('|');
+		void aiSettings.previewRows;
+		// Untracked: `digest` reads and writes the controller's own digest cache,
+		// and tracking that here would make this effect its own trigger.
+		untrack(() => void aiRun.digest(nodeId));
+	});
+
+	/**
+	 * Run this node, and turn a missing key into the sheet plus a second attempt.
+	 *
+	 * The continuation is the milestone's "Connect succeeds, the sheet closes, the
+	 * run continues": the same run, started again once a key is in hand, rather
+	 * than a state machine that has to remember where it stopped.
+	 */
+	function runAiNode(nodeId: string, mode: AiRunMode): void {
+		startAiRun(() => aiRun.run(nodeId, mode));
+	}
+
+	/**
+	 * The "Fix with AI" press: a refine run carrying the traceback the last
+	 * execution printed. Routed through the same missing-key retry as Run,
+	 * because a reader whose script just failed is exactly the reader who should
+	 * not have to press twice.
+	 */
+	function fixAiNode(nodeId: string): void {
+		startAiRun(() => aiRun.runFix(nodeId));
+	}
+
+	/** One attempt, retried once behind the key sheet when that is what it needed. */
+	function startAiRun(attempt: () => Promise<AiRunOutcome>): void {
+		void attempt().then((outcome) => {
+			if (outcome !== 'needs-key') return;
+			onOpenAiSettings?.(() => void attempt());
+		});
+	}
+
+	/**
+	 * Give one of an AI node's outputs a node of its own.
+	 *
+	 * Placed exactly where `createDefiningNode` places the node it makes — below
+	 * the node that asked for it, by the same 2.5 radii — because both are the
+	 * same act: a node created *from* another one, with no pointer to say where.
+	 * The layout takes it from there; the reader never dropped it anywhere, so
+	 * there is nothing to honour.
+	 *
+	 * The reader stays in the workbench they pressed from. A promote is a filing
+	 * action, not a journey: they are looking at the figure and saying where it
+	 * belongs, and the workbench row they pressed answers by naming the node it
+	 * landed in, with a jump for when they do want to go. Unpinned for the same
+	 * reason — it hangs off the AI node, so it is inside that component's
+	 * neighbourhood rather than a beacon of its own, and the row's jump reveals
+	 * it if the hop budget does not.
+	 *
+	 * `promoteAiOutput` is idempotent, so a second press commits nothing: the
+	 * identity check is what keeps a double-tap out of the undo list.
+	 */
+	function promoteAiOutputToNode(aiNodeId: string, outputName: string): void {
+		const origin = graphLayout.posByNodeId[aiNodeId] ?? CENTERED_POSITION;
+		const next = promoteAiOutput(graph, aiNodeId, outputName, {
+			position: { x: origin.x, y: origin.y + NODE_RADIUS * 2.5 }
+		});
+		if (next === graph) return;
+		commitUserGraph(layoutRuntime.relaxAfterMutation(next), editIntent('promote AI output'));
+	}
 
 	/** Internal enter animations for nodes added by the user (scale 0 → target). */
 	let nodeEnterAnimations = $state<Record<string, NodeEnterAnimation>>({});
@@ -2986,7 +3109,39 @@
 			</div>
 		{:else}
 			{@const detailsNode = nodeById[level.subjectId]}
-			{#if detailsNode}
+			{#if detailsNode?.addons?.ai}
+				<!-- An `!ai` node's focus surface is the workbench, not the details
+				     view: it is the same full-screen level with a different content
+				     variant, which is why nested image zoom over its output grid
+				     works without anything here knowing about it. -->
+				<div class="focus-surface" data-focus-subject-id={level.subjectId}>
+					<NodeDetailsLayer title={detailsNode.title} detailsTitleId={DETAILS_TITLE_ID} detailsMode>
+						<AiNodeContent
+							node={detailsNode}
+							inputs={collectAiInputs(graph, detailsNode.id)}
+							digests={aiRun.digestsFor(detailsNode.id)}
+							previewRows={aiSettings.previewRows}
+							assets={graph.assets ?? {}}
+							{assetStore}
+							{assetScope}
+							runState={aiRun.stateFor(detailsNode.id)}
+							hasKey={aiClient !== null}
+							{titleForNodeId}
+							onPromptChange={(prompt) =>
+								commitUserGraph(
+									setAiPrompt(graph, detailsNode.id, prompt),
+									editIntent('edit AI prompt')
+								)}
+							onRun={(mode) => runAiNode(detailsNode.id, mode)}
+							onCancel={() => aiRun.cancel(detailsNode.id)}
+							onPromote={(outputName) => promoteAiOutputToNode(detailsNode.id, outputName)}
+							onFix={() => fixAiNode(detailsNode.id)}
+							onOpenSettings={() => onOpenAiSettings?.()}
+							onJumpToNode={(nodeId) => jumpToNode(detailsNode.id, nodeId)}
+						/>
+					</NodeDetailsLayer>
+				</div>
+			{:else if detailsNode}
 				<div class="focus-surface" data-focus-subject-id={level.subjectId}>
 					<NodeDetailsLayer title={detailsNode.title} detailsTitleId={DETAILS_TITLE_ID} detailsMode>
 						<NodeDetailsContent

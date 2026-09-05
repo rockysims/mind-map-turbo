@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { SvelteURLSearchParams } from 'svelte/reactivity';
 	import { APP_CONFIG } from '$lib/appConfig';
 	import { BUILD_STAMP_META_NAME, formatBuildStamp, parseBuildStamp } from '$lib/buildInfo';
@@ -12,6 +12,8 @@
 		type AiKeyValidation,
 		type AiSettings
 	} from '$lib/ai/aiSettings';
+	import { createAnthropicClient } from '$lib/ai/anthropicClient';
+	import { createPyExecutor, type PyExecutor } from '$lib/ai/pyExecutor';
 	import { IndexedDbGraphAssetStore } from '$lib/assets/assetStore';
 	import {
 		downloadFileArtifact,
@@ -99,6 +101,29 @@
 	let aiSettingsStorage: StorageLike | null = null;
 	let aiSheetOpen = $state(false);
 	const aiConnected = $derived((aiSettings.apiKey ?? '') !== '');
+	/**
+	 * The Messages client, rebuilt whenever the key or the model moves.
+	 *
+	 * `null` without a key, which is how everything downstream knows there is
+	 * nothing to run yet: no component holds the key, only the client built from
+	 * it. Cheap to rebuild — the client is a closure over `fetch`.
+	 */
+	const aiClient = $derived.by(() => {
+		const apiKey = aiSettings.apiKey ?? '';
+		return apiKey === '' ? null : createAnthropicClient({ apiKey, model: aiSettings.model });
+	});
+	/**
+	 * One Python executor for the page's lifetime, built on mount so nothing is
+	 * constructed during SSR. It loads the runtime on first use and keeps it
+	 * across every run of every AI node; only this page ever disposes it.
+	 */
+	let aiExecutor = $state<PyExecutor | null>(null);
+	/**
+	 * What to do once a key arrives, parked by a run that stopped for the want of
+	 * one. Cleared whichever way the sheet closes, so a Connect the reader made
+	 * for their own reasons never starts a run they did not ask for twice.
+	 */
+	let aiConnectContinuation: (() => void) | null = null;
 	let startupError = $state<string | null>(null);
 	let graphAssetStore = $state<IndexedDbGraphAssetStore | null>(null);
 	let selectedGraphId = $state(graphIdFromUrl(page.url));
@@ -132,6 +157,9 @@
 			});
 			const assetStore = new IndexedDbGraphAssetStore();
 			graphAssetStore = assetStore;
+			// Constructing it downloads nothing: the runtime loads on the first run
+			// of the first AI node, and stays loaded for every run after that.
+			aiExecutor = createPyExecutor();
 
 			const selectedGraphFileText = consumeOpenFileWindowName() ?? consumeOpenFileText();
 			const embeddedGraph =
@@ -228,6 +256,12 @@
 
 			return () => {
 				persistedGraph.dispose();
+				// Terminal, and the page is going: a disposed executor throws from
+				// every later call, which is why no run ever disposes it and the
+				// controller leaves it alone on cancel. Without this the worker and
+				// whatever runtime it downloaded outlive the page.
+				aiExecutor?.dispose();
+				aiExecutor = null;
 				window.removeEventListener('storage', onStorage);
 				window.removeEventListener('hashchange', onRouteChange);
 				window.removeEventListener('popstate', onRouteChange);
@@ -270,13 +304,38 @@
 	}
 
 	/**
-	 * A placeholder until T03 lands the Messages client: the real validator sends
-	 * a one-output-token request, because the models endpoint refuses browsers.
-	 * Everything past "is there a key at all" is guesswork until then.
+	 * Check the key the reader just typed with a throwaway client built from it —
+	 * not the page's own, which is still built from whatever key was there
+	 * before, and may be no key at all. The client sends the cheapest Messages
+	 * call there is, because the models endpoint refuses browsers.
 	 */
 	async function validateAiKey(key: string): Promise<AiKeyValidation> {
-		if (key === '') return { ok: false, message: 'Not connected yet.' };
-		return { ok: true };
+		if (key === '') return { ok: false, message: 'Enter a key to connect.' };
+		return createAnthropicClient({ apiKey: key, model: aiSettings.model }).validateKey(key);
+	}
+
+	/** Open the key sheet, remembering what a run wanted to do once it closes. */
+	function openAiSettings(afterConnect?: () => void): void {
+		aiConnectContinuation = afterConnect ?? null;
+		aiSheetOpen = true;
+	}
+
+	function closeAiSettings(): void {
+		aiSheetOpen = false;
+		aiConnectContinuation = null;
+	}
+
+	/**
+	 * Connect saved a key. Resume whatever was waiting on it, after a tick, so the
+	 * client derived from the new settings is the one the resumed run picks up.
+	 */
+	async function continueAfterAiConnect(): Promise<void> {
+		aiSheetOpen = false;
+		const resume = aiConnectContinuation;
+		aiConnectContinuation = null;
+		if (resume === null) return;
+		await tick();
+		resume();
 	}
 
 	function openGraphFilePicker(): void {
@@ -541,7 +600,7 @@
 		onRedo={() => persisted?.redo()}
 		onBlockedAction={(reason) => persisted?.reportBlockedAction(reason)}
 		{aiConnected}
-		onOpenAiSettings={() => (aiSheetOpen = true)}
+		onOpenAiSettings={() => openAiSettings()}
 	/>
 
 	{#if aiSheetOpen}
@@ -551,8 +610,8 @@
 			validateKey={validateAiKey}
 			onSave={saveAiSettingsChange}
 			onForget={forgetAiSettingsKey}
-			onClose={() => (aiSheetOpen = false)}
-			onConnected={() => (aiSheetOpen = false)}
+			onClose={closeAiSettings}
+			onConnected={() => void continueAfterAiConnect()}
 		/>
 	{/if}
 
@@ -604,6 +663,10 @@
 				{defaultPrimaryNodeId}
 				assetStore={graphAssetStore}
 				assetScope={persisted.loadedGraphId}
+				{aiClient}
+				{aiExecutor}
+				{aiSettings}
+				onOpenAiSettings={openAiSettings}
 				onMultigraphChange={(graph, generation, intent) =>
 					persisted?.notifyGraphChanged(graph, { syncView: true, generation, intent })}
 				onViewStateChange={(viewState) =>

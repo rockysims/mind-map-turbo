@@ -12,9 +12,11 @@ const GRAPH_HTML_DOCUMENT_VERSION = 1;
  * The lowest reader that understands what this app writes. Bumped with every
  * schema version an older app cannot make sense of, so that app routes the file
  * to its own embedded shell (the `unsupported-app-version` path) instead of
- * failing on the schema envelope. 3 is schema 7 — file attachments.
+ * failing on the schema envelope. 3 is schema 7 — file attachments; 4 is
+ * schema 8 — the `ai` add-on, which an older reader refuses as an unknown
+ * add-on name rather than ignoring.
  */
-export const GRAPH_HTML_READER_VERSION = 3;
+export const GRAPH_HTML_READER_VERSION = 4;
 export const GRAPH_HTML_PAYLOAD_SCRIPT_ID = 'mind-map-embedded-graph';
 const GRAPH_HTML_ASSET_SCRIPT_TYPE = 'application/x-mind-map-asset';
 const GRAPH_HTML_ASSET_ID_ATTRIBUTE = 'data-mind-map-asset-id';

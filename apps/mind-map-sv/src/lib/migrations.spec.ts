@@ -491,16 +491,38 @@ describe('schema 7: file attachments', () => {
 		);
 	});
 
-	it('refuses schema version 8 as unsupported rather than malformed', () => {
+	it('refuses schema version 9 as unsupported rather than malformed', () => {
 		expect(() =>
-			unwrapPersistedGraph({ schemaVersion: 8, data: makeGraph({ nodeCount: 1 }) })
+			unwrapPersistedGraph({ schemaVersion: 9, data: makeGraph({ nodeCount: 1 }) })
 		).toThrow(
-			new PersistedGraphError('Unsupported graph schema version: 8', 'unsupported-version')
+			new PersistedGraphError('Unsupported graph schema version: 9', 'unsupported-version')
 		);
 	});
 
 	// A tail from another schema version is dropped rather than migrated; the
 	// graph beside it still loads, which is the half that matters on a reload.
+	it('drops a version 7 draft undo tail and loads its graph anyway', () => {
+		const data = graphWith([{ type: 'file', assetId: 'f1', name: 'readings.csv' }], {
+			f1: CSV_ASSET
+		});
+		const draft = {
+			schemaVersion: 7,
+			data,
+			history: {
+				head: {
+					label: 'add file',
+					primaryNodeId: 'n0',
+					severedBeaconPreference: [],
+					createdAt: 100
+				},
+				entries: []
+			}
+		};
+
+		expect(unwrapPersistedHistory(draft)).toBeNull();
+		expect(unwrapPersistedGraph(draft)).toEqual(data);
+	});
+
 	it('drops a version 6 draft undo tail and loads its graph anyway', () => {
 		const data = graphWith([{ type: 'image', assetId: 'a1', alt: 'A photo' }], { a1: IMAGE_ASSET });
 		const draft = {
@@ -539,5 +561,186 @@ describe('schema 7: file attachments', () => {
 				history: { head, entries: [] }
 			})
 		).toEqual({ head, entries: [] });
+	});
+});
+
+describe('schema 8: the ai add-on', () => {
+	const PLOT_ASSET: GraphAssetMetadata = {
+		id: 'p1',
+		kind: 'image',
+		mimeType: 'image/png',
+		name: 'plot.png',
+		size: 40,
+		createdAt: 3
+	};
+
+	/** A finished run with every optional field filled in. */
+	const FULL_RUN = {
+		id: 'run-1',
+		startedAt: 1_700_000_000_000,
+		finishedAt: 1_700_000_030_000,
+		status: 'done',
+		mode: 'analyse',
+		model: 'claude-opus-5',
+		runtime: '0.27.7',
+		inputs: [{ nodeId: 'src', assetId: 'f1', label: 'baseline' }, { nodeId: 'note' }],
+		summary: 'Plotted channel 2 for both files.',
+		outputs: [{ name: 'plot.png', assetId: 'p1', mimeType: 'image/png' }],
+		usage: { inputTokens: 1200, outputTokens: 340 },
+		toolCalls: 2,
+		error: undefined
+	};
+
+	/** A one-node graph whose node carries `addons`, plus the given asset metadata. */
+	function graphWithAddons(
+		addons: unknown,
+		assets: Record<string, GraphAssetMetadata> = {}
+	): unknown {
+		const base = makeGraph({
+			nodes: [{ id: 'n0', title: 'Analysis', description: '' }],
+			pinned: [0],
+			pinHistory: { 0: 1 }
+		});
+		return {
+			...base,
+			nodes: [{ ...base.nodes[0], addons }],
+			assets,
+			pinSequence: 1
+		};
+	}
+
+	it('loads a version 7 document unchanged', () => {
+		const data = graphWithAddons({ task: { done: true, doneAt: 5 } });
+
+		expect(unwrapPersistedGraph({ schemaVersion: 7, data })).toEqual(data);
+	});
+
+	it('loads a node carrying a fully populated ai add-on', () => {
+		const data = graphWithAddons(
+			{
+				ai: {
+					prompt: 'plot channel 2 against time',
+					model: 'claude-opus-5',
+					script: 'import pandas as pd\n',
+					runs: [FULL_RUN],
+					promoted: { 'plot.png': 'n1' }
+				}
+			},
+			{ p1: PLOT_ASSET }
+		);
+
+		expect(unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toEqual(data);
+	});
+
+	it('loads an ai add-on that has never run', () => {
+		const data = graphWithAddons({ ai: { prompt: '', runs: [], promoted: {} } });
+
+		expect(unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toEqual(data);
+	});
+
+	it('loads an ai add-on beside a task one', () => {
+		const data = graphWithAddons({
+			task: { done: false },
+			ai: { prompt: 'plot it', runs: [], promoted: {} }
+		});
+
+		expect(unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toEqual(data);
+	});
+
+	// A run is never persisted as running, so a file saying one is describes a
+	// state this app cannot resume or draw.
+	it('refuses a persisted run whose status is running', () => {
+		const data = graphWithAddons({
+			ai: { prompt: '', runs: [{ ...FULL_RUN, status: 'running' }], promoted: {} }
+		});
+
+		expect(() => unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toThrow(
+			new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload')
+		);
+	});
+
+	it('refuses a run whose status is a word it does not know', () => {
+		const data = graphWithAddons({
+			ai: { prompt: '', runs: [{ ...FULL_RUN, status: 'finished' }], promoted: {} }
+		});
+
+		expect(() => unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toThrow(
+			new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload')
+		);
+	});
+
+	it('refuses a run whose mode is not one of the three', () => {
+		const data = graphWithAddons({
+			ai: { prompt: '', runs: [{ ...FULL_RUN, mode: 'chat' }], promoted: {} }
+		});
+
+		expect(() => unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toThrow(
+			new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload')
+		);
+	});
+
+	it('refuses a run with no runtime recorded', () => {
+		const withoutRuntime = { ...FULL_RUN, runtime: undefined };
+		const data = graphWithAddons({
+			ai: { prompt: '', runs: [withoutRuntime], promoted: {} }
+		});
+
+		expect(() => unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toThrow(
+			new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload')
+		);
+	});
+
+	it('refuses a malformed output entry', () => {
+		const data = graphWithAddons({
+			ai: {
+				prompt: '',
+				runs: [{ ...FULL_RUN, outputs: [{ name: 'plot.png', assetId: 'p1' }] }],
+				promoted: {}
+			}
+		});
+
+		expect(() => unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toThrow(
+			new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload')
+		);
+	});
+
+	it('refuses usage that is not a pair of numbers', () => {
+		const data = graphWithAddons({
+			ai: {
+				prompt: '',
+				runs: [{ ...FULL_RUN, usage: { inputTokens: 1, outputTokens: 'lots' } }],
+				promoted: {}
+			}
+		});
+
+		expect(() => unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toThrow(
+			new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload')
+		);
+	});
+
+	it('refuses a promoted binding that is not a node id string', () => {
+		const data = graphWithAddons({
+			ai: { prompt: '', runs: [], promoted: { 'plot.png': { nodeId: 'n1' } } }
+		});
+
+		expect(() => unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toThrow(
+			new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload')
+		);
+	});
+
+	it('refuses runs that is not an array', () => {
+		const data = graphWithAddons({ ai: { prompt: '', runs: {}, promoted: {} } });
+
+		expect(() => unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toThrow(
+			new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload')
+		);
+	});
+
+	it('refuses an ai add-on with no prompt field at all', () => {
+		const data = graphWithAddons({ ai: { runs: [], promoted: {} } });
+
+		expect(() => unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toThrow(
+			new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload')
+		);
 	});
 });
