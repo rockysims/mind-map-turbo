@@ -61,7 +61,7 @@
 	import {
 		NEW_NODE_TITLE,
 		addEdge,
-		addNodeImageContent,
+		addNodeContentBlock,
 		addNode,
 		commitInlineTitleSyntax,
 		deleteTagEverywhere,
@@ -72,7 +72,7 @@
 		removeEdge,
 		removeNode,
 		referencedAssetIds,
-		removeNodeImageContent,
+		removeNodeContentBlock,
 		moveNodeContentBlock,
 		setNodeDesignations,
 		setNodePinned,
@@ -1903,7 +1903,7 @@
 			createdAt: Date.now()
 		};
 		commitUserGraph(
-			addNodeImageContent(
+			addNodeContentBlock(
 				graph,
 				nodeId,
 				{ type: 'image', assetId, alt: details.alt, caption: details.caption },
@@ -1941,7 +1941,7 @@
 	 * can reach it any more.
 	 */
 	async function deleteNodeImage(nodeId: string, assetId: string) {
-		const result = removeNodeImageContent(graph, nodeId, assetId);
+		const result = removeNodeContentBlock(graph, nodeId, assetId);
 		commitUserGraph(result.graph, editIntent('remove image'));
 		if (!assetStore || !assetScope) return;
 		for (const removedAssetId of result.removedAssetIds) {

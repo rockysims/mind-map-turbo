@@ -2,26 +2,33 @@ import { describe, expect, it } from 'vitest';
 import {
 	addEdge,
 	addNode,
+	addNodeContentBlock,
 	commitInlineTitleSyntax,
 	deleteTagEverywhere,
 	duplicateEdgeIdentifier,
 	findExistingEdge,
 	moveNode,
+	moveNodeContentBlock,
 	neighborsOf,
 	NEW_NODE_TITLE,
 	normalizeNodeTitle,
+	referencedAssetIds,
 	removeEdge,
 	removeNode,
 	removeNodeAddon,
+	removeNodeContentBlock,
 	setNodeAddon,
 	setNodeDesignations,
 	setNodePinned,
 	setTagColor,
 	togglePinned,
 	updateEdge,
-	updateNodeContent
+	updateNodeContent,
+	updateNodeImageContent
 } from './graph';
 import { makeGraph } from './testFixtures';
+import type { GraphAssetMetadata } from '../../types/multigraph';
+import type { NodeFileContent, NodeImageContent } from '../../types/node';
 
 describe('graph mutations', () => {
 	describe('addNode', () => {
@@ -645,6 +652,274 @@ describe('graph mutations', () => {
 			});
 
 			expect(removeNodeAddon(graph, 'missing', 'task')).toBe(graph);
+		});
+	});
+
+	describe('content blocks and their assets', () => {
+		const imageAsset = (id: string): GraphAssetMetadata => ({
+			id,
+			kind: 'image',
+			mimeType: 'image/png',
+			name: `${id}.png`,
+			size: 12,
+			createdAt: 1
+		});
+
+		const fileAsset = (id: string): GraphAssetMetadata => ({
+			id,
+			kind: 'file',
+			mimeType: 'text/csv',
+			name: `${id}.csv`,
+			size: 24,
+			createdAt: 2
+		});
+
+		const imageBlock = (assetId: string): NodeImageContent => ({
+			type: 'image',
+			assetId,
+			alt: 'A photo'
+		});
+
+		const fileBlock = (assetId: string): NodeFileContent => ({
+			type: 'file',
+			assetId,
+			name: `${assetId}.csv`
+		});
+
+		describe('addNodeContentBlock', () => {
+			it('appends an image block and its asset without mutating the original graph', () => {
+				const graph = makeGraph({ nodeCount: 2 });
+
+				const next = addNodeContentBlock(graph, 'n1', imageBlock('a1'), imageAsset('a1'));
+
+				expect(next).not.toBe(graph);
+				expect(next.nodes).not.toBe(graph.nodes);
+				expect(next.nodes[1].content).toEqual([imageBlock('a1')]);
+				expect(next.assets).toEqual({ a1: imageAsset('a1') });
+				expect(graph.nodes[1].content).toBeUndefined();
+				expect(graph.assets).toBeUndefined();
+			});
+
+			it('appends a file block beside an image already on the node', () => {
+				const withImage = addNodeContentBlock(
+					makeGraph({ nodeCount: 1 }),
+					'n0',
+					imageBlock('a1'),
+					imageAsset('a1')
+				);
+
+				const next = addNodeContentBlock(withImage, 'n0', fileBlock('f1'), fileAsset('f1'));
+
+				expect(next.nodes[0].content).toEqual([imageBlock('a1'), fileBlock('f1')]);
+				expect(next.assets).toEqual({ a1: imageAsset('a1'), f1: fileAsset('f1') });
+				expect(withImage.nodes[0].content).toEqual([imageBlock('a1')]);
+			});
+
+			it('is a no-op for missing node ids', () => {
+				const graph = makeGraph({ nodeCount: 1 });
+
+				expect(addNodeContentBlock(graph, 'missing', fileBlock('f1'), fileAsset('f1'))).toBe(graph);
+			});
+		});
+
+		describe('removeNodeContentBlock', () => {
+			it('drops a file block and reports its asset as unreferenced', () => {
+				const graph = addNodeContentBlock(
+					makeGraph({ nodeCount: 1 }),
+					'n0',
+					fileBlock('f1'),
+					fileAsset('f1')
+				);
+
+				const { graph: next, removedAssetIds } = removeNodeContentBlock(graph, 'n0', 'f1');
+
+				expect(next).not.toBe(graph);
+				expect(next.nodes[0].content).toEqual([]);
+				expect(next.assets).toEqual({});
+				expect(removedAssetIds).toEqual(['f1']);
+				expect(graph.nodes[0].content).toEqual([fileBlock('f1')]);
+			});
+
+			it('drops an image block the same way', () => {
+				const graph = addNodeContentBlock(
+					makeGraph({ nodeCount: 1 }),
+					'n0',
+					imageBlock('a1'),
+					imageAsset('a1')
+				);
+
+				expect(removeNodeContentBlock(graph, 'n0', 'a1')).toMatchObject({
+					removedAssetIds: ['a1']
+				});
+			});
+
+			// The caller tombstones what comes back, so naming an asset another node
+			// still shows would delete a live blob out from under it.
+			it('reports nothing removed while another node still references the asset', () => {
+				const twoNodes = addNodeContentBlock(
+					addNodeContentBlock(makeGraph({ nodeCount: 2 }), 'n0', fileBlock('f1'), fileAsset('f1')),
+					'n1',
+					fileBlock('f1'),
+					fileAsset('f1')
+				);
+
+				const { graph: next, removedAssetIds } = removeNodeContentBlock(twoNodes, 'n0', 'f1');
+
+				expect(removedAssetIds).toEqual([]);
+				expect(next.assets).toEqual({ f1: fileAsset('f1') });
+				expect(next.nodes[1].content).toEqual([fileBlock('f1')]);
+			});
+
+			it('leaves the other blocks on the node alone', () => {
+				const graph = addNodeContentBlock(
+					addNodeContentBlock(
+						makeGraph({ nodeCount: 1 }),
+						'n0',
+						imageBlock('a1'),
+						imageAsset('a1')
+					),
+					'n0',
+					fileBlock('f1'),
+					fileAsset('f1')
+				);
+
+				const { graph: next } = removeNodeContentBlock(graph, 'n0', 'f1');
+
+				expect(next.nodes[0].content).toEqual([imageBlock('a1')]);
+			});
+
+			it('is a no-op for missing node ids', () => {
+				const graph = makeGraph({ nodeCount: 1 });
+
+				expect(removeNodeContentBlock(graph, 'missing', 'f1')).toEqual({
+					graph,
+					removedAssetIds: []
+				});
+			});
+		});
+
+		describe('referencedAssetIds', () => {
+			it('is empty for a graph with no content', () => {
+				expect(referencedAssetIds(makeGraph({ nodeCount: 2 })).size).toBe(0);
+			});
+
+			it('counts an image-only node', () => {
+				const graph = addNodeContentBlock(
+					makeGraph({ nodeCount: 1 }),
+					'n0',
+					imageBlock('a1'),
+					imageAsset('a1')
+				);
+
+				expect([...referencedAssetIds(graph)]).toEqual(['a1']);
+			});
+
+			it('counts a file-only node', () => {
+				const graph = addNodeContentBlock(
+					makeGraph({ nodeCount: 1 }),
+					'n0',
+					fileBlock('f1'),
+					fileAsset('f1')
+				);
+
+				expect([...referencedAssetIds(graph)]).toEqual(['f1']);
+			});
+
+			it('counts both kinds across a mixed graph, deduped', () => {
+				const graph = addNodeContentBlock(
+					addNodeContentBlock(
+						addNodeContentBlock(
+							makeGraph({ nodeCount: 2 }),
+							'n0',
+							imageBlock('a1'),
+							imageAsset('a1')
+						),
+						'n0',
+						fileBlock('f1'),
+						fileAsset('f1')
+					),
+					'n1',
+					fileBlock('f1'),
+					fileAsset('f1')
+				);
+
+				expect([...referencedAssetIds(graph)].sort()).toEqual(['a1', 'f1']);
+			});
+		});
+
+		describe('updateNodeImageContent', () => {
+			it('rewrites alt and caption without mutating the original graph', () => {
+				const graph = addNodeContentBlock(
+					makeGraph({ nodeCount: 1 }),
+					'n0',
+					imageBlock('a1'),
+					imageAsset('a1')
+				);
+
+				const next = updateNodeImageContent(graph, 'n0', 'a1', {
+					alt: 'Changed',
+					caption: 'On the bench'
+				});
+
+				expect(next).not.toBe(graph);
+				expect(next.nodes[0].content).toEqual([
+					{ type: 'image', assetId: 'a1', alt: 'Changed', caption: 'On the bench' }
+				]);
+				expect(graph.nodes[0].content).toEqual([imageBlock('a1')]);
+			});
+
+			// Alt text is an image concept; a file row's caption is T03's to edit.
+			it('leaves a file block sharing the asset id untouched', () => {
+				const graph = addNodeContentBlock(
+					makeGraph({ nodeCount: 1 }),
+					'n0',
+					fileBlock('f1'),
+					fileAsset('f1')
+				);
+
+				expect(
+					updateNodeImageContent(graph, 'n0', 'f1', { alt: 'Changed' }).nodes[0].content
+				).toEqual([fileBlock('f1')]);
+			});
+
+			it('is a no-op for missing node ids', () => {
+				const graph = makeGraph({ nodeCount: 1 });
+
+				expect(updateNodeImageContent(graph, 'missing', 'a1', { alt: 'x' })).toBe(graph);
+			});
+		});
+
+		describe('moveNodeContentBlock', () => {
+			it('reorders blocks of either kind without mutating the original graph', () => {
+				const graph = addNodeContentBlock(
+					addNodeContentBlock(
+						makeGraph({ nodeCount: 1 }),
+						'n0',
+						imageBlock('a1'),
+						imageAsset('a1')
+					),
+					'n0',
+					fileBlock('f1'),
+					fileAsset('f1')
+				);
+
+				const next = moveNodeContentBlock(graph, 'n0', 1, 0);
+
+				expect(next).not.toBe(graph);
+				expect(next.nodes[0].content).toEqual([fileBlock('f1'), imageBlock('a1')]);
+				expect(graph.nodes[0].content).toEqual([imageBlock('a1'), fileBlock('f1')]);
+			});
+
+			it('is a no-op for an out-of-range index', () => {
+				const graph = addNodeContentBlock(
+					makeGraph({ nodeCount: 1 }),
+					'n0',
+					fileBlock('f1'),
+					fileAsset('f1')
+				);
+
+				expect(moveNodeContentBlock(graph, 'n0', 0, 5)).toBe(graph);
+			});
 		});
 	});
 

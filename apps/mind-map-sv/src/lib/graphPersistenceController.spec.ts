@@ -161,6 +161,52 @@ function imageGraph(assetIds: string[]): MultigraphData {
 	});
 }
 
+/** The same, for file attachments: one `file` block and its metadata per asset id. */
+function fileGraph(assetIds: string[]): MultigraphData {
+	const graph = makeGraph({
+		nodes: assetIds.map((assetId, index) => ({
+			id: `n${index}`,
+			title: `File ${index}`,
+			description: '',
+			content: [{ type: 'file' as const, assetId, name: `${assetId}.csv` }]
+		}))
+	});
+	return {
+		...graph,
+		assets: Object.fromEntries(
+			assetIds.map((assetId) => [
+				assetId,
+				{
+					id: assetId,
+					kind: 'file' as const,
+					mimeType: 'text/csv',
+					name: `${assetId}.csv`,
+					size: 1,
+					createdAt: 1
+				}
+			])
+		)
+	};
+}
+
+async function storeFileAsset(
+	store: GraphAssetStore,
+	scope: string,
+	assetId: string,
+	body: string
+) {
+	const blob = new Blob([body], { type: 'text/csv' });
+	await store.put({
+		scope,
+		assetId,
+		blob,
+		mimeType: 'text/csv',
+		name: `${assetId}.csv`,
+		size: blob.size,
+		updatedAt: 1
+	});
+}
+
 async function embeddedAsset(assetId: string, body: string): Promise<GraphFileEmbeddedAsset> {
 	const blob = new Blob([body], { type: 'image/png' });
 	return {
@@ -1361,6 +1407,100 @@ describe('GraphPersistenceController additive import', () => {
 		expect(result).toMatchObject({ outcome: 'imported' });
 		expect(await readAsset(assetStore, 'active', 'host-asset')).toBe('host bytes');
 		expect(await readAsset(assetStore, 'active', 'incoming-asset')).toBe('incoming bytes');
+	});
+});
+
+describe('file attachments across export and import', () => {
+	const CSV_BODY = 'time,value\n1,2\n';
+
+	// The whole portability claim for schema 7 in one test: a CSV attached here
+	// comes back out of a document opened by an app that has never seen it.
+	it('embeds a file attachment on export and a fresh app hydrates it on import', async () => {
+		const assetStore = new MemoryGraphAssetStore();
+		const { controller } = setup({ assetStore });
+		await controller.load('active');
+		controller.notifyGraphChanged(fileGraph(['readings']), { syncView: true });
+		await storeFileAsset(assetStore, 'active', 'readings', CSV_BODY);
+
+		const artifact = await controller.exportGraphDocument(
+			'<!doctype html><html><body></body></html>'
+		);
+
+		// The exported bytes are all a fresh profile has: new store, new controller.
+		const freshStore = new MemoryGraphAssetStore();
+		const fresh = setup({ assetStore: freshStore });
+		await fresh.controller.load('active');
+
+		expect(await fresh.controller.importGraphDocument(artifact.content)).toBe('imported');
+		expect(fresh.controller.getView().graph.nodes[0].content).toEqual([
+			{ type: 'file', assetId: 'readings', name: 'readings.csv' }
+		]);
+		expect(await readAsset(freshStore, 'active', 'readings')).toBe(CSV_BODY);
+	});
+
+	it('carries a file and an image out of the same document', async () => {
+		const assetStore = new MemoryGraphAssetStore();
+		const { controller } = setup({ assetStore });
+		await controller.load('active');
+		const mixed = fileGraph(['readings']);
+		controller.notifyGraphChanged(
+			{
+				...mixed,
+				nodes: [
+					{
+						...mixed.nodes[0],
+						content: [
+							...(mixed.nodes[0].content ?? []),
+							{ type: 'image', assetId: 'photo', alt: 'A photo' }
+						]
+					}
+				],
+				assets: {
+					...mixed.assets,
+					photo: {
+						id: 'photo',
+						kind: 'image',
+						mimeType: 'image/png',
+						size: 1,
+						createdAt: 1
+					}
+				}
+			},
+			{ syncView: true }
+		);
+		await storeFileAsset(assetStore, 'active', 'readings', CSV_BODY);
+		await storeAsset(assetStore, 'active', 'photo', 'picture bytes');
+
+		const artifact = await controller.exportGraphDocument(
+			'<!doctype html><html><body></body></html>'
+		);
+
+		const freshStore = new MemoryGraphAssetStore();
+		const fresh = setup({ assetStore: freshStore });
+		await fresh.controller.load('active');
+		await fresh.controller.importGraphDocument(artifact.content);
+
+		expect(await readAsset(freshStore, 'active', 'readings')).toBe(CSV_BODY);
+		expect(await readAsset(freshStore, 'active', 'photo')).toBe('picture bytes');
+	});
+
+	// `deleteUnreferenced` counts file blocks through `referencedAssetIds`, so a
+	// file the incoming document does not name is swept like an unreferenced image.
+	it('sweeps a file blob the imported document no longer references', async () => {
+		const assetStore = new MemoryGraphAssetStore();
+		const { controller } = setup({ assetStore, confirmGraphImportReplace: () => true });
+		await controller.load('active');
+		controller.notifyGraphChanged(fileGraph(['stale']), { syncView: true });
+		await storeFileAsset(assetStore, 'active', 'stale', 'old rows');
+
+		await controller.importGraphDocument(
+			serializeGraphHtmlFile({
+				data: makeGraph({ nodeCount: 1, pinned: [0] }),
+				viewState: NEUTRAL_VIEW_STATE
+			})
+		);
+
+		expect(await readAsset(assetStore, 'active', 'stale')).toBeNull();
 	});
 });
 

@@ -5,7 +5,20 @@ export interface NodeImageContent {
 	caption?: string;
 }
 
-export type NodeContentBlock = NodeImageContent;
+/**
+ * A file of any type attached to a node. `name` is the filename the upload came
+ * with, kept on the block rather than read back off the asset so a details row
+ * can be drawn without touching IndexedDB. There is no `alt`: a file is not
+ * rendered, it is opened, so the name is what stands in for it.
+ */
+export interface NodeFileContent {
+	type: 'file';
+	assetId: string;
+	name: string;
+	caption?: string;
+}
+
+export type NodeContentBlock = NodeImageContent | NodeFileContent;
 
 /**
  * Data the `!task` add-on carries. `doneAt` is an epoch-ms stamp of the moment

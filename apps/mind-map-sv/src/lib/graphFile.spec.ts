@@ -7,11 +7,13 @@ import {
 	GRAPH_HTML_PAYLOAD_SCRIPT_ID,
 	GRAPH_HTML_READER_VERSION,
 	createGraphFileArtifact,
+	isUnsupportedHtmlGraphFile,
 	parseGraphFile,
 	parseGraphFileText,
 	serializeGraphFile,
 	serializeGraphHtmlFile,
-	type GraphFileDocument
+	type GraphFileDocument,
+	type GraphFileEmbeddedAsset
 } from './graphFile';
 import { CURRENT_SCHEMA_VERSION, NEUTRAL_VIEW_STATE, PersistedGraphError } from './migrations';
 
@@ -201,12 +203,138 @@ describe('HTML graph files', () => {
 		);
 	});
 
+	// Schema 7 stamps reader version 3, so the next schema bump stamps 4. This is
+	// the case a reader one version behind sees: it must route the file to the
+	// file's own embedded shell rather than fail on the schema envelope, which is
+	// what `isUnsupportedHtmlGraphFile` is asked at the call site.
+	it('routes a file one reader version ahead to the unsupported-app-version path', () => {
+		const html = serializeGraphHtmlFile(makeDoc()).replace(
+			`"minReaderVersion": ${GRAPH_HTML_READER_VERSION}`,
+			`"minReaderVersion": ${GRAPH_HTML_READER_VERSION + 1}`
+		);
+
+		let thrown: unknown;
+		try {
+			parseGraphFileText(html);
+		} catch (error) {
+			thrown = error;
+		}
+
+		expect(thrown).toEqual(
+			new PersistedGraphError(
+				`Unsupported graph HTML reader version: ${GRAPH_HTML_READER_VERSION + 1}`,
+				'unsupported-app-version'
+			)
+		);
+		expect(isUnsupportedHtmlGraphFile(thrown)).toBe(true);
+	});
+
+	it('stamps the current reader version on what it writes', () => {
+		expect(GRAPH_HTML_READER_VERSION).toBe(3);
+		expect(serializeGraphHtmlFile(makeDoc())).toContain('"minReaderVersion": 3');
+	});
+
 	it('creates HTML file artifacts by default', () => {
 		const artifact = createGraphFileArtifact('team graph', makeDoc());
 
 		expect(artifact.filename).toBe('team-graph.html');
 		expect(artifact.mimeType).toBe('text/html');
 		expect(parseGraphFileText(artifact.content).data).toEqual(makeDoc().data);
+	});
+});
+
+describe('embedded assets in HTML graph files', () => {
+	const IMAGE: GraphFileEmbeddedAsset = {
+		assetId: 'a1',
+		mimeType: 'image/png',
+		name: 'photo.png',
+		size: 12,
+		base64: 'aW1hZ2UgYnl0ZXM='
+	};
+
+	const CSV: GraphFileEmbeddedAsset = {
+		assetId: 'f1',
+		mimeType: 'text/csv',
+		name: 'readings.csv',
+		size: 24,
+		base64: 'dGltZSx2YWx1ZQoxLDIK'
+	};
+
+	/** A document whose one node carries the given blocks, so the assets are referenced. */
+	function docWithAssets(embeddedAssets: GraphFileEmbeddedAsset[]): GraphFileDocument {
+		const graph = makeGraph({ nodeCount: 1, pinned: [0] });
+		return {
+			data: {
+				...graph,
+				nodes: [
+					{
+						...graph.nodes[0],
+						content: embeddedAssets.map((asset) =>
+							asset.mimeType.startsWith('image/') && asset.assetId.startsWith('a')
+								? { type: 'image' as const, assetId: asset.assetId, alt: 'A photo' }
+								: { type: 'file' as const, assetId: asset.assetId, name: asset.name ?? '' }
+						)
+					}
+				],
+				assets: Object.fromEntries(
+					embeddedAssets.map((asset) => [
+						asset.assetId,
+						{
+							id: asset.assetId,
+							kind: asset.assetId.startsWith('a') ? ('image' as const) : ('file' as const),
+							mimeType: asset.mimeType,
+							name: asset.name,
+							size: asset.size,
+							createdAt: 1
+						}
+					])
+				)
+			},
+			viewState: NEUTRAL,
+			embeddedAssets
+		};
+	}
+
+	it('round-trips an image asset, as it always has', () => {
+		const doc = docWithAssets([IMAGE]);
+
+		expect(parseGraphFileText(serializeGraphHtmlFile(doc)).embeddedAssets).toEqual([IMAGE]);
+	});
+
+	// Before schema 7 the container rejected any non-image asset as a malformed
+	// file; a CSV attachment has to survive the same round trip an image does.
+	it('round-trips a text/csv asset with its mime type, size and name intact', () => {
+		const doc = docWithAssets([CSV]);
+		const html = serializeGraphHtmlFile(doc);
+		const parsed = parseGraphFileText(html);
+
+		expect(parsed.embeddedAssets).toEqual([CSV]);
+		expect(parsed.data).toEqual(doc.data);
+	});
+
+	it('parses a version 7 document carrying an image and a file together', () => {
+		const parsed = parseGraphFileText(serializeGraphHtmlFile(docWithAssets([IMAGE, CSV])));
+
+		expect(parsed.embeddedAssets).toEqual([IMAGE, CSV]);
+	});
+
+	it('still rejects an embedded asset with no mime type', () => {
+		const html = serializeGraphHtmlFile(docWithAssets([CSV])).replace(
+			'data-mime-type="text/csv"',
+			'data-mime-type=""'
+		);
+
+		expect(() => parseGraphFileText(html)).toThrow(
+			new PersistedGraphError('Graph HTML file embedded asset is malformed.', 'malformed-payload')
+		);
+	});
+
+	it('still rejects an embedded asset whose payload is not base64', () => {
+		const html = serializeGraphHtmlFile(docWithAssets([CSV])).replace(CSV.base64, 'not base64!');
+
+		expect(() => parseGraphFileText(html)).toThrow(
+			new PersistedGraphError('Graph HTML file embedded asset is malformed.', 'malformed-payload')
+		);
 	});
 });
 

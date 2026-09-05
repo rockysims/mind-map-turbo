@@ -5,7 +5,12 @@ import type {
 	Point,
 	TagColorNamespace
 } from '../../types/multigraph';
-import type { NodeData, NodeImageContent, QuantityDesignation } from '../../types/node';
+import type {
+	NodeContentBlock,
+	NodeData,
+	NodeImageContent,
+	QuantityDesignation
+} from '../../types/node';
 import { withNodeAddon, type NodeAddonName } from './nodeAddons';
 import { mathPlainText } from '../../MathText/lib/mathPlainText';
 import { symbolFor } from '../../MathText/lib/mathSymbols';
@@ -311,10 +316,11 @@ function dedupeDesignations(designations: readonly QuantityDesignation[]): Quant
 	return result;
 }
 
-export function addNodeImageContent(
+/** Append an image or file block to a node, registering its asset metadata. */
+export function addNodeContentBlock(
 	data: MultigraphData,
 	nodeId: string,
-	image: NodeImageContent,
+	block: NodeContentBlock,
 	asset: GraphAssetMetadata
 ): MultigraphData {
 	if (!hasNode(data, nodeId)) return data;
@@ -326,7 +332,7 @@ export function addNodeImageContent(
 			[asset.id]: asset
 		},
 		nodes: data.nodes.map((node) =>
-			node.id === nodeId ? { ...node, content: [...(node.content ?? []), image] } : node
+			node.id === nodeId ? { ...node, content: [...(node.content ?? []), block] } : node
 		)
 	};
 }
@@ -378,7 +384,14 @@ export function moveNodeContentBlock(
 	};
 }
 
-export function removeNodeImageContent(
+/**
+ * Drop a node's block for `assetId`, whatever kind it is.
+ *
+ * `removedAssetIds` names the assets no block anywhere still points at, so the
+ * caller can tombstone their blobs (`assets/assetTrash.ts`) rather than delete
+ * them: an undo has to be able to put the block back pointing at something.
+ */
+export function removeNodeContentBlock(
 	data: MultigraphData,
 	nodeId: string,
 	assetId: string
@@ -390,9 +403,7 @@ export function removeNodeImageContent(
 			node.id === nodeId
 				? {
 						...node,
-						content: (node.content ?? []).filter(
-							(block) => !(block.type === 'image' && block.assetId === assetId)
-						)
+						content: (node.content ?? []).filter((block) => block.assetId !== assetId)
 					}
 				: node
 		)
@@ -403,11 +414,17 @@ export function removeNodeImageContent(
 	return { graph: { ...nextGraph, assets: nextAssets }, removedAssetIds: [assetId] };
 }
 
+/**
+ * Every asset id any node still points at — the keep-set for garbage
+ * collection. Every content block kind carries one, so this counts images and
+ * files alike; a block type without an asset would fail to type-check here,
+ * which is the reminder to revisit it.
+ */
 export function referencedAssetIds(data: MultigraphData): Set<string> {
 	const ids = new Set<string>();
 	for (const node of data.nodes) {
 		for (const block of node.content ?? []) {
-			if (block.type === 'image') ids.add(block.assetId);
+			ids.add(block.assetId);
 		}
 	}
 	return ids;

@@ -15,7 +15,12 @@ export type TagColorNamespace = keyof TagColorConfig;
 
 export interface GraphAssetMetadata {
 	id: string;
-	kind: 'image';
+	/**
+	 * What the asset is *for*, not what it is: the MIME type says PNG, the kind
+	 * says whether the node renders it inline or offers it as a download. A PNG
+	 * attached through Add file is `'file'` with an `image/png` MIME type.
+	 */
+	kind: 'image' | 'file';
 	mimeType: string;
 	name?: string;
 	size: number;
