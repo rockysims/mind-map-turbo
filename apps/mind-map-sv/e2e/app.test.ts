@@ -215,6 +215,10 @@ test('downloaded HTML documents propagate a clean live shell to descendants', as
 	const openPopup = await openPopupPromise;
 	await openPopup.waitForLoadState('domcontentloaded');
 	await expect(openPopup.getByRole('button', { name: 'Choose graph file' })).toBeVisible();
+	// The Open page names the app the reader is currently in, so they can tell
+	// which of two .html files holds the newer app before picking one. Served
+	// from the dev server here, which injects no build stamp.
+	await expect(openPopup.locator('.app-version')).toHaveText(/^version /);
 	await openPopup.close();
 
 	const newPopupPromise = page.waitForEvent('popup');

@@ -23,6 +23,8 @@
 		confirmResponse = true,
 		/** Text to import when the "Import text" harness button is clicked. */
 		simulateImportText = '',
+		/** Raw build stamp the harness app claims to be, for version-skew stories. */
+		appVersion = undefined,
 		/** Mirrors the root route's fresh-default inline edit behavior for stories. */
 		editFreshDefaultRoot = false
 	}: {
@@ -31,6 +33,7 @@
 		layoutSettings?: Partial<LayoutSettings>;
 		confirmResponse?: boolean;
 		simulateImportText?: string;
+		appVersion?: string;
 		editFreshDefaultRoot?: boolean;
 	} = $props();
 
@@ -58,6 +61,7 @@
 	const redoBlockedReason = $derived(historyGuardReason ?? 'Nothing to redo.');
 
 	const persisted = usePersistedGraph({
+		appVersion: appVersionAtMount(),
 		persistence,
 		createScheduler: (onStatus) =>
 			new SaveScheduler({
@@ -103,6 +107,10 @@
 
 	function graphsAtMount(): Record<string, MultigraphData> {
 		return graphs;
+	}
+
+	function appVersionAtMount(): string | undefined {
+		return appVersion;
 	}
 
 	async function loadRoutedGraph(graphId: string): Promise<void> {
@@ -169,6 +177,7 @@
 	data-loaded-graph-id={persisted.loadedGraphId}
 	data-routed-graph-id={routedGraphId}
 	data-notice={persisted.notice}
+	data-notice-severity={persisted.noticeSeverity}
 	data-graph-ids={graphIds}
 	data-node-count={persisted.graph.nodes.length}
 	data-primary-title={primaryTitle}

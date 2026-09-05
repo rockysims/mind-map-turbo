@@ -10,6 +10,7 @@ import {
 	semanticallyUnchanged
 } from './components/ui/Multigraph/lib/graphIdentity';
 import { importGraphData } from './components/ui/Multigraph/lib/graphImport';
+import { newerAppNotice } from './buildInfo';
 import {
 	documentStatusHasUnsavedChanges,
 	documentStatusForGraph,
@@ -96,7 +97,7 @@ export type ControllerStatus =
 	 * or a cached draft another tab would have overwritten. It outranks the
 	 * document status line until something replaces it; a plain notice does not.
 	 */
-	| { state: 'notice'; message: string; sticky?: boolean }
+	| { state: 'notice'; message: string; sticky?: boolean; severity?: 'info' | 'warning' }
 	| { state: 'exported'; filename: string }
 	| { state: 'error'; message: string };
 
@@ -252,6 +253,11 @@ export type GraphPersistenceControllerDeps = {
 	createGraphId?: () => string;
 	createDocumentId?: () => string;
 	now?: () => number;
+	/**
+	 * Raw build stamp of the running app. Recorded on every document it writes,
+	 * and compared against a document's own stamp on open.
+	 */
+	appVersion?: string;
 	openUnsupportedHtmlFile?: (html: string) => boolean;
 	assetStore?: GraphAssetStore;
 	chooseEmbeddedDocumentConflict?: (context: {
@@ -448,6 +454,16 @@ export class GraphPersistenceController {
 		// exactly the blobs the tail was about to make reachable again, and the
 		// symptom — a broken image several undos later — is a long way from here.
 		await this.sweepTrashedAssets();
+
+		// Last, so the awaits above cannot overwrite it with a routine status, and
+		// sticky because the reader has to act on it: their next Save would wrap
+		// this newer graph back up in this older app's code.
+		const versionNotice = newerAppNotice(doc.appVersion, this.deps.appVersion);
+		if (versionNotice !== null) {
+			this.update({
+				status: { state: 'notice', sticky: true, severity: 'warning', message: versionNotice }
+			});
+		}
 	}
 
 	private async shouldOpenEmbeddedFile(context: {
@@ -692,6 +708,7 @@ export class GraphPersistenceController {
 				viewState: this.view.viewState,
 				documentId,
 				exportedAt: this.now(),
+				appVersion: this.deps.appVersion,
 				embeddedAssets
 			},
 			{
@@ -760,11 +777,12 @@ export class GraphPersistenceController {
 		await this.hydrateEmbeddedAssets(graphId, imported);
 		await this.flushPendingSave();
 		await this.refreshGraphList();
+		const versionNotice = newerAppNotice(imported.appVersion, this.deps.appVersion);
 		this.update({
-			status: {
-				state: 'notice',
-				message: `Imported into "${graphId}".`
-			}
+			status:
+				versionNotice !== null
+					? { state: 'notice', sticky: true, severity: 'warning', message: versionNotice }
+					: { state: 'notice', message: `Imported into "${graphId}".` }
 		});
 		return 'imported';
 	}
@@ -1412,6 +1430,12 @@ export function controllerNoticeSeverity(view: ControllerView): 'info' | 'warnin
 	if (view.status.state === 'notice' && view.status.sticky === true) return 'info';
 	if (view.cachePending) return 'info';
 	if (view.status.state === 'warning') return 'warning';
+	// A sticky notice may name its own severity, at the same point in the order
+	// where controllerNotice hands it the line. Notices that name none keep
+	// falling through to the document-status rule, as they always have.
+	if (view.status.state === 'notice' && view.status.sticky === true) {
+		if (view.status.severity !== undefined) return view.status.severity;
+	}
 	// Only escalate when the notice is the document-status one saying the work
 	// is not saved.
 	if (!view.draftCached && documentStatusHasUnsavedChanges(view.documentStatus)) {
