@@ -20,7 +20,11 @@ export const APP_CONFIG = {
 		runtime: {
 			version: '0.27.7', // Pyodide version pinned so a run is reproducible
 			indexUrl: 'https://cdn.jsdelivr.net/pyodide/v0.27.7/full/', // CDN the runtime loads from
-			packages: ['pandas', 'numpy', 'scipy', 'matplotlib'] // packages loaded with it
+			// The preload set only. scipy's wheel is 13 MB of the 33 MB the four
+			// together cost and most scripts never touch it, so the executor calls
+			// `loadPackagesFromImports` before every run and fetches whatever else a
+			// script imports on demand (T01 spike decision).
+			packages: ['pandas', 'numpy', 'matplotlib']
 		}
 	},
 	interaction: {
