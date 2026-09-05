@@ -118,9 +118,6 @@ TODO: make long press work too even if its not a mobile device
 Later:
 
 - Show image as node background with title over it
-- Mark done (checkbox?) feature (maybe via special !task tag?)
-- Allow # prefix even within edit for consistency? currently seems to fail to add tag
-- Need an easier way to add/remove tags (at least for nodes)?
 
 from the 2026-08-28 derived-edges review (small math-layer improvements; the
 big findings became milestone 11 and two standalone bug-fix tasks):
