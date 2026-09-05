@@ -5,6 +5,7 @@ import {
 	markInterruptedRuns,
 	recordAiRun,
 	refreshPromotedOutputs,
+	replaceAiRun,
 	setAiPrompt,
 	setAiScript
 } from './aiNode';
@@ -326,6 +327,74 @@ describe('recordAiRun', () => {
 		recordAiRun(before, 'ai', makeRun({ id: 'r2' }), 1);
 
 		expect(aiAddon(before).runs.map((run) => run.id)).toEqual(['r1']);
+	});
+});
+
+describe('replaceAiRun', () => {
+	it('swaps the placeholder for the finished record in place, leaving one entry', () => {
+		const before = graphWithAi({
+			runs: [makeRun({ id: 'old' }), makeRun({ id: 'live', status: 'interrupted' })]
+		});
+
+		const after = replaceAiRun(
+			before,
+			'ai',
+			makeRun({
+				id: 'live',
+				status: 'done',
+				summary: 'Two channels, both drifting.',
+				outputs: [makeOutput('drift.png', 'a1')],
+				toolCalls: 2
+			}),
+			[imageAsset('a1')]
+		);
+
+		const runs = aiAddon(after).runs;
+		expect(runs.map((run) => run.id)).toEqual(['old', 'live']);
+		expect(runs[1]).toMatchObject({
+			status: 'done',
+			summary: 'Two channels, both drifting.',
+			toolCalls: 2
+		});
+		expect(after.assets?.a1).toEqual(imageAsset('a1'));
+	});
+
+	it('leaves a graph whose history no longer holds the run untouched', () => {
+		const before = graphWithAi({ runs: [makeRun({ id: 'old' })] });
+
+		const after = replaceAiRun(before, 'ai', makeRun({ id: 'gone', status: 'done' }), [
+			imageAsset('a1')
+		]);
+
+		expect(after).toBe(before);
+	});
+
+	it('truncates the summary the way recordAiRun does', () => {
+		const before = graphWithAi({ runs: [makeRun({ id: 'live', status: 'interrupted' })] });
+
+		const after = replaceAiRun(
+			before,
+			'ai',
+			makeRun({ id: 'live', status: 'done', summary: 'x'.repeat(50) }),
+			[],
+			10
+		);
+
+		expect(aiAddon(after).runs[0].summary).toBe('x'.repeat(10));
+	});
+
+	it('does not mutate the graph it was handed', () => {
+		const before = graphWithAi({ runs: [makeRun({ id: 'live', status: 'interrupted' })] });
+
+		replaceAiRun(before, 'ai', makeRun({ id: 'live', status: 'done', summary: 'done' }));
+
+		expect(aiAddon(before).runs[0].status).toBe('interrupted');
+	});
+
+	it('leaves a node without the add-on alone', () => {
+		const before = makeGraph({ nodes: [{ id: 'plain', title: 'Plain', description: '' }] });
+
+		expect(replaceAiRun(before, 'plain', makeRun({ id: 'live' }))).toBe(before);
 	});
 });
 

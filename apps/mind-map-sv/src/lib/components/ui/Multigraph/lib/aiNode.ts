@@ -10,7 +10,7 @@
  */
 
 import { APP_CONFIG } from '$lib/appConfig';
-import type { MultigraphData } from '../../types/multigraph';
+import type { GraphAssetMetadata, MultigraphData } from '../../types/multigraph';
 import type {
 	AiAddon,
 	AiRun,
@@ -129,6 +129,57 @@ export function recordAiRun(
 	const evictedAssetIds = [...candidates].filter((assetId) => !stillReferenced.has(assetId));
 
 	return { graph: withoutAssetMetadata(graph, evictedAssetIds), evictedAssetIds };
+}
+
+/**
+ * Swap one already-recorded run for its finished self, in place, and register
+ * the metadata of the assets it names.
+ *
+ * This is the other half of the run controller's two-commit shape. A run
+ * commits a placeholder record the moment it starts — `status: 'interrupted'`,
+ * because the schema refuses a persisted `running` and a reload must show the
+ * run that was in flight rather than nothing — and replaces it here when it
+ * ends. Replacing rather than appending is the whole point: `recordAiRun`
+ * appends, and appending the terminal record would leave two entries for one
+ * run.
+ *
+ * Matching is by `run.id`, and a run id that is not in the history leaves the
+ * graph untouched. That is the honest answer for the one way it happens: an
+ * undo landing mid-run takes the placeholder off the node, and pushing the
+ * terminal record onto a history the reader has just undone would be putting
+ * back what they removed.
+ *
+ * The assets ride along rather than being registered by a second function
+ * because they are one fact with the run: an output the record names and whose
+ * metadata the graph does not carry is a broken attachment, and one commit is
+ * what keeps the two from ever being apart. The summary is truncated on the way
+ * in for the same reason `recordAiRun` truncates it.
+ */
+export function replaceAiRun(
+	data: MultigraphData,
+	nodeId: string,
+	run: AiRun,
+	assets: GraphAssetMetadata[] = [],
+	summaryMaxChars: number = APP_CONFIG.ai.summaryMaxChars
+): MultigraphData {
+	const ai = aiAddonOf(data, nodeId);
+	if (ai === undefined) return data;
+	const index = ai.runs.findIndex((candidate) => candidate.id === run.id);
+	if (index === -1) return data;
+
+	const runs = [...ai.runs];
+	runs[index] = { ...run, summary: run.summary.slice(0, Math.max(0, summaryMaxChars)) };
+
+	const withRun = withAiAddon(data, nodeId, { ...ai, runs });
+	if (assets.length === 0) return withRun;
+
+	return {
+		...withRun,
+		assets: {
+			...(withRun.assets ?? {}),
+			...Object.fromEntries(assets.map((asset) => [asset.id, asset]))
+		}
+	};
 }
 
 /**
