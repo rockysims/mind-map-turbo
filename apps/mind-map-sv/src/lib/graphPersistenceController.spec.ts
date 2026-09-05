@@ -1199,6 +1199,86 @@ describe('GraphPersistenceController', () => {
 	});
 });
 
+describe('reporting the export size', () => {
+	/** The `fileGraph` node, with its one attachment resized to `sizeBytes`. */
+	function heavyGraph(sizeBytes: number): MultigraphData {
+		return {
+			...fileGraph(['a1']),
+			assets: {
+				a1: {
+					id: 'a1',
+					kind: 'file',
+					mimeType: 'text/csv',
+					name: 'a1.csv',
+					size: sizeBytes,
+					createdAt: 1
+				}
+			}
+		};
+	}
+
+	async function loadedHeavy(sizeBytes = 30 * 1024 * 1024) {
+		const context = setup();
+		await context.persistence.save('heavy', {
+			data: heavyGraph(sizeBytes),
+			viewState: NEUTRAL_VIEW_STATE
+		});
+		await context.controller.load('heavy');
+		return context;
+	}
+
+	it('adds the download size under the document status', async () => {
+		const { controller } = await loadedHeavy();
+
+		// 30 MB of CSV plus the third base64 adds. The second sentence becomes a
+		// line of its own in the toolbar.
+		expect(controllerNotice(controller.getView())).toBe(
+			'Draft cached in this browser. Save to keep it. Download will be about 40 MB.'
+		);
+		// A big document is something the reader built, not a risk to their work.
+		expect(controllerNoticeSeverity(controller.getView())).toBe('info');
+	});
+
+	it('says nothing about a document below the configured total', async () => {
+		const { controller } = await loadedHeavy(APP_CONFIG.multigraph.attachments.warnTotalBytes / 2);
+
+		expect(controllerNotice(controller.getView())).toBe(
+			'Draft cached in this browser. Save to keep it.'
+		);
+	});
+
+	it('adds to a sticky notice rather than replacing it', async () => {
+		const { controller } = await loadedHeavy();
+
+		controller.reportBlockedAction('Nothing to undo. Opened files start fresh.');
+
+		// The size is an addition, never a tier of its own: the answer the reader
+		// is owed keeps the line, with the size stacked beneath it.
+		expect(controllerNotice(controller.getView())).toBe(
+			'Nothing to undo. Opened files start fresh. Download will be about 40 MB.'
+		);
+		expect(controllerNoticeSeverity(controller.getView())).toBe('info');
+	});
+
+	it('keeps a cache failure readable as its own sentence', async () => {
+		const { controller, scheduler } = await loadedHeavy();
+		controller.notifyGraphChanged(addNode(controller.getView().graph, { title: 'Another' }), {
+			syncView: true
+		});
+		scheduler.failFlushOnce = true;
+
+		await controller.selectGraph('next');
+
+		// The store's raw message ends without punctuation, so appending supplies
+		// the full stop the toolbar splits its lines on.
+		expect(controllerNotice(controller.getView())).toBe(
+			'Could not cache draft. quota exceeded. Download will be about 40 MB.'
+		);
+		// The failure still owns the colour; the size line does not soften it.
+		expect(controllerNoticeSeverity(controller.getView())).toBe('warning');
+	});
+});
+
 describe('GraphPersistenceController additive import', () => {
 	/** A loaded 'active' graph of two nodes, viewed at a non-neutral pan and zoom. */
 	async function loadedHost(options: Parameters<typeof setup>[0] = {}) {

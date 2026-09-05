@@ -20,6 +20,7 @@ import {
 	type DocumentBaseline,
 	type DocumentStatus
 } from './documentStatus';
+import { exportSizeEstimateBytes, exportSizeNotice } from './exportSize';
 import {
 	createGraphFileArtifact,
 	isUnsupportedHtmlGraphFile,
@@ -1385,7 +1386,31 @@ export function statusToNotice(status: ControllerStatus): string {
 	return `Could not cache draft. ${status.message}`;
 }
 
+/**
+ * The notice the toolbar shows for this view.
+ *
+ * Two parts: the one message the tiers in `primaryNotice` pick out, and — when
+ * the document has grown big enough to be worth saying so — the export size
+ * appended to it. The size is deliberately not a tier of its own. It is a
+ * standing fact about the document rather than an answer to something the
+ * reader just did, so it is *added* to whichever notice won and never
+ * substituted for it: a sticky answer, a quota warning and a cache error all
+ * keep the line they were given, and the toolbar stacks the size beneath it
+ * (`noticeLines` breaks a notice into its sentences).
+ */
 export function controllerNotice(view: ControllerView): string {
+	const notice = primaryNotice(view);
+	const sizeLine = exportSizeNotice(exportSizeEstimateBytes(view.graph));
+	if (sizeLine === null) return notice;
+	if (notice === '') return sizeLine;
+	// `noticeLines` breaks on sentence punctuation, so a notice ending without
+	// any — a cache error carrying a storage layer's raw message — needs one, or
+	// the two sentences render as one run-on line.
+	return /[.!?]$/.test(notice) ? `${notice} ${sizeLine}` : `${notice}. ${sizeLine}`;
+}
+
+/** The tier that owns the line, before the standing export size is added. */
+function primaryNotice(view: ControllerView): string {
 	if (view.status.state === 'error') return statusToNotice(view.status);
 	// Memory-only storage is a standing condition, not a transient status: it
 	// outranks 'Caching draft...' / 'Draft cached.' / 'Loaded "x".', which would
@@ -1415,11 +1440,17 @@ export function controllerNotice(view: ControllerView): string {
  * Severity of the notice `controllerNotice` would return, so the toolbar can
  * escalate the ones that mean work is at risk. Kept beside the messages so the
  * two cannot drift apart.
+ *
+ * Decided on `primaryNotice`'s tiers alone. The export-size line is information
+ * about a document the reader built on purpose, not a risk to it, so a document
+ * large enough to report never turns the status line amber on its own — and,
+ * being an addition rather than a tier, it never takes the colour away from the
+ * message it was appended to either.
  */
 export function controllerNoticeSeverity(view: ControllerView): 'info' | 'warning' {
 	if (view.status.state === 'error') return 'warning';
 	if (view.durability === 'memory-only') return 'warning';
-	// Mirrors controllerNotice's precedence exactly, so the styling always
+	// Mirrors primaryNotice's precedence exactly, so the styling always
 	// matches the text: a pending cache write renders 'Caching draft...' and must
 	// not be amber, even while a quota warning status is standing by.
 	if (view.status.state === 'exported') return 'info';

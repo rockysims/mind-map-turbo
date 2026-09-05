@@ -26,6 +26,37 @@ of the empty canvas, so it does not have to be remembered.
 Nodes are reachable from the keyboard: <kbd>Tab</kbd> moves between them and
 <kbd>Enter</kbd> opens the focused node's details.
 
+## Title syntax
+
+A node's title carries more than its name. Three markers at the front of what
+you type are read as instructions and then removed, so the title that gets
+stored is only the words that are left:
+
+- `#lab Filter rig` tags the node `lab` and titles it "Filter rig". Node tags
+  colour the node's border.
+- `@baseline Filter rig` tags the edge created alongside the new node
+  `baseline`. It applies to that edge, not to the node.
+- `!task Filter rig` gives the node the task add-on: a done checkbox in its
+  details view and a small box on the canvas.
+
+The markers may be combined in any order, may abut, and may repeat, so
+`!task #lab @bench Buy filters` and `#lab!task@bench Buy filters` both mean the
+same thing. A name ends at the next marker or the next space, which is why a
+tag name cannot itself contain `#`, `@` or `!`. A leading `>` or `<` before all
+of that points the new edge: `>` draws the arrow towards the node you are
+typing, `<` draws it back the other way, and without either the edge is
+undirected.
+
+Unlike `#` and `@`, which take any word you invent, `!` picks from a closed
+list of add-ons — `task` is the only one today. An unrecognised name is not an
+error and does not vanish: `!important Read this` ends the marker run and stays
+in the title exactly as typed.
+
+The node edit sheet's title field reads `#` and `!` too, and adds to what is
+already there rather than replacing it — the sheet's own tag list and add-on
+toggles stay the way to remove one. It leaves `@` and a leading `>` or `<`
+alone, because an existing node has no newly created edge to apply them to.
+
 ## Writing math in node descriptions
 
 Node descriptions accept LaTeX between dollar delimiters: `$…$` renders inline
