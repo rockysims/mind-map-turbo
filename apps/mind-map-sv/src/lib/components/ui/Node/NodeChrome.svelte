@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import { pinScrollToOrigin } from '../Multigraph/lib/pinScroll';
 
 	let {
 		diameterPx,
@@ -30,8 +31,18 @@
 	} = $props();
 </script>
 
+<!--
+	`onscroll` puts the box straight back: `.circle` clips and is never a
+	scroller, in the stage or as deep zoom's frame, but `overflow: hidden` only
+	stops the *reader* scrolling — script and focus still can, and in the frame
+	that took the whole surface off screen. Unconditional rather than only in
+	`detailsMode`, because the answer to "were you scrolled?" is the same "no"
+	either way and a branch here would only be a second thing to get wrong. See
+	`Multigraph/lib/pinScroll.ts`.
+-->
 <div
 	class="circle"
+	onscroll={(event) => pinScrollToOrigin(event.currentTarget)}
 	data-pinned={pinned ? 'true' : undefined}
 	data-tag-border={hasTagBorder ? 'true' : undefined}
 	data-details-mode={detailsMode ? 'true' : undefined}
@@ -54,6 +65,8 @@
 		border: var(--node-border-width) solid #aaaaaa;
 		background: var(--node-surface-background, #ccc);
 		overflow: hidden;
+		/* Clipping, not scrolling — so scroll anchoring has no business here. */
+		overflow-anchor: none;
 	}
 
 	.circle[data-pinned='true'] {

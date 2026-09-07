@@ -379,6 +379,25 @@
 		return `${index}:${input.nodeId}:${input.assetId}`;
 	}
 
+	/**
+	 * The hidden file inputs the Add and Replace buttons open.
+	 *
+	 * Add and Replace used to be `<label>`s wrapping their input, which is the
+	 * usual way to make a file picker look like a button — and it works by moving
+	 * focus onto the input. Inside deep zoom that is what blanked the surface: the
+	 * browser scrolls every scrollable ancestor to bring a newly focused element
+	 * into view, the frame is an `overflow: hidden` box that is scrollable from
+	 * script even though the reader cannot scroll it, and the sums come out far
+	 * off inside a transform-scaled content layer (see `lib/pinScroll.ts`). So the
+	 * press lands on a real button, focus stays on it, and the button opens the
+	 * picker by clicking it — which needs no focus and scrolls nothing.
+	 *
+	 * Keyed by row rather than by asset id, exactly as the row itself is: the same
+	 * file can be attached twice, and the two rows need two pickers.
+	 */
+	let addPicker = $state<HTMLInputElement | null>(null);
+	let replacePickers = $state<Record<string, HTMLInputElement | null>>({});
+
 	/** How the accessible name of a row action names the node it acts on. */
 	function groupName(group: AiInputGroup): string {
 		return group.self ? 'this node' : group.title;
@@ -930,18 +949,25 @@
 						<div class="group-actions">
 							<!-- One button, not the sheet's two: the file's own type decides
 							     what it becomes, so an image picked here is still an image. -->
-							<label
+							<button
+								type="button"
 								class="add-file"
+								data-ai-add-file
+								aria-label="Add a file to this node"
 								title="Attaches a file to this node, so the next run reads it."
+								onclick={() => addPicker?.click()}
 							>
 								Add file
-								<input
-									type="file"
-									data-ai-add-file
-									aria-label="Add a file to this node"
-									onchange={addPickedFile}
-								/>
-							</label>
+							</button>
+							<input
+								class="file-picker"
+								type="file"
+								tabindex="-1"
+								aria-hidden="true"
+								bind:this={addPicker}
+								data-ai-add-file-input
+								onchange={addPickedFile}
+							/>
 						</div>
 					</div>
 					{#if inputs.length === 0}
@@ -1005,15 +1031,25 @@
 										phone reader would otherwise get a glyph and nothing else.
 									-->
 									<div class="row-actions">
-										<label class="row-action" title={REPLACE_HINT}>
+										<button
+											type="button"
+											class="row-action"
+											data-ai-replace-file={input.assetId}
+											aria-label="Replace {input.name} with a new file under the same name"
+											title={REPLACE_HINT}
+											onclick={() => replacePickers[fileKey(input, index)]?.click()}
+										>
 											<span aria-hidden="true">⇄</span>
-											<input
-												type="file"
-												data-ai-replace-file={input.assetId}
-												aria-label="Replace {input.name} with a new file under the same name"
-												onchange={(event) => replacePickedFile(event, input)}
-											/>
-										</label>
+										</button>
+										<input
+											class="file-picker"
+											type="file"
+											tabindex="-1"
+											aria-hidden="true"
+											bind:this={replacePickers[fileKey(input, index)]}
+											data-ai-replace-file-input={input.assetId}
+											onchange={(event) => replacePickedFile(event, input)}
+										/>
 										<button
 											type="button"
 											class="row-action"
@@ -1225,8 +1261,8 @@
 
 	/*
 	 * The same square target Promote uses, for the same reason: a glyph in a
-	 * press big enough for a thumb. The label is a button in everything but
-	 * element — it holds the file input that opens the picker.
+	 * press big enough for a thumb. All three are real buttons now, Replace
+	 * included — see `.file-picker` for why it stopped being a label.
 	 */
 	.row-action {
 		display: grid;
@@ -1249,23 +1285,34 @@
 		padding: 0.35rem 0.75rem;
 		background: #f8fafc;
 		color: #334155;
+		/* A `<button>` does not inherit the surface's type the way the `<label>`
+		   this used to be did. */
+		font-family: inherit;
 		font-size: 0.95rem;
 		cursor: pointer;
 	}
 
 	/*
-	 * The file inputs themselves are off-screen rather than `display: none`: a
-	 * hidden input is not focusable, and the label's press is the only way in for
-	 * a mouse. `overflow: hidden` and not `auto` — this surface admits exactly
-	 * one scroller.
+	 * The file inputs the two buttons click.
+	 *
+	 * They are out of the reader's way but still drawn, so a story can hand one a
+	 * file the way the dialog does. `position: fixed` and not `absolute`: fixed
+	 * takes them out of this surface's flow entirely and parks them at the frame's
+	 * own top-left, so there is nothing for a scroll container or a clipping box
+	 * above to bring into view even if something does ask. (Inside a transformed
+	 * ancestor a fixed element is contained by that ancestor rather than by the
+	 * viewport, which is what keeps it with the frame.) `tabindex="-1"` and
+	 * `pointer-events: none` because the button is the control and these are its
+	 * plumbing — nothing should ever reach them but a `.click()`.
 	 */
-	.row-action input,
-	.add-file input {
-		position: absolute;
+	.file-picker {
+		position: fixed;
+		top: 0;
+		left: 0;
 		width: 1px;
 		height: 1px;
-		overflow: hidden;
-		clip: rect(0 0 0 0);
+		opacity: 0;
+		pointer-events: none;
 	}
 
 	.attachment-status {

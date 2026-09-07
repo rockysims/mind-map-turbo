@@ -17,6 +17,7 @@
 
 <script lang="ts">
 	import { contentLayerScale, crossfadeOpacity } from './lib/morphSurface';
+	import { pinScrollToOrigin } from './lib/pinScroll';
 	import type { FrameGeometry } from './lib/frameGeometry';
 
 	let {
@@ -115,9 +116,13 @@
 {/snippet}
 
 {#snippet defaultFrame(args: FrameSnippetArgs)}
+	<!-- `onscroll` because this box clips and must never be anywhere but its
+	     origin: see `lib/pinScroll.ts` for the blank frame that taught us an
+	     `overflow: hidden` box is still scrollable from script and from focus. -->
 	<div
 		class="deep-zoom-default-frame"
 		style={`border-radius: ${args.borderRadiusPx}px; border-width: ${args.borderWidthPx}px;`}
+		onscroll={(event) => pinScrollToOrigin(event.currentTarget)}
 	>
 		{@render args.content()}
 	</div>
@@ -170,6 +175,10 @@
 		border-color: #334155;
 		background: #ffffff;
 		overflow: hidden;
+		/* Nothing here may move the box, the browser's scroll anchoring least of
+		   all — the content layers are absolutely positioned and transform-scaled,
+		   which is exactly the geometry anchoring reasons badly about. */
+		overflow-anchor: none;
 	}
 
 	.deep-zoom-content-layer {

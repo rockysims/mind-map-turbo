@@ -22,6 +22,7 @@
 <script lang="ts">
 	import DeepZoomLayer, { type FrameSnippetArgs } from './DeepZoomLayer.svelte';
 	import ZoomWorld, { type DescendInput } from './ZoomWorld.svelte';
+	import { pinScrollToOrigin } from './lib/pinScroll';
 
 	let {
 		levels = [],
@@ -97,7 +98,13 @@
 					{@render details?.(level)}
 				</ZoomWorld>
 			{:else}
-				<div class="frozen-level" aria-hidden={isActive ? undefined : 'true'}>
+				<!-- The other clipping box on the path from the layer to the content,
+				     pinned for the same reason the frame is (`lib/pinScroll.ts`). -->
+				<div
+					class="frozen-level"
+					aria-hidden={isActive ? undefined : 'true'}
+					onscroll={(event) => pinScrollToOrigin(event.currentTarget)}
+				>
 					{@render details?.(level)}
 				</div>
 			{/if}
@@ -139,6 +146,7 @@
 		width: 100%;
 		height: 100%;
 		overflow: hidden;
+		overflow-anchor: none;
 		pointer-events: none;
 	}
 
