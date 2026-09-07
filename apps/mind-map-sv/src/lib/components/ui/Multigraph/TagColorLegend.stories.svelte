@@ -48,6 +48,20 @@
 	type DeleteSpy = {
 		mock: { calls: Array<[TagColorNamespace, string]> };
 	};
+
+	/**
+	 * `touch-action` decides what the browser's own gesture handling does, which a
+	 * synthetic PointerEvent sequence cannot exercise — dispatched events scroll
+	 * nothing, and `scrollTop = n` works whatever the rule says. The computed value
+	 * is the assertion that actually means something here.
+	 */
+	function touchActionOf(canvasElement: HTMLElement, selector: string): string {
+		const found = canvasElement.querySelector(selector);
+		if (!(found instanceof HTMLElement)) {
+			throw new Error(`no element for ${selector}`);
+		}
+		return getComputedStyle(found).touchAction;
+	}
 </script>
 
 <Story
@@ -94,5 +108,19 @@
 
 		canvas.getByRole('button', { name: 'Delete edge tag rel' }).click();
 		expect(deleteSpy.mock.calls.at(-1)).toEqual(['edgeTags', 'rel']);
+	}}
+/>
+
+<Story
+	name="LetsAFingerScrollTheTagListWhileTheBackdropSwallowsTheGesture"
+	play={async ({ canvasElement }) => {
+		// The legend is a scroll container, and a graph with more tags than fit puts
+		// its last rows below the fold — a blanket `none` here meant no finger could
+		// ever reach them.
+		expect(touchActionOf(canvasElement, '.tag-color-legend')).toBe('pan-y');
+
+		// The backdrop scrolls nothing and must still swallow the gesture whole, or
+		// the canvas pans behind an open legend.
+		expect(touchActionOf(canvasElement, '.legend-backdrop')).toBe('none');
 	}}
 />
