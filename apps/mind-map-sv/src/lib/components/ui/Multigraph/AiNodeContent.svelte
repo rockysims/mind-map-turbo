@@ -79,27 +79,32 @@
 	 *
 	 * `label` names the mode on the switch; `run` names the *act* on the button
 	 * beside it, because the switch is a choice and the button is what happens.
+	 * `running` is that same act in flight, so the one button that runs three
+	 * different things still says which one is out — a bare spinner cannot.
 	 * The names are verbs in the reader's own words — Write, Change, Run —
 	 * rather than the persisted `AiRunMode` values (`analyse`, `refine`,
 	 * `rerun`), which stay as they are in every stored run.
 	 */
-	const MODES: { mode: AiRunMode; label: string; run: string; hint: string }[] = [
+	const MODES: { mode: AiRunMode; label: string; run: string; running: string; hint: string }[] = [
 		{
 			mode: 'analyse',
 			label: 'Write',
 			run: 'Write & run',
+			running: 'Writing…',
 			hint: 'Claude writes a new script from the prompt and runs it'
 		},
 		{
 			mode: 'refine',
 			label: 'Change',
 			run: 'Change & run',
+			running: 'Changing…',
 			hint: 'Claude changes the stored script to match the prompt and runs it'
 		},
 		{
 			mode: 'rerun',
 			label: 'Run',
 			run: 'Run',
+			running: 'Running…',
 			// It names the trap rather than the saving: Run calls no model, and every
 			// attached file reaches the script on every run — but a script that opens
 			// fixed filenames never looks at a new one, and nothing about that answer
@@ -629,7 +634,8 @@
 					onclick={() => onRun?.(mode)}
 				>
 					{#if busy}
-						<span class="dot" class:reduced-motion={reduceMotion} aria-hidden="true"></span>Running…
+						<span class="dot" class:reduced-motion={reduceMotion} aria-hidden="true"
+						></span>{selectedMode.running}
 					{:else}
 						{selectedMode.run}
 					{/if}

@@ -850,14 +850,28 @@
 
 <Story
 	name="ARunInFlightSaysSoOnTheButtonThatStartedIt"
-	args={{ runState: runState({ phase: 'running', text: 'Working.' }) }}
+	args={{
+		node: nodeOf(aiGraph({ script: SCRIPT, runs: [DONE_RUN] })),
+		runState: runState({ phase: 'running', text: 'Working.' })
+	}}
 	play={async ({ canvasElement }) => {
 		const run = required(canvasElement, '[data-ai-run]');
 		expect(run).toBeDisabled();
-		expect(run.textContent?.trim()).toBe('Running…');
 		expect(run.querySelector('.dot')).not.toBeNull();
 		// The way out of a run stays live while the way into one does not.
 		expect(required(canvasElement, '[data-ai-cancel]')).toBeEnabled();
+
+		// The same button runs three different things, so a dot alone cannot say
+		// which one is out: in flight it names the act of the mode that started it,
+		// in the same verb the switch used to choose it.
+		await userEvent.click(required(canvasElement, '[data-ai-mode="analyse"]'));
+		await waitFor(() => expect(text(canvasElement, '[data-ai-run]')).toBe('Writing…'));
+
+		await userEvent.click(required(canvasElement, '[data-ai-mode="refine"]'));
+		await waitFor(() => expect(text(canvasElement, '[data-ai-run]')).toBe('Changing…'));
+
+		await userEvent.click(required(canvasElement, '[data-ai-mode="rerun"]'));
+		await waitFor(() => expect(text(canvasElement, '[data-ai-run]')).toBe('Running…'));
 	}}
 />
 
