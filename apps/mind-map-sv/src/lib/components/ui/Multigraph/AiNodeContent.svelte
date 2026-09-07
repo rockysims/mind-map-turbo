@@ -1460,7 +1460,7 @@
 	}
 
 	.runtime-note {
-		color: #94a3b8;
+		color: #64748b;
 		font-size: 0.8125rem;
 	}
 
