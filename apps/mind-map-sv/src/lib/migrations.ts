@@ -498,7 +498,7 @@ function isAiRun(value: unknown): value is AiRun {
 		(value.mode === 'analyse' || value.mode === 'refine' || value.mode === 'rerun') &&
 		// Optional rather than required: every run recorded before the field
 		// existed is still a valid run, and a missing prompt only costs the
-		// workbench its "unchanged" answer (it offers Refine instead of Re-run).
+		// workbench its "unchanged" answer (it offers `refine` instead of `rerun`).
 		(value.prompt === undefined || typeof value.prompt === 'string') &&
 		(value.model === undefined || typeof value.model === 'string') &&
 		typeof value.runtime === 'string' &&
@@ -518,6 +518,10 @@ function isAiRunInput(value: unknown): value is AiRunInput {
 		isRecord(value) &&
 		typeof value.nodeId === 'string' &&
 		(value.assetId === undefined || typeof value.assetId === 'string') &&
+		// Optional for the same reason `prompt` is: a run recorded before the
+		// filename was kept is still a valid run, and all it costs is the
+		// workbench's ability to name what changed since it.
+		(value.name === undefined || typeof value.name === 'string') &&
 		(value.label === undefined || typeof value.label === 'string')
 	);
 }

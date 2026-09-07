@@ -56,7 +56,14 @@ import type { GraphAssetMetadata, MultigraphData } from '../../types/multigraph'
 import type { AiRun, AiRunInput, AiRunMode, AiRunOutput, AiRunStatus } from '../../types/node';
 import { collectAiInputs, type AiInput } from './aiInputs';
 import { recordAiRun, refreshPromotedOutputs, replaceAiRun, setAiScript } from './aiNode';
-import { IDLE_RUN_STATE, type AiRunState, type AiRunStep } from './aiWorkbenchView';
+import {
+	hasInputChanges,
+	inputChangesForAddon,
+	IDLE_RUN_STATE,
+	type AiInputChanges,
+	type AiRunState,
+	type AiRunStep
+} from './aiWorkbenchView';
 
 /** The undo label every commit a run makes carries. */
 export const AI_RUN_COMMIT_LABEL = 'run AI node';
@@ -393,7 +400,7 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 			putState(nodeId, {
 				...IDLE_RUN_STATE,
 				phase: 'error',
-				error: 'This node has no stored script to run yet. Run an analysis first.'
+				error: 'This node has no stored script to run yet. Write one first.'
 			});
 			return 'error';
 		}
@@ -455,6 +462,9 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 							settings,
 							prompt: ai.prompt,
 							previousScript: storedScript,
+							// Against the run whose script is stored, and computed here rather
+							// than at the press: the graph can move between the two.
+							inputChanges: inputChangesForAddon(ai, inputs),
 							signal: abort.signal,
 							progress,
 							...(traceback === undefined ? {} : { traceback })
@@ -561,6 +571,8 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 		settings: AiSettings;
 		prompt: string;
 		previousScript: string;
+		/** What has changed about the files since the stored script was written. */
+		inputChanges: AiInputChanges;
 		signal: AbortSignal;
 		progress: RunProgress;
 		/** The failure a "Fix with AI" refine is answering. Absent for every other run. */
@@ -581,6 +593,9 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 				? buildRefineRequest({
 						...build,
 						previousScript: input.previousScript,
+						// Only when something actually moved: an empty list would be a
+						// sentence about nothing, in a prefix that is cached across the loop.
+						...(hasInputChanges(input.inputChanges) ? { inputChanges: input.inputChanges } : {}),
 						...(input.traceback === undefined ? {} : { traceback: input.traceback })
 					})
 				: buildAnalyseRequest(build);
@@ -713,7 +728,9 @@ function fileInputCount(inputs: AiInput[]): number {
 function toRunInput(input: AiInput): AiRunInput {
 	return {
 		nodeId: input.nodeId,
-		...(input.kind === 'file' ? { assetId: input.assetId } : {}),
+		// The name as well as the id: what the next run compares against is the
+		// filename the script was written to open.
+		...(input.kind === 'file' ? { assetId: input.assetId, name: input.name } : {}),
 		...(input.label === undefined ? {} : { label: input.label })
 	};
 }

@@ -231,10 +231,12 @@ describe('createAiRunController', () => {
 			runtime: APP_CONFIG.ai.runtime.version,
 			usage: { inputTokens: 400, outputTokens: 80 }
 		});
-		// One entry per input the request carried: the neighbour's text and its file.
+		// One entry per input the request carried: the neighbour's text and its
+		// file. The file's name as well as its id, because that is what the next
+		// run compares against to say whether the stored script is still current.
 		expect(runs[0].inputs).toEqual([
 			{ nodeId: 'data', label: 'baseline' },
-			{ nodeId: 'data', assetId: CSV_ASSET_ID, label: 'baseline' }
+			{ nodeId: 'data', assetId: CSV_ASSET_ID, name: 'sweep.csv', label: 'baseline' }
 		]);
 	});
 
@@ -387,6 +389,35 @@ describe('createAiRunController', () => {
 
 		expect(userText(h.client.requests[0])).not.toContain('failed');
 		expect(h.runs()[0].mode).toBe('refine');
+	});
+
+	it('tells a refine which files have moved since the stored script was written', async () => {
+		// The digests say what is attached now; this says which of them the script
+		// has never seen, which is the part it cannot work out by reading itself.
+		const previous: AiRun = {
+			id: 'r1',
+			startedAt: 1,
+			finishedAt: 2,
+			status: 'done',
+			mode: 'analyse',
+			prompt: 'Plot channel 2.',
+			runtime: APP_CONFIG.ai.runtime.version,
+			inputs: [{ nodeId: 'data', assetId: 'gone-asset', name: 'old.csv' }],
+			summary: 'Plotted.',
+			outputs: [],
+			toolCalls: 0
+		};
+		const h = await harness({
+			graph: baseGraph({ script: 'print("stored")', runs: [previous] }),
+			turns: [endTurn('Updated for the new file.')]
+		});
+
+		expect(await h.controller.run('ai', 'refine')).toBe('done');
+
+		expect(userText(h.client.requests[0])).toContain(
+			'Since this script was written these files were added: sweep.csv; removed: old.csv. ' +
+				'Update the script to use the current files.'
+		);
 	});
 
 	it('records a cancelled run with no outputs when the run is cancelled mid-script', async () => {

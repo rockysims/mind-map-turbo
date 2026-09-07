@@ -2,7 +2,8 @@
 
 **Created:** 2026-08-30
 **Area:** `apps/mind-map-sv/src/lib/components/ui/Multigraph/NodeActionMenu.svelte`,
-`apps/mind-map-sv/src/lib/components/ui/GraphToolbar/GraphToolbar.svelte`
+`apps/mind-map-sv/src/lib/components/ui/GraphToolbar/GraphToolbar.svelte`,
+`apps/mind-map-sv/src/lib/components/ui/Multigraph/AiNodeContent.svelte`
 **Cost if ignored:** The people most likely to need the explanation are the
 least likely to get it. The node action menu is opened by long-press on a
 phone, where a hover tooltip can never appear — so `Merge`, the label that
@@ -14,6 +15,12 @@ in exactly the place it is most often used.
 Every button in the node action menu and the graph toolbar carries a native
 `title` attribute. Browsers show that on mouse hover only: nothing on touch,
 and nothing on keyboard focus in most browsers.
+
+2026-09-06: the AI workbench's Promote control became an icon (`⤴`) with an
+`aria-label` and a `title`, which puts one more explanation behind the same
+hover. A screen reader still hears the label; a phone reader gets the glyph
+and nothing else. The same payoff below covers it — a tooltip that reaches
+focus and long-press would serve this button and the menu at once.
 
 ## Why
 

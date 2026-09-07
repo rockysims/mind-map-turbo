@@ -9,6 +9,7 @@
  */
 
 import { latestDoneRun } from './aiNode';
+import type { AiInput } from './aiInputs';
 import type { AiAddon, AiRun, AiRunMode } from '../../types/node';
 
 /**
@@ -70,6 +71,88 @@ export { latestDoneRun };
 export const IDLE_RUN_STATE: AiRunState = { phase: 'idle', text: '', thinking: '', steps: [] };
 
 /**
+ * What has happened to the files since a run, by filename.
+ *
+ * Three lists rather than a flag, because the sentence the workbench writes
+ * names them — "added a.csv, replaced b.csv" — and because they mean different
+ * things to a script: an added file it will not open, a replaced one it will
+ * open and find different, a removed one it will fail on.
+ */
+export interface AiInputChanges {
+	added: string[];
+	removed: string[];
+	replaced: string[];
+}
+
+/** Nothing has changed: the answer every caller with no run to compare gets. */
+const NO_INPUT_CHANGES: AiInputChanges = { added: [], removed: [], replaced: [] };
+
+export function hasInputChanges(changes: AiInputChanges): boolean {
+	return changes.added.length + changes.removed.length + changes.replaced.length > 0;
+}
+
+/**
+ * Which files have come, gone or been swapped since `run` was recorded.
+ *
+ * This exists because re-run is not as free as it looks. The controller does
+ * gather the current files on every run, but the *stored script* opens the
+ * names it was written for — so a file added since then is written into the
+ * sandbox and never read, and a renamed one is written under a name no line of
+ * the script mentions. Nothing fails; the answer is just quietly about the old
+ * data, which is the worst way for this to go wrong.
+ *
+ * Matched by asset id first: the same id under a new name is not a new file,
+ * and the same name over a new id is `replaced`, which is the case a reader has
+ * to be told about because the script will happily read the new bytes and say
+ * nothing. Only file inputs count — a neighbour's title and description are
+ * sent in the request, not written to disk, so a script cannot be out of date
+ * with respect to one.
+ *
+ * A run recorded before filenames were kept (`AiRunInput.name`) can still be
+ * matched by id, so files that survived are recognised; what it cannot do is
+ * name a file that has gone, and that one is left out rather than guessed at.
+ */
+export function inputsChangedSince(run: AiRun, inputs: AiInput[]): AiInputChanges {
+	const current = fileInputs(inputs);
+	const previous = run.inputs.filter((input) => input.assetId !== undefined);
+
+	const currentIds = new Set(current.map((input) => input.assetId));
+	const previousIds = new Set(previous.map((input) => input.assetId));
+	// Only the names that have *gone* can stand in for a replacement: a name that
+	// is still attached under its old id has not been replaced by anything.
+	const goneNames = new Set(
+		previous
+			.filter((input) => input.assetId !== undefined && !currentIds.has(input.assetId))
+			.map((input) => input.name)
+			.filter((name): name is string => name !== undefined)
+	);
+
+	const added: string[] = [];
+	const replaced: string[] = [];
+	for (const input of current) {
+		if (previousIds.has(input.assetId)) continue;
+		const list = goneNames.has(input.name) ? replaced : added;
+		if (!list.includes(input.name)) list.push(input.name);
+	}
+
+	const currentNames = new Set(current.map((input) => input.name));
+	const removed: string[] = [];
+	for (const input of previous) {
+		if (input.assetId !== undefined && currentIds.has(input.assetId)) continue;
+		// A gone id whose name is attached again is the replacement above, not a
+		// removal; a gone id with no name recorded cannot be named at all.
+		if (input.name === undefined || currentNames.has(input.name)) continue;
+		if (!removed.includes(input.name)) removed.push(input.name);
+	}
+
+	return { added, removed, replaced };
+}
+
+function fileInputs(inputs: AiInput[]): Extract<AiInput, { kind: 'file' }>[] {
+	return inputs.filter((input) => input.kind === 'file');
+}
+
+/**
  * The mode the switch starts on.
  *
  * - **analyse** — nothing to build on: no completed run, or no stored script.
@@ -78,14 +161,60 @@ export const IDLE_RUN_STATE: AiRunState = { phase: 'idle', text: '', thinking: '
  * - **refine** — the prompt has moved since the run that wrote the script, so
  *   the script needs editing to match. A run recorded before `AiRun.prompt`
  *   existed lands here too: an absent prompt cannot be claimed unchanged, and
- *   offering to edit the script is the recoverable half of that guess.
- * - **rerun** — the prompt is exactly what produced the stored script, so the
- *   only reason to run is new data, and that needs no model call at all.
+ *   offering to edit the script is the recoverable half of that guess. Changed
+ *   *files* land here as well, and for the same reason: the stored script names
+ *   the files it was written for, so new data can need a new script even when
+ *   the question has not moved an inch.
+ * - **rerun** — the prompt and the files are both exactly what produced the
+ *   stored script, so the only reason to run is that the bytes behind an
+ *   attachment moved — and that needs no model call at all.
+ *
+ * `inputs` is optional because a caller that has not collected them cannot be
+ * asked to invent them; without it the file question is simply not asked, which
+ * is the answer this had before it could be.
  */
-export function defaultRunMode(ai: AiAddon): AiRunMode {
+export function defaultRunMode(ai: AiAddon, inputs?: AiInput[]): AiRunMode {
 	const latest = latestDoneRun(ai);
 	if (latest === undefined || ai.script === undefined) return 'analyse';
-	return latest.prompt === ai.prompt ? 'rerun' : 'refine';
+	if (latest.prompt !== ai.prompt) return 'refine';
+	if (inputs !== undefined && hasInputChanges(inputsChangedSince(latest, inputs))) return 'refine';
+	return 'rerun';
+}
+
+/**
+ * What changed since the run whose script is stored, or nothing at all when
+ * there is no such run. The workbench's one call: it draws the note and reads
+ * the default mode off the same answer.
+ */
+export function inputChangesForAddon(ai: AiAddon, inputs: AiInput[]): AiInputChanges {
+	const latest = latestDoneRun(ai);
+	if (latest === undefined || ai.script === undefined) return NO_INPUT_CHANGES;
+	return inputsChangedSince(latest, inputs);
+}
+
+/**
+ * The note above the mode switch, or `''` when there is nothing to say.
+ *
+ * It names the files and then names the choice, because the reader's next act
+ * is picking a mode: Run is not wrong, it is just literal, and Change is how the
+ * script catches up. Only the non-empty parts are listed — "removed: none" is
+ * noise about a thing that did not happen.
+ */
+export function inputChangesNote(changes: AiInputChanges): string {
+	const parts = [
+		listPart('added', changes.added),
+		listPart('replaced', changes.replaced),
+		listPart('removed', changes.removed)
+	].filter((part) => part !== '');
+	if (parts.length === 0) return '';
+	return (
+		`Files changed since the script was written: ${parts.join(', ')}. ` +
+		'Run uses the stored script as it is; choose Change so Claude updates it.'
+	);
+}
+
+function listPart(verb: string, names: string[]): string {
+	return names.length === 0 ? '' : `${verb} ${names.join(', ')}`;
 }
 
 /**
@@ -109,8 +238,8 @@ export function staleOutputNames(ai: AiAddon): string[] {
 
 /**
  * One line of what a run cost: `claude-opus-5 · 48 s · 12.3k tokens · 3 tool
- * calls`, and `script only · 2 s` for a re-run, which calls no model and so has
- * neither tokens nor tool calls to report.
+ * calls`, and `script only · 2 s` for a Run of the stored script, which calls no
+ * model and so has neither tokens nor tool calls to report.
  *
  * Every segment is dropped when the run has nothing to put in it, so an
  * interrupted run reads as its model alone rather than as `0 s` and `0 tokens`
