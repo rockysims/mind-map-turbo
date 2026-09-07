@@ -82,6 +82,7 @@
 		referencedAssetIds,
 		removeNodeAddon,
 		removeNodeContentBlock,
+		replaceNodeContentBlockAsset,
 		moveNodeContentBlock,
 		setNodeAddon,
 		setNodeDesignations,
@@ -2017,16 +2018,32 @@
 	 * picked it: a PNG chosen through Add file is still an image, and anything
 	 * that is not an image is a file block whichever way it arrived.
 	 */
+	/** A fresh asset id, from the platform where there is one and the clock where there is not. */
+	function newAssetId(): string {
+		return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+			? crypto.randomUUID()
+			: `asset-${Date.now().toString(36)}`;
+	}
+
+	/** The metadata a stored file is registered under, from the file itself. */
+	function assetMetadataFor(assetId: string, file: File): GraphAssetMetadata {
+		return {
+			id: assetId,
+			kind: file.type.startsWith('image/') ? 'image' : 'file',
+			mimeType: file.type,
+			name: file.name,
+			size: file.size,
+			createdAt: Date.now()
+		};
+	}
+
 	async function addAttachmentToNode(
 		nodeId: string,
 		file: File
 	): Promise<'added' | 'store-failed'> {
 		if (!assetStore || !assetScope) return 'store-failed';
 		const isImage = file.type.startsWith('image/');
-		const assetId =
-			typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-				? crypto.randomUUID()
-				: `asset-${Date.now().toString(36)}`;
+		const assetId = newAssetId();
 		const stored = await assetStore.put({
 			scope: assetScope,
 			assetId,
@@ -2037,14 +2054,7 @@
 			updatedAt: Date.now()
 		});
 		if (!stored.ok) return 'store-failed';
-		const asset: GraphAssetMetadata = {
-			id: assetId,
-			kind: isImage ? 'image' : 'file',
-			mimeType: file.type,
-			name: file.name,
-			size: file.size,
-			createdAt: Date.now()
-		};
+		const asset = assetMetadataFor(assetId, file);
 		// An image's alt starts as its filename, which is what the upload knows;
 		// a file has no alt at all, because it is opened rather than rendered.
 		const block: NodeContentBlock = isImage
@@ -2080,6 +2090,58 @@
 			moveNodeContentBlock(graph, nodeId, fromIndex, fromIndex + direction),
 			editIntent('move attachment')
 		);
+	}
+
+	/**
+	 * Swap the bytes behind one attachment, keeping the name the script opens.
+	 *
+	 * The workbench's Replace: a fresh export of the same measurement, and a Run
+	 * that reads it without a model call. The new blob is stored under a new id
+	 * and the *block* is repointed, so the block's `name` (or an image's `alt`)
+	 * survives — which is what keeps `analysis.py` opening the same filename, and
+	 * what makes `inputsChangedSince` call this a replacement rather than one file
+	 * gone and another arrived.
+	 *
+	 * The old blob is tombstoned rather than deleted, on the same reasoning as a
+	 * removal: undo has to be able to put the old bytes back. A block that is not
+	 * there to repoint leaves the graph alone and tombstones the blob just stored,
+	 * so a replace that raced a delete leaves nothing behind.
+	 */
+	async function replaceNodeAttachment(
+		nodeId: string,
+		assetId: string,
+		file: File
+	): Promise<'added' | 'store-failed'> {
+		if (!assetStore || !assetScope) return 'store-failed';
+		const nextAssetId = newAssetId();
+		const stored = await assetStore.put({
+			scope: assetScope,
+			assetId: nextAssetId,
+			blob: file,
+			mimeType: file.type,
+			name: file.name,
+			size: file.size,
+			updatedAt: Date.now()
+		});
+		if (!stored.ok) return 'store-failed';
+
+		const result = replaceNodeContentBlockAsset(
+			graph,
+			nodeId,
+			assetId,
+			nextAssetId,
+			assetMetadataFor(nextAssetId, file)
+		);
+		if (result.graph === graph) {
+			await tombstoneAsset(assetStore, assetScope, nextAssetId);
+			return 'store-failed';
+		}
+
+		commitUserGraph(result.graph, editIntent('replace attachment'));
+		for (const removedAssetId of result.removedAssetIds) {
+			await tombstoneAsset(assetStore, assetScope, removedAssetId);
+		}
+		return 'added';
 	}
 
 	/**
@@ -3140,6 +3202,10 @@
 							onFix={() => fixAiNode(detailsNode.id)}
 							onOpenSettings={() => onOpenAiSettings?.()}
 							onJumpToNode={(nodeId) => jumpToNode(detailsNode.id, nodeId)}
+							onAddFile={(nodeId, file) => addAttachmentToNode(nodeId, file)}
+							onReplaceFile={(nodeId, assetId, file) =>
+								replaceNodeAttachment(nodeId, assetId, file)}
+							onRemoveFile={(nodeId, assetId) => void deleteNodeAttachment(nodeId, assetId)}
 						/>
 					</NodeDetailsLayer>
 				</div>

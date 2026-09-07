@@ -10,6 +10,7 @@
 
 import { latestDoneRun } from './aiNode';
 import type { AiInput } from './aiInputs';
+import type { FileDigest } from '$lib/ai/probeScript';
 import type { AiAddon, AiRun, AiRunMode } from '../../types/node';
 
 /**
@@ -196,17 +197,37 @@ export function inputChangesForAddon(ai: AiAddon, inputs: AiInput[]): AiInputCha
  * The note above the mode switch, or `''` when there is nothing to say.
  *
  * It names the files and then names the choice, because the reader's next act
- * is picking a mode: Run is not wrong, it is just literal, and Change is how the
- * script catches up. Only the non-empty parts are listed — "removed: none" is
- * noise about a thing that did not happen.
+ * is picking a mode. Which choice, though, depends on what moved:
+ *
+ * - **Replaced only** — the same names over new bytes, which is what the
+ *   workbench's own Replace does. The stored script opens exactly those names,
+ *   so a Run is not a trap here: it is the point. The note says so rather than
+ *   pushing the reader at a model call they do not need.
+ * - **Anything added or removed** — the script names the files it was written
+ *   for, so a new one is written into the sandbox and never read and a missing
+ *   one is a failure waiting to happen. Change is what catches the script up,
+ *   and the sentence says that. A replacement in the same breath is listed
+ *   alongside, because the reader is owed all of what moved.
+ *
+ * Only the non-empty parts are listed — "removed: none" is noise about a thing
+ * that did not happen.
  */
 export function inputChangesNote(changes: AiInputChanges): string {
+	const replacedOnly = changes.added.length === 0 && changes.removed.length === 0;
+	if (replacedOnly) {
+		if (changes.replaced.length === 0) return '';
+		const names = changes.replaced.join(', ');
+		return (
+			`${names} ${changes.replaced.length === 1 ? 'was' : 'were'} replaced since the last run. ` +
+			'Run re-runs the script on the new data; Change lets Claude adjust it.'
+		);
+	}
+
 	const parts = [
 		listPart('added', changes.added),
 		listPart('replaced', changes.replaced),
 		listPart('removed', changes.removed)
 	].filter((part) => part !== '');
-	if (parts.length === 0) return '';
 	return (
 		`Files changed since the script was written: ${parts.join(', ')}. ` +
 		'Run uses the stored script as it is; choose Change so Claude updates it.'
@@ -215,6 +236,70 @@ export function inputChangesNote(changes: AiInputChanges): string {
 
 function listPart(verb: string, names: string[]): string {
 	return names.length === 0 ? '' : `${verb} ${names.join(', ')}`;
+}
+
+/**
+ * The digest disclosure's summary: what this file will actually contribute to
+ * the request.
+ *
+ * It names the preview depth rather than hiding it, because the depth is the
+ * promise the settings sheet made about how much of the file leaves the
+ * machine. But the setting is a *ceiling*, and a file with three rows sends
+ * three however high it is set — so the number here is the smaller of the two,
+ * and a file that fits inside the preview says "all", which is a different fact
+ * about the request and the one the reader wanted: nothing was held back.
+ *
+ * At a depth of zero it is "schema only" whatever the file holds, which is the
+ * setting's own words for the promise it is keeping.
+ */
+export function digestDisclosureLabel(previewRows: number, digest: FileDigest): string {
+	const depth = Math.max(Math.floor(previewRows), 0);
+	if (depth === 0) return 'What Claude will see (schema only)';
+
+	const rows = digest.kind === 'table' ? digest.rows : undefined;
+	if (rows !== undefined && rows <= depth) {
+		return `What Claude will see (all ${rows} ${rows === 1 ? 'row' : 'rows'})`;
+	}
+	return `What Claude will see (${depth} ${depth === 1 ? 'row' : 'rows'})`;
+}
+
+/**
+ * The one line on the closed prose disclosure — what Claude said, or what it is
+ * doing while it has not said anything yet.
+ *
+ * Claude's prose is the part of a run a reader checks once and then scrolls
+ * past, so it folds away; a disclosure with nothing on its summary but a title
+ * folds away the fact that there is anything to read. The first sentence is the
+ * answer often enough to save the click, and it is the same text either way:
+ * the stream while a run is live, the stored summary once it is not.
+ *
+ * `storedSummary` is the caller's, because only the workbench knows whether the
+ * run on screen is the stored one — an errored run's phase is over, and its
+ * predecessor's summary is not what happened.
+ */
+export function prosePreviewLine(runState: AiRunState, storedSummary: string): string {
+	const streamed = runState.phase === 'idle' ? '' : runState.text;
+	const said = streamed.trim() !== '' ? streamed : storedSummary;
+	if (said.trim() !== '') return firstSentence(said);
+
+	if (runState.phase === 'loading-runtime') return 'Loading the Python runtime…';
+	if (runState.phase !== 'running') return 'Nothing yet';
+	// A run whose model has not spoken yet is usually a script that is: name it,
+	// so the closed line still moves while the surface waits.
+	return runState.steps.some((step) => step.exitCode === null) ? 'Running analysis.py' : 'Running…';
+}
+
+/**
+ * The first sentence of `text`, on one line, cut to `limit` characters with an
+ * ellipsis when the sentence is longer than a summary line can hold. A newline
+ * ends a sentence as surely as a full stop does — Claude's replies are written
+ * in paragraphs, and half of one is not a preview.
+ */
+function firstSentence(text: string, limit: number = 120): string {
+	const line = text.trim().split('\n')[0]?.trim() ?? '';
+	const stop = line.search(/[.!?](\s|$)/u);
+	const sentence = stop === -1 ? line : line.slice(0, stop + 1);
+	return sentence.length > limit ? `${sentence.slice(0, limit).trimEnd()}…` : sentence;
 }
 
 /**

@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
 	defaultRunMode,
+	digestDisclosureLabel,
 	inputChangesNote,
+	prosePreviewLine,
 	inputsChangedSince,
 	latestDoneRun,
 	runMetadataLine,
-	staleOutputNames
+	staleOutputNames,
+	IDLE_RUN_STATE,
+	type AiRunState
 } from './aiWorkbenchView';
 import type { AiInput } from './aiInputs';
+import type { FileDigest } from '$lib/ai/probeScript';
 import type { AiAddon, AiRun, AiRunInput, AiRunOutput } from '../../types/node';
 
 const RUNTIME = '0.27.7';
@@ -165,7 +170,26 @@ describe('inputsChangedSince', () => {
 });
 
 describe('inputChangesNote', () => {
-	it('names what moved and then names the choice', () => {
+	// Same names, new bytes — which is what the workbench's own Replace does. The
+	// stored script opens exactly those names, so a Run is the point here rather
+	// than the trap, and the note must not push at a model call nobody needs.
+	it('tells a replacement it can just be run', () => {
+		expect(inputChangesNote({ added: [], removed: [], replaced: ['measurements.csv'] })).toBe(
+			'measurements.csv was replaced since the last run. ' +
+				'Run re-runs the script on the new data; Change lets Claude adjust it.'
+		);
+	});
+
+	it('agrees with itself about several replacements', () => {
+		expect(inputChangesNote({ added: [], removed: [], replaced: ['a.csv', 'b.csv'] })).toBe(
+			'a.csv, b.csv were replaced since the last run. ' +
+				'Run re-runs the script on the new data; Change lets Claude adjust it.'
+		);
+	});
+
+	// A file the script names nowhere is the failure that does not look like one,
+	// so this half keeps the sentence that names the choice.
+	it('names what moved and then names the choice when something came or went', () => {
 		expect(inputChangesNote({ added: ['a.csv'], removed: [], replaced: ['b.csv'] })).toBe(
 			'Files changed since the script was written: added a.csv, replaced b.csv. ' +
 				'Run uses the stored script as it is; choose Change so Claude updates it.'
@@ -180,6 +204,86 @@ describe('inputChangesNote', () => {
 
 	it('is empty when nothing changed, so the workbench has nothing to draw', () => {
 		expect(inputChangesNote({ added: [], removed: [], replaced: [] })).toBe('');
+	});
+});
+
+describe('digestDisclosureLabel', () => {
+	const table = (rows?: number): FileDigest => ({
+		name: 'measurements.csv',
+		size: 2048,
+		kind: 'table',
+		columns: ['time'],
+		...(rows === undefined ? {} : { rows })
+	});
+
+	it('names the preview depth for a file with more rows than that', () => {
+		expect(digestDisclosureLabel(5, table(10_000))).toBe('What Claude will see (5 rows)');
+	});
+
+	// The setting is a ceiling, not a promise about this file: claiming five rows
+	// of a two-row file was the complaint that started this.
+	it('says how many the file actually has when it fits inside the preview', () => {
+		expect(digestDisclosureLabel(5, table(2))).toBe('What Claude will see (all 2 rows)');
+		expect(digestDisclosureLabel(5, table(1))).toBe('What Claude will see (all 1 row)');
+		expect(digestDisclosureLabel(5, table(5))).toBe('What Claude will see (all 5 rows)');
+	});
+
+	it('keeps schema-only at a depth of zero, whatever the file holds', () => {
+		expect(digestDisclosureLabel(0, table(2))).toBe('What Claude will see (schema only)');
+		expect(digestDisclosureLabel(-3, table(10_000))).toBe('What Claude will see (schema only)');
+	});
+
+	it('falls back to the depth when the probe counted no rows', () => {
+		expect(digestDisclosureLabel(1, table(undefined))).toBe('What Claude will see (1 row)');
+		expect(digestDisclosureLabel(5, { name: 'notes.txt', size: 12, kind: 'other' })).toBe(
+			'What Claude will see (5 rows)'
+		);
+	});
+});
+
+describe('prosePreviewLine', () => {
+	const state = (patch: Partial<AiRunState> = {}): AiRunState => ({
+		...IDLE_RUN_STATE,
+		...patch
+	});
+
+	it('shows the first sentence of what is streaming', () => {
+		expect(
+			prosePreviewLine(
+				state({ phase: 'running', text: 'Reading both files. Then plotting them.' }),
+				''
+			)
+		).toBe('Reading both files.');
+	});
+
+	it('falls back to the stored summary once nothing is running', () => {
+		expect(prosePreviewLine(IDLE_RUN_STATE, 'Both files plotted on shared axes.')).toBe(
+			'Both files plotted on shared axes.'
+		);
+	});
+
+	// The line has to fit on one row of a summary, and a paragraph with no full
+	// stop in it is still a paragraph.
+	it('cuts a long first sentence rather than wrapping the summary', () => {
+		const long = `${'word '.repeat(60)}stop.`;
+		const preview = prosePreviewLine(state({ phase: 'done', text: long }), '');
+
+		expect(preview.length).toBeLessThanOrEqual(121);
+		expect(preview.endsWith('…')).toBe(true);
+	});
+
+	it('says what is happening while a run has not said anything yet', () => {
+		expect(prosePreviewLine(state({ phase: 'loading-runtime' }), '')).toBe(
+			'Loading the Python runtime…'
+		);
+		expect(prosePreviewLine(state({ phase: 'running' }), '')).toBe('Running…');
+		expect(
+			prosePreviewLine(state({ phase: 'running', steps: [{ stdoutTail: '', exitCode: null }] }), '')
+		).toBe('Running analysis.py');
+	});
+
+	it('has nothing to preview on a node that has never run', () => {
+		expect(prosePreviewLine(IDLE_RUN_STATE, '')).toBe('Nothing yet');
 	});
 });
 

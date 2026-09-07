@@ -6317,13 +6317,14 @@
 			return found as HTMLElement;
 		});
 
-		// The inputs a run would send: the neighbour's text and its CSV, both
-		// labelled by the edge's tag, with the digest the request will carry.
+		// The inputs a run would send: the neighbour's text and its CSV, with the
+		// digest the request will carry. Grouped by node now, so the edge's tag is
+		// on the neighbour's header rather than repeated on each of its files.
 		const inputs = workbench.querySelectorAll('[data-ai-input]');
 		expect(inputs).toHaveLength(2);
 		expect(inputs[0].querySelector('[data-ai-input-name]')).toHaveTextContent('Bench sweep');
+		expect(inputs[0].querySelector('[data-ai-input-label]')).toHaveTextContent('baseline');
 		expect(inputs[1].querySelector('[data-ai-input-name]')).toHaveTextContent('sweep.csv');
-		expect(inputs[1].querySelector('[data-ai-input-label]')).toHaveTextContent('baseline');
 		await waitFor(() => {
 			expect(workbench.querySelector('[data-ai-digest]')).toHaveTextContent(
 				't (int64), ch2 (float64)'

@@ -22,6 +22,13 @@ hover. A screen reader still hears the label; a phone reader gets the glyph
 and nothing else. The same payoff below covers it — a tooltip that reaches
 focus and long-press would serve this button and the menu at once.
 
+2026-09-07: the workbench's input rows gained Replace (`⇄`) and Remove (`✕`),
+plus Add file on this node's group — three more explanations behind the same
+hover. Each carries an `aria-label` that names the file and the act ("Replace
+measurements.csv with a new file under the same name"), so the meaning is in
+the accessible name rather than the `title` alone, and the `title` adds the
+*why* (a Run re-reads the new bytes) that only a mouse ever sees.
+
 ## Why
 
 `title` is one attribute per button, needs no new component, no positioning or
