@@ -1233,11 +1233,29 @@
 		return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
 	}
 
+	/**
+	 * Escape walks out one level at a time, and a text field is a level: from one
+	 * it blurs, which is what escaping an editor means, and only a press with no
+	 * field under it closes the surface. The typing guard is per-shortcut rather
+	 * than blanket for exactly this reason — Escape is one of the few keys that
+	 * is *for* the field. A prompt half-typed in the workbench used to leave with
+	 * the surface on the first press; blurring commits it instead.
+	 */
+	function leaveFocusOnEscape(): void {
+		if (!focus.isFocused) return;
+		if (keyboardIsInTextEntry()) {
+			const active = document.activeElement;
+			if (active instanceof HTMLElement) active.blur();
+			return;
+		}
+		focus.closeFocus();
+	}
+
 	$effect(() => {
 		if (typeof window === 'undefined') return;
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (event.key === 'Escape' && focus.isFocused) {
-				focus.closeFocus();
+				leaveFocusOnEscape();
 				return;
 			}
 			if (event.metaKey || event.ctrlKey || event.altKey) {
@@ -3260,7 +3278,11 @@
 			data-focus-depth={focus.depth}
 			data-exit-scrub={focus.exitScrubActive ? 'true' : undefined}
 			onkeydown={(event) => {
-				if (event.key === 'Escape') focus.closeFocus();
+				if (event.key !== 'Escape') return;
+				// The surface is inside this element, so the press is spent here and
+				// does not reach the window listener to be read a second time.
+				event.stopPropagation();
+				leaveFocusOnEscape();
 			}}
 		>
 			{#if focus.dialogOpen && navCrumbs.length > 1}

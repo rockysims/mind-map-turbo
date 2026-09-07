@@ -6515,6 +6515,49 @@
 />
 
 <!--
+	Escape means "close what I am in", and a text field is one of the things a
+	reader can be in. The workbench put a prompt inside the focus surface, and the
+	first press used to take the surface and the deep zoom with it, from under a
+	half-typed prompt. It leaves the field first now; the blur commits what was
+	typed, and a second press leaves the surface.
+-->
+<Story
+	name="EscapeLeavesTheWorkbenchPromptBeforeItLeavesTheFocus"
+	args={{
+		multigraphData: AI_WORKBENCH_GRAPH,
+		defaultPrimaryNodeId: 'ai',
+		layoutSettings: { relaxIterations: 0 },
+		assetStore: aiAssetStore(),
+		assetScope: AI_SCOPE,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const dialog = await enterFocusOn(canvasElement, 'ai');
+		const prompt = await waitFor(() => {
+			const found = dialog.querySelector('[data-ai-prompt]');
+			expect(found).toBeInTheDocument();
+			return found as HTMLTextAreaElement;
+		});
+
+		prompt.focus();
+		expect(document.activeElement).toBe(prompt);
+
+		// Out of the field, still in the workbench: the narrower thing goes first.
+		dispatchKeydown(prompt, 'Escape');
+		expect(document.activeElement).not.toBe(prompt);
+		expect(dialog.querySelector('[data-ai-workbench]')).toBeInTheDocument();
+		expect(canvasElement.querySelector('[role="dialog"]')).toBeInTheDocument();
+
+		// With no field under it, the same key means the surface.
+		dispatchKeydown(document.activeElement, 'Escape');
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[role="dialog"]')).not.toBeInTheDocument();
+		});
+	}}
+/>
+
+<!--
 	Reading a workbench taller than the frame, in the real frame.
 
 	The bug: `.zoom-world` had no grid template, so its one row was sized by the
