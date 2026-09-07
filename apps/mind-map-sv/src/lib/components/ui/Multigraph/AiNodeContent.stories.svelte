@@ -152,6 +152,32 @@
 		};
 	}
 
+	/** A file attached to the AI node itself, so its own group has a row. */
+	const OWN_ASSET: GraphAssetMetadata = {
+		id: 'asset-own',
+		kind: 'file',
+		mimeType: 'text/csv',
+		name: 'notes.csv',
+		size: 256,
+		createdAt: 1
+	};
+
+	/** The fixture graph with a file on the `!ai` node as well as on the bench. */
+	function graphWithOwnFile(addon: Partial<AiAddon> = {}): MultigraphData {
+		const graph = aiGraph(addon);
+		const content: NodeContentBlock[] = [{ type: 'file', assetId: 'asset-own', name: 'notes.csv' }];
+		return {
+			...graph,
+			nodes: graph.nodes.map((node) => (node.id === 'ai' ? { ...node, content } : node)),
+			assets: { ...graph.assets, 'asset-own': OWN_ASSET }
+		};
+	}
+
+	/** What the reader picks out of the file dialog. */
+	function pickedFile(name: string): File {
+		return new File(['time,ch2\n0.0,1.0\n'], name, { type: 'text/csv' });
+	}
+
 	/** A second file, attached after the run that wrote the script. */
 	const EXTRA_ASSET: GraphAssetMetadata = {
 		id: 'asset-extra',
@@ -364,6 +390,12 @@
 	play={async ({ canvasElement }) => {
 		expect(text(canvasElement, '[data-ai-stream-text]')).toContain('plotting channel 2');
 
+		// The closed prose line carries the first sentence of what is streaming, so
+		// the fold costs the reader nothing while they wait.
+		expect(text(canvasElement, '[data-ai-prose-preview]')).toBe(
+			'Reading both files and plotting channel 2 on shared axes.'
+		);
+
 		// A summary, not the raw thinking, and folded away by default.
 		const thinking = required(canvasElement, '[data-ai-thinking]');
 		expect(thinking).toBeInstanceOf(HTMLDetailsElement);
@@ -437,6 +469,11 @@
 		expect(text(canvasElement, '[data-ai-metadata]')).toBe(
 			'claude-opus-5 · 48 s · 12.3k tokens · 3 tool calls'
 		);
+
+		// Nothing is running, so the outputs are the current answer: full opacity,
+		// and no caption saying they came from somewhere else.
+		expect(getComputedStyle(required(canvasElement, '[data-ai-outputs-body]')).opacity).toBe('1');
+		expect(content.querySelector('[data-ai-outputs-stale-while-running]')).toBeNull();
 
 		// The prompt still matches the run that wrote the script, so the cheap mode
 		// is the default and every output offers a node of its own.
@@ -733,11 +770,14 @@
 		expect(text(canvasElement, '[data-ai-mode="refine"]')).toBe('Change');
 		expect(text(canvasElement, '[data-ai-mode="rerun"]')).toBe('Run');
 
-		// Run's hint names the trap rather than the saving: it calls no model, but
-		// the stored script opens the names it was written for.
+		// Run's hint names the trap rather than the saving: every file is written
+		// into the script's folder, and only a script that scans that folder sees a
+		// new one. Reworded from "read only if the script reads by pattern", which
+		// stated the rule in the script's terms and left the reader unable to tell
+		// which kind of script they had.
 		expect(text(canvasElement, '[data-ai-mode-hint]')).toBe(
-			'Runs the stored script again on the current files; files added since it was written ' +
-				'are read only if the script reads by pattern'
+			'Runs the stored script again on the current files. New files are seen only by a ' +
+				'script that scans its folder rather than opening fixed names.'
 		);
 		expect(text(canvasElement, '[data-ai-run]')).toBe('Run');
 
@@ -1118,3 +1158,286 @@
 		/>
 	{/snippet}
 </Story>
+
+<!--
+	Flat, the inputs list was one run of names with no way to tell whose file was
+	whose — and the node is exactly what an Add, a Replace or a Remove acts on. So
+	files sit indented under the node they hang off: this node first, then each
+	neighbour, whose own header *is* its text input rather than a row above one.
+-->
+<Story
+	name="InputsAreGroupedUnderTheNodeEachFileHangsOff"
+	play={async ({ canvasElement }) => {
+		const groups = workbench(canvasElement).querySelectorAll('[data-ai-input-group]');
+		expect([...groups].map((group) => group.getAttribute('data-ai-input-group'))).toEqual([
+			'ai',
+			'bench'
+		]);
+
+		// This node leads, named for where the reader is standing rather than by
+		// its own title, and it is the group that offers Add file.
+		const own = required(canvasElement, '[data-ai-input-group="ai"]');
+		expect(own).toHaveAttribute('data-ai-input-group-kind', 'self');
+		expect(text(own, '[data-ai-input-group-name]')).toBe('This node');
+		expect(own.querySelector('[data-ai-add-file]')).not.toBeNull();
+		expect(text(own, '[data-ai-input-name]')).toBe('notes.csv');
+
+		// The neighbour's header is its text input: the title, the edge's role, and
+		// the description the request carries — no separate row for any of it.
+		const bench = required(canvasElement, '[data-ai-input-group="bench"]');
+		expect(bench).toHaveAttribute('data-ai-input-group-kind', 'neighbour');
+		const head = required(bench, '[data-ai-input-group-head]');
+		expect(head).toHaveAttribute('data-ai-input-kind', 'text');
+		expect(text(head, '[data-ai-input-name]')).toBe('Bench run 3');
+		expect(text(head, '[data-ai-input-label]')).toBe('baseline');
+		expect(text(bench, '[data-ai-input-description]')).toContain('20 °C');
+
+		// And its file is under it, indented by the rule that makes the grouping
+		// visible rather than merely true of the DOM.
+		const files = required(bench, 'ul');
+		expect(getComputedStyle(files).borderLeftWidth).toBe('2px');
+		const row = required(files, '[data-ai-input-kind="file"]');
+		expect(row).toHaveAttribute('data-ai-input-node', 'bench');
+		expect(text(row, '[data-ai-input-name]')).toBe('measurements.csv');
+		// The chip is the group's, said once: repeating it on every file was noise.
+		expect(row.querySelector('[data-ai-input-label]')).toBeNull();
+
+		// The header is also the way to the node itself, for a reader who would
+		// rather look than take this surface's word.
+		await userEvent.click(required(bench, '[data-ai-input-jump="bench"]'));
+		expect(harnessState(canvasElement)).toHaveAttribute('data-last-jump', 'bench');
+	}}
+>
+	{#snippet template()}
+		<AiNodeHarness baseGraph={graphWithOwnFile()} nodeId="ai" digests={DIGESTS} />
+	{/snippet}
+</Story>
+
+<!--
+	Attaching a file used to mean leaving the workbench for the edit sheet, which
+	is two screens away from the Run button that needs the file. The harness
+	applies the same `addNodeContentBlock` the app commits, so the row the reader
+	gets here is the row the graph gained.
+-->
+<Story
+	name="AddingAFileToThisNodePutsARowUnderIt"
+	play={async ({ canvasElement }) => {
+		const own = required(canvasElement, '[data-ai-input-group="ai"]');
+		expect(own.querySelectorAll('[data-ai-input-kind="file"]')).toHaveLength(0);
+
+		const picker = required(own, '[data-ai-add-file]');
+		// Hover-only tooltips are the standing debt, so the meaning is in the name.
+		expect(picker).toHaveAttribute('aria-label', 'Add a file to this node');
+		await userEvent.upload(picker as HTMLInputElement, pickedFile('ambient.csv'));
+
+		await waitFor(() => {
+			const row = required(own, '[data-ai-input-kind="file"]');
+			expect(text(row, '[data-ai-input-name]')).toBe('ambient.csv');
+		});
+		expect(harnessState(canvasElement)).toHaveAttribute('data-last-add', 'ai:ambient.csv');
+		// The reader cannot see the result of a file dialog, so the surface says it.
+		expect(text(canvasElement, '[data-ai-attachment-status]')).toBe('ambient.csv attached.');
+	}}
+>
+	{#snippet template()}
+		<AiNodeHarness baseGraph={aiGraph()} nodeId="ai" digests={DIGESTS} />
+	{/snippet}
+</Story>
+
+<!--
+	Replace is the whole point of the cheap mode: new bytes under the name the
+	stored script opens, so a Run reads them without a model call. The block keeps
+	its name and only its asset id moves, which is also what makes the note say
+	"replaced" rather than one file gone and another arrived.
+-->
+<Story
+	name="ReplacingAFileKeepsTheNameTheScriptOpens"
+	play={async ({ canvasElement }) => {
+		const content = workbench(canvasElement);
+		// The files are the ones the run recorded, so there is nothing to say yet.
+		expect(content.querySelector('[data-ai-inputs-changed]')).toBeNull();
+
+		const row = required(canvasElement, '[data-ai-input-asset-id="asset-csv"]');
+		const replace = required(row, '[data-ai-replace-file="asset-csv"]');
+		expect(replace).toHaveAttribute(
+			'aria-label',
+			'Replace measurements.csv with a new file under the same name'
+		);
+		expect(required(row, 'label.row-action')).toHaveAttribute(
+			'title',
+			'Replace this file with a new one under the same name, so a Run re-reads it'
+		);
+
+		await userEvent.upload(replace as HTMLInputElement, pickedFile('measurements-v2.csv'));
+
+		// The name the script opens survives; the bytes behind it are new.
+		const replaced = await waitFor(() =>
+			required(canvasElement, '[data-ai-input-asset-id="asset-picked-1"]')
+		);
+		expect(text(replaced, '[data-ai-input-name]')).toBe('measurements.csv');
+		expect(content.querySelector('[data-ai-input-asset-id="asset-csv"]')).toBeNull();
+		expect(harnessState(canvasElement)).toHaveAttribute(
+			'data-last-replace',
+			'bench:asset-csv:measurements-v2.csv'
+		);
+
+		// And the note says the one thing a replacement means: run it.
+		expect(text(canvasElement, '[data-ai-inputs-changed]')).toBe(
+			'measurements.csv was replaced since the last run. ' +
+				'Run re-runs the script on the new data; Change lets Claude adjust it.'
+		);
+	}}
+>
+	{#snippet template()}
+		<AiNodeHarness
+			baseGraph={aiGraph({ script: SCRIPT, runs: [DONE_RUN] })}
+			nodeId="ai"
+			digests={DIGESTS}
+		/>
+	{/snippet}
+</Story>
+
+<!-- No confirm on the way off: milestone 12 made undo the safety net for the
+     destructive edits, and this is one of them. -->
+<Story
+	name="RemovingAFileDropsItsRow"
+	play={async ({ canvasElement }) => {
+		const remove = required(canvasElement, '[data-ai-remove-file="asset-csv"]');
+		expect(remove).toHaveAttribute('aria-label', 'Remove measurements.csv from Bench run 3');
+
+		await userEvent.click(remove);
+
+		await waitFor(() =>
+			expect(
+				workbench(canvasElement).querySelector('[data-ai-input-asset-id="asset-csv"]')
+			).toBeNull()
+		);
+		expect(harnessState(canvasElement)).toHaveAttribute('data-last-remove', 'bench:asset-csv');
+		// The neighbour is still an input — its title and description are sent.
+		expect(required(canvasElement, '[data-ai-input-group="bench"]')).not.toBeNull();
+	}}
+>
+	{#snippet template()}
+		<AiNodeHarness baseGraph={aiGraph()} nodeId="ai" digests={DIGESTS} />
+	{/snippet}
+</Story>
+
+<!-- The reader picked a file and nothing happened, because they said no to the
+     size question. That needs a sentence, or the button reads as broken. -->
+<Story
+	name="DecliningTheSizeQuestionSaysSoRatherThanNothing"
+	play={async ({ canvasElement }) => {
+		const own = required(canvasElement, '[data-ai-input-group="ai"]');
+		await userEvent.upload(
+			required(own, '[data-ai-add-file]') as HTMLInputElement,
+			pickedFile('huge.csv')
+		);
+
+		await waitFor(() =>
+			expect(text(canvasElement, '[data-ai-attachment-status]')).toBe('Attachment cancelled.')
+		);
+		expect(own.querySelector('[data-ai-input-kind="file"]')).toBeNull();
+		expect(harnessState(canvasElement)).toHaveAttribute('data-last-add', '');
+	}}
+>
+	{#snippet template()}
+		<AiNodeHarness
+			baseGraph={aiGraph()}
+			nodeId="ai"
+			digests={DIGESTS}
+			warnBytesPerFile={4}
+			confirmAttachment={() => false}
+		/>
+	{/snippet}
+</Story>
+
+<!--
+	The plots on screen belong to the *last* run while a new one is in flight, and
+	a figure that looks current is the one lie this surface can tell. Faded and
+	captioned rather than removed: the reader is usually comparing the new answer
+	against exactly this one.
+-->
+<Story
+	name="TheLastRunsOutputsFadeWhileANewOneIsInFlight"
+	play={async ({ canvasElement }) => {
+		expect(text(canvasElement, '[data-ai-outputs-stale-while-running]')).toBe('from the last run');
+		const body = required(canvasElement, '[data-ai-outputs-body]');
+		expect(getComputedStyle(body).opacity).toBe('0.45');
+	}}
+>
+	{#snippet template()}
+		<AiNodeHarness
+			baseGraph={aiGraph({ script: SCRIPT, runs: [DONE_RUN] })}
+			nodeId="ai"
+			digests={DIGESTS}
+			assetStore={outputStore()}
+			assetScope="story"
+			runState={runState({ phase: 'running', text: 'Re-reading the files.' })}
+		/>
+	{/snippet}
+</Story>
+
+<!--
+	Claude's prose is what a reader checks once and scrolls past; open by default
+	it pushed the plots and the script below the fold. The summary line is what
+	keeps folding it honest — the first sentence is the answer often enough to
+	save the click.
+-->
+<Story
+	name="ClaudesProseIsOneLineUntilItIsAskedFor"
+	play={async ({ canvasElement }) => {
+		const prose = required(canvasElement, '[data-ai-prose]');
+		expect(prose).toBeInstanceOf(HTMLDetailsElement);
+		expect((prose as HTMLDetailsElement).open).toBe(false);
+		expect(text(prose, '[data-ai-prose-preview]')).toBe(
+			'Both files plotted on shared axes; channel 2 drifts after the third minute.'
+		);
+
+		await userEvent.click(required(prose, 'summary'));
+		await waitFor(() => expect((prose as HTMLDetailsElement).open).toBe(true));
+		expect(text(prose, '[data-ai-summary]')).toContain('shared axes');
+
+		// What a reader acts on stays outside the fold: the script rows, and the
+		// errors and tracebacks that come with them.
+		expect(prose.querySelector('[data-ai-steps]')).toBeNull();
+		expect(required(canvasElement, '[data-ai-steps]')).not.toBeNull();
+	}}
+>
+	{#snippet template()}
+		<AiNodeHarness
+			baseGraph={aiGraph({ script: SCRIPT, runs: [DONE_RUN] })}
+			nodeId="ai"
+			digests={DIGESTS}
+			runState={runState({ steps: [{ stdoutTail: 'Wrote channel2.png', exitCode: 0 }] })}
+		/>
+	{/snippet}
+</Story>
+
+<!--
+	The preview depth is a ceiling, not a promise about this file: "(5 rows)" over
+	a two-row CSV claimed three rows that do not exist.
+-->
+<Story
+	name="AFileShorterThanThePreviewSaysAllOfIt"
+	args={{
+		digests: {
+			'asset-csv': {
+				name: 'measurements.csv',
+				size: 2048,
+				kind: 'table',
+				columns: ['time', 'ch2'],
+				dtypes: ['float64', 'float64'],
+				rows: 2,
+				head: [
+					['0.0', '1.1'],
+					['0.1', '1.2']
+				]
+			} satisfies FileDigest
+		}
+	}}
+	play={async ({ canvasElement }) => {
+		expect(
+			required(canvasElement, '[data-ai-input-kind="file"] details summary').textContent?.trim()
+		).toBe('What Claude will see (all 2 rows)');
+	}}
+/>

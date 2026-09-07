@@ -18,6 +18,7 @@ import {
 	removeNode,
 	removeNodeAddon,
 	removeNodeContentBlock,
+	replaceNodeContentBlockAsset,
 	setNodeAddon,
 	setNodeDesignations,
 	setNodePinned,
@@ -1006,6 +1007,130 @@ describe('graph mutations', () => {
 					graph,
 					removedAssetIds: []
 				});
+			});
+		});
+
+		describe('replaceNodeContentBlockAsset', () => {
+			const replacement = (id: string): GraphAssetMetadata => ({
+				...fileAsset(id),
+				name: 'picked-from-disk.csv',
+				size: 4096
+			});
+
+			// The name is what the stored script opens, so a replacement that kept
+			// the bytes and lost the name would break the one thing it is for.
+			it('points the block at the new asset and keeps the name the script opens', () => {
+				const graph = addNodeContentBlock(
+					makeGraph({ nodeCount: 1 }),
+					'n0',
+					fileBlock('f1'),
+					fileAsset('f1')
+				);
+
+				const { graph: next, removedAssetIds } = replaceNodeContentBlockAsset(
+					graph,
+					'n0',
+					'f1',
+					'f2',
+					replacement('f2')
+				);
+
+				expect(next.nodes[0].content).toEqual([{ type: 'file', assetId: 'f2', name: 'f1.csv' }]);
+				expect(next.assets).toEqual({ f2: replacement('f2') });
+				expect(removedAssetIds).toEqual(['f1']);
+				// Immutable, as every mutation here is: the old graph is what undo holds.
+				expect(graph.nodes[0].content).toEqual([fileBlock('f1')]);
+				expect(graph.assets).toEqual({ f1: fileAsset('f1') });
+			});
+
+			it('keeps an image block’s alt text and caption', () => {
+				const graph = addNodeContentBlock(
+					makeGraph({ nodeCount: 1 }),
+					'n0',
+					{ ...imageBlock('a1'), caption: 'Run 3' },
+					imageAsset('a1')
+				);
+
+				const { graph: next } = replaceNodeContentBlockAsset(
+					graph,
+					'n0',
+					'a1',
+					'a2',
+					replacement('a2')
+				);
+
+				expect(next.nodes[0].content).toEqual([
+					{ type: 'image', assetId: 'a2', alt: 'A photo', caption: 'Run 3' }
+				]);
+			});
+
+			// The caller tombstones what comes back, so naming an asset another node
+			// still shows would take a live blob out from under it.
+			it('reports nothing removed while another node still references the old asset', () => {
+				const twoNodes = addNodeContentBlock(
+					addNodeContentBlock(makeGraph({ nodeCount: 2 }), 'n0', fileBlock('f1'), fileAsset('f1')),
+					'n1',
+					fileBlock('f1'),
+					fileAsset('f1')
+				);
+
+				const { graph: next, removedAssetIds } = replaceNodeContentBlockAsset(
+					twoNodes,
+					'n0',
+					'f1',
+					'f2',
+					replacement('f2')
+				);
+
+				expect(removedAssetIds).toEqual([]);
+				expect(next.assets).toEqual({ f1: fileAsset('f1'), f2: replacement('f2') });
+				expect(next.nodes[1].content).toEqual([fileBlock('f1')]);
+			});
+
+			it('leaves the other blocks on the node alone', () => {
+				const graph = addNodeContentBlock(
+					addNodeContentBlock(
+						makeGraph({ nodeCount: 1 }),
+						'n0',
+						imageBlock('a1'),
+						imageAsset('a1')
+					),
+					'n0',
+					fileBlock('f1'),
+					fileAsset('f1')
+				);
+
+				const { graph: next } = replaceNodeContentBlockAsset(
+					graph,
+					'n0',
+					'f1',
+					'f2',
+					replacement('f2')
+				);
+
+				expect(next.nodes[0].content).toEqual([
+					imageBlock('a1'),
+					{ type: 'file', assetId: 'f2', name: 'f1.csv' }
+				]);
+			});
+
+			// Same object, so a replace that found nothing lands in no history entry
+			// — and the caller can tell, which is how it knows to bin the blob it
+			// just stored.
+			it('is a no-op for a node or an asset id that names no block', () => {
+				const graph = addNodeContentBlock(
+					makeGraph({ nodeCount: 1 }),
+					'n0',
+					fileBlock('f1'),
+					fileAsset('f1')
+				);
+
+				expect(
+					replaceNodeContentBlockAsset(graph, 'missing', 'f1', 'f2', replacement('f2'))
+				).toEqual({ graph, removedAssetIds: [] });
+				expect(
+					replaceNodeContentBlockAsset(graph, 'n0', 'nope', 'f2', replacement('f2')).graph
+				).toBe(graph);
 			});
 		});
 

@@ -41,17 +41,20 @@
 	import { prefersReducedMotion } from '$lib/reducedMotion';
 	import type { GraphAssetMetadata } from '../types/multigraph';
 	import type { AiAddon, AiRunMode, AiRunOutput, NodeData } from '../types/node';
-	import type { AiInput } from './lib/aiInputs';
+	import { groupAiInputs, type AiFileInput, type AiInput, type AiInputGroup } from './lib/aiInputs';
 	import {
 		defaultRunMode,
+		digestDisclosureLabel,
 		inputChangesForAddon,
 		inputChangesNote,
 		latestDoneRun,
+		prosePreviewLine,
 		runMetadataLine,
 		staleOutputNames,
 		IDLE_RUN_STATE,
 		type AiRunState
 	} from './lib/aiWorkbenchView';
+	import { attachmentSizeWarning } from './lib/attachmentSizeWarning';
 	import { formatByteSize } from './lib/byteSize';
 
 	/** What a node without the add-on reads as, so this never renders half a surface. */
@@ -62,6 +65,13 @@
 
 	/** Why Change and Run are out of reach, said once and shown twice. */
 	const NO_SCRIPT_REASON = 'No stored script yet — write one first.';
+
+	/**
+	 * What Replace is for, in the terms that make it worth having: the block keeps
+	 * the name, so the stored script goes on opening it and a Run reads the new
+	 * bytes without a model call.
+	 */
+	const REPLACE_HINT = 'Replace this file with a new one under the same name, so a Run re-reads it';
 
 	/**
 	 * The three modes, in the order they become available to a node: write a
@@ -90,13 +100,15 @@
 			mode: 'rerun',
 			label: 'Run',
 			run: 'Run',
-			// It names the trap rather than the saving: Run calls no model, but the
-			// stored script opens the names it was written for, so a file attached
-			// since then is written into the sandbox and never read unless the
-			// script globs for it. That is the failure that does not look like one.
+			// It names the trap rather than the saving: Run calls no model, and every
+			// attached file is written into the script's folder on every run — but a
+			// script that opens fixed filenames never looks at a new one, and nothing
+			// about that answer looks wrong. An earlier wording ("read only if the
+			// script reads by pattern") named the rule in the script's terms rather
+			// than the reader's, and the reader could not tell which kind they had.
 			hint:
-				'Runs the stored script again on the current files; files added since it was written ' +
-				'are read only if the script reads by pattern'
+				'Runs the stored script again on the current files. New files are seen only by a ' +
+				'script that scans its folder rather than opening fixed names.'
 		}
 	];
 
@@ -113,13 +125,18 @@
 		model = APP_CONFIG.ai.defaultModel,
 		titleForNodeId = (nodeId: string) => nodeId,
 		nodeExists = () => true,
+		confirmAttachment = (message: string) => window.confirm(message),
+		warnBytesPerFile = APP_CONFIG.multigraph.attachments.warnBytesPerFile,
 		onPromptChange,
 		onRun,
 		onCancel,
 		onPromote,
 		onFix,
 		onOpenSettings,
-		onJumpToNode
+		onJumpToNode,
+		onAddFile,
+		onReplaceFile,
+		onRemoveFile
 	}: {
 		/** The focused node. Its `addons.ai` is what this whole surface draws. */
 		node: NodeData;
@@ -180,6 +197,33 @@
 		onOpenSettings?: () => void;
 		/** Leave for a promoted node without pinning it, as the details view does. */
 		onJumpToNode?: (nodeId: string) => void;
+		/**
+		 * Attach one picked file to this node. The MIME type decides what block it
+		 * becomes, exactly as the edit sheet's two upload buttons decide nothing —
+		 * so the workbench offers one button and a PNG picked through it is still
+		 * an image.
+		 */
+		onAddFile?: (nodeId: string, file: File) => Promise<'added' | 'store-failed'>;
+		/**
+		 * Swap the bytes behind one attachment, keeping the name the script opens.
+		 * Offered on a neighbour's files as well as this node's: it is one graph,
+		 * and undo covers the edit either way.
+		 */
+		onReplaceFile?: (
+			nodeId: string,
+			assetId: string,
+			file: File
+		) => Promise<'added' | 'store-failed'>;
+		/** Take one attachment off its node. Undo is the safety net, so no confirm. */
+		onRemoveFile?: (nodeId: string, assetId: string) => void;
+		/**
+		 * Asks before attaching a file over the per-file size threshold — the same
+		 * question the edit sheet asks, because it is the same cost. Injectable so
+		 * a story can answer it.
+		 */
+		confirmAttachment?: (message: string) => boolean;
+		/** File size over which `confirmAttachment` is asked. A test pins it. */
+		warnBytesPerFile?: number;
 	} = $props();
 
 	const ai = $derived(node.addons?.ai ?? EMPTY_AI);
@@ -194,6 +238,14 @@
 	const inputChanges = $derived(inputChangesForAddon(ai, inputs));
 	const inputsChangedNote = $derived(inputChangesNote(inputChanges));
 	const reduceMotion = $derived(prefersReducedMotion());
+	/**
+	 * The inputs as the reader reads them: this node first, then each neighbour,
+	 * with the files under the node they hang off — which is the node an Add, a
+	 * Replace or a Remove on that group acts on.
+	 */
+	const groups = $derived(groupAiInputs(inputs, node.id));
+	/** What the last Add, Replace or Remove did, for a reader who cannot see a file dialog. */
+	let attachmentStatus = $state('');
 
 	const busy = $derived(runState.phase === 'running' || runState.phase === 'loading-runtime');
 
@@ -230,6 +282,17 @@
 
 	/** The selected row of `MODES`; `analyse` is the one every node always has. */
 	const selectedMode = $derived(MODES.find((option) => option.mode === mode) ?? MODES[0]);
+
+	/**
+	 * The status line is about a press the reader made on *this* node. Focus can
+	 * move to another `!ai` node without this component being rebuilt, and
+	 * "ambient.csv attached." sitting over a node it was never attached to is a
+	 * lie that costs nothing to avoid.
+	 */
+	$effect(() => {
+		void node.id;
+		untrack(() => (attachmentStatus = ''));
+	});
 
 	$effect(() => {
 		const current = ai.prompt;
@@ -309,11 +372,67 @@
 		commitPrompt();
 	}
 
-	/** A stable key per input row: the same asset can be attached to two nodes. */
-	function inputKey(input: AiInput, index: number): string {
-		return input.kind === 'file'
-			? `${index}:${input.nodeId}:${input.assetId}`
-			: `${index}:${input.nodeId}`;
+	/** A stable key per file row: the same asset can be attached twice over. */
+	function fileKey(input: AiFileInput, index: number): string {
+		return `${index}:${input.nodeId}:${input.assetId}`;
+	}
+
+	/** How the accessible name of a row action names the node it acts on. */
+	function groupName(group: AiInputGroup): string {
+		return group.self ? 'this node' : group.title;
+	}
+
+	/**
+	 * The picked file, and the input it came from with its value already cleared
+	 * — so picking the same file twice in a row fires `change` the second time,
+	 * and so the reader's filename is not left sitting in a control that has
+	 * already acted on it.
+	 */
+	function takePickedFile(event: Event): File | undefined {
+		// Svelte types `currentTarget` broadly; this handler is only ever attached
+		// to a file input.
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = '';
+		return file;
+	}
+
+	/**
+	 * The size question, asked once for Add and Replace alike. A cancelled answer
+	 * is reported rather than swallowed: the reader pressed something and nothing
+	 * happened, which needs a sentence.
+	 */
+	function allowedBySize(file: File): boolean {
+		if (file.size <= warnBytesPerFile) return true;
+		if (confirmAttachment(attachmentSizeWarning(file))) return true;
+		attachmentStatus = 'Attachment cancelled.';
+		return false;
+	}
+
+	async function addPickedFile(event: Event): Promise<void> {
+		const file = takePickedFile(event);
+		if (file === undefined || onAddFile === undefined) return;
+		attachmentStatus = '';
+		if (!allowedBySize(file)) return;
+		const result = await onAddFile(node.id, file);
+		attachmentStatus = result === 'added' ? `${file.name} attached.` : 'Unable to store that file.';
+	}
+
+	async function replacePickedFile(event: Event, target: AiFileInput): Promise<void> {
+		const file = takePickedFile(event);
+		if (file === undefined || onReplaceFile === undefined) return;
+		attachmentStatus = '';
+		if (!allowedBySize(file)) return;
+		const result = await onReplaceFile(target.nodeId, target.assetId, file);
+		attachmentStatus =
+			result === 'added'
+				? `${target.name} replaced. The script still opens that name.`
+				: 'Unable to store that file.';
+	}
+
+	function removeFile(input: AiFileInput): void {
+		attachmentStatus = '';
+		onRemoveFile?.(input.nodeId, input.assetId);
 	}
 
 	/**
@@ -330,17 +449,6 @@
 			parts.push(`${digest.rows} ${digest.rows === 1 ? 'row' : 'rows'}`);
 		}
 		return parts.join(', ');
-	}
-
-	/**
-	 * The disclosure's summary. It names the preview depth rather than hiding it,
-	 * because the depth is the promise the settings sheet made about how much of
-	 * the file leaves the machine, and this is where it is kept.
-	 */
-	function digestDisclosureLabel(rows: number): string {
-		const depth = Math.max(Math.floor(rows), 0);
-		if (depth === 0) return 'What Claude will see (schema only)';
-		return `What Claude will see (${depth} ${depth === 1 ? 'row' : 'rows'})`;
 	}
 
 	/**
@@ -379,6 +487,15 @@
 	const showLive = $derived(
 		runState.phase !== 'idle' || runState.error !== undefined || runState.steps.length > 0
 	);
+
+	/**
+	 * Whether there is a run to say anything about. A node that has never run has
+	 * none, and an empty disclosure titled "What Claude did" is a promise about a
+	 * thing that has not happened — but a run in flight that has not spoken yet
+	 * does have one, and its summary line is where "Running…" belongs.
+	 */
+	const showProse = $derived(showLive || storedSummary.trim() !== '');
+	const prosePreview = $derived(prosePreviewLine(runState, storedSummary));
 </script>
 
 {#snippet outputActions(output: AiRunOutput)}
@@ -545,6 +662,47 @@
 		</p>
 	</section>
 
+	{#if showProse}
+		<!--
+			Claude's own words, folded away.
+			The reader came for the plots and the script; the prose is what they check
+			once and then scroll past, and open by default it pushed everything that
+			followed below the fold. The summary line is what keeps it honest — the
+			first sentence is the answer often enough to save the click, and while a
+			run is live it says what is happening instead. What stays outside is what
+			a reader acts on: the execution rows, the errors and the traceback.
+		-->
+		<details class="prose-panel" data-ai-prose>
+			<summary>
+				<span class="prose-title">What Claude did</span>
+				<span class="prose-preview" data-ai-prose-preview>{prosePreview}</span>
+			</summary>
+			<div class="prose-body">
+				{#if streamedText.trim() !== ''}
+					<p class="response" data-ai-stream-text>{streamedText}</p>
+				{/if}
+
+				{#if storedSummary.trim() !== ''}
+					<p class="response" data-ai-summary>{storedSummary}</p>
+				{/if}
+
+				{#if runState.thinking.trim() !== ''}
+					<!-- Folded once more inside the fold: a thinking summary is about how
+					     the answer was reached, which is a further question than the
+					     answer itself. -->
+					<details class="thinking" data-ai-thinking>
+						<summary>Thinking</summary>
+						<p data-ai-thinking-text>{runState.thinking}</p>
+					</details>
+				{/if}
+
+				{#if streamedText.trim() === '' && storedSummary.trim() === '' && runState.thinking.trim() === ''}
+					<p class="empty" data-ai-prose-empty>Nothing said yet.</p>
+				{/if}
+			</div>
+		</details>
+	{/if}
+
 	{#if showLive}
 		<section class="live-section" data-ai-live data-ai-phase={runState.phase}>
 			{#if runState.phase === 'loading-runtime'}
@@ -558,17 +716,6 @@
 				<p class="running" class:reduced-motion={reduceMotion} data-ai-running aria-live="polite">
 					<span class="dot" aria-hidden="true"></span>Running
 				</p>
-			{/if}
-
-			{#if runState.thinking.trim() !== ''}
-				<details class="thinking" data-ai-thinking>
-					<summary>Thinking</summary>
-					<p data-ai-thinking-text>{runState.thinking}</p>
-				</details>
-			{/if}
-
-			{#if streamedText.trim() !== ''}
-				<p class="response" data-ai-stream-text>{streamedText}</p>
 			{/if}
 
 			{#if runState.steps.length > 0}
@@ -623,73 +770,86 @@
 		</section>
 	{/if}
 
-	{#if storedSummary.trim() !== ''}
-		<p class="response" data-ai-summary>{storedSummary}</p>
-	{/if}
-
 	{#if outputs.length > 0}
 		<section class="outputs-section" data-ai-outputs>
 			<h3 class="section-label">Outputs</h3>
-			{#if imageOutputs.length > 0}
-				<!-- The same grid and the same `data-asset-id` the details view draws,
+			{#if busy}
+				<!--
+					These are the *last* run's outputs, and a run is in flight: a plot that
+					looks current is the one way this surface can lie. Faded and captioned
+					rather than hidden, because the reader is often comparing the new
+					answer against exactly this one — and because a grid that vanishes on
+					every Run makes the surface jump.
+				-->
+				<p class="stale-caption" data-ai-outputs-stale-while-running>from the last run</p>
+			{/if}
+			<div
+				class="outputs-body"
+				class:while-running={busy}
+				class:reduced-motion={reduceMotion}
+				data-ai-outputs-body
+			>
+				{#if imageOutputs.length > 0}
+					<!-- The same grid and the same `data-asset-id` the details view draws,
 				     which is the whole reason nested zoom works here for free. -->
-				<div class="image-grid" aria-label="Run outputs">
-					{#each imageOutputs as output (output.assetId)}
-						{@const asset = assets[output.assetId]}
-						<!-- The name leads, because it is the binding a promoted node is made
+					<div class="image-grid" aria-label="Run outputs">
+						{#each imageOutputs as output (output.assetId)}
+							{@const asset = assets[output.assetId]}
+							<!-- The name leads, because it is the binding a promoted node is made
 						     by and the filename the script has to keep stable between runs.
 						     It is also where `<figcaption>` is allowed to sit given the
 						     actions row below the frame. -->
-						<figure data-ai-output={output.name}>
-							<figcaption>{output.name}</figcaption>
-							{#if assetUrls[output.assetId]}
-								<div class="image-frame" role="presentation">
-									<img
-										class="focus-image"
-										data-asset-id={output.assetId}
-										src={assetUrls[output.assetId]}
-										alt={output.name}
-									/>
-								</div>
-							{:else}
-								<div class="missing-image" role="img" aria-label={output.name}>
-									{asset?.name ?? output.name}
-								</div>
-							{/if}
-							{@render outputActions(output)}
-						</figure>
-					{/each}
-				</div>
-			{/if}
+							<figure data-ai-output={output.name}>
+								<figcaption>{output.name}</figcaption>
+								{#if assetUrls[output.assetId]}
+									<div class="image-frame" role="presentation">
+										<img
+											class="focus-image"
+											data-asset-id={output.assetId}
+											src={assetUrls[output.assetId]}
+											alt={output.name}
+										/>
+									</div>
+								{:else}
+									<div class="missing-image" role="img" aria-label={output.name}>
+										{asset?.name ?? output.name}
+									</div>
+								{/if}
+								{@render outputActions(output)}
+							</figure>
+						{/each}
+					</div>
+				{/if}
 
-			{#if fileOutputs.length > 0}
-				<ul class="file-list" aria-label="Run output files">
-					{#each fileOutputs as output (output.assetId)}
-						{@const url = assetUrls[output.assetId]}
-						{@const asset = assets[output.assetId]}
-						<li data-ai-output={output.name} data-file-asset-id={output.assetId}>
-							<div class="file-meta">
-								<strong data-file-name>{output.name}</strong>
-								<span data-file-type>{output.mimeType}</span>
-								<!-- The size comes off the registered metadata rather than the run
+				{#if fileOutputs.length > 0}
+					<ul class="file-list" aria-label="Run output files">
+						{#each fileOutputs as output (output.assetId)}
+							{@const url = assetUrls[output.assetId]}
+							{@const asset = assets[output.assetId]}
+							<li data-ai-output={output.name} data-file-asset-id={output.assetId}>
+								<div class="file-meta">
+									<strong data-file-name>{output.name}</strong>
+									<span data-file-type>{output.mimeType}</span>
+									<!-- The size comes off the registered metadata rather than the run
 								     record, which stores only what binds a promoted node. -->
-								<span data-file-size>{formatByteSize(asset?.size ?? 0)}</span>
-							</div>
-							{#if url}
-								<!-- An anchor, for the reason `NodeDetailsContent` gives: the URL is
+									<span data-file-size>{formatByteSize(asset?.size ?? 0)}</span>
+								</div>
+								{#if url}
+									<!-- An anchor, for the reason `NodeDetailsContent` gives: the URL is
 								     already in hand, so the tap is a navigation the reader made. -->
-								<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-								<a class="file-open" data-file-open href={url} target="_blank" rel="noopener"
-									>Open</a
-								>
-							{:else}
-								<span class="file-unavailable" data-file-unavailable>Unavailable</span>
-							{/if}
-							{@render outputActions(output)}
-						</li>
-					{/each}
-				</ul>
-			{/if}
+									<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+									<a class="file-open" data-file-open href={url} target="_blank" rel="noopener"
+										>Open</a
+									>
+								{:else}
+									<span class="file-unavailable" data-file-unavailable>Unavailable</span>
+								{/if}
+								{@render outputActions(output)}
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			</div>
 		</section>
 	{/if}
 
@@ -725,70 +885,161 @@
 
 	<!--
 		Below the controls and the answer, because it is the part a reader checks
-		rather than the part they act on. Each file is one line — name, size, and
-		the shape of the table — with the digest itself, which is the text that
-		actually leaves the machine, one disclosure away. It used to be open by
-		default, which put a screenful of somebody's CSV between the prompt and
-		the Run button.
+		rather than the part they act on.
+
+		Grouped by the node each file hangs off, this node first. Flat, it was one
+		list of names with no way to tell whose file was whose — and the node is
+		exactly what an Add, a Replace or a Remove acts on, so the group header is
+		where those actions can sit and mean something. A neighbour's title and
+		description *are* its input, so the header is that input rather than a row
+		above it; only this node's own header is not an input at all, which is why
+		it carries no `data-ai-input`.
 	-->
 	<section class="inputs-section" data-ai-inputs>
 		<h3 class="section-label">Inputs</h3>
-		{#if inputs.length === 0}
-			<p class="empty" data-ai-inputs-empty>
-				Nothing attached yet. Attach files here, or connect a node that has some.
+		{#if attachmentStatus !== ''}
+			<!-- A file dialog is a thing the reader cannot see the result of, and a
+			     cancelled or failed one leaves the list looking exactly as it did. -->
+			<p class="attachment-status" data-ai-attachment-status aria-live="polite">
+				{attachmentStatus}
 			</p>
-		{:else}
-			<ul>
-				{#each inputs as input, index (inputKey(input, index))}
-					{@const digest = input.kind === 'file' ? digests[input.assetId] : undefined}
-					<li
-						data-ai-input
-						data-ai-input-kind={input.kind}
-						data-ai-input-node={input.nodeId}
-						data-ai-input-asset-id={input.kind === 'file' ? input.assetId : undefined}
-					>
-						<div class="input-head" data-ai-digest-summary>
-							<strong data-ai-input-name>{input.kind === 'file' ? input.name : input.title}</strong>
-							{#if input.label}
-								<span class="label-chip" data-ai-input-label>{input.label}</span>
-							{/if}
-							{#if input.kind === 'file'}
-								<span class="input-size" data-ai-input-size>{formatByteSize(input.size)}</span>
-								{#if digest && digestShape(digest) !== ''}
-									<span class="input-shape" data-ai-input-shape>{digestShape(digest)}</span>
-								{/if}
-							{/if}
-						</div>
-						{#if input.kind === 'file'}
-							{#if digest}
-								{#if digest.kind === 'table'}
-									<!-- Exactly what the request will carry about this file, rendered
-									     through the same function that builds it, so the promise the
-									     settings sheet makes is checkable on screen — by a reader who
-									     asks for it, rather than at everyone all the time. -->
-									<details class="digest-panel">
-										<summary>{digestDisclosureLabel(previewRows)}</summary>
-										<pre class="digest" data-ai-digest>{renderDigest(digest, previewRows)}</pre>
-									</details>
-								{:else if digest.kind === 'unavailable'}
-									<!-- Nothing was measured and nothing is coming: the name and the
-									     size above are the whole of what is known, and this says why
-									     there is no disclosure under them. Not an error block — the
-									     other files are fine, and this one is a fact about this row. -->
-									<p class="unavailable" data-ai-digest-unavailable={digest.reason}>
-										{digestUnavailableText(digest.reason)}
-									</p>
-								{/if}
-							{:else}
-								<p class="pending" data-ai-digest-pending>digesting…</p>
-							{/if}
-						{:else if input.description.trim() !== ''}
-							<p class="input-description" data-ai-input-description>{input.description}</p>
-						{/if}
-					</li>
-				{/each}
-			</ul>
 		{/if}
+		{#each groups as group (group.nodeId)}
+			<section
+				class="input-group"
+				data-ai-input-group={group.nodeId}
+				data-ai-input-group-kind={group.self ? 'self' : 'neighbour'}
+			>
+				{#if group.self}
+					<div class="group-head" data-ai-input-group-head>
+						<strong data-ai-input-group-name>This node</strong>
+						<div class="group-actions">
+							<!-- One button, not the sheet's two: the file's own type decides
+							     what it becomes, so an image picked here is still an image. -->
+							<label
+								class="add-file"
+								title="Attaches a file to this node, so the next run reads it."
+							>
+								Add file
+								<input
+									type="file"
+									data-ai-add-file
+									aria-label="Add a file to this node"
+									onchange={addPickedFile}
+								/>
+							</label>
+						</div>
+					</div>
+					{#if inputs.length === 0}
+						<p class="empty" data-ai-inputs-empty>
+							Nothing attached yet. Attach files here, or connect a node that has some.
+						</p>
+					{/if}
+				{:else}
+					<div
+						class="group-head"
+						data-ai-input
+						data-ai-input-kind="text"
+						data-ai-input-node={group.nodeId}
+						data-ai-input-group-head
+					>
+						<strong data-ai-input-name>{group.title}</strong>
+						{#if group.label}
+							<span class="label-chip" data-ai-input-label>{group.label}</span>
+						{/if}
+						<div class="group-actions">
+							<!-- The way to the node whose files these are, for a reader who
+							     wants to see it rather than take this surface's word. -->
+							<button
+								type="button"
+								class="jump"
+								data-ai-input-jump={group.nodeId}
+								title="Opens this node, without pinning it."
+								onclick={() => onJumpToNode?.(group.nodeId)}
+							>
+								Open
+							</button>
+						</div>
+					</div>
+					{#if group.description.trim() !== ''}
+						<p class="input-description" data-ai-input-description>{group.description}</p>
+					{/if}
+				{/if}
+
+				{#if group.files.length > 0}
+					<ul class="group-files">
+						{#each group.files as input, index (fileKey(input, index))}
+							{@const digest = digests[input.assetId]}
+							<li
+								data-ai-input
+								data-ai-input-kind="file"
+								data-ai-input-node={input.nodeId}
+								data-ai-input-asset-id={input.assetId}
+							>
+								<div class="input-top">
+									<div class="input-head" data-ai-digest-summary>
+										<strong data-ai-input-name>{input.name}</strong>
+										<span class="input-size" data-ai-input-size>{formatByteSize(input.size)}</span>
+										{#if digest && digestShape(digest) !== ''}
+											<span class="input-shape" data-ai-input-shape>{digestShape(digest)}</span>
+										{/if}
+									</div>
+									<!--
+										Two icons, and the meaning lives in the accessible name rather
+										than the tooltip: `title` is hover-only, which is the standing
+										debt in `docs/debt/2026-08-30-tooltips-are-hover-only.md`, so a
+										phone reader would otherwise get a glyph and nothing else.
+									-->
+									<div class="row-actions">
+										<label class="row-action" title={REPLACE_HINT}>
+											<span aria-hidden="true">⇄</span>
+											<input
+												type="file"
+												data-ai-replace-file={input.assetId}
+												aria-label="Replace {input.name} with a new file under the same name"
+												onchange={(event) => replacePickedFile(event, input)}
+											/>
+										</label>
+										<button
+											type="button"
+											class="row-action"
+											data-ai-remove-file={input.assetId}
+											aria-label="Remove {input.name} from {groupName(group)}"
+											title="Removes this file. Undo puts it back."
+											onclick={() => removeFile(input)}
+										>
+											<span aria-hidden="true">✕</span>
+										</button>
+									</div>
+								</div>
+								{#if digest}
+									{#if digest.kind === 'table'}
+										<!-- Exactly what the request will carry about this file, rendered
+										     through the same function that builds it, so the promise the
+										     settings sheet makes is checkable on screen — by a reader who
+										     asks for it, rather than at everyone all the time. -->
+										<details class="digest-panel">
+											<summary>{digestDisclosureLabel(previewRows, digest)}</summary>
+											<pre class="digest" data-ai-digest>{renderDigest(digest, previewRows)}</pre>
+										</details>
+									{:else if digest.kind === 'unavailable'}
+										<!-- Nothing was measured and nothing is coming: the name and the
+										     size above are the whole of what is known, and this says why
+										     there is no disclosure under them. Not an error block — the
+										     other files are fine, and this one is a fact about this row. -->
+										<p class="unavailable" data-ai-digest-unavailable={digest.reason}>
+											{digestUnavailableText(digest.reason)}
+										</p>
+									{/if}
+								{:else}
+									<p class="pending" data-ai-digest-pending>digesting…</p>
+								{/if}
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			</section>
+		{/each}
 	</section>
 
 	{#if hasScript}
@@ -902,11 +1153,110 @@
 		font-size: 0.95rem;
 	}
 
+	/* A group is its header and the files under it; the gap between groups is
+	   wider than the one inside a group, which is the whole of what makes the
+	   files read as belonging to the node above them. */
+	.input-group {
+		display: grid;
+		gap: 0.35rem;
+	}
+
+	.input-group + .input-group {
+		margin-top: 0.75rem;
+	}
+
+	.group-head {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+
+	.group-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		margin-left: auto;
+	}
+
+	/* Indented under the header, which is the other half of the grouping: a rule
+	   down the left says "these hang off that" without a box around each group. */
+	.group-files {
+		margin-left: 0.75rem;
+		padding-left: 0.75rem;
+		border-left: 2px solid #e2e8f0;
+	}
+
+	.input-top {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
 	.input-head {
 		display: flex;
 		align-items: baseline;
 		flex-wrap: wrap;
 		gap: 0.5rem;
+		flex: 1 1 auto;
+		min-width: 0;
+	}
+
+	.row-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+		margin-left: auto;
+	}
+
+	/*
+	 * The same square target Promote uses, for the same reason: a glyph in a
+	 * press big enough for a thumb. The label is a button in everything but
+	 * element — it holds the file input that opens the picker.
+	 */
+	.row-action {
+		display: grid;
+		place-items: center;
+		width: 2.25rem;
+		height: 2.25rem;
+		padding: 0;
+		border: 1px solid #cbd5e1;
+		border-radius: 0.4rem;
+		background: #f8fafc;
+		color: #334155;
+		font-size: 1rem;
+		line-height: 1;
+		cursor: pointer;
+	}
+
+	.add-file {
+		border: 1px solid #cbd5e1;
+		border-radius: 0.4rem;
+		padding: 0.35rem 0.75rem;
+		background: #f8fafc;
+		color: #334155;
+		font-size: 0.95rem;
+		cursor: pointer;
+	}
+
+	/*
+	 * The file inputs themselves are off-screen rather than `display: none`: a
+	 * hidden input is not focusable, and the label's press is the only way in for
+	 * a mouse. `overflow: hidden` and not `auto` — this surface admits exactly
+	 * one scroller.
+	 */
+	.row-action input,
+	.add-file input {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip: rect(0 0 0 0);
+	}
+
+	.attachment-status {
+		color: #475569;
+		font-size: 0.875rem;
 	}
 
 	.label-chip {
@@ -1124,6 +1474,74 @@
 		50% {
 			opacity: 0.3;
 		}
+	}
+
+	/*
+	 * The closed line reads as one sentence: a bold title and then what was said,
+	 * clipped at the width of the surface rather than wrapping to three lines.
+	 */
+	.prose-panel summary {
+		cursor: pointer;
+	}
+
+	.prose-title {
+		color: #475569;
+		font-size: 0.925rem;
+		font-weight: 600;
+	}
+
+	/*
+	 * Inline-block rather than a flex child: `<summary>` draws its disclosure
+	 * marker only while it lays out as a list item, and a flex summary loses the
+	 * one glyph that says it opens.
+	 */
+	.prose-preview {
+		display: inline-block;
+		max-width: 100%;
+		margin-left: 0.5rem;
+		overflow: hidden;
+		color: #64748b;
+		font-size: 0.925rem;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		vertical-align: bottom;
+	}
+
+	.prose-body {
+		display: grid;
+		gap: 0.5rem;
+		padding-top: 0.5rem;
+	}
+
+	/*
+	 * The last run's outputs, while a new one is in flight. Faded rather than
+	 * removed, with the caption above saying which run they came from — a plot
+	 * that looks current while another is being drawn is the one lie this surface
+	 * could tell.
+	 */
+	.outputs-body {
+		display: grid;
+		gap: 0.75rem;
+		transition: opacity 150ms ease;
+	}
+
+	.outputs-body.while-running {
+		opacity: 0.45;
+	}
+
+	.outputs-body.reduced-motion {
+		transition: none;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.outputs-body {
+			transition: none;
+		}
+	}
+
+	.stale-caption {
+		color: #64748b;
+		font-size: 0.8125rem;
 	}
 
 	.thinking summary {

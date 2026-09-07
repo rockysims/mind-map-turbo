@@ -17,6 +17,7 @@
 	import { mathPlainText } from '../MathText/lib/mathPlainText';
 	import type { QuantitySymbol } from '../MathText/lib/mathSymbols';
 	import { normalizeNodeTitle, type EdgePatch } from './lib/graph';
+	import { attachmentSizeWarning } from './lib/attachmentSizeWarning';
 	import { formatByteSize } from './lib/byteSize';
 	import { isRegisteredAddon, NODE_ADDON_REGISTRY, type NodeAddonName } from './lib/nodeAddons';
 	import { normalizeTagList } from './lib/titleSyntax';
@@ -436,7 +437,7 @@
 		if (!file || !onAddAttachment) return;
 		attachmentStatus = '';
 
-		if (file.size > warnBytesPerFile && !confirmAttachment(sizeWarningFor(file))) {
+		if (file.size > warnBytesPerFile && !confirmAttachment(attachmentSizeWarning(file))) {
 			attachmentStatus = 'Attachment cancelled.';
 			input.value = '';
 			return;
@@ -445,14 +446,6 @@
 		const result = await onAddAttachment(file);
 		attachmentStatus = result === 'added' ? 'Attachment added.' : 'Unable to store attachment.';
 		input.value = '';
-	}
-
-	/**
-	 * Why a big file is worth a question: it is copied into the document, and the
-	 * single-file export writes it as base64, which costs about a third again.
-	 */
-	function sizeWarningFor(file: File): string {
-		return `${file.name} is ${formatByteSize(file.size)}. It is stored inside this document and makes a saved file about a third larger again. Attach it anyway?`;
 	}
 
 	function draftFor(block: NodeContentBlock): { alt: string; caption: string } {

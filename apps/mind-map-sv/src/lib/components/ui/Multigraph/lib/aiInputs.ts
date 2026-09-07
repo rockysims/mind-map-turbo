@@ -29,7 +29,7 @@ interface AiTextInput {
 	label?: string;
 }
 
-interface AiFileInput {
+export interface AiFileInput {
 	kind: 'file';
 	nodeId: string;
 	assetId: string;
@@ -82,6 +82,100 @@ export function collectAiInputs(graph: MultigraphData, nodeId: string): AiInput[
 	}
 
 	return inputs;
+}
+
+/**
+ * One node's contribution to a run, as the workbench lists it: the node itself,
+ * then the files attached to it.
+ *
+ * The flat list `collectAiInputs` returns is the order a request renders in,
+ * and it reads as one long list of things with no way to tell whose file is
+ * whose. Grouped, a file is visibly *under* the node it hangs off — which is
+ * also the node an Add, a Replace or a Remove acts on, so the group header is
+ * where those actions belong.
+ *
+ * The AI node's own group leads and is always present, even with nothing
+ * attached: it is where Add file lives, and a node with no files is exactly the
+ * node that needs it. Its `title` is empty because the surface names it "This
+ * node" — the reader is looking at it.
+ */
+export interface AiInputGroup {
+	nodeId: string;
+	/** `true` for the AI node's own group; every other group is a neighbour. */
+	self: boolean;
+	/** The neighbour's title. Empty for the self group, which the surface names. */
+	title: string;
+	/** The neighbour's description — text the request carries. Empty for self. */
+	description: string;
+	/** The role the connecting edge gives this neighbour, if it has one. */
+	label?: string;
+	files: AiFileInput[];
+}
+
+/**
+ * The collected inputs, grouped by the node each one hangs off.
+ *
+ * Order is `collectAiInputs`'s order, which is why nothing here sorts: the self
+ * group first, then each neighbour in the order its text input appeared. A file
+ * for a node with no text input of its own joins the self group when it is the
+ * AI node's, and otherwise opens a group named by its node id — collected
+ * inputs never do that, but this takes a list rather than a graph and cannot
+ * drop a file it was handed.
+ */
+export function groupAiInputs(inputs: AiInput[], selfNodeId: string): AiInputGroup[] {
+	const selfGroup: AiInputGroup = {
+		nodeId: selfNodeId,
+		self: true,
+		title: '',
+		description: '',
+		files: []
+	};
+	const groups: AiInputGroup[] = [selfGroup];
+	const byNodeId = new Map<string, AiInputGroup>([[selfNodeId, selfGroup]]);
+
+	for (const input of inputs) {
+		if (input.kind === 'text') {
+			// A text input for a node that already has a group describes that group
+			// rather than opening a second one — the self node above all, whose group
+			// exists before any input is read.
+			const described = byNodeId.get(input.nodeId);
+			if (described !== undefined) {
+				described.title = input.title;
+				described.description = input.description;
+				if (input.label !== undefined) described.label = input.label;
+				continue;
+			}
+			const group: AiInputGroup = {
+				nodeId: input.nodeId,
+				self: false,
+				title: input.title,
+				description: input.description,
+				...(input.label === undefined ? {} : { label: input.label }),
+				files: []
+			};
+			byNodeId.set(input.nodeId, group);
+			groups.push(group);
+			continue;
+		}
+
+		const existing = byNodeId.get(input.nodeId);
+		if (existing !== undefined) {
+			existing.files.push(input);
+			continue;
+		}
+		const group: AiInputGroup = {
+			nodeId: input.nodeId,
+			self: false,
+			title: input.nodeId,
+			description: '',
+			...(input.label === undefined ? {} : { label: input.label }),
+			files: [input]
+		};
+		byNodeId.set(input.nodeId, group);
+		groups.push(group);
+	}
+
+	return groups;
 }
 
 /**

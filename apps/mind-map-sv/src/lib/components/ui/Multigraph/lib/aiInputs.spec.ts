@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collectAiInputs, type AiInput } from './aiInputs';
+import { collectAiInputs, groupAiInputs, type AiInput } from './aiInputs';
 import { makeGraph } from './testFixtures';
 import type { GraphAssetMetadata, MultigraphData } from '../../types/multigraph';
 import type { NodeContentBlock } from '../../types/node';
@@ -300,5 +300,63 @@ describe('collectAiInputs', () => {
 
 		expect(collectAiInputs(graph, 'ai').map((input) => input.nodeId)).toEqual(['ai']);
 		expect(collectAiInputs(graph, 'nope')).toEqual([]);
+	});
+});
+
+describe('groupAiInputs', () => {
+	it('puts each file under the node it hangs off, this node first', () => {
+		const groups = groupAiInputs(collectAiInputs(baseGraph(), 'ai'), 'ai');
+
+		expect(groups.map((group) => [group.nodeId, group.files.map((file) => file.name)])).toEqual([
+			['ai', ['own-first.csv', 'own-second.csv']],
+			['up', ['sweep1.csv']],
+			['side', []]
+		]);
+		// The node the reader is looking at is the one they can attach to, and it
+		// is named by the surface rather than by its own title.
+		expect(groups[0].self).toBe(true);
+		expect(groups[0].title).toBe('');
+		expect(groups[1].self).toBe(false);
+	});
+
+	it('carries the neighbour’s title, description and edge label onto its header', () => {
+		const groups = groupAiInputs(collectAiInputs(baseGraph(), 'ai'), 'ai');
+
+		expect(groups[1]).toMatchObject({
+			nodeId: 'up',
+			title: 'Bench run 1',
+			description: 'first sweep',
+			label: 'baseline'
+		});
+		// An untagged edge gives no role, so there is no chip to draw.
+		expect(groups[2].label).toBeUndefined();
+	});
+
+	// A node with nothing attached is exactly the node that needs Add file, so
+	// its group is there before any input is.
+	it('always opens with this node’s group, even with no inputs at all', () => {
+		expect(groupAiInputs([], 'ai')).toEqual([
+			{ nodeId: 'ai', self: true, title: '', description: '', files: [] }
+		]);
+	});
+
+	it('groups a file whose node has no text input of its own', () => {
+		const orphan: AiInput = {
+			kind: 'file',
+			nodeId: 'ghost',
+			assetId: 'a1',
+			name: 'one.csv',
+			mimeType: 'text/csv',
+			size: 12
+		};
+
+		// Collected inputs never look like this — a neighbour's text always comes
+		// first — but this takes a list rather than a graph, and a file it was
+		// handed must not vanish.
+		expect(groupAiInputs([orphan], 'ai')[1]).toMatchObject({
+			nodeId: 'ghost',
+			title: 'ghost',
+			files: [orphan]
+		});
 	});
 });

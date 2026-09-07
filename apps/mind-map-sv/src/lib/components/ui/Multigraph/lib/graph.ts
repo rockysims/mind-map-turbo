@@ -502,6 +502,55 @@ export function removeNodeContentBlock(
 }
 
 /**
+ * Point a node's block at new bytes, keeping everything else about it.
+ *
+ * The workbench's Replace: the reader hands over a fresh export of the same
+ * measurement, and the script must go on opening the name it was written for.
+ * So the block keeps its `name` (a file) or its `alt` (an image) and its
+ * caption, and only `assetId` moves — which is also what makes
+ * `inputsChangedSince` report the file as *replaced* rather than as one gone
+ * and one arrived.
+ *
+ * `removedAssetIds` names the old asset when no block anywhere still points at
+ * it, on the same contract as `removeNodeContentBlock`: the caller tombstones
+ * it rather than deleting it, because an undo has to be able to put the old
+ * bytes back. A node or an asset id that names no block comes back as the same
+ * graph object, so a replace that found nothing lands in no history entry.
+ */
+export function replaceNodeContentBlockAsset(
+	data: MultigraphData,
+	nodeId: string,
+	assetId: string,
+	newAssetId: string,
+	asset: GraphAssetMetadata
+): { graph: MultigraphData; removedAssetIds: string[] } {
+	const node = data.nodes.find((candidate) => candidate.id === nodeId);
+	if (!node?.content?.some((block) => block.assetId === assetId)) {
+		return { graph: data, removedAssetIds: [] };
+	}
+
+	const nextGraph: MultigraphData = {
+		...data,
+		assets: { ...(data.assets ?? {}), [newAssetId]: asset },
+		nodes: data.nodes.map((candidate) =>
+			candidate.id === nodeId
+				? {
+						...candidate,
+						content: (candidate.content ?? []).map((block) =>
+							block.assetId === assetId ? { ...block, assetId: newAssetId } : block
+						)
+					}
+				: candidate
+		)
+	};
+
+	if (isAssetReferenced(nextGraph, assetId)) return { graph: nextGraph, removedAssetIds: [] };
+	const nextAssets = { ...(nextGraph.assets ?? {}) };
+	delete nextAssets[assetId];
+	return { graph: { ...nextGraph, assets: nextAssets }, removedAssetIds: [assetId] };
+}
+
+/**
  * Every asset id any node still points at — the keep-set for garbage
  * collection. Every content block kind carries one, so this counts images and
  * files alike; a block type without an asset would fail to type-check here,

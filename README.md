@@ -64,7 +64,10 @@ alone, because an existing node has no newly created edge to apply them to.
 `!ai Channel drift` gives a node the AI add-on. Open it and you get a
 workbench: a prompt, the files and notes it can see, a Run button, and — once
 a run finishes — a summary, the plots and tables it produced, and the Python
-script that produced them.
+script that produced them. The inputs are listed under the node each one hangs
+off, and can be edited there: **Add file** on this node, and on any file row
+**Replace** (new bytes under the same name, so the stored script still opens it)
+and **Remove**. Undo covers all three.
 
 What actually happens on a run is worth being precise about, because it is
 unusual: **Claude writes a script, and your browser runs it.** Nothing is
@@ -105,13 +108,18 @@ to check, and Forget key.
   rather than accumulating. Cheaper and steadier than starting over.
 - **Run** — runs the stored script again on the current files, with **no model
   call at all**. Free, and the right button after changing the data behind an
-  attachment.
+  attachment. New files are seen only by a script that scans its folder rather
+  than opening fixed names (see below).
 
-Run does gather the files afresh each time, but the stored script opens the
-*names* it was written for — so a file added or swapped since then is handed to
-the script and never read. When that has happened the workbench says so above
-the switch, naming the files, and starts on **Change**, which is how the script
-catches up with the data.
+Every attached file — this node's and its one-hop neighbours' — is written into
+the script's folder on every run, under its own filename. So a script that scans
+that folder finds a file you added yesterday, and a script that opens fixed
+filenames does not: it is handed the new file and never reads it. When files
+have come or gone since the script was written the workbench says so above the
+switch, naming them, and starts on **Change**, which is how the script catches
+up. A file _replaced_ under the same name is the case Run was made for — the
+script opens that name either way — and the note says so rather than pushing you
+at a model call.
 
 An output can be promoted to a node of its own — the `⤴` button on its row. A
 later run that produces the same filename swaps the image on that node, and one
