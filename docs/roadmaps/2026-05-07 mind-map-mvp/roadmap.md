@@ -66,7 +66,7 @@ individual PR-sized tasks.
 | 10  | LaTeX math in node titles                          | complete    | [milestone](milestones/10-latex-math-in-node-titles.md), [plan](plans/2026-08-27%2010-latex-math-in-node-titles.md)                                   |
 | 11  | Unified hop model for derived edges                | complete    | [milestone](milestones/11-unified-hop-model-for-derived-edges.md), [plan](plans/2026-08-28%2011-unified-hop-model-for-derived-edges.md)               |
 | 12  | Undo and redo                                      | complete    | [milestone](milestones/12-undo-and-redo.md), [plan](plans/2026-08-30%2012-undo-and-redo.md)                                                           |
-| 13  | Node add-ons and file attachments                  | proposed    | [milestone](milestones/13-node-addons-and-file-attachments.md), [plan](plans/2026-09-04%2013-node-addons-and-file-attachments.md)                     |
+| 13  | Node add-ons and file attachments                  | complete    | [milestone](milestones/13-node-addons-and-file-attachments.md), [plan](plans/2026-09-04%2013-node-addons-and-file-attachments.md)                     |
 | 14  | AI nodes                                           | proposed    | [milestone](milestones/14-ai-nodes.md), [plan](plans/2026-09-04%2014-ai-nodes.md)                                                                     |
 
 Milestones 04a-04m deepen the local-first graph experience before multiplayer.

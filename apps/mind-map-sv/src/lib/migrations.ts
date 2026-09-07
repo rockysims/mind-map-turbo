@@ -7,9 +7,16 @@ import type {
 	Point,
 	TagColorConfig
 } from './components/ui/types/multigraph';
-import type { NodeContentBlock, NodeData, QuantityDesignation } from './components/ui/types/node';
+import type {
+	NodeAddons,
+	NodeContentBlock,
+	NodeData,
+	QuantityDesignation,
+	TaskAddon
+} from './components/ui/types/node';
+import { isRegisteredAddon, type NodeAddonName } from './components/ui/Multigraph/lib/nodeAddons';
 
-export const CURRENT_SCHEMA_VERSION = 6;
+export const CURRENT_SCHEMA_VERSION = 7;
 
 const EMPTY_TAG_COLOR_CONFIG: TagColorConfig = {
 	nodeTags: {},
@@ -177,7 +184,9 @@ function unwrapPersistedGraphData(payload: unknown): MultigraphData {
 		) {
 			throw new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload');
 		}
-		return migrateGraphDataToV6(migrateGraphDataToV5(migrateGraphDataToV4(payload.data)));
+		return migrateGraphDataToV7(
+			migrateGraphDataToV6(migrateGraphDataToV5(migrateGraphDataToV4(payload.data)))
+		);
 	}
 
 	if (payload.schemaVersion === 4) {
@@ -189,7 +198,7 @@ function unwrapPersistedGraphData(payload: unknown): MultigraphData {
 		) {
 			throw new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload');
 		}
-		return migrateGraphDataToV6(migrateGraphDataToV5(payload.data));
+		return migrateGraphDataToV7(migrateGraphDataToV6(migrateGraphDataToV5(payload.data)));
 	}
 
 	if (payload.schemaVersion === 5) {
@@ -201,7 +210,19 @@ function unwrapPersistedGraphData(payload: unknown): MultigraphData {
 		) {
 			throw new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload');
 		}
-		return migrateGraphDataToV6(payload.data);
+		return migrateGraphDataToV7(migrateGraphDataToV6(payload.data));
+	}
+
+	if (payload.schemaVersion === 6) {
+		if (
+			!isMultigraphData(payload.data, {
+				allowMissingContent: true,
+				allowMissingAssets: true
+			})
+		) {
+			throw new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload');
+		}
+		return migrateGraphDataToV7(payload.data);
 	}
 
 	if (payload.schemaVersion !== CURRENT_SCHEMA_VERSION) {
@@ -236,17 +257,19 @@ function migrateLegacyGraphData(
 	data: MultigraphData,
 	options: { allowMissingTags?: boolean } = {}
 ): MultigraphData {
-	return migrateGraphDataToV6(
-		migrateGraphDataToV5(
-			migrateGraphDataToV4({
-				...data,
-				nodes: data.nodes.map((node) => ({
-					...node,
-					tags: options.allowMissingTags ? (node.tags ?? []) : node.tags
-				})),
-				edges: data.edges.map(migrateLegacyEdge),
-				tagColorConfig: { ...EMPTY_TAG_COLOR_CONFIG }
-			})
+	return migrateGraphDataToV7(
+		migrateGraphDataToV6(
+			migrateGraphDataToV5(
+				migrateGraphDataToV4({
+					...data,
+					nodes: data.nodes.map((node) => ({
+						...node,
+						tags: options.allowMissingTags ? (node.tags ?? []) : node.tags
+					})),
+					edges: data.edges.map(migrateLegacyEdge),
+					tagColorConfig: { ...EMPTY_TAG_COLOR_CONFIG }
+				})
+			)
 		)
 	);
 }
@@ -282,6 +305,17 @@ function migrateGraphDataToV5(data: MultigraphData): MultigraphData {
  * the others and v7 has a place to hang.
  */
 function migrateGraphDataToV6(data: MultigraphData): MultigraphData {
+	return data;
+}
+
+/**
+ * v7 widens `GraphAssetMetadata.kind` to `'image' | 'file'` and adds the
+ * `file` content block. Both are additive — a v6 graph carries only image
+ * assets and image blocks, which stay exactly what they were — so there is
+ * nothing to rewrite. Named like its neighbours so the branch chain reads the
+ * same and v8 has a place to hang.
+ */
+function migrateGraphDataToV7(data: MultigraphData): MultigraphData {
 	return data;
 }
 
@@ -360,7 +394,38 @@ function isNodeData(
 			? value.content === undefined || isNodeContent(value.content)
 			: isNodeContent(value.content)) &&
 		(value.inputs === undefined || isDesignationArray(value.inputs)) &&
-		(value.outputs === undefined || isDesignationArray(value.outputs))
+		(value.outputs === undefined || isDesignationArray(value.outputs)) &&
+		(value.addons === undefined || isNodeAddons(value.addons))
+	);
+}
+
+/**
+ * The registry is closed, so an unknown key or a badly shaped payload makes the
+ * node malformed rather than being dropped: a file written by a newer app that
+ * knows `!ai` is not a file this one can load and re-save without losing it.
+ */
+function isNodeAddons(value: unknown): value is NodeAddons {
+	return (
+		isRecord(value) &&
+		Object.entries(value).every(
+			([name, addon]) => isRegisteredAddon(name) && isAddonData(name, addon)
+		)
+	);
+}
+
+function isAddonData(name: NodeAddonName, value: unknown): boolean {
+	switch (name) {
+		case 'task':
+			return isTaskAddon(value);
+	}
+}
+
+function isTaskAddon(value: unknown): value is TaskAddon {
+	return (
+		isRecord(value) &&
+		typeof value.done === 'boolean' &&
+		(value.doneAt === undefined ||
+			(typeof value.doneAt === 'number' && Number.isFinite(value.doneAt)))
 	);
 }
 
@@ -422,26 +487,32 @@ function isNodeContent(value: unknown): value is NodeContentBlock[] {
 }
 
 function isNodeContentBlock(value: unknown): value is NodeContentBlock {
-	return (
-		isRecord(value) &&
-		value.type === 'image' &&
-		typeof value.assetId === 'string' &&
-		typeof value.alt === 'string' &&
-		(value.caption === undefined || typeof value.caption === 'string')
-	);
+	if (!isRecord(value)) return false;
+	if (typeof value.assetId !== 'string') return false;
+	if (value.caption !== undefined && typeof value.caption !== 'string') return false;
+	if (value.type === 'image') return typeof value.alt === 'string';
+	if (value.type === 'file') return typeof value.name === 'string';
+	return false;
 }
 
 function isAssetMetadataRecord(value: unknown): value is Record<string, GraphAssetMetadata> {
 	return isRecord(value) && Object.values(value).every(isAssetMetadata);
 }
 
+/**
+ * The `image/` MIME check belongs to the kind, not to the asset: an image block
+ * renders its blob in an `<img>`, so a non-image MIME type there is a broken
+ * document. A `file` asset is only ever handed to the browser, so any type is
+ * legal — including `image/png`, which is what a PNG attached through Add file
+ * is.
+ */
 function isAssetMetadata(value: unknown): value is GraphAssetMetadata {
 	return (
 		isRecord(value) &&
 		typeof value.id === 'string' &&
-		value.kind === 'image' &&
+		(value.kind === 'image' || value.kind === 'file') &&
 		typeof value.mimeType === 'string' &&
-		value.mimeType.startsWith('image/') &&
+		(value.kind === 'file' || value.mimeType.startsWith('image/')) &&
 		(value.name === undefined || typeof value.name === 'string') &&
 		typeof value.size === 'number' &&
 		Number.isFinite(value.size) &&

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import SquareText from '$lib/components/ui/SquareText/SquareText.svelte';
+	import type { AddonBadge } from './lib/addonBadges';
 
 	let titleInputRef = $state<HTMLInputElement | null>(null);
 
@@ -12,6 +13,8 @@
 		detailsMode = false,
 		quantityLabels = [],
 		quantityOverflowCount = 0,
+		badges = [],
+		taskDone = false,
 		onTitleCommit
 	}: {
 		title: string;
@@ -32,6 +35,11 @@
 		quantityLabels?: string[];
 		/** Quantities beyond those named, or zero when they all fit. */
 		quantityOverflowCount?: number;
+		/** Add-on and attachment glyphs, decided by `lib/addonBadges.ts`. */
+		badges?: readonly AddonBadge[];
+		/** Mutes the title. Redundant with the task badge, and deliberately so:
+		 * the badge says which state, the muting says it at a glance. */
+		taskDone?: boolean;
 		onTitleCommit?: (title: string) => void;
 	} = $props();
 
@@ -57,9 +65,31 @@
 <div
 	class="compact-layer"
 	data-details-mode={detailsMode ? 'true' : undefined}
+	data-task-done={taskDone ? 'true' : undefined}
 	aria-hidden={detailsMode ? 'true' : undefined}
 	style="--node-diameter: {diameterPx}px; --node-text-font-size: {fontSizePx}px;"
 >
+	{#if badges.length > 0}
+		<!--
+			The band above the inscribed square, mirroring the quantity chips in the
+			band below it: both are unclaimed by the auto-fitting title, and putting
+			the badges opposite the chips is what keeps two glyphs and three chips
+			from ever meeting.
+		-->
+		<div class="addon-badges" data-node-addon-badges>
+			{#each badges as badge (badge.kind)}
+				<span
+					class="addon-badge"
+					data-addon-badge={badge.kind}
+					role="img"
+					aria-label={badge.label}
+					title={badge.label}
+					>{badge.glyph}{#if badge.count !== undefined}<span class="badge-count">{badge.count}</span
+						>{/if}</span
+				>
+			{/each}
+		</div>
+	{/if}
 	<div class="square">
 		{#if isTitleEditing}
 			<input
@@ -102,6 +132,40 @@
 		grid-area: 1 / 1;
 		position: relative;
 		will-change: opacity;
+	}
+
+	/*
+	 * Sized off the node's own font size like everything else inside it, so a
+	 * badge shrinks and grows with the node rather than becoming a fleck at
+	 * distance or a placard up close.
+	 */
+	.addon-badges {
+		position: absolute;
+		bottom: 100%;
+		left: 50%;
+		display: flex;
+		gap: 0.2em;
+		justify-content: center;
+		/* The chord this far up the circle is narrower than the square below it. */
+		max-width: calc(var(--node-diameter) * 0.55);
+		transform: translateX(-50%);
+		font-size: calc(var(--node-text-font-size) * 0.9);
+		line-height: 1.2;
+		overflow: hidden;
+		/*
+		 * Display only, by the milestone's decision: done is toggled in the details
+		 * view, never by a canvas tap. Hit testing is geometric against the node
+		 * circle, so a badge that swallowed pointer events would be a dead zone
+		 * where a drag refuses to start.
+		 */
+		pointer-events: none;
+	}
+
+	/* Tabular-ish and a shade smaller, so the number reads as a count on the
+	   glyph rather than as a second glyph. */
+	.badge-count {
+		font-size: 0.8em;
+		font-weight: bold;
 	}
 
 	.quantities {
@@ -156,6 +220,17 @@
 		font-size: var(--node-text-font-size);
 		padding-bottom: 15px;
 		text-align: center;
+	}
+
+	/*
+	 * The same slate the details view uses for text that is present but no longer
+	 * the point, against the node's own light surface. Colour alone rather than a
+	 * strike-through: the milestone says a done task renders muted and nothing
+	 * else changes about it, and the checked badge carries the state for anyone
+	 * the contrast shift passes by.
+	 */
+	.compact-layer[data-task-done='true'] :global(.title) {
+		color: #64748b;
 	}
 
 	.title-input {

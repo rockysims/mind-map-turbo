@@ -1,6 +1,14 @@
 const NODE_RADIUS_PX = 200; // default node radius in layout and rendering
 
 export const APP_CONFIG = {
+	ai: {
+		defaultModel: 'claude-opus-5', // model an unconfigured browser runs AI nodes on
+		models: ['claude-opus-5', 'claude-sonnet-5'], // models offered in the settings sheet
+		previewRows: 5, // rows of each input file a request may carry by default
+		previewRowChoices: [0, 5, 20], // preview-row depths the settings sheet offers
+		sendPlots: true, // send rendered plots back so Claude can check its own figure
+		rememberKey: true // keep the API key in this browser between sessions
+	},
 	interaction: {
 		doubleClickMs: 250, // max gap between clicks to count as double-click
 		dragThresholdPx: 5, // min pointer movement before a drag starts
@@ -69,9 +77,14 @@ export const APP_CONFIG = {
 			worldWheelSensitivity: 0.002, // wheel delta to scale factor inside focus/image worlds
 			worldMaxScale: 8 // deepest free zoom inside a focused world
 		},
+		attachments: {
+			warnBytesPerFile: 5 * 1024 * 1024, // per-file size the uploader asks about before adding
+			warnTotalBytes: 25 * 1024 * 1024 // total attachment size above which the export size is reported
+		},
 		tagSyntax: {
 			nodeTagMarker: '#', // leading marker for node tags in title/query shortcuts
-			edgeTagMarker: '@' // leading marker for edge tags in title/query shortcuts
+			edgeTagMarker: '@', // leading marker for edge tags in title/query shortcuts
+			addonMarker: '!' // leading marker for node add-ons from the closed registry
 		},
 		layout: {
 			baseRadius: NODE_RADIUS_PX, // base radius for hop-scaled layout

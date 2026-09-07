@@ -161,6 +161,52 @@ function imageGraph(assetIds: string[]): MultigraphData {
 	});
 }
 
+/** The same, for file attachments: one `file` block and its metadata per asset id. */
+function fileGraph(assetIds: string[]): MultigraphData {
+	const graph = makeGraph({
+		nodes: assetIds.map((assetId, index) => ({
+			id: `n${index}`,
+			title: `File ${index}`,
+			description: '',
+			content: [{ type: 'file' as const, assetId, name: `${assetId}.csv` }]
+		}))
+	});
+	return {
+		...graph,
+		assets: Object.fromEntries(
+			assetIds.map((assetId) => [
+				assetId,
+				{
+					id: assetId,
+					kind: 'file' as const,
+					mimeType: 'text/csv',
+					name: `${assetId}.csv`,
+					size: 1,
+					createdAt: 1
+				}
+			])
+		)
+	};
+}
+
+async function storeFileAsset(
+	store: GraphAssetStore,
+	scope: string,
+	assetId: string,
+	body: string
+) {
+	const blob = new Blob([body], { type: 'text/csv' });
+	await store.put({
+		scope,
+		assetId,
+		blob,
+		mimeType: 'text/csv',
+		name: `${assetId}.csv`,
+		size: blob.size,
+		updatedAt: 1
+	});
+}
+
 async function embeddedAsset(assetId: string, body: string): Promise<GraphFileEmbeddedAsset> {
 	const blob = new Blob([body], { type: 'image/png' });
 	return {
@@ -1153,6 +1199,86 @@ describe('GraphPersistenceController', () => {
 	});
 });
 
+describe('reporting the export size', () => {
+	/** The `fileGraph` node, with its one attachment resized to `sizeBytes`. */
+	function heavyGraph(sizeBytes: number): MultigraphData {
+		return {
+			...fileGraph(['a1']),
+			assets: {
+				a1: {
+					id: 'a1',
+					kind: 'file',
+					mimeType: 'text/csv',
+					name: 'a1.csv',
+					size: sizeBytes,
+					createdAt: 1
+				}
+			}
+		};
+	}
+
+	async function loadedHeavy(sizeBytes = 30 * 1024 * 1024) {
+		const context = setup();
+		await context.persistence.save('heavy', {
+			data: heavyGraph(sizeBytes),
+			viewState: NEUTRAL_VIEW_STATE
+		});
+		await context.controller.load('heavy');
+		return context;
+	}
+
+	it('adds the download size under the document status', async () => {
+		const { controller } = await loadedHeavy();
+
+		// 30 MB of CSV plus the third base64 adds. The second sentence becomes a
+		// line of its own in the toolbar.
+		expect(controllerNotice(controller.getView())).toBe(
+			'Draft cached in this browser. Save to keep it. Download will be about 40 MB.'
+		);
+		// A big document is something the reader built, not a risk to their work.
+		expect(controllerNoticeSeverity(controller.getView())).toBe('info');
+	});
+
+	it('says nothing about a document below the configured total', async () => {
+		const { controller } = await loadedHeavy(APP_CONFIG.multigraph.attachments.warnTotalBytes / 2);
+
+		expect(controllerNotice(controller.getView())).toBe(
+			'Draft cached in this browser. Save to keep it.'
+		);
+	});
+
+	it('adds to a sticky notice rather than replacing it', async () => {
+		const { controller } = await loadedHeavy();
+
+		controller.reportBlockedAction('Nothing to undo. Opened files start fresh.');
+
+		// The size is an addition, never a tier of its own: the answer the reader
+		// is owed keeps the line, with the size stacked beneath it.
+		expect(controllerNotice(controller.getView())).toBe(
+			'Nothing to undo. Opened files start fresh. Download will be about 40 MB.'
+		);
+		expect(controllerNoticeSeverity(controller.getView())).toBe('info');
+	});
+
+	it('keeps a cache failure readable as its own sentence', async () => {
+		const { controller, scheduler } = await loadedHeavy();
+		controller.notifyGraphChanged(addNode(controller.getView().graph, { title: 'Another' }), {
+			syncView: true
+		});
+		scheduler.failFlushOnce = true;
+
+		await controller.selectGraph('next');
+
+		// The store's raw message ends without punctuation, so appending supplies
+		// the full stop the toolbar splits its lines on.
+		expect(controllerNotice(controller.getView())).toBe(
+			'Could not cache draft. quota exceeded. Download will be about 40 MB.'
+		);
+		// The failure still owns the colour; the size line does not soften it.
+		expect(controllerNoticeSeverity(controller.getView())).toBe('warning');
+	});
+});
+
 describe('GraphPersistenceController additive import', () => {
 	/** A loaded 'active' graph of two nodes, viewed at a non-neutral pan and zoom. */
 	async function loadedHost(options: Parameters<typeof setup>[0] = {}) {
@@ -1361,6 +1487,100 @@ describe('GraphPersistenceController additive import', () => {
 		expect(result).toMatchObject({ outcome: 'imported' });
 		expect(await readAsset(assetStore, 'active', 'host-asset')).toBe('host bytes');
 		expect(await readAsset(assetStore, 'active', 'incoming-asset')).toBe('incoming bytes');
+	});
+});
+
+describe('file attachments across export and import', () => {
+	const CSV_BODY = 'time,value\n1,2\n';
+
+	// The whole portability claim for schema 7 in one test: a CSV attached here
+	// comes back out of a document opened by an app that has never seen it.
+	it('embeds a file attachment on export and a fresh app hydrates it on import', async () => {
+		const assetStore = new MemoryGraphAssetStore();
+		const { controller } = setup({ assetStore });
+		await controller.load('active');
+		controller.notifyGraphChanged(fileGraph(['readings']), { syncView: true });
+		await storeFileAsset(assetStore, 'active', 'readings', CSV_BODY);
+
+		const artifact = await controller.exportGraphDocument(
+			'<!doctype html><html><body></body></html>'
+		);
+
+		// The exported bytes are all a fresh profile has: new store, new controller.
+		const freshStore = new MemoryGraphAssetStore();
+		const fresh = setup({ assetStore: freshStore });
+		await fresh.controller.load('active');
+
+		expect(await fresh.controller.importGraphDocument(artifact.content)).toBe('imported');
+		expect(fresh.controller.getView().graph.nodes[0].content).toEqual([
+			{ type: 'file', assetId: 'readings', name: 'readings.csv' }
+		]);
+		expect(await readAsset(freshStore, 'active', 'readings')).toBe(CSV_BODY);
+	});
+
+	it('carries a file and an image out of the same document', async () => {
+		const assetStore = new MemoryGraphAssetStore();
+		const { controller } = setup({ assetStore });
+		await controller.load('active');
+		const mixed = fileGraph(['readings']);
+		controller.notifyGraphChanged(
+			{
+				...mixed,
+				nodes: [
+					{
+						...mixed.nodes[0],
+						content: [
+							...(mixed.nodes[0].content ?? []),
+							{ type: 'image', assetId: 'photo', alt: 'A photo' }
+						]
+					}
+				],
+				assets: {
+					...mixed.assets,
+					photo: {
+						id: 'photo',
+						kind: 'image',
+						mimeType: 'image/png',
+						size: 1,
+						createdAt: 1
+					}
+				}
+			},
+			{ syncView: true }
+		);
+		await storeFileAsset(assetStore, 'active', 'readings', CSV_BODY);
+		await storeAsset(assetStore, 'active', 'photo', 'picture bytes');
+
+		const artifact = await controller.exportGraphDocument(
+			'<!doctype html><html><body></body></html>'
+		);
+
+		const freshStore = new MemoryGraphAssetStore();
+		const fresh = setup({ assetStore: freshStore });
+		await fresh.controller.load('active');
+		await fresh.controller.importGraphDocument(artifact.content);
+
+		expect(await readAsset(freshStore, 'active', 'readings')).toBe(CSV_BODY);
+		expect(await readAsset(freshStore, 'active', 'photo')).toBe('picture bytes');
+	});
+
+	// `deleteUnreferenced` counts file blocks through `referencedAssetIds`, so a
+	// file the incoming document does not name is swept like an unreferenced image.
+	it('sweeps a file blob the imported document no longer references', async () => {
+		const assetStore = new MemoryGraphAssetStore();
+		const { controller } = setup({ assetStore, confirmGraphImportReplace: () => true });
+		await controller.load('active');
+		controller.notifyGraphChanged(fileGraph(['stale']), { syncView: true });
+		await storeFileAsset(assetStore, 'active', 'stale', 'old rows');
+
+		await controller.importGraphDocument(
+			serializeGraphHtmlFile({
+				data: makeGraph({ nodeCount: 1, pinned: [0] }),
+				viewState: NEUTRAL_VIEW_STATE
+			})
+		);
+
+		expect(await readAsset(assetStore, 'active', 'stale')).toBeNull();
 	});
 });
 

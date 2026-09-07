@@ -4,9 +4,11 @@ import {
 	PersistedGraphError,
 	parsePersistedGraph,
 	unwrapPersistedGraph,
+	unwrapPersistedHistory,
 	wrapPersistedGraph
 } from './migrations';
 import { makeGraph } from './components/ui/Multigraph/lib/testFixtures';
+import type { GraphAssetMetadata, MultigraphData } from './components/ui/types/multigraph';
 
 describe('persisted graph migrations', () => {
 	it('wraps current graph data in the schema envelope', () => {
@@ -295,9 +297,247 @@ describe('persisted graph migrations', () => {
 		).toThrow(new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload'));
 	});
 
+	it('reads a current-version node carrying add-ons', () => {
+		const graph = makeGraph({ nodeCount: 1, pinned: [0] });
+		const nodes = [
+			{ ...graph.nodes[0], addons: { task: { done: true, doneAt: 1_700_000_000_000 } } }
+		];
+
+		expect(
+			unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data: { ...graph, nodes } })
+				.nodes[0].addons
+		).toEqual({ task: { done: true, doneAt: 1_700_000_000_000 } });
+	});
+
+	it('rejects an add-on name that is not in the registry', () => {
+		const graph = makeGraph({ nodeCount: 1 });
+
+		expect(() =>
+			unwrapPersistedGraph({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data: { ...graph, nodes: [{ ...graph.nodes[0], addons: { nonsense: {} } }] }
+			})
+		).toThrow(new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload'));
+	});
+
+	it('rejects a registered add-on with malformed data', () => {
+		const graph = makeGraph({ nodeCount: 1 });
+
+		expect(() =>
+			unwrapPersistedGraph({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data: { ...graph, nodes: [{ ...graph.nodes[0], addons: { task: { done: 'yes' } } }] }
+			})
+		).toThrow(new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload'));
+	});
+
+	it('rejects a task add-on with a non-finite doneAt', () => {
+		const graph = makeGraph({ nodeCount: 1 });
+
+		expect(() =>
+			unwrapPersistedGraph({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data: {
+					...graph,
+					nodes: [{ ...graph.nodes[0], addons: { task: { done: true, doneAt: 'today' } } }]
+				}
+			})
+		).toThrow(new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload'));
+	});
+
 	it('rejects malformed JSON with a typed error', () => {
 		expect(() => parsePersistedGraph('{ nope')).toThrow(
 			new PersistedGraphError('Persisted graph JSON is malformed.', 'malformed-payload')
 		);
+	});
+});
+
+describe('schema 7: file attachments', () => {
+	const IMAGE_ASSET: GraphAssetMetadata = {
+		id: 'a1',
+		kind: 'image',
+		mimeType: 'image/png',
+		name: 'photo.png',
+		size: 12,
+		createdAt: 1
+	};
+
+	const CSV_ASSET: GraphAssetMetadata = {
+		id: 'f1',
+		kind: 'file',
+		mimeType: 'text/csv',
+		name: 'readings.csv',
+		size: 24,
+		createdAt: 2
+	};
+
+	/** A one-node graph carrying the given blocks and asset metadata. */
+	function graphWith(
+		content: NonNullable<MultigraphData['nodes'][number]['content']>,
+		assets: Record<string, GraphAssetMetadata>
+	): MultigraphData {
+		return {
+			...makeGraph({
+				nodes: [{ id: 'n0', title: 'Node 0', description: '', content }],
+				pinned: [0],
+				pinHistory: { 0: 1 }
+			}),
+			assets,
+			pinSequence: 1
+		};
+	}
+
+	it('loads a version 6 document unchanged, images still images', () => {
+		const data = graphWith([{ type: 'image', assetId: 'a1', alt: 'A photo' }], { a1: IMAGE_ASSET });
+
+		const loaded = unwrapPersistedGraph({ schemaVersion: 6, data });
+
+		expect(loaded).toEqual(data);
+		expect(loaded.nodes[0].content).toEqual([{ type: 'image', assetId: 'a1', alt: 'A photo' }]);
+		expect(loaded.assets?.a1.kind).toBe('image');
+	});
+
+	it('loads a version 7 document carrying a file block', () => {
+		const data = graphWith(
+			[{ type: 'file', assetId: 'f1', name: 'readings.csv', caption: 'March run' }],
+			{ f1: CSV_ASSET }
+		);
+
+		expect(unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toEqual(data);
+	});
+
+	it('loads a node carrying an image and a file side by side', () => {
+		const data = graphWith(
+			[
+				{ type: 'image', assetId: 'a1', alt: 'A photo' },
+				{ type: 'file', assetId: 'f1', name: 'readings.csv' }
+			],
+			{ a1: IMAGE_ASSET, f1: CSV_ASSET }
+		);
+
+		expect(unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toEqual(data);
+	});
+
+	// The kind says how the node treats the blob, not what the blob is: a PNG
+	// attached through Add file is a download, not a rendered image.
+	it('accepts a file asset with an image MIME type', () => {
+		const pngAsFile: GraphAssetMetadata = {
+			id: 'f2',
+			kind: 'file',
+			mimeType: 'image/png',
+			name: 'diagram.png',
+			size: 40,
+			createdAt: 3
+		};
+		const data = graphWith([{ type: 'file', assetId: 'f2', name: 'diagram.png' }], {
+			f2: pngAsFile
+		});
+
+		expect(unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toEqual(data);
+	});
+
+	it('still rejects an image asset whose MIME type is not an image', () => {
+		const data = graphWith([{ type: 'image', assetId: 'a1', alt: 'A photo' }], {
+			a1: { ...IMAGE_ASSET, mimeType: 'text/csv' }
+		});
+
+		expect(() => unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toThrow(
+			new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload')
+		);
+	});
+
+	it('rejects an asset kind outside the two the schema knows', () => {
+		const data = graphWith([{ type: 'image', assetId: 'a1', alt: 'A photo' }], {
+			// A newer app's kind, which this one cannot load and re-save without losing it.
+			a1: { ...IMAGE_ASSET, kind: 'video' } as unknown as GraphAssetMetadata
+		});
+
+		expect(() => unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toThrow(
+			new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload')
+		);
+	});
+
+	it('rejects a file block with no name', () => {
+		const data = graphWith(
+			[
+				{ type: 'file', assetId: 'f1' } as unknown as {
+					type: 'file';
+					assetId: string;
+					name: string;
+				}
+			],
+			{ f1: CSV_ASSET }
+		);
+
+		expect(() => unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toThrow(
+			new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload')
+		);
+	});
+
+	it('rejects a content block of an unknown type', () => {
+		const data = graphWith(
+			[
+				{ type: 'video', assetId: 'v1' } as unknown as {
+					type: 'file';
+					assetId: string;
+					name: string;
+				}
+			],
+			{}
+		);
+
+		expect(() => unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toThrow(
+			new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload')
+		);
+	});
+
+	it('refuses schema version 8 as unsupported rather than malformed', () => {
+		expect(() =>
+			unwrapPersistedGraph({ schemaVersion: 8, data: makeGraph({ nodeCount: 1 }) })
+		).toThrow(
+			new PersistedGraphError('Unsupported graph schema version: 8', 'unsupported-version')
+		);
+	});
+
+	// A tail from another schema version is dropped rather than migrated; the
+	// graph beside it still loads, which is the half that matters on a reload.
+	it('drops a version 6 draft undo tail and loads its graph anyway', () => {
+		const data = graphWith([{ type: 'image', assetId: 'a1', alt: 'A photo' }], { a1: IMAGE_ASSET });
+		const draft = {
+			schemaVersion: 6,
+			data,
+			history: {
+				head: {
+					label: 'add image',
+					primaryNodeId: 'n0',
+					severedBeaconPreference: [],
+					createdAt: 100
+				},
+				entries: []
+			}
+		};
+
+		expect(unwrapPersistedHistory(draft)).toBeNull();
+		expect(unwrapPersistedGraph(draft)).toEqual(data);
+	});
+
+	it('keeps a current-version draft undo tail', () => {
+		const data = graphWith([{ type: 'file', assetId: 'f1', name: 'readings.csv' }], {
+			f1: CSV_ASSET
+		});
+		const head = {
+			label: 'add file',
+			primaryNodeId: 'n0',
+			severedBeaconPreference: [],
+			createdAt: 100
+		};
+
+		expect(
+			unwrapPersistedHistory({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data,
+				history: { head, entries: [] }
+			})
+		).toEqual({ head, entries: [] });
 	});
 });

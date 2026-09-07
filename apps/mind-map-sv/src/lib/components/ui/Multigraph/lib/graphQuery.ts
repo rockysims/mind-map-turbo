@@ -2,11 +2,12 @@ import type { MultigraphData } from '../../types/multigraph';
 import type { NodeData } from '../../types/node';
 import { mathPlainText } from '../../MathText/lib/mathPlainText';
 import { hasMath } from '../../MathText/lib/mathSegments';
-import { colorForTag } from './tagColors';
+import { isRegisteredAddon } from './nodeAddons';
+import { colorForTag, fallbackTagColor } from './tagColors';
 import { DEFAULT_TAG_SYNTAX, type TagSyntaxConfig } from './titleSyntax';
 
 export type GraphQueryTokenMode = 'focus' | 'spotlight' | 'exclude';
-export type GraphQueryTokenTarget = 'nodeTag' | 'edgeTag' | 'text';
+export type GraphQueryTokenTarget = 'nodeTag' | 'edgeTag' | 'text' | 'addon';
 export type GraphQueryRole = 'focus' | 'spotlight' | 'context' | 'background' | 'excluded';
 
 export interface GraphQueryToken {
@@ -81,9 +82,12 @@ export function parseGraphQuery(
 		if (tagMarker) {
 			const parsed = readTag(input, index + tagMarker.length, tagSyntax);
 			if (parsed.value) {
+				// The add-on registry is not consulted here: the token carries the raw
+				// name so the panel can echo back what was typed, and an unregistered
+				// name is resolved to "matches nothing" at evaluation time instead.
 				tokens.push({
 					mode,
-					target: tagMarker === tagSyntax.nodeTagMarker ? 'nodeTag' : 'edgeTag',
+					target: targetForMarker(tagMarker, tagSyntax),
 					value: parsed.value
 				});
 			}
@@ -142,6 +146,22 @@ export function evaluateGraphQuery(
 				if (!matchedTag) continue;
 				applyTokenToState(nodeStates[node.id], token, tokenIndex, {
 					spotlightColor: colorForTag(data.tagColorConfig.nodeTags, matchedTag).color
+				});
+			}
+			continue;
+		}
+
+		if (token.target === 'addon') {
+			// The registry is closed, so an unregistered name simply matches no node —
+			// the query stays valid and the rest of its tokens keep working.
+			if (!isRegisteredAddon(token.value)) continue;
+			const addonName = token.value;
+			for (const node of data.nodes) {
+				if (node.addons?.[addonName] === undefined) continue;
+				// Add-ons carry no colour config, so the spotlight reuses the same
+				// name-derived fallback an uncoloured node tag would get.
+				applyTokenToState(nodeStates[node.id], token, tokenIndex, {
+					spotlightColor: fallbackTagColor(addonName)
 				});
 			}
 			continue;
@@ -416,6 +436,11 @@ function startsWithTagMarker(input: string, index: number, tagSyntax: TagSyntaxC
 	return tagMarkerAt(input, index, tagSyntax) !== null;
 }
 
+/**
+ * The marker starting at `index`, or null. All three title markers count: `!`
+ * ends a text or tag token exactly the way `#` and `@` do, so a name can no
+ * more contain one than the other two.
+ */
 function tagMarkerAt(input: string, index: number, tagSyntax: TagSyntaxConfig): string | null {
 	if (tagSyntax.nodeTagMarker && input.startsWith(tagSyntax.nodeTagMarker, index)) {
 		return tagSyntax.nodeTagMarker;
@@ -423,5 +448,14 @@ function tagMarkerAt(input: string, index: number, tagSyntax: TagSyntaxConfig): 
 	if (tagSyntax.edgeTagMarker && input.startsWith(tagSyntax.edgeTagMarker, index)) {
 		return tagSyntax.edgeTagMarker;
 	}
+	if (tagSyntax.addonMarker && input.startsWith(tagSyntax.addonMarker, index)) {
+		return tagSyntax.addonMarker;
+	}
 	return null;
+}
+
+function targetForMarker(marker: string, tagSyntax: TagSyntaxConfig): GraphQueryTokenTarget {
+	if (marker === tagSyntax.nodeTagMarker) return 'nodeTag';
+	if (marker === tagSyntax.addonMarker) return 'addon';
+	return 'edgeTag';
 }

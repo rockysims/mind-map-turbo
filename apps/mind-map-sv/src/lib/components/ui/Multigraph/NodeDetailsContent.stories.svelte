@@ -8,7 +8,10 @@
 	import { nodeQuantities } from './lib/nodeQuantities';
 	import type { QuantityIndexEntry } from './lib/quantityIndex';
 	import { cycleDesignation } from './lib/quantityDesignations';
-	import { designations } from './lib/testFixtures';
+	import { designations, makeGraph } from './lib/testFixtures';
+	import NodeDetailsHarness from './NodeDetailsHarness.svelte';
+	import { MemoryGraphAssetStore } from '$lib/assets/assetStore';
+	import type { MultigraphData } from '../types/multigraph';
 
 	function makeNode(description: string): NodeData {
 		return { id: 'node-1', title: 'Kinematics', description, tags: [] };
@@ -169,6 +172,97 @@
 	const MOON_AND_EARTH_TITLES = (nodeId: string) => (nodeId === 'earth' ? 'Earth' : 'Moon');
 
 	const CHIP_HOLD_MS = APP_CONFIG.multigraph.dataflow.chipPeekLongPressMs;
+
+	/** A node carrying the task add-on, in the state the story asks for. */
+	function taskNode(done: boolean): NodeData {
+		return {
+			id: 'node-1',
+			title: 'Change the filters',
+			description: '',
+			tags: [],
+			addons: { task: done ? { done: true, doneAt: 1_700_000_000_000 } : { done: false } }
+		};
+	}
+
+	function taskGraph(): MultigraphData {
+		return makeGraph({ nodes: [taskNode(false)] });
+	}
+
+	/** One node with one CSV attached, and the asset metadata the rows read. */
+	function fileGraph(): MultigraphData {
+		return {
+			...makeGraph({
+				nodes: [
+					{
+						id: 'node-1',
+						title: 'Rig measurements',
+						description: '',
+						tags: [],
+						content: [
+							{
+								type: 'file',
+								assetId: 'asset-csv',
+								name: 'measurements.csv',
+								caption: 'Rig run 3'
+							}
+						]
+					}
+				]
+			}),
+			assets: {
+				'asset-csv': {
+					id: 'asset-csv',
+					kind: 'file',
+					mimeType: 'text/csv',
+					name: 'measurements.csv',
+					size: 8,
+					createdAt: 1
+				}
+			}
+		};
+	}
+
+	/** The blob behind that metadata — eight bytes, so the row reads `8 B`. */
+	function csvStore(): MemoryGraphAssetStore {
+		const store = new MemoryGraphAssetStore();
+		void store.put({
+			scope: 'story',
+			assetId: 'asset-csv',
+			blob: new Blob(['a,b\n1,2\n'], { type: 'text/csv' }),
+			mimeType: 'text/csv',
+			name: 'measurements.csv',
+			size: 8,
+			updatedAt: 1
+		});
+		return store;
+	}
+
+	function cellText(row: HTMLElement, attribute: string): string {
+		return row.querySelector(`[${attribute}]`)?.textContent?.trim() ?? '';
+	}
+
+	function taskToggle(canvasElement: HTMLElement): HTMLElement {
+		const found = canvasElement.querySelector('[data-task-toggle]');
+		if (!(found instanceof HTMLElement)) throw new Error('no task toggle');
+		return found;
+	}
+
+	/** The task glyph on the harness's canvas node. */
+	function badgeGlyph(canvasElement: HTMLElement): string {
+		return canvasElement.querySelector('[data-addon-badge="task"]')?.textContent?.trim() ?? '';
+	}
+
+	function titleColor(canvasElement: HTMLElement): string {
+		const titleEl = canvasElement.querySelector('.node .title');
+		if (!(titleEl instanceof HTMLElement)) throw new Error('no canvas node title');
+		return window.getComputedStyle(titleEl).color;
+	}
+
+	function harnessState(canvasElement: HTMLElement): HTMLElement {
+		const found = canvasElement.querySelector('[data-node-details-harness]');
+		if (!(found instanceof HTMLElement)) throw new Error('no harness state element');
+		return found;
+	}
 
 	function sleep(ms: number): Promise<void> {
 		return new Promise((resolve) => setTimeout(resolve, ms));
@@ -1850,3 +1944,126 @@
 		expect(cardLabels(canvasElement, 'input')).toEqual(['g']);
 	}}
 />
+
+<Story
+	name="AFileAttachmentIsListedWithAWayToOpenIt"
+	play={async ({ canvasElement }) => {
+		// The canvas node announces the file with a count glyph; the row below is
+		// where the name, type and size actually live.
+		const badge = canvasElement.querySelector('[data-addon-badge="attachments"]');
+		expect(badge).toBeInTheDocument();
+		expect(badge).toHaveAttribute('aria-label', '1 attachment');
+
+		const row = await waitFor(() => {
+			const found = canvasElement.querySelector('[data-file-asset-id="asset-csv"]');
+			expect(found).toBeInTheDocument();
+			return found as HTMLElement;
+		});
+		expect(cellText(row, 'data-file-name')).toBe('measurements.csv');
+		expect(cellText(row, 'data-file-type')).toBe('text/csv');
+		expect(cellText(row, 'data-file-size')).toBe('8 B');
+		expect(cellText(row, 'data-file-caption')).toBe('Rig run 3');
+
+		// A link rather than a scripted `window.open`, so nothing here opens a
+		// window: the story reads the href the reader's tap would follow.
+		const open = await waitFor(() => {
+			const found = row.querySelector('[data-file-open]');
+			expect(found).toBeInstanceOf(HTMLAnchorElement);
+			return found as HTMLAnchorElement;
+		});
+		expect(open.href.startsWith('blob:')).toBe(true);
+		expect(open.target).toBe('_blank');
+		expect(open.rel).toBe('noopener');
+	}}
+>
+	{#snippet template()}
+		<NodeDetailsHarness
+			baseGraph={fileGraph()}
+			nodeId="node-1"
+			assetStore={csvStore()}
+			assetScope="story"
+		/>
+	{/snippet}
+</Story>
+
+<Story
+	name="AFileWhoseBlobIsMissingSaysSo"
+	play={async ({ canvasElement }) => {
+		const row = canvasElement.querySelector('[data-file-asset-id="asset-csv"]');
+		expect(row).toBeInTheDocument();
+		// The document still names it, the way a missing image still names its
+		// asset; the store simply has no copy in this profile.
+		expect(cellText(row as HTMLElement, 'data-file-name')).toBe('measurements.csv');
+		await waitFor(() =>
+			expect((row as HTMLElement).querySelector('[data-file-unavailable]')).toBeInTheDocument()
+		);
+		expect((row as HTMLElement).querySelector('[data-file-open]')).toBeNull();
+	}}
+>
+	{#snippet template()}
+		<NodeDetailsHarness
+			baseGraph={fileGraph()}
+			nodeId="node-1"
+			assetStore={new MemoryGraphAssetStore()}
+			assetScope="story"
+		/>
+	{/snippet}
+</Story>
+
+<Story
+	name="TheTaskControlShowsNotDone"
+	args={{
+		node: taskNode(false),
+		currentNodeId: 'node-1',
+		onToggleTaskDone: fn()
+	}}
+	play={async ({ canvasElement }) => {
+		const toggle = taskToggle(canvasElement);
+		expect(toggle).toHaveAttribute('data-task-done', 'false');
+		expect(toggle).toHaveAttribute('aria-pressed', 'false');
+		expect(toggle.textContent).toContain('Not done');
+	}}
+/>
+
+<Story
+	name="TheTaskControlShowsDone"
+	args={{
+		node: taskNode(true),
+		currentNodeId: 'node-1',
+		onToggleTaskDone: fn()
+	}}
+	play={async ({ canvasElement }) => {
+		const toggle = taskToggle(canvasElement);
+		expect(toggle).toHaveAttribute('data-task-done', 'true');
+		expect(toggle).toHaveAttribute('aria-pressed', 'true');
+		expect(toggle.textContent).toContain('Done');
+	}}
+/>
+
+<Story
+	name="TogglingDoneUpdatesTheBadgeAndMutesTheTitle"
+	play={async ({ canvasElement }) => {
+		expect(badgeGlyph(canvasElement)).toBe('☐');
+		expect(canvasElement.querySelector('.node')).not.toHaveAttribute('data-task-done');
+		const litTitle = titleColor(canvasElement);
+
+		await userEvent.click(taskToggle(canvasElement));
+
+		await waitFor(() => expect(badgeGlyph(canvasElement)).toBe('☑'));
+		expect(canvasElement.querySelector('.node')).toHaveAttribute('data-task-done', 'true');
+		expect(titleColor(canvasElement)).toBe('rgb(100, 116, 139)');
+		expect(titleColor(canvasElement)).not.toBe(litTitle);
+		expect(harnessState(canvasElement)).toHaveAttribute('data-last-intent', 'mark task done');
+
+		// And back, which is the undo path's label as well as the reader's.
+		await userEvent.click(taskToggle(canvasElement));
+
+		await waitFor(() => expect(badgeGlyph(canvasElement)).toBe('☐'));
+		expect(canvasElement.querySelector('.node')).not.toHaveAttribute('data-task-done');
+		expect(harnessState(canvasElement)).toHaveAttribute('data-last-intent', 'mark task not done');
+	}}
+>
+	{#snippet template()}
+		<NodeDetailsHarness baseGraph={taskGraph()} nodeId="node-1" />
+	{/snippet}
+</Story>

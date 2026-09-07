@@ -33,7 +33,7 @@
 	import type { GraphAssetStore } from '$lib/assets/assetStore';
 	import { tombstoneAsset } from '$lib/assets/assetTrash';
 	import { prefersReducedMotion } from '$lib/reducedMotion';
-	import type { NodeData } from '../types/node';
+	import type { NodeContentBlock, NodeData } from '../types/node';
 	import type { EdgeData } from '../types/edge';
 	import type { GraphCommitIntent } from '../types/history';
 	import type { TagColorChangePhase } from './lib/tagColors.js';
@@ -61,9 +61,10 @@
 	import {
 		NEW_NODE_TITLE,
 		addEdge,
-		addNodeImageContent,
+		addNodeContentBlock,
 		addNode,
 		commitInlineTitleSyntax,
+		commitSheetTitleSyntax,
 		deleteTagEverywhere,
 		duplicateEdgeIdentifier,
 		findExistingEdge,
@@ -72,16 +73,21 @@
 		removeEdge,
 		removeNode,
 		referencedAssetIds,
-		removeNodeImageContent,
+		removeNodeAddon,
+		removeNodeContentBlock,
 		moveNodeContentBlock,
+		setNodeAddon,
 		setNodeDesignations,
 		setNodePinned,
 		setTagColor,
+		setTaskDone,
 		togglePinned,
 		updateEdge,
+		updateNodeFileContent,
 		updateNodeImageContent,
 		updateNodeContent
 	} from './lib/graph.js';
+	import { addonIntentLabel, type NodeAddonName } from './lib/nodeAddons';
 	import { deriveGraphLayout, withSettledGraphPositions } from './lib/graphLayout.js';
 	import { evaluateGraphQuery, type GraphQueryElementState } from './lib/graphQuery.js';
 	import { beaconNodeIds } from './lib/beacons.js';
@@ -1869,17 +1875,31 @@
 			outputs?: QuantityDesignation[];
 		}
 	) {
-		commitContentGraph(updateNodeContent(graph, nodeId, content), editIntent('edit node'));
+		// Two passes rather than one: the first saves what the sheet's own fields
+		// say, the second reads the markers out of the title it just stored — which
+		// can rewrite the title and add to the tags and add-ons, additively, since
+		// the sheet's fields stay the way to take any of them off again.
+		const withFields = updateNodeContent(graph, nodeId, content);
+		const listedTags =
+			content.tags ?? withFields.nodes.find((node) => node.id === nodeId)?.tags ?? [];
+		const withSyntax = commitSheetTitleSyntax(withFields, nodeId, content.title, listedTags);
+		commitContentGraph(withSyntax, editIntent('edit node'));
 		closeOverlays();
 	}
 
-	async function addImageToNode(
+	/**
+	 * Store one attachment and give the node a block for it.
+	 *
+	 * The file's MIME type decides which block it becomes, not the button that
+	 * picked it: a PNG chosen through Add file is still an image, and anything
+	 * that is not an image is a file block whichever way it arrived.
+	 */
+	async function addAttachmentToNode(
 		nodeId: string,
-		file: File,
-		details: { alt: string; caption?: string }
-	): Promise<'added' | 'unsupported' | 'store-failed'> {
-		if (!file.type.startsWith('image/')) return 'unsupported';
+		file: File
+	): Promise<'added' | 'store-failed'> {
 		if (!assetStore || !assetScope) return 'store-failed';
+		const isImage = file.type.startsWith('image/');
 		const assetId =
 			typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
 				? crypto.randomUUID()
@@ -1896,20 +1916,20 @@
 		if (!stored.ok) return 'store-failed';
 		const asset: GraphAssetMetadata = {
 			id: assetId,
-			kind: 'image',
+			kind: isImage ? 'image' : 'file',
 			mimeType: file.type,
 			name: file.name,
 			size: file.size,
 			createdAt: Date.now()
 		};
+		// An image's alt starts as its filename, which is what the upload knows;
+		// a file has no alt at all, because it is opened rather than rendered.
+		const block: NodeContentBlock = isImage
+			? { type: 'image', assetId, alt: file.name }
+			: { type: 'file', assetId, name: file.name };
 		commitUserGraph(
-			addNodeImageContent(
-				graph,
-				nodeId,
-				{ type: 'image', assetId, alt: details.alt, caption: details.caption },
-				asset
-			),
-			editIntent('add image')
+			addNodeContentBlock(graph, nodeId, block, asset),
+			editIntent(isImage ? 'add image' : 'add file')
 		);
 		return 'added';
 	}
@@ -1925,28 +1945,59 @@
 		);
 	}
 
-	function moveNodeImage(nodeId: string, fromIndex: number, direction: -1 | 1) {
+	function saveNodeFile(nodeId: string, assetId: string, details: { caption?: string }) {
+		commitUserGraph(
+			updateNodeFileContent(graph, nodeId, assetId, details),
+			editIntent('edit attachment')
+		);
+	}
+
+	function moveNodeAttachment(nodeId: string, fromIndex: number, direction: -1 | 1) {
 		commitUserGraph(
 			moveNodeContentBlock(graph, nodeId, fromIndex, fromIndex + direction),
-			editIntent('move image')
+			editIntent('move attachment')
 		);
 	}
 
 	/**
-	 * Removing an image tombstones its blob rather than deleting it.
+	 * Removing an attachment tombstones its blob rather than deleting it.
 	 *
 	 * A hard delete here made this the one edit an undo could not honour: the
 	 * content block would come back pointing at nothing. The blob now stays,
 	 * marked unreferenced, and the controller collects it once no history entry
 	 * can reach it any more.
 	 */
-	async function deleteNodeImage(nodeId: string, assetId: string) {
-		const result = removeNodeImageContent(graph, nodeId, assetId);
-		commitUserGraph(result.graph, editIntent('remove image'));
+	async function deleteNodeAttachment(nodeId: string, assetId: string) {
+		const result = removeNodeContentBlock(graph, nodeId, assetId);
+		commitUserGraph(result.graph, editIntent('remove attachment'));
 		if (!assetStore || !assetScope) return;
 		for (const removedAssetId of result.removedAssetIds) {
 			await tombstoneAsset(assetStore, assetScope, removedAssetId);
 		}
+	}
+
+	/**
+	 * Add or remove one add-on, with no confirm on the way off: milestone 12's
+	 * undo is the safety net, and the intent names the add-on so the history
+	 * entry says which one went.
+	 */
+	function toggleNodeAddon(nodeId: string, name: NodeAddonName, enabled: boolean) {
+		commitUserGraph(
+			enabled ? setNodeAddon(graph, nodeId, name) : removeNodeAddon(graph, nodeId, name),
+			editIntent(addonIntentLabel(name, enabled ? 'add' : 'remove'))
+		);
+	}
+
+	/**
+	 * The details view's task control, routed the way every other edit is. The
+	 * intent names the direction rather than the add-on, because that is what the
+	 * undo list has to read back: "mark task done", not "edit node".
+	 */
+	function toggleNodeTaskDone(nodeId: string, done: boolean) {
+		commitUserGraph(
+			setTaskDone(graph, nodeId, done),
+			editIntent(done ? 'mark task done' : 'mark task not done')
+		);
 	}
 
 	function saveEdgeContent(edgeId: string, patch: Parameters<typeof updateEdge>[2]) {
@@ -2861,10 +2912,13 @@
 				inputs: QuantityDesignation[];
 				outputs: QuantityDesignation[];
 			}) => saveNodeContent(editNode.id, content)}
-			onAddImage={(file, details) => addImageToNode(editNode.id, file, details)}
+			onAddAttachment={(file) => addAttachmentToNode(editNode.id, file)}
 			onSaveImage={(assetId, details) => saveNodeImage(editNode.id, assetId, details)}
-			onMoveImage={(fromIndex, direction) => moveNodeImage(editNode.id, fromIndex, direction)}
-			onDeleteImage={(assetId) => void deleteNodeImage(editNode.id, assetId)}
+			onSaveFile={(assetId, details) => saveNodeFile(editNode.id, assetId, details)}
+			onMoveAttachment={(fromIndex, direction) =>
+				moveNodeAttachment(editNode.id, fromIndex, direction)}
+			onDeleteAttachment={(assetId) => void deleteNodeAttachment(editNode.id, assetId)}
+			onToggleAddon={(name, enabled) => toggleNodeAddon(editNode.id, name, enabled)}
 			onSaveEdge={saveEdgeContent}
 			onCancel={() => (editNodeId = null)}
 			onTogglePinned={() => toggleNodePinned(editNode.id)}
@@ -2953,6 +3007,7 @@
 								createDefiningNode(consumerNodeId ?? detailsNode.id, quantityLabel, quantityKey)}
 							onConfirmDefiner={confirmDefinerOutput}
 							onJumpToNode={(nodeId) => jumpToNode(detailsNode.id, nodeId)}
+							onToggleTaskDone={(done) => toggleNodeTaskDone(detailsNode.id, done)}
 						/>
 					</NodeDetailsLayer>
 				</div>

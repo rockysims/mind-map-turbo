@@ -5,10 +5,18 @@ import type {
 	Point,
 	TagColorNamespace
 } from '../../types/multigraph';
-import type { NodeData, NodeImageContent, QuantityDesignation } from '../../types/node';
+import type {
+	NodeContentBlock,
+	NodeData,
+	NodeFileContent,
+	NodeImageContent,
+	QuantityDesignation,
+	TaskAddon
+} from '../../types/node';
+import { withNodeAddon, type NodeAddonName } from './nodeAddons';
 import { mathPlainText } from '../../MathText/lib/mathPlainText';
 import { symbolFor } from '../../MathText/lib/mathSymbols';
-import { parseTitleSyntax } from './titleSyntax';
+import { parseSheetTitleSyntax, parseTitleSyntax } from './titleSyntax';
 
 interface AddNodeInput {
 	id?: string;
@@ -237,6 +245,94 @@ export function setNodeDesignations(
 	};
 }
 
+/**
+ * Gives a node the named add-on, created at its registry default.
+ *
+ * A node that already carries the add-on keeps its data untouched and the same
+ * graph object comes back, so re-typing `!task` on a done task does not reset
+ * it.
+ */
+export function setNodeAddon(
+	data: MultigraphData,
+	nodeId: string,
+	name: NodeAddonName
+): MultigraphData {
+	const node = data.nodes.find((candidate) => candidate.id === nodeId);
+	if (!node) return data;
+	if (node.addons?.[name] !== undefined) return data;
+
+	const addons = withNodeAddon(node.addons, name);
+	return {
+		...data,
+		nodes: data.nodes.map((candidate) =>
+			candidate.id === nodeId ? { ...candidate, addons } : candidate
+		)
+	};
+}
+
+/**
+ * Takes the named add-on and its data off a node.
+ *
+ * Returns the same graph object when the node does not carry it. Dropping the
+ * last add-on drops the `addons` key too, so a node without add-ons serialises
+ * the way it did before add-ons existed rather than carrying an empty object.
+ */
+export function removeNodeAddon(
+	data: MultigraphData,
+	nodeId: string,
+	name: NodeAddonName
+): MultigraphData {
+	const node = data.nodes.find((candidate) => candidate.id === nodeId);
+	if (!node?.addons || node.addons[name] === undefined) return data;
+
+	const addons = { ...node.addons };
+	delete addons[name];
+	const hasRemaining = Object.keys(addons).length > 0;
+
+	return {
+		...data,
+		nodes: data.nodes.map((candidate) => {
+			if (candidate.id !== nodeId) return candidate;
+			if (hasRemaining) return { ...candidate, addons };
+			const withoutAddons = { ...candidate };
+			delete withoutAddons.addons;
+			return withoutAddons;
+		})
+	};
+}
+
+/**
+ * Mark a task add-on done or not done.
+ *
+ * `doneAt` is written from `now` on the way to done and dropped on the way
+ * back, so an undone task carries no stale stamp — the field means "when this
+ * was finished", and a task that is not finished has no answer. A node without
+ * the add-on, and a task already in the asked-for state, both come back as the
+ * same graph object: nothing changed, so nothing should re-render or land in
+ * the undo list.
+ */
+export function setTaskDone(
+	data: MultigraphData,
+	nodeId: string,
+	done: boolean,
+	now: number = Date.now()
+): MultigraphData {
+	const node = data.nodes.find((candidate) => candidate.id === nodeId);
+	const task = node?.addons?.task;
+	if (node === undefined || task === undefined) return data;
+	if (task.done === done) return data;
+
+	const nextTask: TaskAddon = done ? { done: true, doneAt: now } : { done: false };
+	return {
+		...data,
+		nodes: data.nodes.map((candidate) =>
+			candidate.id === nodeId
+				? { ...candidate, addons: { ...candidate.addons, task: nextTask } }
+				: candidate
+		)
+	};
+}
+
 /** A designation's canonical identity — the key of the symbol it designates. */
 export function designationKey(designation: QuantityDesignation): string {
 	return symbolFor(designation.base, designation.subscript).key;
@@ -254,10 +350,11 @@ function dedupeDesignations(designations: readonly QuantityDesignation[]): Quant
 	return result;
 }
 
-export function addNodeImageContent(
+/** Append an image or file block to a node, registering its asset metadata. */
+export function addNodeContentBlock(
 	data: MultigraphData,
 	nodeId: string,
-	image: NodeImageContent,
+	block: NodeContentBlock,
 	asset: GraphAssetMetadata
 ): MultigraphData {
 	if (!hasNode(data, nodeId)) return data;
@@ -269,7 +366,7 @@ export function addNodeImageContent(
 			[asset.id]: asset
 		},
 		nodes: data.nodes.map((node) =>
-			node.id === nodeId ? { ...node, content: [...(node.content ?? []), image] } : node
+			node.id === nodeId ? { ...node, content: [...(node.content ?? []), block] } : node
 		)
 	};
 }
@@ -290,6 +387,33 @@ export function updateNodeImageContent(
 						...node,
 						content: (node.content ?? []).map((block) =>
 							block.type === 'image' && block.assetId === assetId ? { ...block, ...patch } : block
+						)
+					}
+				: node
+		)
+	};
+}
+
+/**
+ * Edit a file block's caption. A file has no alt text — it is opened rather
+ * than rendered — so the caption is the only thing about it the reader writes.
+ */
+export function updateNodeFileContent(
+	data: MultigraphData,
+	nodeId: string,
+	assetId: string,
+	patch: Partial<Pick<NodeFileContent, 'caption'>>
+): MultigraphData {
+	if (!hasNode(data, nodeId)) return data;
+
+	return {
+		...data,
+		nodes: data.nodes.map((node) =>
+			node.id === nodeId
+				? {
+						...node,
+						content: (node.content ?? []).map((block) =>
+							block.type === 'file' && block.assetId === assetId ? { ...block, ...patch } : block
 						)
 					}
 				: node
@@ -321,7 +445,14 @@ export function moveNodeContentBlock(
 	};
 }
 
-export function removeNodeImageContent(
+/**
+ * Drop a node's block for `assetId`, whatever kind it is.
+ *
+ * `removedAssetIds` names the assets no block anywhere still points at, so the
+ * caller can tombstone their blobs (`assets/assetTrash.ts`) rather than delete
+ * them: an undo has to be able to put the block back pointing at something.
+ */
+export function removeNodeContentBlock(
 	data: MultigraphData,
 	nodeId: string,
 	assetId: string
@@ -333,9 +464,7 @@ export function removeNodeImageContent(
 			node.id === nodeId
 				? {
 						...node,
-						content: (node.content ?? []).filter(
-							(block) => !(block.type === 'image' && block.assetId === assetId)
-						)
+						content: (node.content ?? []).filter((block) => block.assetId !== assetId)
 					}
 				: node
 		)
@@ -346,11 +475,17 @@ export function removeNodeImageContent(
 	return { graph: { ...nextGraph, assets: nextAssets }, removedAssetIds: [assetId] };
 }
 
+/**
+ * Every asset id any node still points at — the keep-set for garbage
+ * collection. Every content block kind carries one, so this counts images and
+ * files alike; a block type without an asset would fail to type-check here,
+ * which is the reminder to revisit it.
+ */
 export function referencedAssetIds(data: MultigraphData): Set<string> {
 	const ids = new Set<string>();
 	for (const node of data.nodes) {
 		for (const block of node.content ?? []) {
-			if (block.type === 'image') ids.add(block.assetId);
+			ids.add(block.assetId);
 		}
 	}
 	return ids;
@@ -414,11 +549,17 @@ export function commitInlineTitleSyntax(
 	if (!hasNode(data, nodeId)) return data;
 
 	const parsed = parseTitleSyntax(rawTitle);
-	const graphWithNode = updateNodeContent(data, nodeId, {
+	let graphWithNode = updateNodeContent(data, nodeId, {
 		title: parsed.displayTitle,
 		description: data.nodes.find((node) => node.id === nodeId)?.description ?? '',
 		tags: parsed.nodeTags
 	});
+
+	// Add-ons accumulate rather than being replaced the way tags are: a saved
+	// title never contains a marker, so the edit sheet's toggle is the way off.
+	for (const addon of parsed.addons) {
+		graphWithNode = setNodeAddon(graphWithNode, nodeId, addon);
+	}
 
 	if (!createdEdgeId) return graphWithNode;
 
@@ -438,6 +579,56 @@ export function commitInlineTitleSyntax(
 		tags: parsed.edgeTags,
 		directed: parsed.direction === 'undirected' ? false : true
 	});
+}
+
+/**
+ * Apply the edit sheet's title field, markers and all.
+ *
+ * Additive where the inline editor is wholesale: the sheet has its own tags
+ * field, so a `#lab` typed in the title *adds* to what is listed there rather
+ * than replacing it, and the sheet's own field stays the way to remove a tag.
+ * Same for add-ons — a saved title never carries a marker, so the toggle is the
+ * only way off, and re-typing `!task` on a done task leaves its data alone.
+ *
+ * `@` and a leading `<`/`>` are not markers here: there is no created edge to
+ * apply them to, so they stay in the title as typed (`parseSheetTitleSyntax`).
+ */
+export function commitSheetTitleSyntax(
+	data: MultigraphData,
+	nodeId: string,
+	rawTitle: string,
+	tags: string[]
+): MultigraphData {
+	if (!hasNode(data, nodeId)) return data;
+
+	const parsed = parseSheetTitleSyntax(rawTitle);
+	const nextTags = unionTags(tags, parsed.nodeTags);
+	let next: MultigraphData = {
+		...data,
+		nodes: data.nodes.map((node) =>
+			node.id === nodeId
+				? { ...node, title: normalizeNodeTitle(parsed.displayTitle), tags: nextTags }
+				: node
+		)
+	};
+
+	for (const addon of parsed.addons) {
+		next = setNodeAddon(next, nodeId, addon);
+	}
+
+	return next;
+}
+
+/** The listed tags first, then any the title introduced, each name once. */
+function unionTags(existing: string[], added: string[]): string[] {
+	const seen = new Set(existing);
+	const result = [...existing];
+	for (const tag of added) {
+		if (seen.has(tag)) continue;
+		seen.add(tag);
+		result.push(tag);
+	}
+	return result;
 }
 
 export function moveNode(data: MultigraphData, nodeId: string, point: Point): MultigraphData {

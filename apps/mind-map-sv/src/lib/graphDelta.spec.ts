@@ -2,14 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
 	addEdge,
 	addNode,
-	addNodeImageContent,
+	addNodeContentBlock,
 	commitInlineTitleSyntax,
 	deleteTagEverywhere,
 	moveNode,
 	moveNodeContentBlock,
 	removeEdge,
 	removeNode,
-	removeNodeImageContent,
+	removeNodeContentBlock,
 	setNodeDesignations,
 	setNodePinned,
 	setTagColor,
@@ -60,12 +60,29 @@ const document = (graph: MultigraphData) => ({
 	pinSequence: graph.pinSequence
 });
 
+const FILE_ASSET: GraphAssetMetadata = {
+	id: 'f1',
+	kind: 'file',
+	mimeType: 'text/csv',
+	name: 'readings.csv',
+	size: 24,
+	createdAt: 1
+};
+
 const withImage = (): MultigraphData =>
-	addNodeImageContent(
+	addNodeContentBlock(
 		baseGraph(),
 		'n0',
 		{ type: 'image', assetId: 'a1', alt: 'A picture' },
 		IMAGE_ASSET
+	);
+
+const withFile = (): MultigraphData =>
+	addNodeContentBlock(
+		baseGraph(),
+		'n0',
+		{ type: 'file', assetId: 'f1', name: 'readings.csv' },
+		FILE_ASSET
 	);
 
 /**
@@ -90,7 +107,8 @@ const MUTATIONS: Array<[string, (graph: MultigraphData) => MultigraphData]> = [
 		'setNodeDesignations',
 		(graph) => setNodeDesignations(graph, 'n0', { inputs: [], outputs: designations('v') })
 	],
-	['addNodeImageContent', () => withImage()],
+	['addNodeContentBlock (image)', () => withImage()],
+	['addNodeContentBlock (file)', () => withFile()],
 	[
 		'updateNodeImageContent',
 		() => updateNodeImageContent(withImage(), 'n0', 'a1', { alt: 'Changed' })
@@ -98,7 +116,7 @@ const MUTATIONS: Array<[string, (graph: MultigraphData) => MultigraphData]> = [
 	[
 		'moveNodeContentBlock',
 		() => {
-			const twoBlocks = addNodeImageContent(
+			const twoBlocks = addNodeContentBlock(
 				withImage(),
 				'n0',
 				{ type: 'image', assetId: 'a2', alt: 'Second' },
@@ -107,7 +125,8 @@ const MUTATIONS: Array<[string, (graph: MultigraphData) => MultigraphData]> = [
 			return moveNodeContentBlock(twoBlocks, 'n0', 0, 1);
 		}
 	],
-	['removeNodeImageContent', () => removeNodeImageContent(withImage(), 'n0', 'a1').graph],
+	['removeNodeContentBlock (image)', () => removeNodeContentBlock(withImage(), 'n0', 'a1').graph],
+	['removeNodeContentBlock (file)', () => removeNodeContentBlock(withFile(), 'n0', 'f1').graph],
 	['setTagColor', (graph) => setTagColor(graph, 'nodeTags', 'physics', '#00ff00')],
 	['deleteTagEverywhere', (graph) => deleteTagEverywhere(graph, 'nodeTags', 'physics')],
 	['commitInlineTitleSyntax', (graph) => commitInlineTitleSyntax(graph, 'n0', 'One #maths')],
@@ -119,11 +138,27 @@ const MUTATIONS: Array<[string, (graph: MultigraphData) => MultigraphData]> = [
 	]
 ];
 
+/**
+ * The graph a mutation starts from. Rows whose closure ignores the argument and
+ * builds its own content-bearing graph have to be diffed against the same
+ * starting point, or the delta describes two unrelated documents.
+ */
+function baseFor(name: string): MultigraphData {
+	if (name === 'removeNodeContentBlock (file)') return withFile();
+	if (
+		name.startsWith('updateNodeImageContent') ||
+		name === 'moveNodeContentBlock' ||
+		name === 'removeNodeContentBlock (image)'
+	) {
+		return withImage();
+	}
+	return baseGraph();
+}
+
 describe('diffByReference / applyDelta', () => {
 	for (const [name, mutate] of MUTATIONS) {
 		it(`round-trips a graph through ${name}`, () => {
-			const before =
-				name.includes('Image') || name === 'moveNodeContentBlock' ? withImage() : baseGraph();
+			const before = baseFor(name);
 			const after = mutate(before);
 
 			const delta = diffByReference(before, after);
@@ -133,8 +168,7 @@ describe('diffByReference / applyDelta', () => {
 		});
 
 		it(`round-trips ${name} backwards, which is the direction the tail chains`, () => {
-			const before =
-				name.includes('Image') || name === 'moveNodeContentBlock' ? withImage() : baseGraph();
+			const before = baseFor(name);
 			const after = mutate(before);
 
 			const delta = diffByReference(after, before);

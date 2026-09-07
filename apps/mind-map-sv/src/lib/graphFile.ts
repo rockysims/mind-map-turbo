@@ -8,7 +8,13 @@ import {
 } from './migrations';
 
 const GRAPH_HTML_DOCUMENT_VERSION = 1;
-export const GRAPH_HTML_READER_VERSION = 2;
+/**
+ * The lowest reader that understands what this app writes. Bumped with every
+ * schema version an older app cannot make sense of, so that app routes the file
+ * to its own embedded shell (the `unsupported-app-version` path) instead of
+ * failing on the schema envelope. 3 is schema 7 — file attachments.
+ */
+export const GRAPH_HTML_READER_VERSION = 3;
 export const GRAPH_HTML_PAYLOAD_SCRIPT_ID = 'mind-map-embedded-graph';
 const GRAPH_HTML_ASSET_SCRIPT_TYPE = 'application/x-mind-map-asset';
 const GRAPH_HTML_ASSET_ID_ATTRIBUTE = 'data-mind-map-asset-id';
@@ -282,7 +288,10 @@ function extractHtmlAssetPayloads(html: string): GraphFileEmbeddedAsset[] {
 		const name = readScriptAttribute(script, 'data-name') ?? undefined;
 		const base64 = contentMatch?.[1]?.trim() ?? '';
 		const size = Number(sizeText);
-		if (!assetId || !mimeType || !mimeType.startsWith('image/') || !Number.isFinite(size)) {
+		// No MIME allow-list: an embedded asset may be a CSV, a PDF, or anything
+		// else since schema 7. What the blob is allowed to be is the graph's
+		// business (`isAssetMetadata`), not the container's.
+		if (!assetId || !mimeType || !Number.isFinite(size)) {
 			throw new PersistedGraphError(
 				'Graph HTML file embedded asset is malformed.',
 				'malformed-payload'

@@ -2,24 +2,36 @@ import { describe, expect, it } from 'vitest';
 import {
 	addEdge,
 	addNode,
+	addNodeContentBlock,
 	commitInlineTitleSyntax,
+	commitSheetTitleSyntax,
 	deleteTagEverywhere,
 	duplicateEdgeIdentifier,
 	findExistingEdge,
 	moveNode,
+	moveNodeContentBlock,
 	neighborsOf,
 	NEW_NODE_TITLE,
 	normalizeNodeTitle,
+	referencedAssetIds,
 	removeEdge,
 	removeNode,
+	removeNodeAddon,
+	removeNodeContentBlock,
+	setNodeAddon,
 	setNodeDesignations,
 	setNodePinned,
 	setTagColor,
+	setTaskDone,
 	togglePinned,
 	updateEdge,
-	updateNodeContent
+	updateNodeContent,
+	updateNodeFileContent,
+	updateNodeImageContent
 } from './graph';
 import { makeGraph } from './testFixtures';
+import type { GraphAssetMetadata } from '../../types/multigraph';
+import type { NodeFileContent, NodeImageContent, TaskAddon } from '../../types/node';
 
 describe('graph mutations', () => {
 	describe('addNode', () => {
@@ -523,6 +535,57 @@ describe('graph mutations', () => {
 			expect(commitInlineTitleSyntax(graph, 'missing', '>#node @rel Missing', 'e0')).toBe(graph);
 		});
 
+		it('creates a parsed add-on at its registry default', () => {
+			const graph = makeGraph({ nodeCount: 1 });
+
+			const next = commitInlineTitleSyntax(graph, 'n0', '!task #lab Buy filters');
+
+			expect(next.nodes[0]).toMatchObject({
+				title: 'Buy filters',
+				tags: ['lab'],
+				addons: { task: { done: false } }
+			});
+			expect(graph.nodes[0].addons).toBeUndefined();
+		});
+
+		it('leaves the data of an existing add-on alone when the marker is typed again', () => {
+			const graph = makeGraph({
+				nodes: [
+					{
+						id: 'n0',
+						title: 'Buy filters',
+						description: '',
+						addons: { task: { done: true, doneAt: 1_700_000_000_000 } }
+					}
+				]
+			});
+
+			const next = commitInlineTitleSyntax(graph, 'n0', '!task Buy filters again');
+
+			expect(next.nodes[0].addons?.task).toBe(graph.nodes[0].addons?.task);
+		});
+
+		it('keeps an add-on the title no longer mentions, since the toggle is the way off', () => {
+			const graph = makeGraph({
+				nodes: [
+					{ id: 'n0', title: 'Buy filters', description: '', addons: { task: { done: false } } }
+				]
+			});
+
+			const next = commitInlineTitleSyntax(graph, 'n0', 'Buy filters');
+
+			expect(next.nodes[0].addons).toEqual({ task: { done: false } });
+		});
+
+		it('leaves an unregistered marker word in the title with everything after it', () => {
+			const graph = makeGraph({ nodeCount: 1 });
+
+			const next = commitInlineTitleSyntax(graph, 'n0', '!important #lab Read this');
+
+			expect(next.nodes[0]).toMatchObject({ title: '!important #lab Read this', tags: [] });
+			expect(next.nodes[0].addons).toBeUndefined();
+		});
+
 		it('does not mutate a created edge that is not incident to the node', () => {
 			const graph = makeGraph({
 				nodeCount: 3,
@@ -536,6 +599,528 @@ describe('graph mutations', () => {
 
 			expect(next.nodes[2]).toMatchObject({ title: 'Node title', tags: ['node'] });
 			expect(next.edges[0]).toEqual(graph.edges[0]);
+		});
+	});
+
+	describe('commitSheetTitleSyntax', () => {
+		const taskNode = (addons?: { task: { done: boolean; doneAt?: number } }) =>
+			makeGraph({
+				nodes: [
+					{
+						id: 'n0',
+						title: 'Old title',
+						description: 'kept',
+						tags: ['x'],
+						...(addons ? { addons } : {})
+					}
+				]
+			});
+
+		it('takes the node markers out of the title and adds what they name', () => {
+			const next = commitSheetTitleSyntax(taskNode(), 'n0', '#lab !task Buy filters', ['x']);
+
+			expect(next.nodes[0]).toMatchObject({
+				title: 'Buy filters',
+				// Listed tags first, then what the title introduced.
+				tags: ['x', 'lab'],
+				addons: { task: { done: false } },
+				description: 'kept'
+			});
+		});
+
+		it('leaves an edge tag in the title, since the sheet has no created edge', () => {
+			const next = commitSheetTitleSyntax(taskNode(), 'n0', '@bench Buy filters', ['x']);
+
+			expect(next.nodes[0]).toMatchObject({ title: '@bench Buy filters', tags: ['x'] });
+			expect(next.nodes[0].addons).toBeUndefined();
+		});
+
+		it('leaves a direction prefix in the title for the same reason', () => {
+			expect(commitSheetTitleSyntax(taskNode(), 'n0', '> Title', ['x']).nodes[0].title).toBe(
+				'> Title'
+			);
+			expect(commitSheetTitleSyntax(taskNode(), 'n0', '< Title', ['x']).nodes[0].title).toBe(
+				'< Title'
+			);
+		});
+
+		it('ends the marker run at an edge tag rather than reading past it', () => {
+			const next = commitSheetTitleSyntax(taskNode(), 'n0', '#lab @bench !task Go', ['x']);
+
+			expect(next.nodes[0]).toMatchObject({ title: '@bench !task Go', tags: ['x', 'lab'] });
+			expect(next.nodes[0].addons).toBeUndefined();
+		});
+
+		it('leaves the data of an add-on the node already carries alone', () => {
+			const graph = taskNode({ task: { done: true, doneAt: 1_700_000_000_000 } });
+
+			const next = commitSheetTitleSyntax(graph, 'n0', '!task Buy filters', ['x']);
+
+			expect(next.nodes[0].addons).toEqual({ task: { done: true, doneAt: 1_700_000_000_000 } });
+			expect(next.nodes[0].title).toBe('Buy filters');
+		});
+
+		it('changes neither tags nor add-ons for a title with no markers', () => {
+			const graph = taskNode();
+
+			const next = commitSheetTitleSyntax(graph, 'n0', 'Buy filters', ['x']);
+
+			expect(next.nodes[0]).toMatchObject({ title: 'Buy filters', tags: ['x'] });
+			expect(next.nodes[0].addons).toBeUndefined();
+		});
+
+		it('does not repeat a tag the sheet already lists', () => {
+			expect(
+				commitSheetTitleSyntax(taskNode(), 'n0', '#x Buy filters', ['x']).nodes[0].tags
+			).toEqual(['x']);
+		});
+
+		it('falls back to the default title when the markers were the whole field', () => {
+			expect(commitSheetTitleSyntax(taskNode(), 'n0', '#lab !task', ['x']).nodes[0]).toMatchObject({
+				title: NEW_NODE_TITLE,
+				tags: ['x', 'lab'],
+				addons: { task: { done: false } }
+			});
+		});
+
+		it('does not mutate the graph it was handed', () => {
+			const graph = taskNode();
+
+			const next = commitSheetTitleSyntax(graph, 'n0', '#lab !task Buy filters', ['x']);
+
+			expect(next).not.toBe(graph);
+			expect(graph.nodes[0]).toMatchObject({ title: 'Old title', tags: ['x'] });
+			expect(graph.nodes[0].addons).toBeUndefined();
+		});
+
+		it('is a no-op for missing node ids', () => {
+			const graph = taskNode();
+
+			expect(commitSheetTitleSyntax(graph, 'missing', '#lab Buy filters', ['x'])).toBe(graph);
+		});
+	});
+
+	describe('setNodeAddon', () => {
+		it('creates the add-on at its default without mutating the original graph', () => {
+			const graph = makeGraph({ nodeCount: 2 });
+
+			const next = setNodeAddon(graph, 'n1', 'task');
+
+			expect(next).not.toBe(graph);
+			expect(next.nodes).not.toBe(graph.nodes);
+			expect(next.nodes[1].addons).toEqual({ task: { done: false } });
+			expect(next.nodes[0].addons).toBeUndefined();
+			expect(graph.nodes[1].addons).toBeUndefined();
+		});
+
+		it('returns the same graph object when the node already carries the add-on', () => {
+			const graph = makeGraph({
+				nodes: [{ id: 'n0', title: 'Task', description: '', addons: { task: { done: true } } }]
+			});
+
+			expect(setNodeAddon(graph, 'n0', 'task')).toBe(graph);
+		});
+
+		it('is a no-op for missing node ids', () => {
+			const graph = makeGraph({ nodeCount: 1 });
+
+			expect(setNodeAddon(graph, 'missing', 'task')).toBe(graph);
+		});
+	});
+
+	describe('removeNodeAddon', () => {
+		it('drops the addons key entirely when the last add-on goes', () => {
+			const graph = makeGraph({
+				nodes: [{ id: 'n0', title: 'Task', description: '', addons: { task: { done: true } } }]
+			});
+
+			const next = removeNodeAddon(graph, 'n0', 'task');
+
+			expect(next).not.toBe(graph);
+			expect(next.nodes[0]).not.toHaveProperty('addons');
+			expect(graph.nodes[0].addons).toEqual({ task: { done: true } });
+		});
+
+		it('returns the same graph object when the node does not carry the add-on', () => {
+			const graph = makeGraph({ nodeCount: 1 });
+
+			expect(removeNodeAddon(graph, 'n0', 'task')).toBe(graph);
+		});
+
+		it('is a no-op for missing node ids', () => {
+			const graph = makeGraph({
+				nodes: [{ id: 'n0', title: 'Task', description: '', addons: { task: { done: false } } }]
+			});
+
+			expect(removeNodeAddon(graph, 'missing', 'task')).toBe(graph);
+		});
+	});
+
+	describe('setTaskDone', () => {
+		const taskGraph = (task: TaskAddon) =>
+			makeGraph({
+				nodes: [{ id: 'n0', title: 'Change filters', description: '', addons: { task } }]
+			});
+
+		it('marks a task done with the injected stamp, without mutating the original', () => {
+			const graph = taskGraph({ done: false });
+
+			const next = setTaskDone(graph, 'n0', true, 1234);
+
+			expect(next).not.toBe(graph);
+			expect(next.nodes[0].addons?.task).toEqual({ done: true, doneAt: 1234 });
+			expect(graph.nodes[0].addons?.task).toEqual({ done: false });
+		});
+
+		it('stamps from the clock when no time is injected', () => {
+			const before = Date.now();
+
+			const next = setTaskDone(taskGraph({ done: false }), 'n0', true);
+
+			const doneAt = next.nodes[0].addons?.task?.doneAt;
+			expect(doneAt).toBeGreaterThanOrEqual(before);
+			expect(doneAt).toBeLessThanOrEqual(Date.now());
+		});
+
+		it('clears the stamp when a done task is marked not done', () => {
+			const next = setTaskDone(taskGraph({ done: true, doneAt: 999 }), 'n0', false);
+
+			expect(next.nodes[0].addons?.task).toEqual({ done: false });
+			expect(next.nodes[0].addons?.task).not.toHaveProperty('doneAt');
+		});
+
+		it('leaves the node’s other add-on data alone', () => {
+			const graph = taskGraph({ done: false });
+
+			const next = setTaskDone(graph, 'n0', true, 7);
+
+			expect(Object.keys(next.nodes[0].addons ?? {})).toEqual(['task']);
+			expect(next.nodes[0].title).toBe('Change filters');
+		});
+
+		it('returns the same graph object when the task is already in that state', () => {
+			const graph = taskGraph({ done: true, doneAt: 12 });
+
+			expect(setTaskDone(graph, 'n0', true, 99)).toBe(graph);
+		});
+
+		it('is a no-op on a node without the task add-on', () => {
+			const graph = makeGraph({ nodeCount: 1 });
+
+			expect(setTaskDone(graph, 'n0', true, 1)).toBe(graph);
+		});
+
+		it('is a no-op for missing node ids', () => {
+			const graph = taskGraph({ done: false });
+
+			expect(setTaskDone(graph, 'missing', true, 1)).toBe(graph);
+		});
+	});
+
+	describe('content blocks and their assets', () => {
+		const imageAsset = (id: string): GraphAssetMetadata => ({
+			id,
+			kind: 'image',
+			mimeType: 'image/png',
+			name: `${id}.png`,
+			size: 12,
+			createdAt: 1
+		});
+
+		const fileAsset = (id: string): GraphAssetMetadata => ({
+			id,
+			kind: 'file',
+			mimeType: 'text/csv',
+			name: `${id}.csv`,
+			size: 24,
+			createdAt: 2
+		});
+
+		const imageBlock = (assetId: string): NodeImageContent => ({
+			type: 'image',
+			assetId,
+			alt: 'A photo'
+		});
+
+		const fileBlock = (assetId: string): NodeFileContent => ({
+			type: 'file',
+			assetId,
+			name: `${assetId}.csv`
+		});
+
+		describe('addNodeContentBlock', () => {
+			it('appends an image block and its asset without mutating the original graph', () => {
+				const graph = makeGraph({ nodeCount: 2 });
+
+				const next = addNodeContentBlock(graph, 'n1', imageBlock('a1'), imageAsset('a1'));
+
+				expect(next).not.toBe(graph);
+				expect(next.nodes).not.toBe(graph.nodes);
+				expect(next.nodes[1].content).toEqual([imageBlock('a1')]);
+				expect(next.assets).toEqual({ a1: imageAsset('a1') });
+				expect(graph.nodes[1].content).toBeUndefined();
+				expect(graph.assets).toBeUndefined();
+			});
+
+			it('appends a file block beside an image already on the node', () => {
+				const withImage = addNodeContentBlock(
+					makeGraph({ nodeCount: 1 }),
+					'n0',
+					imageBlock('a1'),
+					imageAsset('a1')
+				);
+
+				const next = addNodeContentBlock(withImage, 'n0', fileBlock('f1'), fileAsset('f1'));
+
+				expect(next.nodes[0].content).toEqual([imageBlock('a1'), fileBlock('f1')]);
+				expect(next.assets).toEqual({ a1: imageAsset('a1'), f1: fileAsset('f1') });
+				expect(withImage.nodes[0].content).toEqual([imageBlock('a1')]);
+			});
+
+			it('is a no-op for missing node ids', () => {
+				const graph = makeGraph({ nodeCount: 1 });
+
+				expect(addNodeContentBlock(graph, 'missing', fileBlock('f1'), fileAsset('f1'))).toBe(graph);
+			});
+		});
+
+		describe('removeNodeContentBlock', () => {
+			it('drops a file block and reports its asset as unreferenced', () => {
+				const graph = addNodeContentBlock(
+					makeGraph({ nodeCount: 1 }),
+					'n0',
+					fileBlock('f1'),
+					fileAsset('f1')
+				);
+
+				const { graph: next, removedAssetIds } = removeNodeContentBlock(graph, 'n0', 'f1');
+
+				expect(next).not.toBe(graph);
+				expect(next.nodes[0].content).toEqual([]);
+				expect(next.assets).toEqual({});
+				expect(removedAssetIds).toEqual(['f1']);
+				expect(graph.nodes[0].content).toEqual([fileBlock('f1')]);
+			});
+
+			it('drops an image block the same way', () => {
+				const graph = addNodeContentBlock(
+					makeGraph({ nodeCount: 1 }),
+					'n0',
+					imageBlock('a1'),
+					imageAsset('a1')
+				);
+
+				expect(removeNodeContentBlock(graph, 'n0', 'a1')).toMatchObject({
+					removedAssetIds: ['a1']
+				});
+			});
+
+			// The caller tombstones what comes back, so naming an asset another node
+			// still shows would delete a live blob out from under it.
+			it('reports nothing removed while another node still references the asset', () => {
+				const twoNodes = addNodeContentBlock(
+					addNodeContentBlock(makeGraph({ nodeCount: 2 }), 'n0', fileBlock('f1'), fileAsset('f1')),
+					'n1',
+					fileBlock('f1'),
+					fileAsset('f1')
+				);
+
+				const { graph: next, removedAssetIds } = removeNodeContentBlock(twoNodes, 'n0', 'f1');
+
+				expect(removedAssetIds).toEqual([]);
+				expect(next.assets).toEqual({ f1: fileAsset('f1') });
+				expect(next.nodes[1].content).toEqual([fileBlock('f1')]);
+			});
+
+			it('leaves the other blocks on the node alone', () => {
+				const graph = addNodeContentBlock(
+					addNodeContentBlock(
+						makeGraph({ nodeCount: 1 }),
+						'n0',
+						imageBlock('a1'),
+						imageAsset('a1')
+					),
+					'n0',
+					fileBlock('f1'),
+					fileAsset('f1')
+				);
+
+				const { graph: next } = removeNodeContentBlock(graph, 'n0', 'f1');
+
+				expect(next.nodes[0].content).toEqual([imageBlock('a1')]);
+			});
+
+			it('is a no-op for missing node ids', () => {
+				const graph = makeGraph({ nodeCount: 1 });
+
+				expect(removeNodeContentBlock(graph, 'missing', 'f1')).toEqual({
+					graph,
+					removedAssetIds: []
+				});
+			});
+		});
+
+		describe('referencedAssetIds', () => {
+			it('is empty for a graph with no content', () => {
+				expect(referencedAssetIds(makeGraph({ nodeCount: 2 })).size).toBe(0);
+			});
+
+			it('counts an image-only node', () => {
+				const graph = addNodeContentBlock(
+					makeGraph({ nodeCount: 1 }),
+					'n0',
+					imageBlock('a1'),
+					imageAsset('a1')
+				);
+
+				expect([...referencedAssetIds(graph)]).toEqual(['a1']);
+			});
+
+			it('counts a file-only node', () => {
+				const graph = addNodeContentBlock(
+					makeGraph({ nodeCount: 1 }),
+					'n0',
+					fileBlock('f1'),
+					fileAsset('f1')
+				);
+
+				expect([...referencedAssetIds(graph)]).toEqual(['f1']);
+			});
+
+			it('counts both kinds across a mixed graph, deduped', () => {
+				const graph = addNodeContentBlock(
+					addNodeContentBlock(
+						addNodeContentBlock(
+							makeGraph({ nodeCount: 2 }),
+							'n0',
+							imageBlock('a1'),
+							imageAsset('a1')
+						),
+						'n0',
+						fileBlock('f1'),
+						fileAsset('f1')
+					),
+					'n1',
+					fileBlock('f1'),
+					fileAsset('f1')
+				);
+
+				expect([...referencedAssetIds(graph)].sort()).toEqual(['a1', 'f1']);
+			});
+		});
+
+		describe('updateNodeImageContent', () => {
+			it('rewrites alt and caption without mutating the original graph', () => {
+				const graph = addNodeContentBlock(
+					makeGraph({ nodeCount: 1 }),
+					'n0',
+					imageBlock('a1'),
+					imageAsset('a1')
+				);
+
+				const next = updateNodeImageContent(graph, 'n0', 'a1', {
+					alt: 'Changed',
+					caption: 'On the bench'
+				});
+
+				expect(next).not.toBe(graph);
+				expect(next.nodes[0].content).toEqual([
+					{ type: 'image', assetId: 'a1', alt: 'Changed', caption: 'On the bench' }
+				]);
+				expect(graph.nodes[0].content).toEqual([imageBlock('a1')]);
+			});
+
+			// Alt text is an image concept; a file row's caption is T03's to edit.
+			it('leaves a file block sharing the asset id untouched', () => {
+				const graph = addNodeContentBlock(
+					makeGraph({ nodeCount: 1 }),
+					'n0',
+					fileBlock('f1'),
+					fileAsset('f1')
+				);
+
+				expect(
+					updateNodeImageContent(graph, 'n0', 'f1', { alt: 'Changed' }).nodes[0].content
+				).toEqual([fileBlock('f1')]);
+			});
+
+			it('is a no-op for missing node ids', () => {
+				const graph = makeGraph({ nodeCount: 1 });
+
+				expect(updateNodeImageContent(graph, 'missing', 'a1', { alt: 'x' })).toBe(graph);
+			});
+		});
+
+		describe('updateNodeFileContent', () => {
+			it('rewrites a file caption without mutating the original graph', () => {
+				const graph = addNodeContentBlock(
+					makeGraph({ nodeCount: 1 }),
+					'n0',
+					fileBlock('f1'),
+					fileAsset('f1')
+				);
+
+				const next = updateNodeFileContent(graph, 'n0', 'f1', { caption: 'Bench run 3' });
+
+				expect(next).not.toBe(graph);
+				expect(next.nodes[0].content).toEqual([
+					{ type: 'file', assetId: 'f1', name: 'f1.csv', caption: 'Bench run 3' }
+				]);
+				expect(graph.nodes[0].content).toEqual([fileBlock('f1')]);
+			});
+
+			// The mirror of updateNodeImageContent: each kind edits only its own.
+			it('leaves an image block sharing the asset id untouched', () => {
+				const graph = addNodeContentBlock(
+					makeGraph({ nodeCount: 1 }),
+					'n0',
+					imageBlock('a1'),
+					imageAsset('a1')
+				);
+
+				expect(
+					updateNodeFileContent(graph, 'n0', 'a1', { caption: 'Changed' }).nodes[0].content
+				).toEqual([imageBlock('a1')]);
+			});
+
+			it('is a no-op for missing node ids', () => {
+				const graph = makeGraph({ nodeCount: 1 });
+
+				expect(updateNodeFileContent(graph, 'missing', 'f1', { caption: 'x' })).toBe(graph);
+			});
+		});
+
+		describe('moveNodeContentBlock', () => {
+			it('reorders blocks of either kind without mutating the original graph', () => {
+				const graph = addNodeContentBlock(
+					addNodeContentBlock(
+						makeGraph({ nodeCount: 1 }),
+						'n0',
+						imageBlock('a1'),
+						imageAsset('a1')
+					),
+					'n0',
+					fileBlock('f1'),
+					fileAsset('f1')
+				);
+
+				const next = moveNodeContentBlock(graph, 'n0', 1, 0);
+
+				expect(next).not.toBe(graph);
+				expect(next.nodes[0].content).toEqual([fileBlock('f1'), imageBlock('a1')]);
+				expect(graph.nodes[0].content).toEqual([imageBlock('a1'), fileBlock('f1')]);
+			});
+
+			it('is a no-op for an out-of-range index', () => {
+				const graph = addNodeContentBlock(
+					makeGraph({ nodeCount: 1 }),
+					'n0',
+					fileBlock('f1'),
+					fileAsset('f1')
+				);
+
+				expect(moveNodeContentBlock(graph, 'n0', 0, 5)).toBe(graph);
+			});
 		});
 	});
 

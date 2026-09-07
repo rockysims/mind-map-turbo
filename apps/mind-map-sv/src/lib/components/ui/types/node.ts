@@ -5,7 +5,38 @@ export interface NodeImageContent {
 	caption?: string;
 }
 
-export type NodeContentBlock = NodeImageContent;
+/**
+ * A file of any type attached to a node. `name` is the filename the upload came
+ * with, kept on the block rather than read back off the asset so a details row
+ * can be drawn without touching IndexedDB. There is no `alt`: a file is not
+ * rendered, it is opened, so the name is what stands in for it.
+ */
+export interface NodeFileContent {
+	type: 'file';
+	assetId: string;
+	name: string;
+	caption?: string;
+}
+
+export type NodeContentBlock = NodeImageContent | NodeFileContent;
+
+/**
+ * Data the `!task` add-on carries. `doneAt` is an epoch-ms stamp of the moment
+ * the task was marked done; it is absent while the task is not done.
+ */
+export interface TaskAddon {
+	done: boolean;
+	doneAt?: number;
+}
+
+/**
+ * The add-ons a node carries, one optional field per entry in the closed
+ * registry in `Multigraph/lib/nodeAddons.ts`. Add-ons are capabilities, not
+ * labels: each is typed on its own rather than living as a string in `tags`.
+ */
+export interface NodeAddons {
+	task?: TaskAddon;
+}
 
 /**
  * A quantity the user confirmed as this node's input or output, stored as the
@@ -26,6 +57,8 @@ export interface NodeData {
 	/** Pin-recency stamp from the graph-level pinSequence counter; higher = more recent. */
 	lastPinnedSeq?: number;
 	content?: NodeContentBlock[];
+	/** Registered add-ons this node carries. Absent means none. */
+	addons?: NodeAddons;
 	/** Quantities the user confirmed this node consumes. Absent means none. */
 	inputs?: QuantityDesignation[];
 	/** Quantities the user confirmed this node defines. Absent means none. */

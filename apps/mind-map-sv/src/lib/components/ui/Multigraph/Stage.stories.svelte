@@ -882,3 +882,39 @@
 		expect(backgroundDrop.nodeId).toBe(NODES[0].id);
 	}}
 />
+
+<Story
+	name="TappingABadgeIsTappingTheNode"
+	args={{
+		nodes: [
+			{
+				id: 'badged',
+				title: 'Change the filters',
+				description: 'Carries both badges',
+				tags: [],
+				addons: { task: { done: false } },
+				content: [{ type: 'file', assetId: 'a1', name: 'measurements.csv' }]
+			}
+		]
+	}}
+	play={async ({ canvasElement }) => {
+		const wrapper = canvasElement.querySelector('[data-testid="stage-callbacks"]') as HTMLElement;
+		const stage = getStage(canvasElement);
+		await waitForLayout();
+
+		const row = canvasElement.querySelector('[data-node-addon-badges]') as HTMLElement;
+		expect(row).toBeInTheDocument();
+		// Display only: the badges take no pointer events, so nothing about them
+		// competes with the gestures the node itself owns.
+		expect(window.getComputedStyle(row).pointerEvents).toBe('none');
+
+		// The gesture lands at the badge's own centre, and the Stage reads it as
+		// the node underneath — its hit test is geometric against the circle, and
+		// the badge sits inside it.
+		const badgeCentre = getCenter(row);
+		await dispatchDoubleClick(stage, badgeCentre.x, badgeCentre.y);
+		await sleep();
+
+		expect(wrapper.dataset.lastMakePrimary).toBe('badged');
+	}}
+/>

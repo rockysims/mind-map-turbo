@@ -11,6 +11,8 @@
 		redoLabel = null,
 		undoBlockedReason = 'Nothing to undo. Opened files start fresh.',
 		redoBlockedReason = 'Nothing to redo.',
+		aiConnected = false,
+		onOpenAiSettings,
 		onNewGraph,
 		onOpenGraphFilePicker,
 		onImportGraphFile,
@@ -30,6 +32,9 @@
 		/** Why the control is standing down, spoken and — on a tap — written to the notice. */
 		undoBlockedReason?: string;
 		redoBlockedReason?: string;
+		/** Whether an Anthropic API key is in hand, so the control can say so. */
+		aiConnected?: boolean;
+		onOpenAiSettings?: () => void;
 		onNewGraph?: () => void;
 		onOpenGraphFilePicker?: () => void;
 		/** Given the chosen file, to fold into the graph already on screen. */
@@ -124,11 +129,11 @@
 		in the accessible name instead.
 	-->
 	<!--
-		One flex item, not two: at a 375px width the row runs out after Save, and
-		letting the pair wrap independently drops ↷ onto a line of its own, which
+		One flex item, not three: at a 375px width the row runs out after Save, and
+		letting the icons wrap independently drops one onto a line of its own, which
 		reads as a mistake rather than as a control.
 	-->
-	<div class="history-controls">
+	<div class="icon-controls">
 		<button
 			type="button"
 			class="icon"
@@ -151,6 +156,19 @@
 		{#if !canRedo}
 			<span id="graph-toolbar-redo-reason" class="sr-only">{redoBlockedReason}</span>
 		{/if}
+		<!--
+			Connected state rides in the accessible name, not in the fill alone: the
+			colour is the glance, the name is the answer for anyone who cannot see it.
+		-->
+		<button
+			type="button"
+			class="icon ai"
+			class:connected={aiConnected}
+			title="Anthropic API key, model and data settings"
+			aria-label={aiConnected ? 'AI settings, connected' : 'AI settings, not connected'}
+			data-ai-connected={aiConnected}
+			onclick={() => onOpenAiSettings?.()}>✦</button
+		>
 	</div>
 	{#if severity === 'warning'}
 		<p class="notice warning" role="alert" aria-live="assertive">
@@ -195,10 +213,15 @@
 		cursor: pointer;
 	}
 
-	.graph-toolbar .history-controls {
+	.graph-toolbar .icon-controls {
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
+	}
+
+	.graph-toolbar button.ai.connected {
+		background: #0f172a;
+		color: #ffffff;
 	}
 
 	/*
