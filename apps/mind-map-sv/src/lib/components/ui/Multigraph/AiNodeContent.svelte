@@ -49,6 +49,8 @@
 		inputChangesNote,
 		latestDoneRun,
 		prosePreviewLine,
+		stepStatusText,
+		stepsPreviewLine,
 		runMetadataLine,
 		staleOutputNames,
 		IDLE_RUN_STATE,
@@ -492,11 +494,6 @@
 			: `Loading the Python runtime — ${loaded} of ${formatByteSize(progress.totalBytes)}.`;
 	}
 
-	function stepStatusText(exitCode: number | null): string {
-		if (exitCode === null) return 'running';
-		return exitCode === 0 ? 'finished' : `failed, exit ${exitCode}`;
-	}
-
 	/**
 	 * The response on screen: what is streaming while a run is live, and the
 	 * stored summary of the last completed run once nothing is.
@@ -691,12 +688,13 @@
 			followed below the fold. The summary line is what keeps it honest — the
 			first sentence is the answer often enough to save the click, and while a
 			run is live it says what is happening instead. What stays outside is what
-			a reader acts on: the execution rows, the errors and the traceback.
+			a reader acts on: the errors and the traceback. The execution rows fold
+			too, under their own line, since a long run made them most of the scroll.
 		-->
 		<details class="prose-panel" data-ai-prose>
 			<summary>
-				<span class="prose-title">What Claude did</span>
-				<span class="prose-preview" data-ai-prose-preview>{prosePreview}</span>
+				<span class="fold-title">What Claude did</span>
+				<span class="fold-preview" data-ai-prose-preview>{prosePreview}</span>
 			</summary>
 			<div class="prose-body">
 				{#if streamedText.trim() !== ''}
@@ -740,20 +738,35 @@
 			{/if}
 
 			{#if runState.steps.length > 0}
-				<ol class="steps" data-ai-steps>
-					{#each runState.steps as step, index (index)}
-						<li
-							data-ai-step={index + 1}
-							data-ai-step-exit-code={step.exitCode === null ? 'running' : `${step.exitCode}`}
+				<!--
+					The execution rows, folded like the prose above them. A long run is a
+					dozen executions with a page of output each, and open by default they
+					were most of the scroll. The closed line carries what a reader checks
+					without opening it: which execution, how it ended, and the last thing
+					it printed — the exception, when it failed.
+				-->
+				<details class="steps-panel" data-ai-steps-panel>
+					<summary>
+						<span class="fold-title">What the script printed</span>
+						<span class="fold-preview" data-ai-steps-preview
+							>{stepsPreviewLine(runState.steps)}</span
 						>
-							<p class="step-head">
-								<strong>analysis.py</strong>
-								<span data-ai-step-status>{stepStatusText(step.exitCode)}</span>
-							</p>
-							<pre class="stdout" data-ai-step-stdout>{step.stdoutTail}</pre>
-						</li>
-					{/each}
-				</ol>
+					</summary>
+					<ol class="steps" data-ai-steps>
+						{#each runState.steps as step, index (index)}
+							<li
+								data-ai-step={index + 1}
+								data-ai-step-exit-code={step.exitCode === null ? 'running' : `${step.exitCode}`}
+							>
+								<p class="step-head">
+									<strong>analysis.py</strong>
+									<span data-ai-step-status>{stepStatusText(step.exitCode)}</span>
+								</p>
+								<pre class="stdout" data-ai-step-stdout>{step.stdoutTail}</pre>
+							</li>
+						{/each}
+					</ol>
+				</details>
 			{/if}
 
 			{#if runState.error !== undefined}
@@ -1544,11 +1557,12 @@
 	 * The closed line reads as one sentence: a bold title and then what was said,
 	 * clipped at the width of the surface rather than wrapping to three lines.
 	 */
-	.prose-panel summary {
+	.prose-panel summary,
+	.steps-panel summary {
 		cursor: pointer;
 	}
 
-	.prose-title {
+	.fold-title {
 		color: #475569;
 		font-size: 0.925rem;
 		font-weight: 600;
@@ -1559,7 +1573,7 @@
 	 * marker only while it lays out as a list item, and a flex summary loses the
 	 * one glyph that says it opens.
 	 */
-	.prose-preview {
+	.fold-preview {
 		display: inline-block;
 		max-width: 100%;
 		margin-left: 0.5rem;
@@ -1623,6 +1637,10 @@
 
 	.response {
 		white-space: pre-wrap;
+	}
+
+	.steps {
+		margin-top: 0.4rem;
 	}
 
 	.steps li {

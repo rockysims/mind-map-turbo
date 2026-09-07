@@ -313,6 +313,39 @@ export function prosePreviewLine(runState: AiRunState, storedSummary: string): s
 	return runState.steps.some((step) => step.exitCode === null) ? 'Running analysis.py' : 'Running…';
 }
 
+/** The word for how a script execution ended, on its row and in the closed line. */
+export function stepStatusText(exitCode: number | null): string {
+	if (exitCode === null) return 'running';
+	return exitCode === 0 ? 'finished' : `failed, exit ${exitCode}`;
+}
+
+/**
+ * The closed line of the "What the script printed" disclosure.
+ *
+ * The execution rows fold away for the same reason the prose does: a run of
+ * twelve executions, each with a page of output, pushed the plots off the
+ * bottom of the surface. The line names the latest execution, how it ended,
+ * and the last thing it printed — for a traceback that is the exception
+ * itself, which is what a reader wants from a failed step without opening it,
+ * and while a step is running it is whatever the script said most recently.
+ */
+export function stepsPreviewLine(steps: AiRunStep[], limit: number = 120): string {
+	const last = steps[steps.length - 1];
+	if (last === undefined) return 'Nothing yet';
+	const head = `Execution ${steps.length} ${stepStatusText(last.exitCode)}`;
+	const printed = lastPrintedLine(last.stdoutTail);
+	return cutToLine(printed === '' ? head : `${head} — ${printed}`, limit);
+}
+
+/** The last non-empty line of `text`, trimmed; `''` when it printed nothing. */
+function lastPrintedLine(text: string): string {
+	const lines = text
+		.split('\n')
+		.map((line) => line.trim())
+		.filter((line) => line !== '');
+	return lines[lines.length - 1] ?? '';
+}
+
 /**
  * The first sentence of `text`, on one line, cut to `limit` characters with an
  * ellipsis when the sentence is longer than a summary line can hold. A newline

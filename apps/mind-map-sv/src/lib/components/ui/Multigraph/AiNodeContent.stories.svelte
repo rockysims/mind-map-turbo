@@ -473,6 +473,8 @@
 		// A step with no exit code yet is the one still running.
 		expect(steps[1]).toHaveAttribute('data-ai-step-exit-code', 'running');
 		expect(steps[1].querySelector('[data-ai-step-status]')?.textContent?.trim()).toBe('running');
+		// And the closed line over the rows follows the step that is running.
+		expect(text(canvasElement, '[data-ai-steps-preview]')).toMatch(/^Execution 2 running/);
 
 		// The three rules for a long run: streamed from the first token, a visible
 		// Cancel, and Run out of reach while one is in flight.
@@ -1515,10 +1517,20 @@
 		await waitFor(() => expect((prose as HTMLDetailsElement).open).toBe(true));
 		expect(text(prose, '[data-ai-summary]')).toContain('shared axes');
 
-		// What a reader acts on stays outside the fold: the script rows, and the
-		// errors and tracebacks that come with them.
+		// What a reader acts on stays outside the fold: the errors and tracebacks.
+		// The script rows are outside it too, but under a fold of their own —
+		// closed, with a line that says how the last execution ended and what it
+		// printed, so the rows cost the reader nothing until they are wanted.
 		expect(prose.querySelector('[data-ai-steps]')).toBeNull();
-		expect(required(canvasElement, '[data-ai-steps]')).not.toBeNull();
+		const stepsPanel = required(canvasElement, '[data-ai-steps-panel]');
+		expect(stepsPanel).toBeInstanceOf(HTMLDetailsElement);
+		expect((stepsPanel as HTMLDetailsElement).open).toBe(false);
+		expect(text(stepsPanel, '[data-ai-steps-preview]')).toBe(
+			'Execution 1 finished — Wrote channel2.png'
+		);
+		await userEvent.click(required(stepsPanel, 'summary'));
+		await waitFor(() => expect((stepsPanel as HTMLDetailsElement).open).toBe(true));
+		expect(required(stepsPanel, '[data-ai-steps]')).not.toBeNull();
 	}}
 >
 	{#snippet template()}
