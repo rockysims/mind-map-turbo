@@ -10,18 +10,20 @@
 
 Three things, built on milestone 14's `!ai` add-on and milestone 09's quantity
 inference: a neighbour's run outputs become a node's inputs by the proximity
-rule that already exists; "Ask a follow-up" makes the next AI node in one press
-and focuses it with the caret in an empty prompt; and a run that prints
-`RESULT R_{th} = 12.3 K/W` makes the node a definer of `R_{th}`, so the derived
-edge to whoever uses it appears without anyone drawing it. Nine tasks, pure
-modules first, and no new subsystem — every piece hangs off machinery that
-shipped in 13, 14, 09 and 11.
+rule that already exists; "Ask a follow-up" opens a composer on the node the
+reader is already looking at, and the press that submits it makes the child AI
+node — prompt already in it, run already starting, holding the pin the parent
+had; and a run that prints `RESULT R_{th} = 12.3 K/W` makes the node a definer
+of `R_{th}`, so the derived edge to whoever uses it appears without anyone
+drawing it. Nine tasks, pure modules first, and no new subsystem — every piece
+hangs off machinery that shipped in 13, 14, 09 and 11.
 
 Agents: Opus subagents implement. Fable reviews the `aiInputs` shape (T03), the
 extractor's third source and its memoisation (T02), the ancestor cap (T04) and
-the follow-up commit (T07), re-runs the gates, and runs the end-to-end smoke
-test with a real key: a two-step chain where the second step reads the first
-step's CSV and reports a number that draws an arrow.
+the follow-up commit — the composer's submit path and the pin transfer — (T07),
+re-runs the gates, and runs the end-to-end smoke test with a real key: a
+two-step chain where the second step reads the first step's CSV and reports a
+number that draws an arrow.
 
 ## Open questions resolved
 
@@ -34,13 +36,18 @@ own and are the ones the milestone points here for.
   that node for.** No new visibility rule to learn, and it removes the reason a
   reader currently has to promote a CSV just to chain a step. Promote keeps its
   own job: putting a figure on the canvas.
-- **How does a reader continue?** **"Ask a follow-up" creates a child AI node on
-  a directed edge and focuses it, prompt ready to type, with a Back crumb.** The
+- **How does a reader continue?** **"Ask a follow-up" opens a composer in the
+  parent's workbench; submitting it creates the child AI node on a directed
+  edge, with the composed prompt already set, and focuses it with a Back crumb.**
+  Nothing is committed while composing, so Cancel and Escape create nothing. The
   map stays the record; a global chat was considered and rejected.
-- **What does the child's request know?** **Up to three hops of AI ancestors
-  along incoming edges — prompt and latest summary each, plus the direct
-  parent's script — as prose in the user message, under a hard character cap.**
-  Files stay at one hop.
+- **What does the child's request know?** **Up to three hops of AI ancestors,
+  reached by the same adjacency rule the file inputs use — an incoming directed
+  edge or an undirected one — prompt and latest summary each, plus the direct
+  parent's script, as prose in the user message under a hard character cap.**
+  Files stay at one hop; the rule for _who is adjacent_ is one rule for both, and
+  the directed-only variant was dropped because two adjacency rules is one more
+  than a reader can predict.
 - **The child's default mode.** **Change, against the parent's script**, because
   a follow-up is an edit to what was just done. Write is offered; Run is not
   until the child has a script of its own.
@@ -85,18 +92,45 @@ own and are the ones the milestone points here for.
   exposure to that hazard, but the name-binding through run history is unchanged
   and the fix filed there still stands.
 - **The follow-up node's placement, pin, edge, label and focus.** **Placed
-  beside the parent by the same offset Define and Promote use; not pinned;
-  joined by a directed, untagged edge; committed as one entry labelled
-  `ask a follow-up`; then focused with a nav entry pushed and the caret in the
-  prompt.** Not pinned because both existing node-creating flows leave their
-  nodes unpinned, an authored edge already puts the child one hop inside the
-  parent's neighbourhood, and a pin per follow-up rewrites what is visible after
-  three of them. Untagged because an edge tag _is_ the input's label in the
-  request — a `@follow-up` on every such edge would put a meaningless role on
-  every input the child collects and colour every one of those edges by
-  milestone 04f's rule. One commit for node, add-on and edge so one Undo takes
-  the whole thing, per
+  beside the parent by the same offset Define and Promote use; carrying the
+  parent's pin, which transfers; joined by a directed, untagged edge; committed
+  as one entry labelled `ask a follow-up`; then focused with a nav entry pushed
+  and its first run started.** The pin transfers rather than being withheld: a
+  pinned parent is unpinned and the child created pinned, in that one commit, and
+  an unpinned parent makes an unpinned child. A pin is the visibility budget the
+  reader spent on where they were working, and a follow-up moves where they are
+  working — so it moves with them, instead of accumulating one pin per question
+  (the failure mode of pinning both) or dropping the reader's chain out of the
+  neighbourhood the moment they leave it (the failure mode of pinning neither).
+  The earlier draft's "not pinned, matching Define and Promote" is superseded:
+  Define and Promote both leave the reader where they were, and a follow-up does
+  not. Untagged because an edge tag _is_ the input's label in the request — a
+  `@follow-up` on every such edge would put a meaningless role on every input the
+  child collects and colour every one of those edges by milestone 04f's rule.
+  One commit for node, add-on, prompt, edge and both pin changes so one Undo
+  takes the whole thing — including giving the parent its pin back — per
   `docs/ui-decisions/2026-08-30--destructive--ship-new-destructive-actions-without-a-confirm.md`.
+- **Does submitting the composer also start the child's run?** **Yes.** The
+  reader has just written a request and pressed a verb; making them find and
+  press a second control on a node they did not choose to visit is a step that
+  answers no question. It also makes the two-step shape honest: the composer is
+  where you decide, and submit is where it happens. Named accordingly (`Ask`,
+  saying so while it works), per
+  `docs/ui-decisions/2026-09-06--status--name-the-run-action-per-mode.md`. The
+  cost is that a mis-press spends tokens, which is why the composer is
+  deliberate and Cancel sits beside Ask; and the fallback, if the smoke test says
+  the auto-run surprises rather than serves, is to create and focus without
+  running and let the child's own `Change & run` start it — a one-line change in
+  `askAiFollowUp` and one story rename, with nothing else in the plan depending
+  on which way it goes.
+- **What does focus land on, now that the prompt is already written?** **The
+  child's workbench with its run in flight**, and no caret hand-off. The earlier
+  draft ended by putting the caret in an empty prompt; there is nothing to type
+  any more, so the prompt field renders the submitted prompt read-normally like
+  any other node's and the reader's eye goes to the run status under it. Nothing
+  steals focus from the surface, which also keeps the deep-zoom focus-scroll
+  hazard `AiNodeContent` documents (a focused element inside a transform-scaled
+  frame scrolls the frame) out of this path entirely.
 
 ## Out of scope (for this plan)
 
@@ -113,6 +147,10 @@ own and are the ones the milestone points here for.
 
 ## Tasks
 
+> **Nothing here starts before the owner says so.** The rulings of 2026-09-07
+> came with "No plan execution until I explicitly say"; the tasks below are
+> drafted and waiting (see Notes).
+>
 > One PR each. Every task runs the full gate set before it is claimed done:
 > `pnpm --filter mind-map-sv lint`, `pnpm --filter mind-map-sv check`,
 > `pnpm --filter mind-map-sv test:unit -- --run`, `pnpm --filter mind-map-sv knip`,
@@ -265,23 +303,30 @@ produced figure reads it differently from one told it is a measurement.
 
 ### T04 — Ancestor context
 
-|                |                                                                                                     |
-| -------------- | --------------------------------------------------------------------------------------------------- |
-| **Depends on** | T03                                                                                                 |
-| **Wave**       | 2                                                                                                   |
-| **Agent**      | opus (Fable reviews the cap)                                                                        |
-| **Effort**     | M                                                                                                   |
-| **Files**      | new `Multigraph/lib/aiAncestry.ts` + spec, `src/lib/ai/aiRequest.ts` + spec, `src/lib/appConfig.ts` |
-| **PR title**   | `feat(ai): carry the conversation so far into a follow-up's request`                                |
+|                |                                                                                                                                                                           |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Depends on** | T03                                                                                                                                                                       |
+| **Wave**       | 2                                                                                                                                                                         |
+| **Agent**      | opus (Fable reviews the cap)                                                                                                                                              |
+| **Effort**     | M                                                                                                                                                                         |
+| **Files**      | new `Multigraph/lib/aiAncestry.ts` + spec, `Multigraph/lib/aiInputs.ts` (export the adjacency predicate) + spec, `src/lib/ai/aiRequest.ts` + spec, `src/lib/appConfig.ts` |
+| **PR title**   | `feat(ai): carry the conversation so far into a follow-up's request`                                                                                                      |
 
 `aiAncestry.ts`, pure:
 
 - `collectAiAncestors(graph, nodeId, maxHops)` → `AiAncestor[]` of
   `{ nodeId; hops; title; prompt; summary; script? }`, nearest first, breadth
-  first, along **incoming directed edges only** and stepping AI node to AI node
-  (a non-AI parent ends that branch — its text is already carried as a one-hop
-  input). A visited set makes a cycle terminate; ties break in `graph.nodes`
-  order so the list is stable. `script` is populated only for `hops === 1`.
+  first, stepping AI node to AI node by **the same adjacency rule
+  `collectAiInputs` uses — an incoming directed edge or an undirected one** (a
+  non-AI neighbour ends that branch; its text is already carried as a one-hop
+  input). Share the predicate with the input collector rather than restating it:
+  one exported helper, called from both, so the two can never drift into two
+  rules. A visited set makes a cycle terminate — and under this rule an
+  undirected pair of AI nodes is a cycle in the ordinary case, not a
+  pathological one, so the set is load-bearing rather than defensive. Ties break
+  in `graph.nodes` order so the list is stable. `script` is populated only for
+  `hops === 1`; two direct parents resolve in `graph.nodes` order, matching
+  `inheritedScript` in T05.
 - `renderAncestorContext(ancestors, limits)` → the prose section, or `''` for no
   ancestors. Headed `Conversation so far (nearest first):`; each entry gives the
   title, `Asked:` and `Result:`; the direct parent's `analysis.py` follows in a
@@ -300,9 +345,15 @@ survives a session of Write, Change and Run. `buildAnalyseRequest` and
 **Acceptance**
 
 - Spec: no ancestors; one; a three-node chain reporting two in order; a fourth
-  step beyond `maxHops` excluded; an undirected edge contributing nothing; a
-  non-AI node between two AI nodes ending the branch; a two-node cycle
-  terminating; two parents reported in a stable order.
+  step beyond `maxHops` excluded; **an AI neighbour joined by an undirected edge
+  contributing on the same terms as one joined by an incoming directed edge**;
+  **two AI nodes joined by one undirected edge, each reporting the other exactly
+  once**; an _outgoing_ directed neighbour contributing nothing; a non-AI node
+  between two AI nodes ending the branch; a two-node directed cycle terminating;
+  two parents reported in a stable order.
+- Spec: the adjacency predicate is the one `collectAiInputs` uses — a table-driven
+  spec over the four edge orientations asserting that a neighbour contributing
+  files also contributes prose, and one contributing neither contributes neither.
 - Spec: only the direct parent carries a script; an ancestor whose latest run is
   not `done` contributes its prompt and an empty summary.
 - Spec: a chain whose rendered section exceeds `maxChars` trims summaries first,
@@ -324,14 +375,25 @@ survives a session of Write, Change and Run. `buildAnalyseRequest` and
 
 `aiNode.ts`:
 
-- `createFollowUpNode(data, aiNodeId, { position, nodeId? })` →
+- `createFollowUpNode(data, aiNodeId, { prompt, position, nodeId? })` →
   `{ graph, nodeId }`. Adds a node titled `!ai Follow-up` — the marker so a later
   title edit does not strip the capability, the word so the canvas has something
   to draw — carrying `addons.ai` at the registry default (via `withNodeAddon`,
-  not a literal, so a registry change cannot drift from it), an empty
-  description, no pin; then a directed, untagged edge from the parent. Same graph
-  object back for an unknown node, or a node without the add-on. Placement is the
+  not a literal, so a registry change cannot drift from it) **with `prompt`
+  already set**, an empty description; then a directed, untagged edge from the
+  parent; then the pin transfer. `prompt` is required and trimmed; an empty or
+  whitespace-only prompt returns the same graph object, so the "cannot submit
+  empty" rule holds at the mutation as well as at the button. Same graph object
+  back for an unknown node, or a node without the add-on. Placement is the
   caller's, exactly as for `promoteAiOutput`.
+- The pin transfer, in that same returned graph: if the parent is pinned, unpin
+  it with `setNodePinned(data, aiNodeId, false)` (`Multigraph/lib/graph.ts`,
+  which `togglePinned` delegates to) **first**, then add the child with
+  `addNode`'s `pinned: true`. Order is the whole subtlety: both calls stamp
+  `lastPinnedSeq` from `nextPinSequence`, and the beacon rule reads the highest
+  stamp, so unpinning last would leave the parent — the node that is no longer
+  pinned — as the most recently touched. Parent not pinned: neither call
+  happens and the child is created unpinned, `pinSequence` untouched.
 - `inheritedScript(data, nodeId)` → the direct AI parent's stored `analysis.py`,
   or `undefined`. Nearest parent only; two parents with scripts resolve in
   `graph.nodes` order and the spec pins that.
@@ -349,10 +411,16 @@ survives a session of Write, Change and Run. `buildAnalyseRequest` and
 
 **Acceptance**
 
-- Spec: the created node carries the add-on with an empty prompt, no runs, no
-  promoted bindings and no pin; the edge is directed parent → child with no tags;
-  a second call makes a second child (a follow-up is not idempotent — two
-  questions are two nodes); an unknown parent returns the same graph object.
+- Spec: the created node carries the add-on with the passed prompt, no runs and
+  no promoted bindings; the edge is directed parent → child with no tags; a
+  second call makes a second child (a follow-up is not idempotent — two questions
+  are two nodes); an unknown parent, a parent without the add-on, and an empty or
+  whitespace-only prompt each return the same graph object.
+- Spec: the pin transfer. A pinned parent yields `parent.pinned === false` and
+  `child.pinned === true` in the one returned graph, with the child's
+  `lastPinnedSeq` the higher of the two; an unpinned parent yields an unpinned
+  child and leaves `pinSequence` and every `lastPinnedSeq` untouched; a parent
+  pinned twice over (pin, unpin, pin) still transfers exactly one pin.
 - Spec: the child is collected as an _outgoing_ neighbour of the parent, so it
   never feeds the parent's own run — asserted through `collectAiInputs`.
 - Spec: `inheritedScript` with no parent, a non-AI parent, a parent with no
@@ -386,8 +454,40 @@ Four additions to the workbench, each following the rulings already in
    line naming the number of steps and the character count, its body the
    rendered section verbatim. `data-ai-context`.
 4. **Ask a follow-up**, a labelled button beside the outputs, `aria-disabled`
-   with the reason in the notice line until the node has a done run, calling
-   `onAskFollowUp`.
+   with the reason in the notice line until the node has a done run. It does not
+   create anything: it opens a composer in this workbench, and only the
+   composer's submit calls `onAskFollowUp(prompt)`.
+
+The composer has three states and the component owns all three, because none of
+them is graph state until the last one commits:
+
+- **closed** — nothing rendered but the button.
+- **composing** — `data-ai-follow-up` on the container, `data-ai-follow-up-prompt`
+  on the textarea, `data-ai-follow-up-submit` on the submit and
+  `data-ai-follow-up-cancel` on Cancel. The textarea grows to its text the way
+  the prompt field does (the same `auto`-then-`scrollHeight` effect), so no inner
+  scroller competes with the root's `data-zoom-scroll`
+  (`docs/ui-decisions/2026-09-06--pointer--mark-scrollers-so-the-zoom-yields-the-wheel.md`).
+  The draft lives in a `$state` string and is dropped on close — a discarded
+  draft is not worth persisting, and persisting it would mean deciding when it
+  expires.
+- **submitting** — the submit is labelled `Ask` and says so while it works, per
+  `docs/ui-decisions/2026-09-06--status--name-the-run-action-per-mode.md`; both
+  controls are `aria-disabled` for the moment between the press and the focus
+  change, so a double-tap cannot commit twice.
+
+Keyboard, mirroring `handlePromptKeydown` beside it: Cmd/Ctrl+Enter submits,
+Enter and Shift+Enter both insert a newline — a follow-up is prose and often more
+than one line, and the field next to it already reads Enter that way, so making
+this one differ would be the surprise. Escape closes the composer and calls
+`stopPropagation` so the focus layer does not also act on it; this is the first
+handler in the file to take Escape, and the header comment that says Escape
+belongs to the focus layer gets a sentence saying which key now has an exception
+and why. Submit is `aria-disabled` with the reason in the notice line while the
+draft is empty or whitespace-only, per
+`docs/ui-decisions/2026-08-30--a11y--say-why-a-control-is-disabled-in-the-notice-line.md`;
+the guard is the same pure predicate `createFollowUpNode` uses, not a second
+`trim()` that can drift from it.
 
 `aiWorkbenchView.ts` gains the pure view helpers these need — the results rows,
 the context summary line, and the follow-up's disabled reason — so the component
@@ -405,13 +505,25 @@ and `…2026-09-06--status--name-the-run-action-per-mode.md`.
   `aria-disabled` with a reason before the first run and enabled after it; the
   mode switch on a fresh child offers Write and Change with Change selected and
   does not offer Run.
-- The new disclosure opens on a real press inside the focus frame (the
-  `interactiveContent.ts` rule from milestone 14's third session), and the
-  workbench still scrolls under the wheel with `data-zoom-scroll`
+- Story: pressing Ask a follow-up shows `[data-ai-follow-up]` and fires no
+  callback; typing into `[data-ai-follow-up-prompt]` and pressing
+  `[data-ai-follow-up-submit]` fires `onAskFollowUp` once with the typed string,
+  reported through the harness as `data-last-follow-up-prompt`.
+- Story: `[data-ai-follow-up-cancel]` closes the composer and fires nothing;
+  Escape inside the prompt closes the composer, fires nothing, and does not reach
+  the focus layer; re-opening the composer shows an empty field.
+- Story: submit is `aria-disabled` with a reason in the notice line while the
+  field is empty and while it holds only spaces and newlines, and pressing it
+  then fires nothing; Cmd+Enter and Ctrl+Enter each submit, and a bare Enter and
+  a Shift+Enter each insert a newline instead.
+- The new disclosure and the composer both open on a real press inside the focus
+  frame (the `interactiveContent.ts` rule from milestone 14's third session), and
+  the workbench still scrolls under the wheel with `data-zoom-scroll`
   (`docs/ui-decisions/2026-09-06--pointer--mark-scrollers-so-the-zoom-yields-the-wheel.md`).
 - No new window-level keyboard shortcut, so
   `docs/ui-decisions/2026-08-30--keyboard--guard-every-shortcut-while-typing.md`
-  is satisfied by construction; the new controls are real buttons reachable by
+  is satisfied by construction — the composer's two keys are handled on its own
+  textarea, not at the window; the new controls are real buttons reachable by
   Tab.
 
 ### T07 — Wiring: collect results on a run, and the follow-up flow
@@ -423,7 +535,7 @@ and `…2026-09-06--status--name-the-run-action-per-mode.md`.
 | **Agent**      | opus (Fable reviews the commit and the focus hand-off)                                                                  |
 | **Effort**     | L                                                                                                                       |
 | **Files**      | `Multigraph/lib/aiRunController.svelte.ts` + spec, `Multigraph.svelte`, `src/routes/+page.svelte` if the props reach it |
-| **PR title**   | `feat(ai): record run results and create a focused follow-up node in one press`                                         |
+| **PR title**   | `feat(ai): record run results and turn a composed follow-up into a focused, running node`                               |
 
 The controller: parse `RESULT` lines from the **full** stdout of the last
 execution that exited 0 (the worker joins every chunk before it replies, so the
@@ -438,26 +550,39 @@ and Change mode falls back to `inheritedScript` with a second instruction
 before this one. Modify it to satisfy the request above.") when the node has no
 script of its own.
 
-`Multigraph.svelte` gains `askAiFollowUp(aiNodeId)`, which is `createDefiningNode`'s
-shape with the ending swapped:
+`Multigraph.svelte` gains `askAiFollowUp(aiNodeId, prompt)`, which is
+`createDefiningNode`'s shape with the ending swapped. The prompt arrives from the
+composer, so this function neither opens nor closes anything — by the time it
+runs, the reader has already decided:
 
 1. Read the departure state first — `focusRootNodeId`, `focus.isFocused` and the
    live `stageViewState` — because `focusRootNodeId` is null once focus is gone.
-2. `createFollowUpNode` at `{ x: origin.x + NODE_RADIUS * 2.5, y: origin.y }`,
-   beside rather than below so a follow-up and a promoted figure do not land on
-   the same spot; commit through `commitUserGraph(layoutRuntime.relaxAfterMutation(…),
-editIntent('ask a follow-up'))`.
+2. `createFollowUpNode(graph, aiNodeId, { prompt, position })` at
+   `{ x: origin.x + NODE_RADIUS * 2.5, y: origin.y }`, beside rather than below so
+   a follow-up and a promoted figure do not land on the same spot. The returned
+   graph already carries the prompt, the edge and the pin transfer; if it is the
+   same object (empty prompt, unknown parent) return without committing. Commit
+   through `commitUserGraph(layoutRuntime.relaxAfterMutation(…),
+editIntent('ask a follow-up'))` — one entry, so one Undo removes the child and
+   gives the parent its pin back together.
 3. Push a nav entry for the departure node with `revealedNodeId: null` — the
    child is joined by an authored edge and is visible on its own account.
 4. `fitViewRequest` onto the child, then `enterFocusOnNode(child.id)`.
-5. Set `promptEditContext = { nodeId, id }`, last, because `closeOverlays()`
-   clears state like it; `AiNodeContent` focuses its prompt textarea in an effect
-   keyed on the id, the way `NodeCompactContent` does for `titleCaretAt`.
+5. Start the child's first run, last, through the same controller entry point the
+   workbench's run button uses — mode resolved by `defaultRunMode` with
+   `inheritedScript`, which for a fresh child is Change against the parent's
+   script. No caret hand-off and no `promptEditContext`: the prompt is already
+   written, so there is nothing to type, and nothing takes DOM focus off the
+   surface. Focus lands on the child's workbench with the run in flight and its
+   control naming what it is doing.
 
 Steps 3 and 4 are `jumpToNode`'s body; extract the shared part rather than
 copying it, so a third caller does not become a third divergence. Extract the
 `origin.y + NODE_RADIUS * 2.5` placement too — it is already duplicated verbatim
 between promote and define, and this is the third.
+
+If the smoke test rules against the auto-run, step 5 is the only thing that goes
+and the rest of the flow is unchanged.
 
 **Acceptance**
 
@@ -469,12 +594,20 @@ between promote and define, and this is the third.
 - Controller spec: a child with no script builds a Change request carrying the
   parent's script and the inherited instruction; the ancestor section is present
   and within the cap.
-- Story: pressing Ask a follow-up commits one graph change with the label
-  `ask a follow-up`, focus lands on the new node, its prompt input is
-  `document.activeElement` and empty, and `[data-nav-back]` names the parent.
+- Story: opening the composer and pressing Cancel, and opening it and pressing
+  Escape, each commit nothing — the graph, the node count and the undo depth are
+  all unchanged.
+- Story: composing a prompt and submitting commits exactly one graph change with
+  the label `ask a follow-up`; focus lands on the new node, its prompt field
+  holds the submitted text, its run is in flight, and `[data-nav-back]` names the
+  parent.
 - Story: Back from the child returns to the parent's workbench at the camera the
   reader left, matching `BackAfterDefineReturnsToTheConsumersDetails`.
-- Story: one Undo after the follow-up removes the child and the edge together.
+- Story: a follow-up from a **pinned** parent leaves the child pinned and the
+  parent unpinned; one Undo restores both and removes the child and the edge, in
+  one step.
+- Story: one Undo after a follow-up from an unpinned parent removes the child and
+  the edge together and pins nothing.
 
 ### T08 — Stories for the chain and the derived edge
 
@@ -495,9 +628,13 @@ sentences in the house style:
   the parent as an output, with no Replace or Remove.
 - `RerunningTheParentMarksTheChildsInputsChanged` — the amber line names the file
   and the child's default mode is Run.
-- `AskingAFollowUpFocusesTheNewNodeReadyToType` and
+- `ComposingAFollowUpCreatesNothingUntilItIsSubmitted` — the composer opens, the
+  reader types, Cancel and Escape each leave the graph exactly as it was.
+- `SubmittingAFollowUpFocusesTheNewNodeWithItsPromptAlreadyRunning` and
   `BackFromAFollowUpReturnsToTheParentsWorkbench` — the round trip, modelled on
   the three define/back-trail stories at `Multigraph.stories.svelte:6083–6200`.
+- `AFollowUpTakesThePinFromItsParent` — a pinned parent, a follow-up, the pin on
+  the child and the parent unpinned; one Undo puts it back.
 - `ARecordedResultMakesTheNodeADefiner` — a run recording `R_{th}` gives the node
   a definer chip and draws a derived edge to a node whose description references
   `R_{th}`; removing the run's node removes the edge.
@@ -506,7 +643,7 @@ sentences in the house style:
 
 **Acceptance**
 
-- All six pass in both the Storybook UI and the `storybook` Vitest project.
+- All eight pass in both the Storybook UI and the `storybook` Vitest project.
 - Each asserts through harness attributes (`data-ai-*`, `data-nav-back`,
   `data-designation-*`) rather than internals.
 
@@ -521,19 +658,26 @@ sentences in the house style:
 | **Files**      | `README.md`, `docs/roadmaps/TODO.md`, this plan, the milestone, `roadmap.md`, `docs/ui-decisions/*`, `docs/debt/*` |
 | **PR title**   | `docs(ai): document follow-ups and results, and record the shell delta`                                            |
 
-README section: what a follow-up is, what a child reads from its parent, how far
-context reaches and what it costs, what a `RESULT` line does, and the sentence
-that values do not flow yet. Record the offline shell size before and after in
-Notes. Write a `docs/ui-decisions/` file for every ruling the owner makes during
-the smoke test — the follow-up control's placement and label, and the unpinned
-child are the two most likely — following `docs/ui-decisions/README.md`. File
-`docs/debt/` entries for anything real found and deliberately not fixed. Flip the
-plan to `done`, the milestone to `complete`, and the roadmap row with it.
+README section: what a follow-up is (compose on the parent, submit to create),
+what the pin transfer does, what a child reads from its parent, how far context
+reaches and what it costs, what a `RESULT` line does, and the sentence that
+values do not flow yet. Record the offline shell size before and after in Notes.
+The owner's three rulings of 2026-09-07 are already logged in
+`docs/ui-decisions/` (the composer instead of create-then-type, the pin
+transferring from parent to child, and one adjacency rule for files and prose).
+One decision is this plan's own and becomes a ruling only once the owner has
+used it: submit starting the child's run. Log it after the smoke test, whichever
+way the owner rules, and write a file for every further ruling made there — the
+control's label and the composer owning Escape are the two most likely —
+following `docs/ui-decisions/README.md`. File `docs/debt/` entries for anything
+real found and deliberately not fixed. Flip the plan to `done`, the milestone to
+`complete`, and the roadmap row with it.
 
 **Acceptance**
 
-- Shell size delta in Notes; README section present; every gate green; no
-  tracked changes under `.svelte-kit/` or any `*storybook*.log`.
+- Shell size delta in Notes; README section present; the submit-runs ruling
+  and any smoke-test rulings written to `docs/ui-decisions/`; every gate green;
+  no tracked changes under `.svelte-kit/` or any `*storybook*.log`.
 
 ## Wave plan
 
@@ -577,10 +721,28 @@ merged.
   second parent appears. This is exactly the added/removed case the amber line
   and the Change default already handle, but it now fires for a reason the reader
   did not cause; T06's copy must survive that reading.
-- **Two AI nodes pointing at each other.** Input collection cannot loop; the
-  ancestor walk needs its visited set, which T04 specs directly. If a real graph
+- **Two AI nodes pointing at each other, or joined by an undirected edge.** Input
+  collection cannot loop; the ancestor walk can, and under the one-rule adjacency
+  an undirected pair is mutual ancestry by construction rather than by accident.
+  The visited set is the answer and T04 specs it directly. If a real graph
   produces a confusing chain anyway, the answer is a diagnostic, not a
-  restriction — nothing here forbids the shape.
+  restriction — nothing here forbids the shape, and the preview shows what was
+  sent.
+- **A submit that also runs spends tokens on a mis-press.** Ask both creates the
+  node and starts its request, so a stray press costs money rather than an
+  `Undo`. The mitigation is the shape the owner asked for: the composer is a
+  deliberate two-step — open it, write a prompt, then submit — an empty prompt
+  cannot be submitted at all, and Cancel sits beside Ask so the way out is as
+  close to hand as the way on. If the smoke test still finds it surprising, the
+  fallback is T07's step 5 alone: create and focus without running, and let the
+  child's own `Change & run` start it.
+- **The pin transfer moves something the reader did not press pin on.** Following
+  up on a pinned node silently unpins it. The label says what happened
+  (`ask a follow-up`), one Undo puts it back with the child, and the two changes
+  are in one entry so they can never come apart. Worth watching in the smoke
+  test: if a reader pins a parent precisely to keep it on screen while working
+  downstream, this is the ruling to revisit, and it is one line in
+  `createFollowUpNode` plus its spec.
 
 ## Definition of Done (this plan)
 
@@ -594,6 +756,23 @@ merged.
 
 ## Notes
 
+- 2026-09-07: **the owner ruled on the three open items, in these words.** On the
+  follow-up flow: _"Lets have the user compose the follow up prompt from the
+  original !ai node and only when they click submit (or w/e) does it create the
+  new node and move them there."_ On the pin: _"If parent is pinned, unpin parent
+  and pin child (so basically follow up transfers pin to follow up)."_ On the
+  ancestor walk, after the directed-only draft: _"not sure I fully understand but
+  I like the simplicity of one rule."_ This revision carries all three: the
+  composer replaces the create-then-type shape, the pin transfers in the same
+  commit, and the walk uses the same adjacency rule as input collection. **No
+  plan execution until the owner explicitly says so** — this document is drafted
+  and waiting, and no task is to be started before that go-ahead.
+- 2026-09-07: whether submitting also starts the child's first run was left to
+  this plan, and the answer here is **yes** — see the open question above for the
+  reasoning and the one-line fallback. Two consequences to raise with the owner
+  at the smoke test rather than guess at: the `Ask` label, and whether an
+  auto-started run on a node the reader has not yet looked at reads as helpful or
+  as presumptuous.
 - 2026-09-07: plan drafted, not started. Written against the milestone 14 code as
   it stands after the 2026-09-07 evening session (scripts run in `/work`, the cap
   is twelve executions, inputs are grouped by node with Add/Replace/Remove).
