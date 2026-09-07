@@ -67,7 +67,8 @@ individual PR-sized tasks.
 | 11  | Unified hop model for derived edges                | complete    | [milestone](milestones/11-unified-hop-model-for-derived-edges.md), [plan](plans/2026-08-28%2011-unified-hop-model-for-derived-edges.md)               |
 | 12  | Undo and redo                                      | complete    | [milestone](milestones/12-undo-and-redo.md), [plan](plans/2026-08-30%2012-undo-and-redo.md)                                                           |
 | 13  | Node add-ons and file attachments                  | complete    | [milestone](milestones/13-node-addons-and-file-attachments.md), [plan](plans/2026-09-04%2013-node-addons-and-file-attachments.md)                     |
-| 14  | AI nodes                                           | proposed    | [milestone](milestones/14-ai-nodes.md), [plan](plans/2026-09-04%2014-ai-nodes.md)                                                                     |
+| 14  | AI nodes                                           | complete    | [milestone](milestones/14-ai-nodes.md), [plan](plans/2026-09-04%2014-ai-nodes.md)                                                                     |
+| 15  | AI follow-ups and results                          | proposed    | [milestone](milestones/15-ai-follow-ups-and-results.md), [plan](plans/2026-09-07%2015-ai-follow-ups-and-results.md)                                   |
 
 Milestones 04a-04m deepen the local-first graph experience before multiplayer.
 Milestone 04b intentionally supersedes 04a's Fibonacci reveal and dimming
@@ -147,6 +148,15 @@ has to be deployed to try it; the 2026-09-04 review found it is also the only
 Anthropic endpoint a browser page may call, which is why the script runs
 locally rather than in a server-side sandbox. A proxy comes with the login
 server.
+Milestone 15 answers what the first weeks of real use found: an AI node's
+outputs feed the AI nodes downstream of it by the proximity rule that already
+collects its inputs, so chaining a step needs no promote; "Ask a follow-up"
+makes the next node in one press and focuses it with the caret in an empty
+prompt, reusing the deep-zoom define-and-come-back mechanism; and a run that
+prints a named number records it as a quantity, so milestone 09's inference
+makes the node a definer and milestone 11 draws the arrow. Numeric values still
+do not flow into downstream scripts — the structure is made visible first, the
+same order milestones 08 to 11 took.
 
 ## How this directory is organized
 
@@ -175,7 +185,11 @@ we change approach mid-stream — old plans stay as historical record.
   immutable-update pattern; a version history browser is still out of scope.
 - AI-generated graph structure (scraping a site into nodes, suggesting
   edges, growing a map from notes). Milestone 14 deliberately limits AI to
-  analysis inside one node; letting it write the map is a later conversation.
+  analysis inside one node. Milestone 15 adds exactly one kind of node around
+  it, a follow-up child of an AI node, and the reader's own press creates it —
+  the model never proposes or writes graph structure. Growing a map from notes
+  or from the web stays out, and letting the AI write the map is still a later
+  conversation.
 
 ## Pre-roadmap foundations (already done before milestone 01)
 
