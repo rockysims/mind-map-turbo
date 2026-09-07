@@ -180,7 +180,7 @@
 		return required(canvasElement, '[data-ai-harness]');
 	}
 
-	function text(canvasElement: HTMLElement, selector: string): string {
+	function text(canvasElement: Element, selector: string): string {
 		return canvasElement.querySelector(selector)?.textContent?.trim() ?? '';
 	}
 
@@ -222,22 +222,31 @@
 		// The edge's tag is the input's role, with no UI of its own.
 		expect(text(canvasElement, '[data-ai-input-label]')).toBe('baseline');
 
-		// The digest, rendered by the same function that renders it into the
-		// request — the milestone's "no surprises before Run".
-		const digest = text(canvasElement, '[data-ai-digest]');
-		expect(digest).toContain('measurements.csv — 2 KB');
-		expect(digest).toContain('3 columns: time (float64), ch1 (float64), ch2 (float64)');
-		expect(digest).toContain('10000 rows');
-		expect(digest).toContain('First 2 rows:');
+		// One line per file: what it is, how big, and the shape of the table. The
+		// rows themselves are a disclosure away (see the collapsed-digest story).
+		const summary = text(rows[1], '[data-ai-digest-summary]');
+		expect(summary).toContain('measurements.csv');
+		expect(summary).toContain('2 KB');
+		expect(summary).toContain('3 columns, 10000 rows');
 		expect(content.querySelector('[data-ai-digest-pending]')).toBeNull();
 
-		// Nothing has run, so a fresh analysis is the only thing on offer.
+		// Nothing has run, so a fresh analysis is the only thing on offer — and the
+		// button beside the switch names that act rather than saying "Run".
 		expect(required(canvasElement, '[data-ai-mode="analyse"]')).toHaveAttribute(
 			'aria-pressed',
 			'true'
 		);
+		expect(text(canvasElement, '[data-ai-run]')).toBe('Run analysis');
 		expect(required(canvasElement, '[data-ai-mode="rerun"]')).toBeDisabled();
 		expect(required(canvasElement, '[data-ai-cancel]')).toBeDisabled();
+
+		// The controls come before the inputs, so a node with several files still
+		// opens on the prompt and the press that runs it.
+		expect(
+			required(canvasElement, '[data-ai-run-controls]').compareDocumentPosition(
+				required(canvasElement, '[data-ai-inputs]')
+			) & Node.DOCUMENT_POSITION_FOLLOWING
+		).toBeTruthy();
 		expect(content.querySelector('[data-ai-script]')).toBeNull();
 		expect(content.querySelector('[data-ai-metadata]')).toBeNull();
 		expect(content.querySelector('[data-ai-live]')).toBeNull();
@@ -504,10 +513,141 @@
 	args={{ hasKey: false, onOpenSettings: fn() }}
 	play={async ({ canvasElement, args }) => {
 		expect(workbench(canvasElement).querySelector('[data-ai-run]')).toBeNull();
-		expect(text(canvasElement, '[data-ai-no-key]')).toContain('stays in this browser');
+
+		// The state, not a warning about it: the same line that names the model
+		// once a key is in hand says there is none.
+		const connection = required(canvasElement, '[data-ai-connection]');
+		expect(connection).toHaveAttribute('data-ai-connection', 'disconnected');
+		expect(connection.textContent?.trim()).toBe('Not connected');
 
 		await userEvent.click(required(canvasElement, '[data-ai-connect]'));
 		expect(spyFor(args.onOpenSettings).mock.calls).toHaveLength(1);
+	}}
+/>
+
+<!--
+	The sheet closes behind a Connect, so the workbench is where the reader finds
+	out whether it took — and the model is the part that makes it an answer
+	rather than a claim.
+-->
+<Story
+	name="AConnectedWorkbenchNamesTheModelItWouldCall"
+	args={{ hasKey: true, model: 'claude-sonnet-5' }}
+	play={async ({ canvasElement }) => {
+		const connection = required(canvasElement, '[data-ai-connection]');
+		expect(connection).toHaveAttribute('data-ai-connection', 'connected');
+		expect(connection.textContent?.trim()).toBe('Connected · claude-sonnet-5');
+		// Green, and the same green the toolbar's dot uses.
+		const dot = connection.querySelector('span');
+		expect(dot).not.toBeNull();
+		expect(getComputedStyle(dot as Element).backgroundColor).toBe('rgb(22, 163, 74)');
+	}}
+/>
+
+<!--
+	Three modes read as three actions until the switch says it is one. The label
+	and the filled selection are what make "Analyse" a choice; the button beside
+	it is what makes pressing something do a visible thing.
+-->
+<Story
+	name="TheModeSwitchIsLabelledAndTheButtonNamesWhatItWillRun"
+	play={async ({ canvasElement }) => {
+		expect(text(canvasElement, '[data-ai-mode-hint]')).toBe(
+			'Run the stored script again, with no model call'
+		);
+		expect(text(canvasElement, '[data-ai-run]')).toBe('Run script');
+
+		const analyse = required(canvasElement, '[data-ai-mode="analyse"]');
+		const rerun = required(canvasElement, '[data-ai-mode="rerun"]');
+		// The selection is filled, the rest are not — a difference a glance reads.
+		expect(getComputedStyle(rerun).backgroundColor).toBe('rgb(15, 23, 42)');
+		expect(getComputedStyle(analyse).backgroundColor).toBe('rgb(255, 255, 255)');
+
+		await userEvent.click(analyse);
+		await waitFor(() => expect(analyse).toHaveAttribute('aria-pressed', 'true'));
+		expect(rerun).toHaveAttribute('aria-pressed', 'false');
+		expect(text(canvasElement, '[data-ai-run]')).toBe('Run analysis');
+		expect(text(canvasElement, '[data-ai-mode-hint]')).toBe('Write a new script for this prompt');
+
+		await userEvent.click(required(canvasElement, '[data-ai-mode="refine"]'));
+		await waitFor(() => expect(text(canvasElement, '[data-ai-run]')).toBe('Refine and run'));
+	}}
+>
+	{#snippet template()}
+		<AiNodeHarness
+			baseGraph={aiGraph({ script: SCRIPT, runs: [DONE_RUN] })}
+			nodeId="ai"
+			digests={DIGESTS}
+		/>
+	{/snippet}
+</Story>
+
+<Story
+	name="ARunInFlightSaysSoOnTheButtonThatStartedIt"
+	args={{ runState: runState({ phase: 'running', text: 'Working.' }) }}
+	play={async ({ canvasElement }) => {
+		const run = required(canvasElement, '[data-ai-run]');
+		expect(run).toBeDisabled();
+		expect(run.textContent?.trim()).toBe('Running…');
+		expect(run.querySelector('.dot')).not.toBeNull();
+		// The way out of a run stays live while the way into one does not.
+		expect(required(canvasElement, '[data-ai-cancel]')).toBeEnabled();
+	}}
+/>
+
+<!--
+	The digest is what leaves the machine, so it stays inspectable — but a CSV's
+	rows are not what the reader came to the workbench to read, and open by
+	default they pushed the Run button off the screen.
+-->
+<Story
+	name="TheDigestIsCollapsedButOneDisclosureAway"
+	play={async ({ canvasElement }) => {
+		const content = workbench(canvasElement);
+		const panel = required(content, '[data-ai-input-kind="file"] details');
+		expect(panel).toBeInstanceOf(HTMLDetailsElement);
+		expect((panel as HTMLDetailsElement).open).toBe(false);
+		// The summary names the depth the settings sheet promised.
+		expect(panel.querySelector('summary')?.textContent?.trim()).toBe(
+			'What Claude will see (5 rows)'
+		);
+
+		await userEvent.click(panel.querySelector('summary') as HTMLElement);
+		await waitFor(() => expect((panel as HTMLDetailsElement).open).toBe(true));
+
+		// And behind it, the same text the request carries, unchanged.
+		const digest = text(canvasElement, '[data-ai-digest]');
+		expect(digest).toContain('measurements.csv — 2 KB');
+		expect(digest).toContain('3 columns: time (float64), ch1 (float64), ch2 (float64)');
+		expect(digest).toContain('10000 rows');
+		expect(digest).toContain('First 2 rows:');
+	}}
+/>
+
+<Story
+	name="ASchemaOnlySettingSaysSoOnTheDisclosure"
+	args={{ previewRows: 0 }}
+	play={async ({ canvasElement }) => {
+		expect(
+			required(canvasElement, '[data-ai-input-kind="file"] details summary').textContent?.trim()
+		).toBe('What Claude will see (schema only)');
+		// The promise is kept in the text too: no rows, however many the probe took.
+		expect(text(canvasElement, '[data-ai-digest]')).not.toContain('First');
+	}}
+/>
+
+<!-- Nothing to preview and no shape to state: a file pandas could not read is
+     its name and its size, and the row says only that. -->
+<Story
+	name="AFileTheProbeCouldNotReadIsJustItsNameAndSize"
+	args={{
+		digests: { 'asset-csv': { name: 'measurements.csv', size: 2048, kind: 'other' } }
+	}}
+	play={async ({ canvasElement }) => {
+		const row = required(canvasElement, '[data-ai-input-kind="file"]');
+		expect(row.querySelector('details')).toBeNull();
+		expect(row.querySelector('[data-ai-input-shape]')).toBeNull();
+		expect(text(row, '[data-ai-digest-summary]')).toContain('2 KB');
 	}}
 />
 
@@ -674,18 +814,41 @@
 	play={async ({ canvasElement }) => {
 		const content = workbench(canvasElement);
 
-		// Focus mode has no scrollbars: a wheel is how the reader moves the world,
-		// so nothing in this subtree may quietly become a scroll container. The
-		// prompt field grows to its text instead.
-		for (const element of [content, ...content.querySelectorAll('*')]) {
+		// One scroller, and it is the root: the surface is taller than the frame,
+		// so it scrolls rather than stranding its controls below the pan clamp.
+		expect(content).toHaveAttribute('data-zoom-scroll');
+		expect(getComputedStyle(content).overflowY).toBe('auto');
+		expect(content.scrollHeight).toBeGreaterThan(content.clientHeight);
+
+		// And nothing inside it is a second one — an inner scrollbar would put a
+		// dead zone in the middle of the surface. The prompt grows to its text and
+		// every `<pre>` wraps.
+		for (const element of content.querySelectorAll('*')) {
 			const { overflowX, overflowY } = getComputedStyle(element);
 			expect([overflowX, overflowY]).not.toContain('scroll');
 			expect([overflowX, overflowY]).not.toContain('auto');
 		}
 
 		const state = harnessState(canvasElement);
+
+		// While the scroller has room, the wheel is the browser's and the world
+		// never hears it.
+		content.scrollTop = 0;
 		content.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 120 }));
+		expect(state).toHaveAttribute('data-stage-wheels', '0');
+
+		// At the top there is nowhere to scroll *up*, so a wheel-out reaches the
+		// world — which is the gesture that exits focus.
+		content.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -120 }));
 		await waitFor(() => expect(state).toHaveAttribute('data-stage-wheels', '1'));
+
+		// And at the bottom a wheel-down zooms again, so neither end is a dead end.
+		content.scrollTop = content.scrollHeight;
+		content.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 120 }));
+		await waitFor(() => expect(state).toHaveAttribute('data-stage-wheels', '2'));
+		// Still room upward from the bottom, so that direction stays the scroller's.
+		content.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -120 }));
+		expect(state).toHaveAttribute('data-stage-wheels', '2');
 
 		// A press on a control belongs to the control, not to a world pan — the
 		// rule `ZoomWorld` applies, checked here against every control this
@@ -708,6 +871,7 @@
 			baseGraph={aiGraph({ script: SCRIPT, runs: [DONE_RUN] })}
 			nodeId="ai"
 			digests={DIGESTS}
+			frameHeightPx={240}
 		/>
 	{/snippet}
 </Story>

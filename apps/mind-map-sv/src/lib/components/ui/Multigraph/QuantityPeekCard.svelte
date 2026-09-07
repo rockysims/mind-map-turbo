@@ -505,8 +505,10 @@
 	>
 		<!-- The focus overlay has no scroll container on purpose — wheel input has to
 		     reach the ZoomWorld underneath — and its pan clamp puts below-frame
-		     content out of reach, so a deep cascade has to scroll here. -->
-		<div class="peek-scroll" data-peek-scroll>
+		     content out of reach, so a deep cascade has to scroll here. The marker
+		     is what makes a wheel over it scroll it: ZoomWorld yields to a marked
+		     scroller with room left, and takes the wheel back at its end. -->
+		<div class="peek-scroll" data-peek-scroll data-zoom-scroll>
 			{@render cardBody()}
 		</div>
 

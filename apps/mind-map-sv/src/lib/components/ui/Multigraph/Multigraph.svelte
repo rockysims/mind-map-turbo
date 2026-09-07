@@ -3126,6 +3126,7 @@
 							{assetScope}
 							runState={aiRun.stateFor(detailsNode.id)}
 							hasKey={aiClient !== null}
+							model={aiSettings.model}
 							{titleForNodeId}
 							onPromptChange={(prompt) =>
 								commitUserGraph(

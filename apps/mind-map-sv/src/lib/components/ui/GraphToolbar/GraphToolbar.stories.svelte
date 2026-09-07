@@ -218,6 +218,12 @@
 			canvas.queryByRole('button', { name: 'AI settings, connected' })
 		).not.toBeInTheDocument();
 
+		// A filled glyph and an unfilled one are the same shape, so the state also
+		// carries a dot: grey here, green once a key is in hand.
+		const dot = control.querySelector('[data-ai-connected-dot]');
+		await expect(dot).toHaveAttribute('aria-hidden', 'true');
+		await expect(getComputedStyle(dot as Element).backgroundColor).toBe('rgb(148, 163, 184)');
+
 		control.click();
 		expect(spyFor(args.onOpenAiSettings).mock.calls).toHaveLength(1);
 	}}
@@ -236,10 +242,12 @@
 	play={async ({ canvasElement }: PlayContext) => {
 		const canvas = within(canvasElement);
 
-		await expect(canvas.getByRole('button', { name: 'AI settings, connected' })).toHaveAttribute(
-			'data-ai-connected',
-			'true'
-		);
+		const control = canvas.getByRole('button', { name: 'AI settings, connected' });
+		await expect(control).toHaveAttribute('data-ai-connected', 'true');
+
+		// The dot the reader looks for after pressing Connect.
+		const dot = control.querySelector('[data-ai-connected-dot]');
+		await expect(getComputedStyle(dot as Element).backgroundColor).toBe('rgb(74, 222, 128)');
 	}}
 />
 
