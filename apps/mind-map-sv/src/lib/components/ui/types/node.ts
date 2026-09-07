@@ -47,10 +47,17 @@ export type AiRunMode = 'analyse' | 'refine' | 'rerun';
  * One thing the run sent. `assetId` is absent for a neighbour's title and
  * description, which are text rather than a file; `label` is the role the
  * connecting edge's tag gave it.
+ *
+ * `name` is the filename that file was sent under, recorded because the stored
+ * script opens files *by name*: comparing the current inputs against this list
+ * is how the workbench can say "b.csv was replaced" rather than only "something
+ * is different". Absent on a record written before the field existed, and on a
+ * text input, which has no filename to record.
  */
 export interface AiRunInput {
 	nodeId: string;
 	assetId?: string;
+	name?: string;
 	label?: string;
 }
 

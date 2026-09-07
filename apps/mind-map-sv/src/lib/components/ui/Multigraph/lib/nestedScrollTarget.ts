@@ -12,21 +12,20 @@
  *
  * A marked scroller with room left in the wheel's direction takes it, and the
  * browser scrolls natively (`scroll`). At either end of that scroller the wheel
- * comes back — but handing it straight to the zoom is what made the surface
- * feel broken, because the two ends mean different things:
+ * comes back — and the world takes it and does nothing (`swallow`):
  *
  * - Wheel-in (`deltaY < 0`, which also scrolls *up*) exhausted at the top:
- *   magnifying a page of controls is never what that gesture meant, so the
- *   world takes the wheel and does nothing (`swallow`). The one exception is a
- *   descendable image under the cursor — that is the gesture that opens a plot
- *   in the output grid into its own zoom level, so it still `zoom`s.
+ *   magnifying a page of controls is never what that gesture meant. The one
+ *   exception is a descendable image under the cursor — that is the gesture
+ *   that opens a plot in the output grid into its own zoom level, so it still
+ *   `zoom`s.
  * - Wheel-out (`deltaY > 0`, which also scrolls *down*) exhausted at the
- *   bottom: this is the scrub that leaves focus, so it does `zoom` — but only
- *   after `exitPauseMs` of quiet. Trackpad momentum arrives as a long tail of
- *   wheels after the finger has stopped, and without the pause that tail rides
- *   straight off the end of a scroll and out of focus. Inside the pause the
- *   wheel is swallowed instead, and the caller resets the exit scrub it may
- *   already have accumulated.
+ *   bottom: swallowed too. **Once the reader is inside a scrollable surface,
+ *   the wheel never leaves deep zoom.** Close — the button, or Escape — is what
+ *   leaves. This started as a timed pause against trackpad momentum, and a
+ *   resistance factor on top of it, and both were tuning knobs on a gesture the
+ *   reader did not want in the first place: a wheel at the end of a scroll is
+ *   the end of a scroll, not a request to close what you are reading.
  *
  * With no marked scroller in the chain, every wheel is a `zoom`, exactly as
  * before any of this existed.
@@ -37,7 +36,6 @@
  * `wheelDeltaPixels` first — so a mouse wheel reporting lines and a trackpad
  * reporting pixels are judged on the same scale.
  */
-import { APP_CONFIG } from '$lib/appConfig';
 
 /** One ancestor of the wheel's target, as the decision needs to see it. */
 export interface NestedScrollCandidate {
@@ -53,8 +51,7 @@ export interface NestedScrollCandidate {
 /**
  * Who the wheel belongs to.
  *
- * - `scroll`: the browser's — return without `preventDefault`, and remember
- *   when it happened (the exit pause is measured from it).
+ * - `scroll`: the browser's — return without `preventDefault`.
  * - `swallow`: the world's, and it does nothing with it — `preventDefault`, no
  *   zoom, and any in-flight exit scrub goes back to zero.
  * - `zoom`: the world's, on the usual terms.
@@ -67,17 +64,12 @@ export interface NestedWheelInput {
 	chain: NestedScrollCandidate[];
 	/** Pixel delta: negative zooms in and scrolls up, positive out and down. */
 	deltaY: number;
-	/** Since the last wheel this rule handed to a nested scroller. */
-	msSinceLastNestedScroll: number;
 	/** Whether a zoom-in here would descend into an image rather than magnify. */
 	descendableImageUnderCursor: boolean;
 }
 
-export function nestedWheelDecision(
-	input: NestedWheelInput,
-	exitPauseMs: number = APP_CONFIG.multigraph.focus.scrollerExitPauseMs
-): NestedWheelDecision {
-	const { chain, deltaY, msSinceLastNestedScroll, descendableImageUnderCursor } = input;
+export function nestedWheelDecision(input: NestedWheelInput): NestedWheelDecision {
+	const { chain, deltaY, descendableImageUnderCursor } = input;
 	// No direction to scroll in, so nothing to hand over; the world's zoom math
 	// makes the same nothing of it.
 	if (deltaY === 0) return 'zoom';
@@ -86,27 +78,9 @@ export function nestedWheelDecision(
 	// another hands the wheel outward before it hands it to the world.
 	if (chain.some((candidate) => canScrollBy(candidate, deltaY))) return 'scroll';
 	if (!holdsMarkedScroller(chain)) return 'zoom';
-	if (deltaY < 0) return descendableImageUnderCursor ? 'zoom' : 'swallow';
-	return msSinceLastNestedScroll >= exitPauseMs ? 'zoom' : 'swallow';
-}
-
-/**
- * The delta the exit scrub should accumulate, given where the wheel landed.
- *
- * Leaving focus from inside a scrollable surface is one gesture away from
- * reading it, so it gets a bigger hump to roll over: the same wheel counts for
- * `1 / resistance` of the scrub it would count for over plain content. A
- * divisor on the delta rather than on the accumulated amount, because the scrub
- * maps delta through the zoom curve — halving the delta is exactly "twice as
- * much wheel", at any point in the zone.
- */
-export function resistedExitDelta(
-	deltaY: number,
-	chain: NestedScrollCandidate[],
-	resistance: number = APP_CONFIG.multigraph.focus.scrollerExitResistance
-): number {
-	if (resistance <= 0 || !holdsMarkedScroller(chain)) return deltaY;
-	return deltaY / resistance;
+	// Both ends of the scroll are the world's and neither moves it, bar the one
+	// zoom-in that opens a plot rather than magnifying the page it sits on.
+	return deltaY < 0 && descendableImageUnderCursor ? 'zoom' : 'swallow';
 }
 
 /**

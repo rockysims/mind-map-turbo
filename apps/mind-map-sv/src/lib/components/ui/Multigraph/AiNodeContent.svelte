@@ -22,10 +22,10 @@
 	 * below-frame content out of reach, so the whole surface is one scroller
 	 * bounded by the frame instead. `ZoomWorld` reads the `data-zoom-scroll`
 	 * marker on this root and hands the wheel over while there is somewhere left
-	 * to scroll; at the ends it takes the wheel back but only zooms where zooming
-	 * is what the gesture meant — nothing at the top (unless a plot in the output
-	 * grid is under the cursor, which opens it), and at the bottom the scrub that
-	 * leaves focus, once the reader has paused (see `lib/nestedScrollTarget.ts`).
+	 * to scroll; at the ends it takes the wheel back and does nothing with it —
+	 * the one exception being a plot in the output grid under the cursor, which a
+	 * zoom-in opens. The wheel never leaves focus from in here; Close does (see
+	 * `lib/nestedScrollTarget.ts`).
 	 * Exactly one scroller, on the root: the prompt
 	 * field still grows to its text and every `<pre>` still wraps, so no inner
 	 * box competes for the same gesture. Pointer presses need no handling
@@ -44,6 +44,8 @@
 	import type { AiInput } from './lib/aiInputs';
 	import {
 		defaultRunMode,
+		inputChangesForAddon,
+		inputChangesNote,
 		latestDoneRun,
 		runMetadataLine,
 		staleOutputNames,
@@ -58,36 +60,37 @@
 	const NO_INPUTS: AiInput[] = [];
 	const NO_DIGESTS: Record<string, FileDigest> = {};
 
-	/** Why Refine and Re-run are out of reach, said once and shown twice. */
-	const NO_SCRIPT_REASON = 'No stored script yet — run an analysis first.';
+	/** Why Change and Run are out of reach, said once and shown twice. */
+	const NO_SCRIPT_REASON = 'No stored script yet — write one first.';
 
 	/**
 	 * The three modes, in the order they become available to a node: write a
-	 * script, edit it, run it again.
+	 * script, change it, run it again.
 	 *
 	 * `label` names the mode on the switch; `run` names the *act* on the button
 	 * beside it, because the switch is a choice and the button is what happens.
-	 * Reading "Analyse" on both used to make the switch look like three actions,
-	 * so pressing one appeared to do nothing.
+	 * The names are verbs in the reader's own words — Write, Change, Run —
+	 * rather than the persisted `AiRunMode` values (`analyse`, `refine`,
+	 * `rerun`), which stay as they are in every stored run.
 	 */
 	const MODES: { mode: AiRunMode; label: string; run: string; hint: string }[] = [
 		{
 			mode: 'analyse',
-			label: 'Analyse',
-			run: 'Run analysis',
-			hint: 'Write a new script for this prompt'
+			label: 'Write',
+			run: 'Write & run',
+			hint: 'Claude writes a new script from the prompt and runs it'
 		},
 		{
 			mode: 'refine',
-			label: 'Refine',
-			run: 'Refine and run',
-			hint: 'Edit the stored script for the changed prompt'
+			label: 'Change',
+			run: 'Change & run',
+			hint: 'Claude changes the stored script to match the prompt and runs it'
 		},
 		{
 			mode: 'rerun',
-			label: 'Re-run script',
-			run: 'Run script',
-			hint: 'Run the stored script again, with no model call'
+			label: 'Run',
+			run: 'Run',
+			hint: 'Runs the stored script again on the current files, no model call'
 		}
 	];
 
@@ -166,6 +169,12 @@
 	const latestRun = $derived(latestDoneRun(ai));
 	const metadataLine = $derived(latestRun === undefined ? '' : runMetadataLine(latestRun));
 	const staleNames = $derived(staleOutputNames(ai));
+	/**
+	 * What the files have done since the stored script was written, and the note
+	 * that says so. Empty for a node with no script to be out of date.
+	 */
+	const inputChanges = $derived(inputChangesForAddon(ai, inputs));
+	const inputsChangedNote = $derived(inputChangesNote(inputChanges));
 	const reduceMotion = $derived(prefersReducedMotion());
 
 	const busy = $derived(runState.phase === 'running' || runState.phase === 'loading-runtime');
@@ -188,11 +197,11 @@
 	/** One object URL per output blob, revoked when the run or the node changes. */
 	let assetUrls = $state<Record<string, string>>({});
 
-	const fallbackMode = $derived(defaultRunMode(ai));
+	const fallbackMode = $derived(defaultRunMode(ai, inputs));
 	/**
 	 * The reader's pick, or what the node calls for. A pick that needs the stored
 	 * script falls back once the script goes — an undo can take it away while the
-	 * switch is sitting on Refine, and running an analyse in Refine's clothing
+	 * switch is sitting on Change, and running a Write in Change's clothing
 	 * would be worse than moving the highlight.
 	 */
 	const mode = $derived<AiRunMode>(
@@ -347,13 +356,24 @@
 	{@const promotedNodeId = ai.promoted[output.name]}
 	<div class="output-actions">
 		{#if promotedNodeId === undefined}
+			<!--
+				An icon, because the row is already a name, a picture and an action, and
+				"Promote" was a word the reader had to translate. The glyph points out
+				of the row and onto the map, which is where the press sends the output;
+				the `aria-label` says it in words for anyone not reading glyphs, and the
+				`title` says what it will do. Hover-only, which is the debt in
+				`docs/debt/2026-08-30-tooltips-are-hover-only.md` — this surface has no
+				tooltip component to borrow.
+			-->
 			<button
 				type="button"
 				class="promote"
 				data-ai-promote={output.name}
+				aria-label="Give this output its own node"
+				title="Gives this output its own node on the map, linked to this one and refreshed each time this node runs."
 				onclick={() => onPromote?.(output.name)}
 			>
-				Promote
+				<span aria-hidden="true">⤴</span>
 			</button>
 		{:else}
 			<span class="promoted-note">In</span>
@@ -396,6 +416,14 @@
 	</section>
 
 	<section class="run-section" data-ai-run-controls>
+		{#if inputsChangedNote !== ''}
+			<!--
+				Above the switch, because it is about the choice the switch is for: Run
+				would send the stored script at files it was never written to open, and
+				nothing about that failure looks like a failure.
+			-->
+			<p class="inputs-changed" data-ai-inputs-changed>{inputsChangedNote}</p>
+		{/if}
 		<!--
 			A labelled switch rather than three bare buttons. Without the label and
 			the filled selection the row read as three actions, so pressing one
@@ -1218,8 +1246,35 @@
 		margin-left: auto;
 	}
 
+	/*
+	 * A square target rather than a word: the same 2.25rem either way, so the
+	 * glyph sits in a press big enough for a thumb.
+	 */
+	button.promote {
+		display: grid;
+		place-items: center;
+		width: 2.25rem;
+		height: 2.25rem;
+		padding: 0;
+		font-size: 1.05rem;
+		line-height: 1;
+	}
+
 	.promoted-note {
 		color: #64748b;
+		font-size: 0.875rem;
+	}
+
+	/*
+	 * Amber, like the stale mark: both say the same kind of thing — what is on
+	 * screen and what the data says have come apart.
+	 */
+	.inputs-changed {
+		border-left: 3px solid #f59e0b;
+		border-radius: 0.35rem;
+		padding: 0.4rem 0.6rem;
+		background: #fffbeb;
+		color: #92400e;
 		font-size: 0.875rem;
 	}
 

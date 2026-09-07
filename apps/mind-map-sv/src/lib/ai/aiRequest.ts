@@ -15,6 +15,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { APP_CONFIG } from '$lib/appConfig';
 import { formatByteSize } from '$lib/components/ui/Multigraph/lib/byteSize';
 import type { AiInput } from '$lib/components/ui/Multigraph/lib/aiInputs';
+import type { AiInputChanges } from '$lib/components/ui/Multigraph/lib/aiWorkbenchView';
 import type { AiEffort, AiRequest, AiTurn } from './aiClient';
 import { executorInputName } from './inputFileName';
 import type { AiSettings } from './aiSettings';
@@ -40,6 +41,9 @@ Rules:
   any derived table to outputs/ as CSV. Use short, stable, descriptive
   filenames; when a previous analysis.py is provided, keep its filenames
   unchanged so the mind map can refresh them in place.
+- When several files share a shape, read them by pattern (for example every
+  .csv in the working directory) rather than by hard-coded names, so the
+  script keeps working when a file is added or replaced.
 - Each tool result includes the images you produced. Look at them: axis
   labels with units, a legend when there is more than one series, a sensible
   scale. Fix the script and run it again if not.
@@ -107,6 +111,13 @@ interface AiRefineRequestBuild extends AiRequestBuild {
 	 * traceback would be describing a failure that did not happen.
 	 */
 	traceback?: string;
+	/**
+	 * Which files have come, gone or been swapped since the previous script was
+	 * written. The digests above already say what is attached *now*; this says
+	 * which of them the script has never seen, which is the part a model cannot
+	 * work out by reading its own code.
+	 */
+	inputChanges?: AiInputChanges;
 }
 
 /**
@@ -128,17 +139,46 @@ export function buildAnalyseRequest(build: AiRequestBuild): AiRequest {
  * A refine: the same request with the previous script and the edit instruction,
  * and — when the reader got here from a failed re-run — the traceback that
  * failure printed, between the instruction and the script it is about.
+ *
+ * A file that has arrived or changed since the script was written gets a
+ * sentence of its own, straight after the instruction: the script's job in that
+ * run is to catch up with the data, and saying which files moved is the
+ * difference between an edit and a guess.
  */
 export function buildRefineRequest(build: AiRefineRequestBuild): AiRequest {
 	const { effort = APP_CONFIG.ai.effort.refine } = build;
 	const traceback = build.traceback?.trim() ?? '';
+	const changes = inputChangesSentence(build.inputChanges);
 	const text = [
 		userMessageText(build),
-		REFINE_INSTRUCTION,
+		changes === '' ? REFINE_INSTRUCTION : `${REFINE_INSTRUCTION} ${changes}`,
 		...(traceback === '' ? [] : [`${FIX_INSTRUCTION}\n\n\`\`\`\n${traceback}\n\`\`\``]),
 		`Previous analysis.py:\n\`\`\`python\n${build.previousScript}\n\`\`\``
 	].join('\n\n');
 	return baseRequest(build, effort, text);
+}
+
+/**
+ * `Since this script was written these files were added: a.csv; replaced:
+ * b.csv. Update the script to use the current files.` — empty when nothing
+ * moved, and each clause dropped when its list is.
+ */
+function inputChangesSentence(changes: AiInputChanges | undefined): string {
+	if (changes === undefined) return '';
+	const clauses = [
+		clause('added', changes.added),
+		clause('replaced', changes.replaced),
+		clause('removed', changes.removed)
+	].filter((part) => part !== '');
+	if (clauses.length === 0) return '';
+	return (
+		`Since this script was written these files were ${clauses.join('; ')}. ` +
+		'Update the script to use the current files.'
+	);
+}
+
+function clause(verb: string, names: string[]): string {
+	return names.length === 0 ? '' : `${verb}: ${names.join(', ')}`;
 }
 
 function baseRequest(build: AiRequestBuild, effort: AiEffort, text: string): AiRequest {

@@ -98,18 +98,24 @@ to check, and Forget key.
 
 ### The three modes
 
-- **Analyse** — write a new script for the prompt as it stands. This is the
-  first run, and the one to use when the question has changed.
-- **Refine** — edit the *stored* script for the changed prompt, keeping its
-  output filenames so the node's figures update in place rather than
-  accumulating. Cheaper and steadier than starting over.
-- **Re-run script** — run the stored script again with **no model call at
-  all**. Free, and the right button after changing the data behind an
+- **Write** — Claude writes a new script from the prompt and runs it. This is
+  the first run, and the one to use when the question has changed.
+- **Change** — Claude changes the stored script to match the prompt and runs
+  it, keeping its output filenames so the node's figures update in place
+  rather than accumulating. Cheaper and steadier than starting over.
+- **Run** — runs the stored script again on the current files, with **no model
+  call at all**. Free, and the right button after changing the data behind an
   attachment.
 
-An output can be promoted to a node of its own; a later run that produces the
-same filename swaps the image on that node, and one that stops producing it
-leaves the last figure in place, marked stale.
+Run does gather the files afresh each time, but the stored script opens the
+*names* it was written for — so a file added or swapped since then is handed to
+the script and never read. When that has happened the workbench says so above
+the switch, naming the files, and starts on **Change**, which is how the script
+catches up with the data.
+
+An output can be promoted to a node of its own — the `⤴` button on its row. A
+later run that produces the same filename swaps the image on that node, and one
+that stops producing it leaves the last figure in place, marked stale.
 
 ### What leaves your machine
 
@@ -135,8 +141,8 @@ start in about a second — though browsers do evict the largest files, and a
 run can occasionally pay for one again.
 
 So: a run needs the network twice over — once for Claude, once for the
-runtime. **Re-run script** needs neither Claude nor, once the runtime is
-cached, anything else, which makes it the mode that still works on a plane.
+runtime. **Run** needs neither Claude nor, once the runtime is cached, anything
+else, which makes it the mode that still works on a plane.
 
 ## Writing math in node descriptions
 

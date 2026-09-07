@@ -12,11 +12,11 @@
 	} from './lib/entryGestureGate';
 	import { wheelDeltaPixels } from './lib/graphMath';
 	import { pointerDistance } from './lib/hitTest';
+	import { startsOnInteractiveContent } from './lib/interactiveContent';
 	import {
 		holdsMarkedScroller,
 		nestedScrollChain,
-		nestedWheelDecision,
-		resistedExitDelta
+		nestedWheelDecision
 	} from './lib/nestedScrollTarget';
 	import {
 		clampZoomWorldState,
@@ -66,13 +66,13 @@
 	let entryGestureGate = $state<EntryGestureGateState>(EMPTY_ENTRY_GESTURE_GATE);
 	let exitBoundaryAmount = $state(0);
 	let descendBoundaryAmount = $state(0);
-	/**
-	 * When a wheel was last handed to a scroller inside the world. Nothing
-	 * renders from it, so it is a plain `let`: the exit pause reads it during the
-	 * next wheel and never during a render.
-	 */
-	let lastNestedScrollAt = 0;
 
+	/**
+	 * The pointers the world has claimed. Reflected as `data-zoom-world-pointers`
+	 * because it is the only way, from outside, to see that a press belonged to
+	 * the content under the world rather than to a pan — a synthetic press cannot
+	 * show the capture that used to swallow it.
+	 */
 	const activePointers = new SvelteMap<number, { clientX: number; clientY: number }>();
 	const transformStyle = $derived(
 		`translate(${worldState.panX}px, ${worldState.panY}px) scale(${worldState.scale})`
@@ -171,13 +171,12 @@
 		const deltaY = wheelDeltaPixels(event, viewportHeightPx());
 		// Before anything is swallowed: who does this wheel belong to? A marked
 		// scroller inside the world with room left takes it; at its ends the world
-		// takes it back, but only zooms where zooming is what the gesture meant
+		// takes it back and does nothing with it, bar the zoom-in that opens a plot
 		// (see `lib/nestedScrollTarget.ts`).
 		const chain = nestedScrollChain(event.target, worldRef);
 		const decision = nestedWheelDecision({
 			chain,
 			deltaY,
-			msSinceLastNestedScroll: Date.now() - lastNestedScrollAt,
 			// Asked only where the answer can change anything — a zoom-in with a
 			// marked scroller in the chain. `elementFromPoint` flushes layout, and a
 			// wheel is not the place to pay for that when nothing reads the result.
@@ -188,7 +187,6 @@
 				descendImageAt(event.clientX, event.clientY) !== null
 		});
 		if (decision === 'scroll') {
-			lastNestedScrollAt = Date.now();
 			// Reading is not leaving: a scroll cancels a scrub already under way.
 			resetExitBoundary();
 			return;
@@ -196,17 +194,14 @@
 		event.preventDefault();
 		event.stopPropagation();
 		if (decision === 'swallow') {
-			// The momentum after a scroll must not carry into an exit, so the
-			// accumulation goes back to zero rather than sitting part-scrubbed.
+			// A wheel the world does nothing with must not leave a part-scrubbed exit
+			// behind it, so the accumulation goes back to zero.
 			resetExitBoundary();
 			return;
 		}
 		if (shouldSwallowEntryZoom(deltaY < 0 ? 'in' : 'out')) return;
-		// Leaving focus from inside a scrollable surface costs a bigger hump of
-		// wheel than leaving it from a page of prose.
-		const exitDeltaY = resistedExitDelta(deltaY, chain);
 		if (exitBoundaryAmount > 0) {
-			exitBoundaryAmount = wheelExitBoundaryAmount(exitBoundaryAmount, exitDeltaY, bounds);
+			exitBoundaryAmount = wheelExitBoundaryAmount(exitBoundaryAmount, deltaY, bounds);
 			onExitBoundary?.(exitBoundaryAmount);
 			return;
 		}
@@ -216,14 +211,7 @@
 		const step = wheelZoomWorld(worldState, deltaY, point, bounds);
 		commitState(step.state);
 		if (step.exitBoundaryDelta > 0) {
-			// This branch clamps the world to fit rather than moving it, so reading
-			// it again with the resisted delta changes only how much of the scrub
-			// this one wheel was worth.
-			const boundaryDelta =
-				exitDeltaY === deltaY
-					? step.exitBoundaryDelta
-					: wheelZoomWorld(worldState, exitDeltaY, point, bounds).exitBoundaryDelta;
-			exitBoundaryAmount = Math.min(1, exitBoundaryAmount + boundaryDelta);
+			exitBoundaryAmount = Math.min(1, exitBoundaryAmount + step.exitBoundaryDelta);
 			onExitBoundary?.(exitBoundaryAmount);
 		} else {
 			resetExitBoundary();
@@ -275,21 +263,13 @@
 		};
 	}
 
-	/**
-	 * A press that starts on a control belongs to the control. Capturing it here
-	 * would retarget its pointerup — and therefore its click — at this element,
-	 * so no button inside the world would ever fire for a real pointer. Synthetic
-	 * test events dispatch straight at the element and never showed this.
-	 */
-	function startsOnInteractiveContent(event: PointerEvent): boolean {
-		return (
-			event.target instanceof Element &&
-			event.target.closest('button, a, input, textarea, select, [contenteditable]') !== null
-		);
-	}
-
 	function handlePointerDown(event: PointerEvent) {
-		if (startsOnInteractiveContent(event)) return;
+		// A press that starts on a control belongs to the control. Capturing it
+		// here would retarget its pointerup — and therefore its click — at this
+		// element, so no button or disclosure inside the world would ever fire for
+		// a real pointer. Synthetic test events dispatch straight at the element
+		// and never showed this (see `lib/interactiveContent.ts`).
+		if (startsOnInteractiveContent(event.target)) return;
 		activePointers.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
 		if (activePointers.size === 1 && worldState.scale > (minScale ?? 1) + 0.001) {
 			dragStart = {
@@ -380,6 +360,7 @@
 	data-zoom-world-scale={worldState.scale}
 	data-zoom-world-pan-x={worldState.panX}
 	data-zoom-world-pan-y={worldState.panY}
+	data-zoom-world-pointers={activePointers.size}
 	role="presentation"
 >
 	<div bind:this={subjectRef} class="zoom-world-subject" style={`transform: ${transformStyle};`}>

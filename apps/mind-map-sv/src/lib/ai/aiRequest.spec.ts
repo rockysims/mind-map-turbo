@@ -112,6 +112,9 @@ Rules:
   any derived table to outputs/ as CSV. Use short, stable, descriptive
   filenames; when a previous analysis.py is provided, keep its filenames
   unchanged so the mind map can refresh them in place.
+- When several files share a shape, read them by pattern (for example every
+  .csv in the working directory) rather than by hard-coded names, so the
+  script keeps working when a file is added or replaced.
 - Each tool result includes the images you produced. Look at them: axis
   labels with units, a legend when there is more than one series, a sensible
   scale. Fix the script and run it again if not.
@@ -305,6 +308,62 @@ describe('buildRefineRequest', () => {
 		// And before the script it is about, so the model reads the failure and
 		// then the code that produced it.
 		expect(text.indexOf(traceback)).toBeLessThan(text.indexOf('Previous analysis.py:'));
+	});
+
+	it('names the files that moved since the script was written', () => {
+		// The digests say what is attached now; this says which of them the stored
+		// script has never seen, which is the part the model cannot work out by
+		// reading its own code.
+		const request = buildRefineRequest({
+			prompt: 'Same question, new data.',
+			inputs: [fileInput('sweep.csv'), fileInput('ambient.csv')],
+			digests: [],
+			settings,
+			previousScript: 'print(1)',
+			inputChanges: { added: ['ambient.csv'], removed: ['old.csv'], replaced: ['sweep.csv'] }
+		});
+
+		const text = userText(request);
+		expect(text).toContain(
+			'Since this script was written these files were added: ambient.csv; ' +
+				'replaced: sweep.csv; removed: old.csv. Update the script to use the current files.'
+		);
+		// Attached to the instruction it qualifies, and before the script it is about.
+		expect(text.indexOf(REFINE_INSTRUCTION)).toBeLessThan(text.indexOf('Since this script'));
+		expect(text.indexOf('Since this script')).toBeLessThan(text.indexOf('Previous analysis.py:'));
+	});
+
+	it('drops the clauses for the lists that are empty', () => {
+		const request = buildRefineRequest({
+			prompt: 'Plot the new one too.',
+			inputs: [],
+			digests: [],
+			settings,
+			previousScript: 'print(1)',
+			inputChanges: { added: ['ambient.csv'], removed: [], replaced: [] }
+		});
+
+		expect(userText(request)).toContain(
+			'Since this script was written these files were added: ambient.csv. ' +
+				'Update the script to use the current files.'
+		);
+		expect(userText(request)).not.toContain('removed');
+	});
+
+	it('says nothing about the files when nothing moved, or when nobody asked', () => {
+		const build = {
+			prompt: 'Log scale.',
+			inputs: [],
+			digests: [],
+			settings,
+			previousScript: 'print(1)'
+		};
+		const empty = { added: [], removed: [], replaced: [] };
+
+		expect(userText(buildRefineRequest({ ...build, inputChanges: empty }))).toBe(
+			userText(buildRefineRequest(build))
+		);
+		expect(userText(buildRefineRequest(build))).not.toContain('Since this script was written');
 	});
 
 	it('says nothing about a failure when there is no traceback', () => {

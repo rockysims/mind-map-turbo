@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { APP_CONFIG } from '$lib/appConfig';
 import {
 	holdsMarkedScroller,
 	nestedWheelDecision,
-	resistedExitDelta,
 	type NestedScrollCandidate,
 	type NestedWheelInput
 } from './nestedScrollTarget';
@@ -19,23 +17,20 @@ function candidate(patch: Partial<NestedScrollCandidate> = {}): NestedScrollCand
 	};
 }
 
-/** A long quiet gap and no image: the plain case each test varies from. */
+/** No image under the cursor: the plain case each test varies from. */
 function input(patch: Partial<NestedWheelInput> = {}): NestedWheelInput {
 	return {
 		chain: [candidate()],
 		deltaY: DOWN,
-		msSinceLastNestedScroll: 10_000,
 		descendableImageUnderCursor: false,
 		...patch
 	};
 }
 
-/** Scrolls down, zooms out, and at the end of the scroll leaves focus. */
+/** Scrolls down and zooms out. */
 const DOWN = 120;
 /** Scrolls up, zooms in, and at the end of the scroll may descend. */
 const UP = -120;
-
-const PAUSE_MS = APP_CONFIG.multigraph.focus.scrollerExitPauseMs;
 
 const atTop = candidate({ scrollTop: 0 });
 const atBottom = candidate({ scrollTop: 400, clientHeight: 200, scrollHeight: 600 });
@@ -113,48 +108,28 @@ describe('nestedWheelDecision', () => {
 		});
 	});
 
-	describe('at the bottom, where the wheel would scrub out of focus', () => {
-		it('leaves focus once the reader has paused', () => {
-			expect(
-				nestedWheelDecision(
-					input({ chain: [atBottom], deltaY: DOWN, msSinceLastNestedScroll: PAUSE_MS })
-				)
-			).toBe('zoom');
+	describe('at the bottom, where the wheel used to scrub out of focus', () => {
+		it('never leaves focus, however many wheels arrive', () => {
+			// The rule the reader asked for: once inside a scrollable surface the
+			// wheel stays there, and Close (or Escape) is what leaves.
+			const wheel = input({ chain: [atBottom], deltaY: DOWN });
+			for (let repeat = 0; repeat < 5; repeat += 1) {
+				expect(nestedWheelDecision(wheel)).toBe('swallow');
+			}
 		});
 
-		it('swallows the momentum tail of the scroll that got here', () => {
-			expect(
-				nestedWheelDecision(
-					input({ chain: [atBottom], deltaY: DOWN, msSinceLastNestedScroll: PAUSE_MS - 1 })
-				)
-			).toBe('swallow');
-		});
-
-		it('takes the pause as a parameter, so a caller can pin it', () => {
-			const wheel = input({ chain: [atBottom], deltaY: DOWN, msSinceLastNestedScroll: 50 });
-			expect(nestedWheelDecision(wheel, 40)).toBe('zoom');
-			expect(nestedWheelDecision(wheel, 60)).toBe('swallow');
-		});
-
-		it('does not make a descendable image an escape from the pause', () => {
+		it('is not escaped by a descendable image either', () => {
 			// The image only matters where a zoom-in would descend, which is the
 			// other end of the scroll.
 			expect(
 				nestedWheelDecision(
-					input({
-						chain: [atBottom],
-						deltaY: DOWN,
-						msSinceLastNestedScroll: 0,
-						descendableImageUnderCursor: true
-					})
+					input({ chain: [atBottom], deltaY: DOWN, descendableImageUnderCursor: true })
 				)
 			).toBe('swallow');
 		});
 
-		it('still scrolls the other way however recent the last scroll', () => {
-			expect(
-				nestedWheelDecision(input({ chain: [atBottom], deltaY: UP, msSinceLastNestedScroll: 0 }))
-			).toBe('scroll');
+		it('still scrolls the other way, so the bottom is not a dead end', () => {
+			expect(nestedWheelDecision(input({ chain: [atBottom], deltaY: UP }))).toBe('scroll');
 		});
 	});
 });
@@ -179,37 +154,5 @@ describe('holdsMarkedScroller', () => {
 
 	it('finds the scroller anywhere in the chain', () => {
 		expect(holdsMarkedScroller([candidate({ marked: false }), atBottom])).toBe(true);
-	});
-});
-
-describe('resistedExitDelta', () => {
-	it('divides the delta when the chain holds a marked scroller', () => {
-		expect(resistedExitDelta(120, [atBottom], 2)).toBe(60);
-		expect(resistedExitDelta(120, [atBottom], 4)).toBe(30);
-	});
-
-	it('leaves the delta alone with no marked scroller in the chain', () => {
-		expect(resistedExitDelta(120, [], 2)).toBe(120);
-		expect(resistedExitDelta(120, [candidate({ marked: false })], 2)).toBe(120);
-	});
-
-	it('leaves the delta alone for a marked box whose content fits', () => {
-		const fits = candidate({ scrollTop: 0, clientHeight: 600, scrollHeight: 600 });
-		expect(resistedExitDelta(120, [fits], 2)).toBe(120);
-	});
-
-	it('resists from either end of the scroll, since the exit is one gesture', () => {
-		expect(resistedExitDelta(120, [atTop], 2)).toBe(60);
-	});
-
-	it('defaults to the configured resistance', () => {
-		expect(resistedExitDelta(120, [atBottom])).toBe(
-			120 / APP_CONFIG.multigraph.focus.scrollerExitResistance
-		);
-	});
-
-	it('ignores a resistance of zero or less rather than dividing by it', () => {
-		expect(resistedExitDelta(120, [atBottom], 0)).toBe(120);
-		expect(resistedExitDelta(120, [atBottom], -2)).toBe(120);
 	});
 });

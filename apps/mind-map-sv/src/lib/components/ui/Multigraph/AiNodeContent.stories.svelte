@@ -6,11 +6,17 @@
 	import { collectAiInputs } from './lib/aiInputs';
 	import { IDLE_RUN_STATE, type AiRunState } from './lib/aiWorkbenchView';
 	import { makeGraph } from './lib/testFixtures';
-	import { APP_CONFIG } from '$lib/appConfig';
 	import { MemoryGraphAssetStore } from '$lib/assets/assetStore';
 	import type { FileDigest } from '$lib/ai/probeScript';
 	import type { GraphAssetMetadata, MultigraphData } from '../types/multigraph';
-	import type { AiAddon, AiRun, AiRunOutput, NodeData } from '../types/node';
+	import type {
+		AiAddon,
+		AiRun,
+		AiRunInput,
+		AiRunOutput,
+		NodeContentBlock,
+		NodeData
+	} from '../types/node';
 
 	const RUNTIME = '0.27.7';
 	const STARTED = 1_700_000_000_000;
@@ -94,8 +100,21 @@
 		};
 	}
 
+	/**
+	 * The fixture graph's inputs as a finished run records them: the bench node's
+	 * text, then its CSV, both labelled by the edge's tag. Recorded rather than
+	 * left empty because a run that sent nothing and a node that now has a file
+	 * is exactly the "the data moved" case, and every story but that one is about
+	 * something else.
+	 */
+	const RUN_INPUTS: AiRunInput[] = [
+		{ nodeId: 'bench', label: 'baseline' },
+		{ nodeId: 'bench', assetId: 'asset-csv', name: 'measurements.csv', label: 'baseline' }
+	];
+
 	const DONE_RUN: AiRun = makeRun({
 		id: 'run-1',
+		inputs: RUN_INPUTS,
 		prompt: PROMPT,
 		model: 'claude-opus-5',
 		finishedAt: STARTED + 48_000,
@@ -130,6 +149,44 @@
 				edges: [{ source: 'bench', target: 'ai', directed: true, tags: ['baseline'] }]
 			}),
 			assets: { 'asset-csv': CSV_ASSET, ...OUTPUT_ASSETS }
+		};
+	}
+
+	/** A second file, attached after the run that wrote the script. */
+	const EXTRA_ASSET: GraphAssetMetadata = {
+		id: 'asset-extra',
+		kind: 'file',
+		mimeType: 'text/csv',
+		name: 'ambient.csv',
+		size: 1024,
+		createdAt: 3
+	};
+
+	/** The same filename over new bytes: a fresh export of the same measurement. */
+	const REPLACEMENT_ASSET: GraphAssetMetadata = {
+		id: 'asset-csv-v2',
+		kind: 'file',
+		mimeType: 'text/csv',
+		name: 'measurements.csv',
+		size: 3072,
+		createdAt: 3
+	};
+
+	/**
+	 * The fixture graph as it stands after the reader swapped the CSV and
+	 * attached another one — the state the stored script is quietly out of date
+	 * with, because it opens the names it was written for.
+	 */
+	function graphWithMovedFiles(): MultigraphData {
+		const graph = aiGraph({ script: SCRIPT, runs: [DONE_RUN] });
+		const content: NodeContentBlock[] = [
+			{ type: 'file', assetId: 'asset-csv-v2', name: 'measurements.csv' },
+			{ type: 'file', assetId: 'asset-extra', name: 'ambient.csv' }
+		];
+		return {
+			...graph,
+			nodes: graph.nodes.map((node) => (node.id === 'bench' ? { ...node, content } : node)),
+			assets: { ...graph.assets, 'asset-csv-v2': REPLACEMENT_ASSET, 'asset-extra': EXTRA_ASSET }
 		};
 	}
 
@@ -231,13 +288,14 @@
 		expect(summary).toContain('3 columns, 10000 rows');
 		expect(content.querySelector('[data-ai-digest-pending]')).toBeNull();
 
-		// Nothing has run, so a fresh analysis is the only thing on offer — and the
+		// Nothing has run, so writing a script is the only thing on offer — and the
 		// button beside the switch names that act rather than saying "Run".
 		expect(required(canvasElement, '[data-ai-mode="analyse"]')).toHaveAttribute(
 			'aria-pressed',
 			'true'
 		);
-		expect(text(canvasElement, '[data-ai-run]')).toBe('Run analysis');
+		expect(text(canvasElement, '[data-ai-mode="analyse"]')).toBe('Write');
+		expect(text(canvasElement, '[data-ai-run]')).toBe('Write & run');
 		expect(required(canvasElement, '[data-ai-mode="rerun"]')).toBeDisabled();
 		expect(required(canvasElement, '[data-ai-cancel]')).toBeDisabled();
 
@@ -401,10 +459,25 @@
 	{/snippet}
 </Story>
 
+<!--
+	Promote is an icon: the row already carries a name, a picture and a link, and
+	the word was one the reader had to translate. The label and the tooltip are
+	what carry the meaning now — the tooltip on hover only, which is the standing
+	debt in `docs/debt/2026-08-30-tooltips-are-hover-only.md`.
+-->
 <Story
 	name="PromotingAnOutputAndJumpingToWhereItLanded"
 	play={async ({ canvasElement }) => {
-		await userEvent.click(required(canvasElement, '[data-ai-promote="channel2.png"]'));
+		const promote = required(canvasElement, '[data-ai-promote="channel2.png"]');
+		expect(promote).toHaveAttribute('aria-label', 'Give this output its own node');
+		expect(promote).toHaveAttribute(
+			'title',
+			'Gives this output its own node on the map, linked to this one and refreshed each time this node runs.'
+		);
+		// A glyph pointing out of the row and onto the map, and no prose beside it.
+		expect(promote.textContent?.trim()).toBe('⤴');
+
+		await userEvent.click(promote);
 		expect(harnessState(canvasElement)).toHaveAttribute('data-last-promote', 'channel2.png');
 
 		// The press lands on the graph, so the row answers it: Promote is gone and
@@ -547,16 +620,22 @@
 
 <!--
 	Three modes read as three actions until the switch says it is one. The label
-	and the filled selection are what make "Analyse" a choice; the button beside
-	it is what makes pressing something do a visible thing.
+	and the filled selection are what make "Write" a choice; the button beside
+	it is what makes pressing something do a visible thing. The names are verbs
+	the reader already owns — Write, Change, Run — while the stored `AiRunMode`
+	values behind them (`analyse`, `refine`, `rerun`) never move.
 -->
 <Story
 	name="TheModeSwitchIsLabelledAndTheButtonNamesWhatItWillRun"
 	play={async ({ canvasElement }) => {
+		expect(text(canvasElement, '[data-ai-mode="analyse"]')).toBe('Write');
+		expect(text(canvasElement, '[data-ai-mode="refine"]')).toBe('Change');
+		expect(text(canvasElement, '[data-ai-mode="rerun"]')).toBe('Run');
+
 		expect(text(canvasElement, '[data-ai-mode-hint]')).toBe(
-			'Run the stored script again, with no model call'
+			'Runs the stored script again on the current files, no model call'
 		);
-		expect(text(canvasElement, '[data-ai-run]')).toBe('Run script');
+		expect(text(canvasElement, '[data-ai-run]')).toBe('Run');
 
 		const analyse = required(canvasElement, '[data-ai-mode="analyse"]');
 		const rerun = required(canvasElement, '[data-ai-mode="rerun"]');
@@ -567,11 +646,16 @@
 		await userEvent.click(analyse);
 		await waitFor(() => expect(analyse).toHaveAttribute('aria-pressed', 'true'));
 		expect(rerun).toHaveAttribute('aria-pressed', 'false');
-		expect(text(canvasElement, '[data-ai-run]')).toBe('Run analysis');
-		expect(text(canvasElement, '[data-ai-mode-hint]')).toBe('Write a new script for this prompt');
+		expect(text(canvasElement, '[data-ai-run]')).toBe('Write & run');
+		expect(text(canvasElement, '[data-ai-mode-hint]')).toBe(
+			'Claude writes a new script from the prompt and runs it'
+		);
 
 		await userEvent.click(required(canvasElement, '[data-ai-mode="refine"]'));
-		await waitFor(() => expect(text(canvasElement, '[data-ai-run]')).toBe('Refine and run'));
+		await waitFor(() => expect(text(canvasElement, '[data-ai-run]')).toBe('Change & run'));
+		expect(text(canvasElement, '[data-ai-mode-hint]')).toBe(
+			'Claude changes the stored script to match the prompt and runs it'
+		);
 	}}
 >
 	{#snippet template()}
@@ -657,17 +741,17 @@
 	never run has neither, and says why rather than leaving two dead buttons.
 -->
 <Story
-	name="WithoutAStoredScriptRefineAndReRunSayWhyTheyAreOutOfReach"
+	name="WithoutAStoredScriptChangeAndRunSayWhyTheyAreOutOfReach"
 	play={async ({ canvasElement }) => {
 		const refine = required(canvasElement, '[data-ai-mode="refine"]');
 		expect(refine).toBeDisabled();
-		expect(refine).toHaveAttribute('title', 'No stored script yet — run an analysis first.');
+		expect(refine).toHaveAttribute('title', 'No stored script yet — write one first.');
 		expect(required(canvasElement, '[data-ai-mode="rerun"]')).toBeDisabled();
 
 		// A disabled button's tooltip is not reliably reachable, so the reason is
 		// on the screen too.
 		expect(text(canvasElement, '[data-ai-mode-note]')).toBe(
-			'No stored script yet — run an analysis first.'
+			'No stored script yet — write one first.'
 		);
 
 		// Pressing one anyway changes nothing: the switch stays where the node is.
@@ -678,6 +762,41 @@
 		);
 	}}
 />
+
+<!--
+	The failure this note exists for: Run does gather the current files, but the
+	stored script opens the names it was written for — so a file added since then
+	is written into the sandbox and never read, and nothing about the answer looks
+	wrong. The note names what moved, and the switch starts on Change.
+-->
+<Story
+	name="FilesChangedSinceTheScriptWasWrittenAskForChange"
+	play={async ({ canvasElement }) => {
+		expect(text(canvasElement, '[data-ai-inputs-changed]')).toBe(
+			'Files changed since the script was written: added ambient.csv, replaced measurements.csv. ' +
+				'Run uses the stored script as it is; choose Change so Claude updates it.'
+		);
+
+		// The prompt has not moved an inch, and the mode is still Change: the
+		// script, not the question, is what is out of date.
+		expect(required(canvasElement, '[data-ai-mode="refine"]')).toHaveAttribute(
+			'aria-pressed',
+			'true'
+		);
+		expect(text(canvasElement, '[data-ai-run]')).toBe('Change & run');
+
+		// Above the switch it is about, so it is read before the choice is made.
+		expect(
+			required(canvasElement, '[data-ai-inputs-changed]').compareDocumentPosition(
+				required(canvasElement, '[data-ai-mode="refine"]')
+			) & Node.DOCUMENT_POSITION_FOLLOWING
+		).toBeTruthy();
+	}}
+>
+	{#snippet template()}
+		<AiNodeHarness baseGraph={graphWithMovedFiles()} nodeId="ai" digests={DIGESTS} />
+	{/snippet}
+</Story>
 
 <Story
 	name="WithAStoredScriptAndAnUnchangedPromptTheDefaultIsTheFreeMode"
@@ -691,6 +810,8 @@
 		);
 		expect(required(canvasElement, '[data-ai-mode="refine"]')).toBeEnabled();
 		expect(workbench(canvasElement).querySelector('[data-ai-mode-note]')).toBeNull();
+		// The files are the ones the run recorded, so there is nothing to warn about.
+		expect(workbench(canvasElement).querySelector('[data-ai-inputs-changed]')).toBeNull();
 	}}
 >
 	{#snippet template()}
@@ -745,7 +866,7 @@
 />
 
 <Story
-	name="EditingThePromptTurnsReRunIntoRefine"
+	name="EditingThePromptTurnsRunIntoChange"
 	play={async ({ canvasElement }) => {
 		// The stored script came from this exact prompt, so nothing needs a model.
 		expect(required(canvasElement, '[data-ai-mode="rerun"]')).toHaveAttribute(
@@ -763,7 +884,7 @@
 		await waitFor(() =>
 			expect(harnessState(canvasElement)).toHaveAttribute('data-last-prompt', REFINED_PROMPT)
 		);
-		// The script no longer matches the prompt, so editing it is what Run means.
+		// The script no longer matches the prompt, so changing it is what a run means.
 		await waitFor(() =>
 			expect(required(canvasElement, '[data-ai-mode="refine"]')).toHaveAttribute(
 				'aria-pressed',
@@ -846,28 +967,32 @@
 		await waitFor(() => expect(state).toHaveAttribute('data-stage-swallows', '1'));
 		expect(state).toHaveAttribute('data-stage-wheels', '0');
 
-		// At the bottom the wheel-out is the gesture that exits focus — but not
-		// while the scroll that got here is still coasting.
+		// At the bottom there is nowhere left to scroll either — and the wheel does
+		// not become an exit: once inside a scrollable surface, Close is what
+		// leaves. However many arrive, the world takes them and does nothing.
 		content.scrollTop = content.scrollHeight;
-		content.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 120 }));
-		await waitFor(() => expect(state).toHaveAttribute('data-stage-swallows', '2'));
+		for (let repeat = 0; repeat < 4; repeat += 1) {
+			content.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 120 }));
+		}
+		await waitFor(() => expect(state).toHaveAttribute('data-stage-swallows', '5'));
 		expect(state).toHaveAttribute('data-stage-wheels', '0');
 
-		// Once the reader has paused, the same wheel reaches the world and leaves.
-		await new Promise((resolve) =>
-			setTimeout(resolve, APP_CONFIG.multigraph.focus.scrollerExitPauseMs + 60)
-		);
-		content.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 120 }));
-		await waitFor(() => expect(state).toHaveAttribute('data-stage-wheels', '1'));
 		// Still room upward from the bottom, so that direction stays the scroller's.
 		content.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -120 }));
-		expect(state).toHaveAttribute('data-stage-wheels', '1');
-		expect(state).toHaveAttribute('data-stage-swallows', '2');
+		expect(state).toHaveAttribute('data-stage-wheels', '0');
+		expect(state).toHaveAttribute('data-stage-swallows', '5');
 
 		// A press on a control belongs to the control, not to a world pan — the
 		// rule `ZoomWorld` applies, checked here against every control this
-		// surface adds.
-		for (const selector of ['[data-ai-prompt]', '[data-ai-run]', '[data-ai-mode="analyse"]']) {
+		// surface adds. The disclosure's summary is on the list because a captured
+		// press would swallow its click and leave it unopenable in deep zoom.
+		for (const selector of [
+			'[data-ai-prompt]',
+			'[data-ai-run]',
+			'[data-ai-mode="analyse"]',
+			'[data-ai-input-kind="file"] details summary',
+			'[data-ai-script] summary'
+		]) {
 			required(canvasElement, selector).dispatchEvent(
 				new PointerEvent('pointerdown', { bubbles: true, pointerId: 1 })
 			);

@@ -6368,8 +6368,8 @@
 	content it was meant to bound, and the scroller had no ends — so every wheel
 	went to the zoom and the reader could not scroll at all. The subject is now
 	exactly the frame, and what the reader feels is the policy above the
-	scroller: scroll while there is room, nothing at the top, and a paused
-	wheel-out at the bottom to leave.
+	scroller: scroll while there is room, and nothing at either end. Leaving a
+	surface you are reading is the Close button's job, not a wheel's.
 -->
 <Story
 	name="ATallWorkbenchScrollsBeforeAWheelReachesTheZoom"
@@ -6420,23 +6420,80 @@
 		expect(wheelWasTaken(workbench, -120)).toBe(true);
 		expect(world.dataset.zoomWorldScale).toBe('1');
 
-		// At the bottom the wheel-out is the gesture that leaves focus — but not
-		// while the scroll that got here is still coasting.
+		// At the bottom the wheel-out is not an exit: however many arrive, and
+		// however hard, the world takes each one and does nothing with it. The
+		// reader is reading, and reading is not leaving.
 		workbench.scrollTop = workbench.scrollHeight;
-		expect(wheelWasTaken(workbench, WHEEL_SLAM_OUT)).toBe(true);
+		for (let attempt = 0; attempt < 8; attempt += 1) {
+			expect(wheelWasTaken(workbench, WHEEL_SLAM_OUT)).toBe(true);
+			await sleep(60);
+		}
 		expect(world.dataset.zoomWorldScale).toBe('1');
 		await expectFocusOn(canvasElement, 'ai');
 
-		// Once the reader has paused, the same wheel scrubs out and focus closes.
-		await sleep(APP_CONFIG.multigraph.focus.scrollerExitPauseMs + 60);
-		for (let attempt = 0; attempt < 8; attempt += 1) {
-			if (!canvasElement.querySelector('.focus-surface')) break;
-			wheelWasTaken(workbench, WHEEL_SLAM_OUT);
-			await sleep(60);
-		}
+		// Close is the way out, and it works from exactly here.
+		(dialog.querySelector('.focus-close-button') as HTMLElement).click();
 		await waitFor(() => {
 			expect(canvasElement.querySelector('.focus-surface')).not.toBeInTheDocument();
 		});
+	}}
+/>
+
+<!--
+	A disclosure inside deep zoom, pressed the way a reader presses one.
+
+	The bug: `ZoomWorld` captures the pointer to pan with it, and a capture
+	retargets the `pointerup` — and so the `click` — at the world. Only controls
+	were exempt, and a `<summary>` was not on that list, so "What Claude will see"
+	could not be opened from inside focus at all. The exemption now covers
+	disclosures and labels too (`lib/interactiveContent.ts`).
+-->
+<Story
+	name="ADisclosureInsideDeepZoomOpensToAPress"
+	args={{
+		multigraphData: AI_WORKBENCH_GRAPH,
+		defaultPrimaryNodeId: 'ai',
+		layoutSettings: { relaxIterations: 0 },
+		assetStore: aiAssetStore(),
+		assetScope: AI_SCOPE,
+		aiExecutor: aiStoryExecutor(),
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const dialog = await enterFocusOn(canvasElement, 'ai');
+		const world = dialog.querySelector('.zoom-world') as HTMLElement;
+
+		// The digest's disclosure, once the probe has measured the file.
+		const summary = await waitFor(() => {
+			const found = dialog.querySelector('[data-ai-input-kind="file"] details summary');
+			expect(found).toBeInTheDocument();
+			return found as HTMLElement;
+		});
+		const details = summary.closest('details') as HTMLDetailsElement;
+		expect(details.open).toBe(false);
+
+		// The press first — this is the half that used to be swallowed — and then
+		// the click it should have been allowed to become.
+		const center = getCenter(summary);
+		summary.dispatchEvent(
+			new PointerEvent('pointerdown', {
+				bubbles: true,
+				cancelable: true,
+				pointerId: 1,
+				clientX: center.x,
+				clientY: center.y
+			})
+		);
+		summary.click();
+
+		await waitFor(() => expect(details.open).toBe(true));
+		// And the world never claimed the press — the half a synthetic pointer
+		// cannot show, since it carries no real capture to retarget the click with.
+		expect(world.dataset.zoomWorldPointers).toBe('0');
+		expect(world.dataset.zoomWorldScale).toBe('1');
+		expect(world.dataset.zoomWorldPanX).toBe('0');
+		expect(world.dataset.zoomWorldPanY).toBe('0');
 	}}
 />
 

@@ -9,15 +9,16 @@
 	 * underneath. That last one is what makes "the reader's gestures still belong
 	 * to the surface" assertable: this harness counts the wheels that reach the
 	 * stage and the presses that would have started a world pan, applying the
-	 * same two rules `ZoomWorld` applies — `startsOnInteractiveContent` for the
-	 * press, and `yieldsToNestedScroll` (imported, since it is a shared module
-	 * rather than a private detail) for the wheel.
+	 * same two rules `ZoomWorld` applies — both imported, since both are shared
+	 * modules: `startsOnInteractiveContent` for the press and
+	 * `nestedWheelDecision` for the wheel.
 	 */
 	import { untrack } from 'svelte';
 	import AiNodeContent from './AiNodeContent.svelte';
 	import { collectAiInputs } from './lib/aiInputs';
 	import { promoteAiOutput, setAiPrompt } from './lib/aiNode';
 	import { IDLE_RUN_STATE, type AiRunState } from './lib/aiWorkbenchView';
+	import { startsOnInteractiveContent } from './lib/interactiveContent';
 	import { nestedScrollChain, nestedWheelDecision } from './lib/nestedScrollTarget';
 	import type { GraphAssetStore } from '$lib/assets/assetStore';
 	import type { FileDigest } from '$lib/ai/probeScript';
@@ -72,38 +73,28 @@
 	const inputs = $derived(collectAiInputs(graph, nodeId));
 
 	/**
-	 * `ZoomWorld`'s rule, copied rather than imported because it is a private
-	 * detail of that component: a press that starts on a control belongs to the
-	 * control, and everything else starts a pan.
+	 * `ZoomWorld`'s rule: a press that starts on a control — or on a disclosure —
+	 * belongs to it, and everything else starts a pan.
 	 */
 	function wouldStartPan(event: PointerEvent): boolean {
-		return !(
-			event.target instanceof Element &&
-			event.target.closest('button, a, input, textarea, select, [contenteditable]') !== null
-		);
+		return !startsOnInteractiveContent(event.target);
 	}
 
-	/** When a wheel was last handed to the scroller, for the exit pause. */
-	let lastNestedScrollAt = 0;
-
 	/**
-	 * `ZoomWorld`'s other rule, imported rather than copied because it is a
-	 * shared module: a wheel inside a marked scroller that can still move belongs
-	 * to that scroller, and at either end the world takes it back — to zoom only
-	 * where zooming is what the gesture meant. Nothing on this surface is a
-	 * descendable image, and the real rule reads that off the DOM under the
-	 * cursor, which a harness has no business faking.
+	 * `ZoomWorld`'s other rule: a wheel inside a marked scroller that can still
+	 * move belongs to that scroller, and at either end the world takes it back and
+	 * does nothing with it. Nothing on this surface is a descendable image, and
+	 * the real rule reads that off the DOM under the cursor, which a harness has
+	 * no business faking.
 	 */
 	function decideWheel(event: WheelEvent): void {
 		const decision = nestedWheelDecision({
 			chain: nestedScrollChain(event.target, stage),
 			deltaY: event.deltaY,
-			msSinceLastNestedScroll: Date.now() - lastNestedScrollAt,
 			descendableImageUnderCursor: false
 		});
-		if (decision === 'scroll') lastNestedScrollAt = Date.now();
-		else if (decision === 'swallow') stageSwallows += 1;
-		else stageWheels += 1;
+		if (decision === 'swallow') stageSwallows += 1;
+		else if (decision === 'zoom') stageWheels += 1;
 	}
 </script>
 
