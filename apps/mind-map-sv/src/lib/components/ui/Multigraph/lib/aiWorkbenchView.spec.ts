@@ -4,6 +4,8 @@ import {
 	digestDisclosureLabel,
 	inputChangesNote,
 	prosePreviewLine,
+	stepStatusText,
+	stepsPreviewLine,
 	inputsChangedSince,
 	latestDoneRun,
 	runMetadataLine,
@@ -654,5 +656,39 @@ describe('runMetadataLine', () => {
 		);
 
 		expect(line).toBe('claude-opus-5');
+	});
+});
+
+describe('stepsPreviewLine', () => {
+	it('names the latest execution, how it ended, and the last line it printed', () => {
+		expect(
+			stepsPreviewLine([
+				{ stdoutTail: 'Reading data\nWrote channel2.png\n', exitCode: 0 },
+				{ stdoutTail: "Traceback (most recent call last):\n  ...\nKeyError: 'ch2'\n", exitCode: 1 }
+			])
+		).toBe("Execution 2 failed, exit 1 — KeyError: 'ch2'");
+	});
+
+	it('says a step is running and follows what it prints', () => {
+		expect(stepsPreviewLine([{ stdoutTail: 'Loading both files\n', exitCode: null }])).toBe(
+			'Execution 1 running — Loading both files'
+		);
+	});
+
+	it('drops the dash when the step printed nothing', () => {
+		expect(stepsPreviewLine([{ stdoutTail: '  \n\n', exitCode: 0 }])).toBe('Execution 1 finished');
+		expect(stepsPreviewLine([])).toBe('Nothing yet');
+	});
+
+	it('cuts a long printed line to the summary width', () => {
+		const line = stepsPreviewLine([{ stdoutTail: 'x'.repeat(200), exitCode: 0 }], 40);
+		expect(line).toHaveLength(40 + 1);
+		expect(line.endsWith('…')).toBe(true);
+	});
+
+	it('words an exit the same way on the row and in the closed line', () => {
+		expect(stepStatusText(null)).toBe('running');
+		expect(stepStatusText(0)).toBe('finished');
+		expect(stepStatusText(2)).toBe('failed, exit 2');
 	});
 });

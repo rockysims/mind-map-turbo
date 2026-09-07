@@ -25,7 +25,9 @@
  * `max_tokens`, or the configured tool-call cap. The script and outputs of the
  * *last execution that exited 0* are what the node keeps: a run whose third
  * script crashed still has the second one's figures, and that is the run the
- * reader wanted.
+ * reader wanted. A script that runs past the timeout is one more failed
+ * execution rather than the end of the run — the executor hands the next call a
+ * fresh worker, and "that took too long" is something Claude can act on.
  *
  * ## Cancel does not dispose
  *
@@ -49,7 +51,13 @@ import {
 import type { AiSettings } from '$lib/ai/aiSettings';
 import { executorInputName } from '$lib/ai/inputFileName';
 import type { DigestUnavailableReason, FileDigest } from '$lib/ai/probeScript';
-import type { ExecutionOutput, ExecutorFile, PyExecutor } from '$lib/ai/pyExecutor';
+import { PyExecutorError } from '$lib/ai/pyExecutor';
+import type {
+	ExecutionOutput,
+	ExecutionResult,
+	ExecutorFile,
+	PyExecutor
+} from '$lib/ai/pyExecutor';
 import type { GraphAssetStore } from '$lib/assets/assetStore';
 import { tombstoneAsset } from '$lib/assets/assetTrash';
 import type { GraphAssetMetadata, MultigraphData } from '../../types/multigraph';
@@ -673,6 +681,11 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 				: buildAnalyseRequest(build);
 
 		let toolCalls = 0;
+		// What the cap message is written from: a run that ends at the cap has to
+		// say what its executions were doing, not just how many there were.
+		let failedExecutions = 0;
+		let timedOutExecutions = 0;
+		let lastExecutionMessage = '';
 		let inputTokens = 0;
 		let outputTokens = 0;
 		let model: string | undefined;
@@ -724,7 +737,12 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 
 			if (toolCalls >= APP_CONFIG.ai.maxToolCalls) {
 				return settled({
-					error: `The run stopped at its limit of ${APP_CONFIG.ai.maxToolCalls} script runs. What ran is below.`
+					error: capReachedMessage({
+						executions: toolCalls,
+						failed: failedExecutions,
+						timedOut: timedOutExecutions,
+						last: lastExecutionMessage
+					})
 				});
 			}
 			toolCalls += 1;
@@ -732,10 +750,24 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 			progress.steps = [...progress.steps, { stdoutTail: '', exitCode: null }];
 			putState(nodeId, { phase: 'running', ...progress });
 
-			const result = await executor.run(requested, files, {
-				timeoutMs: APP_CONFIG.ai.scriptTimeoutMs,
-				signal
-			});
+			// A timeout is an outcome of *this* execution, not the end of the run:
+			// the executor rebuilds its worker on the next call, and a script that
+			// took too long is something Claude can answer by doing less. Every
+			// other rejection — a cancel above all — still ends the run.
+			const timeoutMs = APP_CONFIG.ai.scriptTimeoutMs;
+			let timedOut = false;
+			let result: ExecutionResult;
+			try {
+				result = await executor.run(requested, files, { timeoutMs, signal });
+			} catch (error) {
+				if (!isTimeout(error)) throw error;
+				timedOut = true;
+				timedOutExecutions += 1;
+				result = timedOutResult(timeoutMs);
+			}
+			if (!timedOut && result.exitCode !== 0) failedExecutions += 1;
+			lastExecutionMessage = tail(result.stderr || result.stdout);
+
 			progress.steps = [
 				...progress.steps.slice(0, -1),
 				{ stdoutTail: tail(result.stdout || result.stderr), exitCode: result.exitCode }
@@ -754,6 +786,7 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 				turn,
 				{
 					toolUseId: call.id,
+					execution: toolCalls,
 					exitCode: result.exitCode,
 					stdout: result.stdout,
 					stderr: result.stderr,
@@ -844,6 +877,74 @@ function toRunInput(input: AiInput): AiRunInput {
 		// filename the script was written to open.
 		...(input.kind === 'file' ? { assetId: input.assetId, name: input.name } : {}),
 		...(input.label === undefined ? {} : { label: input.label })
+	};
+}
+
+/** How many characters of an execution's last words the cap message quotes. */
+const CAP_MESSAGE_QUOTE_CHARS = 200;
+
+/**
+ * Why a run that hit the cap has nothing to show.
+ *
+ * "Stopped after 12 executions" on its own is a number, not a diagnosis: the
+ * reader's next move depends on whether the scripts were crashing, running too
+ * long, or simply exploring. So the counts that are not zero are named, and the
+ * last thing the sandbox said is quoted — which is the sentence a reader can
+ * act on, and usually the one that explains the other eleven.
+ */
+function capReachedMessage(run: {
+	executions: number;
+	failed: number;
+	timedOut: number;
+	last: string;
+}): string {
+	const opening = `Stopped after ${run.executions} executions without a finished analysis`;
+	const quoted = lastLine(run.last, CAP_MESSAGE_QUOTE_CHARS);
+	const clauses = [
+		run.failed > 0 ? `${run.failed} ended in an error` : '',
+		run.timedOut > 0 ? `${run.timedOut} timed out` : '',
+		quoted === '' ? '' : `the last said: ${quoted}`
+	].filter((clause) => clause !== '');
+
+	const sentence = clauses.length === 0 ? opening : `${opening}: ${clauses.join(', ')}`;
+	// The quote may already end in punctuation — a traceback's last line usually
+	// does — and "KeyError: 'ch2'.." is a typo the reader would blame on us.
+	return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
+}
+
+/**
+ * The last non-empty line of an execution's output, short enough to sit inside
+ * a sentence. The last, not the first: a Python failure opens with
+ * "Traceback (most recent call last):" and ends with the exception that
+ * matters, and a script's final print is likewise the one it meant.
+ */
+function lastLine(text: string, limit: number): string {
+	const lines = text.split('\n').filter((candidate) => candidate.trim() !== '');
+	const line = lines.length === 0 ? '' : lines[lines.length - 1].trim();
+	return line.length <= limit ? line : `${line.slice(0, limit)}…`;
+}
+
+/** Whether a rejection is the executor cutting a script short, and nothing else. */
+function isTimeout(error: unknown): boolean {
+	return error instanceof PyExecutorError && error.kind === 'timeout';
+}
+
+/**
+ * A timeout as a result the loop can carry on from.
+ *
+ * The worker is gone by the time this is built, so whatever the script printed
+ * went with it — which is itself worth saying, because a model that thinks its
+ * prints were merely empty will print more of them.
+ */
+function timedOutResult(timeoutMs: number): ExecutionResult {
+	return {
+		exitCode: 1,
+		stdout: '',
+		stderr:
+			`The script was stopped after ${timeoutMs} ms and nothing it printed was kept. ` +
+			'Do less in one execution, or work on a sample of the data.',
+		outputs: [],
+		durationMs: timeoutMs
 	};
 }
 

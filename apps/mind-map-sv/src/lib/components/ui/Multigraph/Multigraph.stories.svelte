@@ -6910,8 +6910,10 @@
 
 			// And now the press itself, with the window lost across it exactly as a
 			// native dialog loses it: opened hidden, the file chosen, the window back.
+			// The picker is the hidden input the Replace button clicks, which is
+			// where the browser delivers the file (see `.file-picker`).
 			const replace = dialog.querySelector(
-				`[data-ai-replace-file="${AI_CSV_ASSET_ID}"]`
+				`[data-ai-replace-file-input="${AI_CSV_ASSET_ID}"]`
 			) as HTMLInputElement;
 			expect(replace).toBeInTheDocument();
 			await withDocumentHidden(() => {
@@ -6938,5 +6940,85 @@
 		} finally {
 			console.error = realConsoleError;
 		}
+	}}
+/>
+
+<!--
+	The blank itself, from the mechanism rather than from the gesture.
+
+	The reader pressed Replace and everything inside the deep zoom went blank.
+	Their DOM said what had happened: the frame was exactly where it belonged,
+	and the content layer inside it sat at `top: -1863` — an `overflow: hidden`
+	box had been scrolled. That is what focusing the hidden file input under the
+	old `<label>` did: the browser brings a newly focused element into view by
+	scrolling every scrollable ancestor, `overflow: hidden` stops the *reader*
+	scrolling and nothing else, and inside a transform-scaled content layer the
+	arithmetic lands a long way off. It depended on the window's size, which is
+	why no other machine ever saw it.
+
+	Two halves, both pinned here. The frame is scrolled the way the browser
+	scrolled it and puts itself back (`lib/pinScroll.ts`), and the picker is
+	focused outright — which now moves nothing, because it is a `position: fixed`
+	input behind a real button instead of a label the press focuses.
+-->
+<Story
+	name="AFocusInsideTheFrameCannotScrollItsContentOffScreen"
+	args={{
+		multigraphData: AI_REPLACE_GRAPH,
+		defaultPrimaryNodeId: 'ai',
+		layoutSettings: { relaxIterations: 0 },
+		assetStore: aiReplaceStore(),
+		assetScope: AI_SCOPE,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const dialog = await enterFocusOn(canvasElement, 'ai');
+		// The frame is `NodeChrome`'s `.circle`, the one bordered box of the level.
+		const frame = dialog.querySelector('.deep-zoom-layer .circle') as HTMLElement;
+		const layer = dialog.querySelector('[data-morph-layer="details"]') as HTMLElement;
+		await waitFor(() => {
+			expect(dialog.querySelector('[data-ai-workbench]')).toBeInTheDocument();
+		});
+
+		// Scroll anchoring is the other thing that moves a box nobody scrolled.
+		expect(getComputedStyle(frame).overflowAnchor).toBe('none');
+
+		/** How far the content layer sits from the top of the frame that clips it. */
+		const contentOffset = (): number =>
+			layer.getBoundingClientRect().top - frame.getBoundingClientRect().top;
+		expect(contentOffset()).toBeCloseTo(0, 0);
+
+		// "It does not scroll" says nothing until there is somewhere to scroll to:
+		// the reader's window had room below the content and a headless one need
+		// not. A tall block inside the content layer overflows the frame the same
+		// way their workbench did.
+		const filler = appendTallFiller(layer, 2400);
+		await waitFor(() => {
+			expect(frame.scrollHeight).toBeGreaterThan(frame.clientHeight);
+		});
+
+		// Exactly what their browser did, in one line, at the distance it chose.
+		frame.scrollTop = 1863;
+		await waitFor(() => expect(frame.scrollTop).toBe(0));
+		expect(contentOffset()).toBeCloseTo(0, 0);
+
+		// And the focus that asked for it. Nothing should move — the picker is out
+		// of the surface's flow behind a button now — and if a browser still tries,
+		// the pin above is what catches it.
+		const picker = dialog.querySelector(
+			`[data-ai-replace-file-input="${AI_CSV_ASSET_ID}"]`
+		) as HTMLInputElement;
+		expect(picker).toBeInTheDocument();
+		picker.focus();
+		await waitFor(() => expect(frame.scrollTop).toBe(0));
+		expect(frame.scrollLeft).toBe(0);
+		expect(contentOffset()).toBeCloseTo(0, 0);
+
+		// Which is to say: the workbench is still on screen, which is the whole
+		// report.
+		expect(dialog.querySelector('[data-ai-workbench]')).toBeInTheDocument();
+		expect(getComputedStyle(layer).opacity).toBe('1');
+		filler.remove();
 	}}
 />

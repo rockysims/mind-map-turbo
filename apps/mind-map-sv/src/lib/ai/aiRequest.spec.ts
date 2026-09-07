@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type Anthropic from '@anthropic-ai/sdk';
+import { APP_CONFIG } from '$lib/appConfig';
 import {
 	appendToolResult,
 	buildAnalyseRequest,
@@ -69,6 +70,7 @@ function png(name: string, byteLength: number): AiToolResult['outputs'][number] 
 function toolResult(over: Partial<AiToolResult> = {}): AiToolResult {
 	return {
 		toolUseId: 'toolu_1',
+		execution: 1,
 		exitCode: 0,
 		stdout: 'wrote 2 files\n',
 		stderr: '',
@@ -106,14 +108,19 @@ write runs anywhere else.
 Rules:
 - Keep all code in one script, analysis.py, and send the whole script on
   every run_analysis call; there is no other way to run code. The attached
-  files are in the working directory under the names listed below. pandas,
+  files are in the current directory under the names listed below. pandas,
   numpy, scipy and matplotlib are available; there is no network and no pip.
+- You have 12 executions for this run; explore the data in as few
+  as possible, printing compactly, and put the analysis in the same script.
+- Only the last 8000 characters of each execution's stdout and
+  stderr come back, so anything longer is cut off. The data files may be
+  large: print shapes, dtypes and summary numbers, never rows wholesale.
 - Save every figure to outputs/ as PNG using matplotlib's Agg backend. Save
   any derived table to outputs/ as CSV. Use short, stable, descriptive
   filenames; when a previous analysis.py is provided, keep its filenames
   unchanged so the mind map can refresh them in place.
 - When several files share a shape, read them by pattern (for example every
-  .csv in the working directory) rather than by hard-coded names, so the
+  .csv in the current directory) rather than by hard-coded names, so the
   script keeps working when a file is added or replaced.
 - Each tool result includes the images you produced. Look at them: axis
   labels with units, a legend when there is more than one series, a sensible
@@ -131,6 +138,14 @@ Attached files:
 
 	it('says so plainly when a node has no attachments at all', () => {
 		expect(buildSystemPrompt([])).toContain('Attached files: none.');
+	});
+
+	it('quotes the budgets it is given rather than the shipped ones', () => {
+		const prompt = buildSystemPrompt(['sweep.csv'], { maxToolCalls: 3, stdoutTailChars: 500 });
+
+		expect(prompt).toContain('You have 3 executions for this run');
+		expect(prompt).toContain('Only the last 500 characters');
+		expect(prompt).not.toContain(`${APP_CONFIG.ai.maxToolCalls} executions`);
 	});
 });
 
@@ -527,8 +542,17 @@ describe('appendToolResult', () => {
 		);
 
 		expect(textBlock(next)).toBe(
-			'Exit code: 1\n\nstdout: (empty)\n\nstderr:\nTraceback\nValueError\n\nFiles written to outputs/: none.'
+			`Execution 1 of ${APP_CONFIG.ai.maxToolCalls}\n` +
+				'Exit code: 1\n\nstdout: (empty)\n\nstderr:\nTraceback\nValueError\n\nFiles written to outputs/: none.'
 		);
+	});
+
+	it('opens with where the run has got to in its execution budget', () => {
+		const next = appendToolResult(request, assistantTurn, toolResult({ execution: 5 }), {
+			maxToolCalls: 12
+		});
+
+		expect(textBlock(next).split('\n')[0]).toBe('Execution 5 of 12');
 	});
 });
 

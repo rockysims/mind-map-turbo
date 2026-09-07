@@ -178,6 +178,24 @@
 		return new File(['time,ch2\n0.0,1.0\n'], name, { type: 'text/csv' });
 	}
 
+	/**
+	 * Pick a file the way the browser delivers one: a `DataTransfer`'s list
+	 * assigned to `files`, then the `change` the handler is listening for.
+	 *
+	 * `userEvent.upload` used to do this, and cannot any more — which is the
+	 * point. The input is `pointer-events: none` plumbing behind a real button
+	 * now, so that opening a picker never moves focus into the deep-zoom frame
+	 * (see `AiNodeContent`'s `.file-picker`). The press on the button is still a
+	 * press, asserted where it matters; what the native dialog does afterwards is
+	 * exactly the two lines below.
+	 */
+	function pickFileInto(input: HTMLInputElement, file: File): void {
+		const transfer = new DataTransfer();
+		transfer.items.add(file);
+		input.files = transfer.files;
+		input.dispatchEvent(new Event('change', { bubbles: true }));
+	}
+
 	/** A second file, attached after the run that wrote the script. */
 	const EXTRA_ASSET: GraphAssetMetadata = {
 		id: 'asset-extra',
@@ -258,6 +276,32 @@
 		const found = canvasElement.querySelector(selector);
 		if (!(found instanceof HTMLElement)) throw new Error(`no ${selector}`);
 		return found;
+	}
+
+	/** The same, narrowed: the hidden picker a file button clicks. */
+	function requiredInput(canvasElement: HTMLElement, selector: string): HTMLInputElement {
+		const found = canvasElement.querySelector(selector);
+		if (!(found instanceof HTMLInputElement)) throw new Error(`no input ${selector}`);
+		return found;
+	}
+
+	/**
+	 * Press a file button and report whether it opened its picker, without the
+	 * native dialog that a real `click` on a file input would raise.
+	 */
+	async function pressOpensPicker(button: HTMLElement, input: HTMLInputElement): Promise<boolean> {
+		let opened = false;
+		const swallow = (event: Event) => {
+			event.preventDefault();
+			opened = true;
+		};
+		input.addEventListener('click', swallow);
+		try {
+			await userEvent.click(button);
+		} finally {
+			input.removeEventListener('click', swallow);
+		}
+		return opened;
 	}
 
 	function harnessState(canvasElement: HTMLElement): HTMLElement {
@@ -429,6 +473,8 @@
 		// A step with no exit code yet is the one still running.
 		expect(steps[1]).toHaveAttribute('data-ai-step-exit-code', 'running');
 		expect(steps[1].querySelector('[data-ai-step-status]')?.textContent?.trim()).toBe('running');
+		// And the closed line over the rows follows the step that is running.
+		expect(text(canvasElement, '[data-ai-steps-preview]')).toMatch(/^Execution 2 running/);
 
 		// The three rules for a long run: streamed from the first token, a visible
 		// Cancel, and Run out of reach while one is in flight.
@@ -1185,6 +1231,10 @@
 			'[data-ai-prompt]',
 			'[data-ai-run]',
 			'[data-ai-mode="analyse"]',
+			// The two file pickers, which are presses on a button now rather than
+			// on a label over a hidden input.
+			'[data-ai-add-file]',
+			'[data-ai-replace-file]',
 			'[data-ai-input-kind="file"] details summary',
 			'[data-ai-script] summary'
 		]) {
@@ -1286,10 +1336,19 @@
 		const own = required(canvasElement, '[data-ai-input-group="ai"]');
 		expect(own.querySelectorAll('[data-ai-input-kind="file"]')).toHaveLength(0);
 
-		const picker = required(own, '[data-ai-add-file]');
+		const add = required(own, '[data-ai-add-file]');
 		// Hover-only tooltips are the standing debt, so the meaning is in the name.
-		expect(picker).toHaveAttribute('aria-label', 'Add a file to this node');
-		await userEvent.upload(picker as HTMLInputElement, pickedFile('ambient.csv'));
+		expect(add).toHaveAttribute('aria-label', 'Add a file to this node');
+		// A real button, not a label over the input: a label's press moves focus
+		// onto the input, and inside the deep-zoom frame that scrolled the whole
+		// surface off screen (see `.file-picker` in AiNodeContent).
+		expect(add.tagName).toBe('BUTTON');
+
+		const picker = requiredInput(own, '[data-ai-add-file-input]');
+		expect(await pressOpensPicker(add, picker)).toBe(true);
+		// Focus stayed on the press, which is the whole point of the change.
+		expect(document.activeElement).toBe(add);
+		pickFileInto(picker, pickedFile('ambient.csv'));
 
 		await waitFor(() => {
 			const row = required(own, '[data-ai-input-kind="file"]');
@@ -1324,12 +1383,19 @@
 			'aria-label',
 			'Replace measurements.csv with a new file under the same name'
 		);
-		expect(required(row, 'label.row-action')).toHaveAttribute(
+		// A button rather than the label it used to be, for the reason in
+		// `.file-picker`: a label's press focuses its input, and that focus is what
+		// scrolled the deep-zoom frame away from its content.
+		expect(replace.tagName).toBe('BUTTON');
+		expect(required(row, 'button.row-action[data-ai-replace-file]')).toHaveAttribute(
 			'title',
 			'Replace this file with a new one under the same name, so a Run re-reads it'
 		);
 
-		await userEvent.upload(replace as HTMLInputElement, pickedFile('measurements-v2.csv'));
+		const picker = requiredInput(row, '[data-ai-replace-file-input="asset-csv"]');
+		expect(await pressOpensPicker(replace, picker)).toBe(true);
+		expect(document.activeElement).toBe(replace);
+		pickFileInto(picker, pickedFile('measurements-v2.csv'));
 
 		// The name the script opens survives; the bytes behind it are new.
 		const replaced = await waitFor(() =>
@@ -1399,10 +1465,7 @@
 	name="DecliningTheSizeQuestionSaysSoRatherThanNothing"
 	play={async ({ canvasElement }) => {
 		const own = required(canvasElement, '[data-ai-input-group="ai"]');
-		await userEvent.upload(
-			required(own, '[data-ai-add-file]') as HTMLInputElement,
-			pickedFile('huge.csv')
-		);
+		pickFileInto(requiredInput(own, '[data-ai-add-file-input]'), pickedFile('huge.csv'));
 
 		await waitFor(() =>
 			expect(text(canvasElement, '[data-ai-attachment-status]')).toBe('Attachment cancelled.')
@@ -1468,10 +1531,20 @@
 		await waitFor(() => expect((prose as HTMLDetailsElement).open).toBe(true));
 		expect(text(prose, '[data-ai-summary]')).toContain('shared axes');
 
-		// What a reader acts on stays outside the fold: the script rows, and the
-		// errors and tracebacks that come with them.
+		// What a reader acts on stays outside the fold: the errors and tracebacks.
+		// The script rows are outside it too, but under a fold of their own —
+		// closed, with a line that says how the last execution ended and what it
+		// printed, so the rows cost the reader nothing until they are wanted.
 		expect(prose.querySelector('[data-ai-steps]')).toBeNull();
-		expect(required(canvasElement, '[data-ai-steps]')).not.toBeNull();
+		const stepsPanel = required(canvasElement, '[data-ai-steps-panel]');
+		expect(stepsPanel).toBeInstanceOf(HTMLDetailsElement);
+		expect((stepsPanel as HTMLDetailsElement).open).toBe(false);
+		expect(text(stepsPanel, '[data-ai-steps-preview]')).toBe(
+			'Execution 1 finished — Wrote channel2.png'
+		);
+		await userEvent.click(required(stepsPanel, 'summary'));
+		await waitFor(() => expect((stepsPanel as HTMLDetailsElement).open).toBe(true));
+		expect(required(stepsPanel, '[data-ai-steps]')).not.toBeNull();
 	}}
 >
 	{#snippet template()}

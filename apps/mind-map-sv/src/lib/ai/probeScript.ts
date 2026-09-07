@@ -11,7 +11,7 @@
  * ## The probe's contract (T06 drives it)
  *
  * **Input — stdin, one JSON object, read to EOF:**
- * `{ "paths": ["/inputs/a.csv", ...], "previewRows": 5 }`
+ * `{ "paths": ["/work/a.csv", ...], "previewRows": 5 }`
  * `previewRows` may be `0` (schema only); a missing key reads as `0`, a missing
  * `paths` as an empty list. Stdin rather than argv so an arbitrarily long path
  * list needs no quoting, and because both a plain `python probe.py < in.json`

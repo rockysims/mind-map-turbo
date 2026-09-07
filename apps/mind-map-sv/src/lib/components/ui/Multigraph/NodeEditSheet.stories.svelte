@@ -1071,10 +1071,9 @@
 
 		await waitFor(() => expect(attachmentRows(canvasElement)).toHaveLength(1));
 		expect(sizePrompts).toHaveLength(1);
-		// The question names the file and its size, and says why the size matters.
+		// The question names the file and what attaching it costs every saved copy.
 		expect(sizePrompts[0]).toContain('huge.csv');
-		expect(sizePrompts[0]).toContain('8 B');
-		expect(sizePrompts[0]).toContain('a third larger');
+		expect(sizePrompts[0]).toContain('adds about 11 B to every saved copy');
 	}}
 >
 	{#snippet template()}

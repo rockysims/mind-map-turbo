@@ -41,8 +41,11 @@
 	/** Roving-tabindex cursor: only this item is in the tab order. */
 	let activeIndex = $state(0);
 	let lastFocusedOpenKey = $state('');
-	// Not reactive on purpose: `bind:this` writes here, but nothing renders from it.
-	const itemRefs: Array<HTMLButtonElement | null> = [];
+	// Reactive because `bind:this` writes into it: Svelte's dev-mode binding
+	// check reads the bound property back and warns `binding_property_non_reactive`
+	// when that read registers no dependency, which a plain array never does — and
+	// it warned on every open. A `$state` array is one proxy and the same writes.
+	const itemRefs = $state<Array<HTMLButtonElement | null>>([]);
 
 	/**
 	 * Labels stay one or two words; the `hint` carries what they cannot say.
