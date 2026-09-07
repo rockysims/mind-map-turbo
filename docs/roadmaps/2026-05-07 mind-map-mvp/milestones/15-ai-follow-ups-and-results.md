@@ -18,9 +18,11 @@ it. Three changes, and they are one change:
 
 An AI node's outputs feed the AI nodes downstream of it, with no promote step:
 whatever the latest run wrote to `outputs/` is an input to any neighbour that
-already collects that node by the proximity rule. "Ask a follow-up" makes the
-next step in one press — a child AI node on a directed edge, focused with an
-empty prompt and the caret in it, and a Back crumb to the node you came from.
+already collects that node by the proximity rule. "Ask a follow-up" is written
+where the reader already is — a composer opens on the node whose answer they
+are reading, and one press submits it: that press makes the next step, a child
+AI node on a directed edge carrying the prompt they just wrote, already running,
+holding the pin the parent had, with a Back crumb to the node they came from.
 And a run that prints a named number reports it as a quantity, so the node
 becomes a definer of `R_{th}` and milestone 09 draws the arrow to whoever's
 equation uses it.
@@ -70,14 +72,23 @@ filename meaningless. Promote does not go away and does not change meaning: it
 is how a plot gets onto the canvas for a person to look at, not how it reaches
 the next script.
 
-**A follow-up is a node, and making one is a single press.** The workbench gains
-one control. It creates a node carrying `!ai`, joins it to the parent with a
-directed edge, focuses it, and leaves the caret in an empty prompt with a Back
-crumb pointing at the parent. Everything after the first press is typing. The
-mechanism is the one Define already uses — commit, push a nav entry, fit the
-camera, hand over the caret — with the difference that a follow-up enters focus
-on the new node rather than dropping to the canvas, because a prompt is written
-in the workbench and a title is not.
+**A follow-up is composed where you are, and lands as a node.** The workbench
+gains one control, and it opens a composer rather than committing anything: the
+reader writes the next request in the _parent's_ workbench, with the answer they
+are responding to still on screen above it. Cancel or Escape closes the composer
+and the graph is untouched; an empty prompt cannot be submitted. Submitting is
+the single press that does everything — one commit makes the node carrying `!ai`
+with that prompt already in it, the directed edge from the parent, and the pin
+transfer below — and then the app focuses the child and starts its first run.
+The mechanism is the one Define already uses — commit, push a nav entry, fit the
+camera — with two differences: a follow-up enters focus on the new node rather
+than dropping to the canvas, and there is no caret to hand over, because the
+prompt was written before the node existed.
+
+Composing first rather than creating first is what the owner asked for, and it
+also settles a question the create-first shape left open: a node created and then
+abandoned is a node in the map, and a reader who changes their mind halfway
+through typing should not have to reach for Undo to unmake it.
 
 **The child starts from the parent's script.** A child has no script of its own,
 so its default mode is Change against the parent's: "here is what was done, do
@@ -88,9 +99,11 @@ Run is not offered until the child has run once, because there is nothing of its
 own to run.
 
 **Context is the ancestors' prose, capped.** A request carries a
-"conversation so far" section built by walking incoming edges from AI node to AI
-node, up to three hops. Each ancestor contributes its prompt and the summary of
-its latest done run; only the direct parent contributes its script. This is
+"conversation so far" section built by walking from AI node to AI node — by the
+same adjacency rule the file inputs use, an incoming directed edge or an
+undirected one — up to three hops. Each ancestor contributes its prompt and the
+summary of its latest done run; only the direct parent contributes its script.
+This is
 prose in the user message, separate from the file inputs, and it is subject to a
 byte cap in `APP_CONFIG` that drops the farthest ancestors first. The workbench's
 "What Claude will see" disclosure shows it verbatim, because the milestone 14
@@ -151,30 +164,61 @@ milestones 08 to 11 took: draw the dependency before evaluating it.
 
 ### Ask a follow-up
 
-- One control in the workbench, available once the node has a done run.
-- It commits, in one entry labelled `ask a follow-up`: a new node carrying the
-  `ai` add-on at its registry default with an empty prompt, titled so the `!ai`
-  marker and the add-on agree; a directed, untagged edge from the parent; and a
-  position beside the parent, which the layout then settles.
-- The new node is not pinned. Define and Promote both leave the nodes they make
-  unpinned, an authored edge already puts the child inside the parent's
-  neighbourhood, and a pin per follow-up would quietly rewrite what is visible
-  after three of them.
+- One control in the workbench, available once the node has a done run. It opens
+  a composer in that node's own workbench — a prompt field, a submit and a
+  Cancel — and commits nothing. While the composer is open the parent's answer,
+  outputs and script are still on screen above it, which is the point of
+  composing there rather than on a node that does not exist yet.
+- Cancel closes the composer and creates nothing. So does Escape, which is the
+  first thing in this workbench to want that key: the composer takes Escape only
+  while it is open and stops it there, so a first press closes the composer and a
+  second leaves focus the way it always has.
+- The submit is named for what it does — `Ask` — and says so while it is working,
+  per `docs/ui-decisions/2026-09-06--status--name-the-run-action-per-mode.md`.
+  The handover is brief: the composer is gone as soon as focus lands on the
+  child, and from there the child's own run control does the naming (`Change &
+run`, in flight) exactly as it does for a run the reader started by hand.
+- An empty prompt cannot be submitted. A whitespace-only draft leaves the submit
+  `aria-disabled` with the reason in the notice line, per
+  `docs/ui-decisions/2026-08-30--a11y--say-why-a-control-is-disabled-in-the-notice-line.md`.
+- The keyboard matches the prompt field beside it: Enter and Shift+Enter both
+  insert a newline, and Cmd/Ctrl+Enter submits — the same keystroke that commits
+  the prompt on a node that already exists (`AiNodeContent.svelte`,
+  `handlePromptKeydown`). No window-level shortcut is added, so
+  `docs/ui-decisions/2026-08-30--keyboard--guard-every-shortcut-while-typing.md`
+  is satisfied by construction.
+- Submitting commits, in one entry labelled `ask a follow-up`: a new node
+  carrying the `ai` add-on at its registry default with the composed prompt
+  already set, titled so the `!ai` marker and the add-on agree; a directed,
+  untagged edge from the parent; a position beside the parent, which the layout
+  then settles; and the pin transfer below.
+- The pin transfers. A pinned parent hands its pin to the child and is unpinned
+  in the same commit; an unpinned parent makes an unpinned child. A pin is a
+  visibility budget spent on where the reader's attention is, and after a
+  follow-up their attention is on the child — so the budget moves with it rather
+  than being spent twice or quietly rewriting what is visible after three
+  follow-ups. Because it is one commit, one Undo restores the parent's pin along
+  with removing the child.
 - The edge is untagged. An edge tag is the input's _label_ in the request, which
   is a role the reader chose (`@baseline`); stamping every follow-up edge with
   the same word would put a meaningless role on every input the child collects,
   and colour every one of those edges by milestone 04f's rule.
 - After the commit the app pushes a nav entry for the node the reader was
-  looking at, fits the camera to the child, enters focus on it, and puts the
-  caret in the prompt. The trail and the floating Back button are the ones that
-  already exist; nothing new renders.
+  looking at, fits the camera to the child, enters focus on it, and starts the
+  child's first run — the reader has just written a request and pressed a verb,
+  so the run is what the press meant. The trail and the floating Back button are
+  the ones that already exist; nothing new renders.
 
 ### Ancestor context
 
-- A pure walk from the node along incoming directed edges, AI node to AI node,
-  bounded by hops and by a visited set, nearest first. Directed only: an
-  undirected edge says two nodes are related, not which came first, and the
-  follow-up edge this feature creates is directed.
+- A pure walk from the node, AI node to AI node, bounded by hops and by a
+  visited set, nearest first. It steps by **the same adjacency rule input
+  collection uses** — an incoming directed edge or an undirected one — and not by
+  a directed-only rule of its own. One rule, learned once: whatever counts as
+  feeding this node its files counts as feeding it the words that came with them.
+  The alternative was directed-only, on the grounds that an undirected edge says
+  two nodes are related rather than which came first; it was dropped because a
+  reader holding two adjacency rules in their head will predict neither.
 - Each ancestor contributes its title, its prompt and its latest done run's
   summary. The direct parent also contributes `analysis.py`.
 - The rendered section goes in the user message rather than the system prompt,
@@ -255,9 +299,20 @@ milestones 08 to 11 took: draw the dependency before evaluating it.
   child's _historical_ run record can still name an asset that has since gone —
   the same as any file the reader removed — and must read as that rather than as
   damage.
-- **Cycles.** Two AI nodes can point at each other. Input collection is one hop
-  and cannot loop, but the ancestor walk can, and needs a visited set and a
-  deterministic order rather than a recursion that happens not to recurse.
+- **Cycles, and now undirected pairs.** Two AI nodes can point at each other, and
+  under the one-rule adjacency two AI nodes joined by an _undirected_ edge are
+  each other's ancestors by construction — the common case, not the pathological
+  one. Input collection is one hop and cannot loop, but the ancestor walk can, and
+  needs a visited set and a deterministic order rather than a recursion that
+  happens not to recurse. The visited set is what makes the pair finite; the
+  request preview is what makes it visible, so a reader who did not want their
+  neighbour's prose in the request can see it there and make the edge directed.
+- **The composer is the first thing in the workbench to want Escape.** The file's
+  own header says Escape belongs to the focus layer and nothing in the workbench
+  listens for it. An open composer has to, or Escape throws the draft away by
+  leaving focus rather than by closing the composer — and the reader who pressed
+  it meant the smaller of the two. It takes Escape only while open and stops it
+  there; everywhere else in the workbench Escape still leaves focus.
 - **Context growth is the cost that creeps.** Three hops of prompts and summaries
   is small until a node has four ancestors with long summaries and the request
   quietly doubles. The cap is a hard character count applied by a pure function
@@ -291,16 +346,23 @@ reopened.
    Promote? **Automatically, latest done run only, by the existing proximity
    rule.** Promote keeps its job of putting a figure on the canvas.
    (Resolved 2026-09-07.)
-2. How does a reader continue a conversation? **"Ask a follow-up" creates a
-   child AI node on a directed edge, focuses it with an empty prompt ready to
-   type, and leaves a Back crumb** — the Define-from-deep-zoom mechanism, reused.
-   Not a chat thread, and not a global chat: the map stays the record.
-   (Resolved 2026-09-07.)
+2. How does a reader continue a conversation? **They compose the next request on
+   the node they are reading, and submitting it is what creates the child.** "Ask
+   a follow-up" opens a composer in the parent's workbench; Cancel or Escape
+   creates nothing; submitting commits the child AI node on a directed edge with
+   that prompt already in it, focuses it and starts its run, leaving a Back crumb
+   — the Define-from-deep-zoom mechanism, reused. Not a chat thread, and not a
+   global chat: the map stays the record.
+   (Resolved 2026-09-07; the composer replaced an earlier create-then-type shape
+   the same day, at the owner's direction.)
 3. What does the child's request know about the parent? **Up to three hops of AI
-   ancestors along incoming edges, each contributing its prompt and its latest
-   summary, with the direct parent also contributing its script; capped in bytes
-   and shown in the request preview.** Data stays at one hop.
-   (Resolved 2026-09-07.)
+   ancestors, reached by the same adjacency rule the file inputs use — an
+   incoming directed edge or an undirected one — each contributing its prompt and
+   its latest summary, with the direct parent also contributing its script;
+   capped in bytes and shown in the request preview.** Data stays at one hop; the
+   _rule_ for who is adjacent is one rule for both.
+   (Resolved 2026-09-07; a directed-only walk was the first draft and the owner
+   chose the single rule.)
 4. What is the child's default mode? **Change, against the parent's script.**
    Write is available; Run is not until the child has a script of its own.
    (Resolved 2026-09-07.)
@@ -312,9 +374,15 @@ reopened.
    field of its own? **A field of its own on the run, with the extractor taught
    to read it.** Decided in the plan; see "Results ride on the run" above for the
    reasoning and the accepted cost. (Resolved 2026-09-07.)
-7. Is the follow-up node pinned, and is its edge tagged? **Neither.** Both follow
-   the precedent Define and Promote set, and both avoid writing meaning the
-   reader did not ask for. (Resolved 2026-09-07.)
+7. Is the follow-up node pinned, and is its edge tagged? **The pin transfers, and
+   the edge is untagged.** A pinned parent hands its pin to the child and is
+   unpinned in the same commit; an unpinned parent makes an unpinned child. A pin
+   marks where the reader's attention is, and a follow-up moves that attention to
+   the child, so the visibility budget moves with it instead of accumulating one
+   pin per question. The edge stays untagged because an edge tag _is_ the input's
+   label in the request, and a word on every follow-up edge is a role nobody
+   chose. (Resolved 2026-09-07; "not pinned, matching Define and Promote" was the
+   first draft and the owner replaced it with the transfer.)
 
 Still binding from milestone 14 and not reopened here: Messages API only, called
 with a raw `fetch`; the executor is local Pyodide in a worker; the key is never
@@ -335,34 +403,44 @@ with an edit-intent label; the add-on registry in `nodeAddons.ts` stays closed.
 3. Two neighbours each producing a file of the same name send two distinct
    filenames, and the same collection of inputs produces the same names every
    time.
-4. "Ask a follow-up" on a node with a done run creates one child node with the
-   `ai` add-on and a directed edge from the parent, enters focus on the child
-   with the caret in an empty prompt, and shows a Back crumb naming the parent.
-   Back returns to the parent's workbench and the camera the reader left.
-5. One Undo after a follow-up removes the child, its add-on and the edge
-   together, under the label `ask a follow-up`.
-6. The child's mode switch offers Write and Change with Change selected, and does
+4. "Ask a follow-up" on a node with a done run opens a composer in that node's
+   workbench and commits nothing. Typing a prompt and submitting creates one
+   child node with the `ai` add-on carrying that prompt, and a directed edge from
+   the parent; focus lands on the child with its first run starting in Change
+   mode, and a Back crumb names the parent. Back returns to the parent's
+   workbench and the camera the reader left.
+5. Cancel closes the composer; Escape closes the composer and does not leave
+   focus, while a second Escape does. Neither creates a node, an edge or a
+   history entry, and a composer holding only whitespace cannot be submitted and
+   says why in the notice line.
+6. A pinned parent's follow-up is created pinned and leaves the parent unpinned;
+   an unpinned parent's follow-up is unpinned and pins nothing.
+7. One Undo after a follow-up removes the child, its add-on, its prompt and the
+   edge together and restores the parent's pin if the follow-up took it, under
+   the single label `ask a follow-up`.
+8. The child's mode switch offers Write and Change with Change selected, and does
    not offer Run. Its Change request carries the parent's script and an
    instruction saying it came from the previous step.
-7. The request preview for a node three steps into a chain shows a
+9. The request preview for a node three steps into a chain shows a
    "conversation so far" section with its ancestors' prompts and summaries,
-   nearest first, and no more than the configured number of characters; a spec
-   pins that a chain long enough to exceed the cap drops the farthest ancestor
-   and says so.
-8. A run whose script prints `RESULT R_{th} = 12.3 K/W` records that result,
-   shows `R_{th} = 12.3\ \text{K/W}` as display math on the node, makes the node
-   a definer of `R_{th}`, and draws a derived edge to a node whose description
-   references `R_{th}`. A run that prints no such line changes nothing.
-9. A `RESULT` line whose value is not a number, or whose symbol contains
-   anything outside the allowed set, is ignored; a run printing more of them than
-   configured keeps the configured number.
-10. Results are parsed from the full stdout of the final execution, pinned by a
+   nearest first, and no more than the configured number of characters; an AI
+   neighbour joined by an undirected edge appears in it on the same terms as one
+   joined by an incoming directed edge; a spec pins that a chain long enough to
+   exceed the cap drops the farthest ancestor and says so.
+10. A run whose script prints `RESULT R_{th} = 12.3 K/W` records that result,
+    shows `R_{th} = 12.3\ \text{K/W}` as display math on the node, makes the node
+    a definer of `R_{th}`, and draws a derived edge to a node whose description
+    references `R_{th}`. A run that prints no such line changes nothing.
+11. A `RESULT` line whose value is not a number, or whose symbol contains
+    anything outside the allowed set, is ignored; a run printing more of them
+    than configured keeps the configured number.
+12. Results are parsed from the full stdout of the final execution, pinned by a
     spec in which the tail limit would have cut the result off.
-11. Dragging a node does not rebuild the quantity index; recording a run with
+13. Dragging a node does not rebuild the quantity index; recording a run with
     results does.
-12. A document with follow-up chains, results and cross-node outputs survives
+14. A document with follow-up chains, results and cross-node outputs survives
     Download and Open in a fresh profile, with every figure visible and every
     derived edge redrawn. A milestone 14 build opens the same file without
     calling it malformed.
-13. Every gate in `AGENTS.md` passes, the offline shell still builds to one file,
+15. Every gate in `AGENTS.md` passes, the offline shell still builds to one file,
     and its size delta is recorded in the plan's notes.
