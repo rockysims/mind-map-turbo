@@ -66,10 +66,17 @@ BUGS:
   title input had cleared its initial value. Passes 3/3 in isolation. The helper
   should wait for the field to hold what it typed before moving on.
 - e2e `deep zoom nests a node image as a second level and pops back to the node`
-  fails: after the first wheel-in the node world's `data-zoom-world-scale` stays
-  at 1, so the scrub never leaves the stage. Confirmed pre-existing on a clean
-  tree at 5517f5c (checked while landing milestone 12, which does not touch the
-  zoom path).
+  fails: the assertion after the first wheel-in reads `data-zoom-world-scale` as
+  1. Confirmed pre-existing on a clean tree at 5517f5c (checked while landing
+  milestone 12, which does not touch the zoom path). Still failing at the same
+  line after the ZoomWorld subject-sizing fix, and the failure snapshot says
+  why: it is reading the wrong world. That first `deltaY: -3000` asks for
+  `e^6 ≈ 403x`, far past `maxScale * (1 + preInscribeZoneFraction)`, so
+  `descendBoundaryDelta` saturates at 1 and the descend fires on that same
+  wheel — the node world unmounts (level 1 freezes) and `.zoom-world.first()`
+  is the fresh depth-2 image world, sitting at scale 1. Either the test should
+  zoom in with a wheel that does not also saturate the descend zone, or a
+  descend should need more than one event's worth of pressure.
 
 MAYBE:
 

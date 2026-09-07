@@ -20,11 +20,13 @@
 	 * may become scrollable. A workbench is taller than a details view — several
 	 * inputs, a live run and its outputs — and the world's pan clamp puts
 	 * below-frame content out of reach, so the whole surface is one scroller
-	 * bounded by the frame instead. The dead zone that used to make is gone:
-	 * `ZoomWorld` reads the `data-zoom-scroll` marker on this root and yields the
-	 * wheel only while there is somewhere left to scroll, so a wheel-out at the
-	 * top still exits focus and a wheel-in at the bottom still zooms (see
-	 * `lib/nestedScrollTarget.ts`). Exactly one scroller, on the root: the prompt
+	 * bounded by the frame instead. `ZoomWorld` reads the `data-zoom-scroll`
+	 * marker on this root and hands the wheel over while there is somewhere left
+	 * to scroll; at the ends it takes the wheel back but only zooms where zooming
+	 * is what the gesture meant — nothing at the top (unless a plot in the output
+	 * grid is under the cursor, which opens it), and at the bottom the scrub that
+	 * leaves focus, once the reader has paused (see `lib/nestedScrollTarget.ts`).
+	 * Exactly one scroller, on the root: the prompt
 	 * field still grows to its text and every `<pre>` still wraps, so no inner
 	 * box competes for the same gesture. Pointer presses need no handling
 	 * either: `ZoomWorld` already declines to start a pan on a press that lands

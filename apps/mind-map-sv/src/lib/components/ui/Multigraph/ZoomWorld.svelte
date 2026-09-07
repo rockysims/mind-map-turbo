@@ -12,7 +12,12 @@
 	} from './lib/entryGestureGate';
 	import { wheelDeltaPixels } from './lib/graphMath';
 	import { pointerDistance } from './lib/hitTest';
-	import { nestedScrollChain, yieldsToNestedScroll } from './lib/nestedScrollTarget';
+	import {
+		holdsMarkedScroller,
+		nestedScrollChain,
+		nestedWheelDecision,
+		resistedExitDelta
+	} from './lib/nestedScrollTarget';
 	import {
 		clampZoomWorldState,
 		pinchZoomWorld,
@@ -61,6 +66,12 @@
 	let entryGestureGate = $state<EntryGestureGateState>(EMPTY_ENTRY_GESTURE_GATE);
 	let exitBoundaryAmount = $state(0);
 	let descendBoundaryAmount = $state(0);
+	/**
+	 * When a wheel was last handed to a scroller inside the world. Nothing
+	 * renders from it, so it is a plain `let`: the exit pause reads it during the
+	 * next wheel and never during a render.
+	 */
+	let lastNestedScrollAt = 0;
 
 	const activePointers = new SvelteMap<number, { clientX: number; clientY: number }>();
 	const transformStyle = $derived(
@@ -143,6 +154,13 @@
 		return typeof window === 'undefined' ? undefined : window.innerHeight;
 	}
 
+	/** Drop any in-flight exit scrub, telling the consumer the frame is whole. */
+	function resetExitBoundary() {
+		if (exitBoundaryAmount <= 0) return;
+		exitBoundaryAmount = 0;
+		onExitBoundary?.(0);
+	}
+
 	function handleWheel(event: WheelEvent) {
 		const bounds = currentBounds();
 		const point = localPoint(event.clientX, event.clientY);
@@ -151,16 +169,44 @@
 		// math downstream reads a pixel delta, and Firefox reports a mouse wheel
 		// in lines (see `wheelDeltaPixels`).
 		const deltaY = wheelDeltaPixels(event, viewportHeightPx());
-		// Before anything is swallowed: a marked scroller inside the world with
-		// room left in this direction owns the wheel, and the browser scrolls it
-		// natively. At its end the wheel comes back here, which is what lets a
-		// wheel-out at the top of a tall surface still exit focus.
-		if (yieldsToNestedScroll(nestedScrollChain(event.target, worldRef), deltaY)) return;
+		// Before anything is swallowed: who does this wheel belong to? A marked
+		// scroller inside the world with room left takes it; at its ends the world
+		// takes it back, but only zooms where zooming is what the gesture meant
+		// (see `lib/nestedScrollTarget.ts`).
+		const chain = nestedScrollChain(event.target, worldRef);
+		const decision = nestedWheelDecision({
+			chain,
+			deltaY,
+			msSinceLastNestedScroll: Date.now() - lastNestedScrollAt,
+			// Asked only where the answer can change anything — a zoom-in with a
+			// marked scroller in the chain. `elementFromPoint` flushes layout, and a
+			// wheel is not the place to pay for that when nothing reads the result.
+			descendableImageUnderCursor:
+				deltaY < 0 &&
+				onDescend !== undefined &&
+				holdsMarkedScroller(chain) &&
+				descendImageAt(event.clientX, event.clientY) !== null
+		});
+		if (decision === 'scroll') {
+			lastNestedScrollAt = Date.now();
+			// Reading is not leaving: a scroll cancels a scrub already under way.
+			resetExitBoundary();
+			return;
+		}
 		event.preventDefault();
 		event.stopPropagation();
+		if (decision === 'swallow') {
+			// The momentum after a scroll must not carry into an exit, so the
+			// accumulation goes back to zero rather than sitting part-scrubbed.
+			resetExitBoundary();
+			return;
+		}
 		if (shouldSwallowEntryZoom(deltaY < 0 ? 'in' : 'out')) return;
+		// Leaving focus from inside a scrollable surface costs a bigger hump of
+		// wheel than leaving it from a page of prose.
+		const exitDeltaY = resistedExitDelta(deltaY, chain);
 		if (exitBoundaryAmount > 0) {
-			exitBoundaryAmount = wheelExitBoundaryAmount(exitBoundaryAmount, deltaY, bounds);
+			exitBoundaryAmount = wheelExitBoundaryAmount(exitBoundaryAmount, exitDeltaY, bounds);
 			onExitBoundary?.(exitBoundaryAmount);
 			return;
 		}
@@ -170,11 +216,17 @@
 		const step = wheelZoomWorld(worldState, deltaY, point, bounds);
 		commitState(step.state);
 		if (step.exitBoundaryDelta > 0) {
-			exitBoundaryAmount = Math.min(1, exitBoundaryAmount + step.exitBoundaryDelta);
+			// This branch clamps the world to fit rather than moving it, so reading
+			// it again with the resisted delta changes only how much of the scrub
+			// this one wheel was worth.
+			const boundaryDelta =
+				exitDeltaY === deltaY
+					? step.exitBoundaryDelta
+					: wheelZoomWorld(worldState, exitDeltaY, point, bounds).exitBoundaryDelta;
+			exitBoundaryAmount = Math.min(1, exitBoundaryAmount + boundaryDelta);
 			onExitBoundary?.(exitBoundaryAmount);
-		} else if (exitBoundaryAmount > 0) {
-			exitBoundaryAmount = 0;
-			onExitBoundary?.(0);
+		} else {
+			resetExitBoundary();
 		}
 		accumulateDescend(step.entryBoundaryDelta, event.clientX, event.clientY);
 	}
@@ -342,12 +394,23 @@
 		position: absolute;
 		inset: 0;
 		display: grid;
+		/* One explicit cell the size of the world's own box. Without a template
+		   the single implicit row is sized by its content, so the subject's
+		   `height: 100%` resolved against a row the subject itself had grown —
+		   a tall surface inside it measured its own content height, `max-height:
+		   100%` on a scroller inside that meant the content's height, and the
+		   scroller never had ends to be at. `minmax(0, 1fr)` makes the cell the
+		   frame, which is the box every zoom subject is supposed to live in. */
+		grid-template-columns: minmax(0, 1fr);
+		grid-template-rows: minmax(0, 1fr);
 		place-items: center;
 		overflow: visible;
 		touch-action: none;
 	}
 
 	.zoom-world-subject {
+		/* Exactly the frame, at scale 1: content taller than it is the content's
+		   business (it clips, or it scrolls), never the subject's size. */
 		width: 100%;
 		height: 100%;
 		transform-origin: 50% 50%;
