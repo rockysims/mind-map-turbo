@@ -38,12 +38,29 @@ const PLOT_SCRIPT = [
 	'import os',
 	'import pandas as pd',
 	'import matplotlib.pyplot as plt',
-	"df = pd.read_csv('/inputs/sweep.csv')",
+	"df = pd.read_csv('/work/sweep.csv')",
 	'fig, ax = plt.subplots()',
 	"ax.plot(df['t'], df['ch1'])",
-	"fig.savefig('/outputs/plot.png')",
-	"df.describe().to_csv('/outputs/summary.csv')",
-	"print('wrote', sorted(os.listdir('/outputs')))"
+	"fig.savefig('/work/outputs/plot.png')",
+	"df.describe().to_csv('/work/outputs/summary.csv')",
+	"print('wrote', sorted(os.listdir('/work/outputs')))"
+].join('\n');
+
+/**
+ * The script the system prompt describes: bare filenames and a relative
+ * `outputs/`, with nothing absolute in it. This is the case the first real run
+ * failed on, so it is the case the live suite pins.
+ */
+const WORKING_DIRECTORY_SCRIPT = [
+	'import os',
+	'import matplotlib.pyplot as plt',
+	"print('cwd', os.getcwd())",
+	"print('here', sorted(os.listdir('.')))",
+	"with open('sweep.csv') as handle:",
+	"    print('first line', handle.readline().strip())",
+	'fig, ax = plt.subplots()',
+	'ax.plot([0, 1], [1, 2])',
+	"fig.savefig('outputs/plot.png')"
 ].join('\n');
 
 function inputs() {
@@ -89,6 +106,21 @@ describe(TITLE, () => {
 			const png = result.outputs[0].bytes;
 			expect([...png.slice(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47]);
 			expect(new TextDecoder().decode(result.outputs[1].bytes)).toContain('ch1');
+		},
+		LOAD_TIMEOUT_MS
+	);
+
+	it.runIf(ENABLED)(
+		'runs in the work directory, so bare names and a relative outputs/ both work',
+		async () => {
+			const result = await live().run(WORKING_DIRECTORY_SCRIPT, inputs(), { timeoutMs: 120_000 });
+
+			expect(result.exitCode).toBe(0);
+			expect(result.stdout).toContain('cwd /work');
+			expect(result.stdout).toContain("here ['outputs', 'sweep.csv']");
+			expect(result.stdout).toContain('first line t,ch1,ch2');
+			expect(result.outputs.map((output) => output.name)).toEqual(['plot.png']);
+			expect([...result.outputs[0].bytes.slice(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47]);
 		},
 		LOAD_TIMEOUT_MS
 	);

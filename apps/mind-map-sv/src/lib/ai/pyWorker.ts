@@ -33,6 +33,10 @@
  * | `run`       | `code`, `stdin?`, `collectOutputs` | `result` with the execution      |
  * | `readFile`  | `path`                             | `result` with `bytes`            |
  *
+ * Every `run` — the probe included — happens with the current directory set to
+ * `WORK_DIR`, which is also where `writeFile` puts the attachments and where
+ * `outputs/` lives. See `WORK_DIR` below for why that matters.
+ *
  * Worker → main: `ready` (once, at startup), `progress` (`phase`, `message`,
  * `loadedBytes`), `stdout` / `stderr` chunks as they are written, `result`
  * (correlated by `id`), and `error` (also correlated) for anything the handler
@@ -56,6 +60,22 @@ export interface PyRuntimeConfig {
 }
 
 /**
+ * The one directory a script ever sees.
+ *
+ * Every attached file is written straight into it, the script is `chdir`ed
+ * into it before it runs, and `outputs/` is a subdirectory of it. That is what
+ * makes the system prompt's two promises true — "the attached files are in the
+ * current directory" and "save to outputs/" — which they were not while the
+ * inputs lived in `/inputs` and the script ran from Pyodide's own
+ * `/home/pyodide`: the first real run died on `FileNotFoundError` for a file
+ * that was on disk under the name it had been told.
+ */
+export const WORK_DIR = '/work';
+
+/** Where the script is asked to save, and the only place outputs are collected from. */
+export const OUTPUT_DIR = `${WORK_DIR}/outputs`;
+
+/**
  * The worker's JavaScript, with the runtime configuration baked in.
  *
  * Written as one template literal on purpose: nothing here is imported, so
@@ -66,7 +86,11 @@ export interface PyRuntimeConfig {
 export function pyWorkerSource(config: PyRuntimeConfig): string {
 	const settings = JSON.stringify({
 		indexUrl: config.indexUrl,
-		packages: [...config.packages]
+		packages: [...config.packages],
+		// Carried in the configuration rather than written out twice, so the
+		// driver and the worker cannot come to disagree about where a file went.
+		workDir: WORK_DIR,
+		outputDir: OUTPUT_DIR
 	});
 
 	return `'use strict';
@@ -76,6 +100,10 @@ const CONFIG = ${settings};
 // traceback still points at the line the author wrote.
 const AGG_PREAMBLE = 'import matplotlib\\nmatplotlib.use("agg")\\n';
 const MATPLOTLIB_MENTION = /matplotlib|pyplot/;
+// Same reasoning, and run before every script and the probe alike: Pyodide
+// starts in /home/pyodide, so without this a bare open() looks in the one
+// directory the attachments are not in.
+const CHDIR_PREAMBLE = 'import os\\nos.chdir("' + CONFIG.workDir + '")\\n';
 
 let pyodide = null;
 let stdoutChunks = [];
@@ -194,8 +222,8 @@ async function handleLoad(id) {
 			})
 	});
 	captureOutput(id);
-	mkdirp('/inputs');
-	mkdirp('/outputs');
+	mkdirp(CONFIG.workDir);
+	mkdirp(CONFIG.outputDir);
 	post({
 		type: 'result',
 		id: id,
@@ -226,6 +254,7 @@ async function handleRun(message) {
 	const started = performance.now();
 	let exitCode = 0;
 	try {
+		await pyodide.runPythonAsync(CHDIR_PREAMBLE);
 		try {
 			await pyodide.loadPackagesFromImports(message.code);
 		} catch (error) {
@@ -243,7 +272,7 @@ async function handleRun(message) {
 	}
 	const durationMs = performance.now() - started;
 
-	const outputs = message.collectOutputs ? collectOutputs('/outputs') : [];
+	const outputs = message.collectOutputs ? collectOutputs(CONFIG.outputDir) : [];
 	post(
 		{
 			type: 'result',

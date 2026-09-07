@@ -284,7 +284,7 @@ describe('createPyExecutor', () => {
 		executor.dispose();
 	});
 
-	it('resets both directories, writes the inputs, and runs the script', async () => {
+	it('resets the work directory and its outputs, writes the inputs, and runs the script', async () => {
 		const { executor, workers } = executorWithFakes({
 			run: () => ({
 				exitCode: 0,
@@ -301,8 +301,8 @@ describe('createPyExecutor', () => {
 		const result = await executor.run('print("hi")', [file('sweep.csv', 't,ch1\n0,1\n')]);
 
 		const worker = workers[0];
-		expect(worker.sentOfType('reset')[0].paths).toEqual(['/inputs', '/outputs']);
-		expect(worker.sentOfType('writeFile')[0].path).toBe('/inputs/sweep.csv');
+		expect(worker.sentOfType('reset')[0].paths).toEqual(['/work', '/work/outputs']);
+		expect(worker.sentOfType('writeFile')[0].path).toBe('/work/sweep.csv');
 		expect(worker.sentOfType('run')[0]).toMatchObject({
 			code: 'print("hi")',
 			collectOutputs: true
@@ -333,8 +333,8 @@ describe('createPyExecutor', () => {
 		await executor.run('pass', [file('../../etc/passwd', 'x'), file('  ', 'y')]);
 
 		expect(workers[0].sentOfType('writeFile').map((message) => message.path)).toEqual([
-			'/inputs/passwd',
-			'/inputs/input'
+			'/work/passwd',
+			'/work/input'
 		]);
 		executor.dispose();
 	});
@@ -366,9 +366,9 @@ describe('createPyExecutor', () => {
 		const digests = await executor.digest([file('sweep.csv', 't\n1\n')], 5);
 
 		const run = workers[0].sentOfType('run')[0];
-		expect(workers[0].sentOfType('reset')[0].paths).toEqual(['/inputs']);
+		expect(workers[0].sentOfType('reset')[0].paths).toEqual(['/work']);
 		expect(run.collectOutputs).toBe(false);
-		expect(run.stdin).toBe(JSON.stringify({ paths: ['/inputs/sweep.csv'], previewRows: 5 }));
+		expect(run.stdin).toBe(JSON.stringify({ paths: ['/work/sweep.csv'], previewRows: 5 }));
 		expect(digests).toEqual([digest]);
 		executor.dispose();
 	});

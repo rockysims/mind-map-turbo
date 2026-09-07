@@ -20,14 +20,10 @@
 import { APP_CONFIG } from '$lib/appConfig';
 import { executorInputName } from './inputFileName';
 import { PROBE_SCRIPT, parseProbeOutput, type MeasuredFileDigest } from './probeScript';
-import { pyWorkerSource, type PyRuntimeConfig } from './pyWorker';
+import { OUTPUT_DIR, WORK_DIR, pyWorkerSource, type PyRuntimeConfig } from './pyWorker';
 
 /** How long a worker has to post `ready` before the construction is called broken. */
 const DEFAULT_READY_TIMEOUT_MS = 15000;
-
-/** Where input files land, and where the script is asked to write its outputs. */
-const INPUT_DIR = '/inputs';
-const OUTPUT_DIR = '/outputs';
 
 /** One file on its way into the runtime, named as the attachment is named. */
 export interface ExecutorFile {
@@ -35,7 +31,7 @@ export interface ExecutorFile {
 	bytes: Uint8Array;
 }
 
-/** One file the script wrote to `/outputs`. */
+/** One file the script wrote to `outputs/`. */
 export interface ExecutionOutput {
 	name: string;
 	mimeType: string;
@@ -393,7 +389,7 @@ export function createPyExecutor(
 	async function writeFiles(channel: PyWorkerChannel, files: ExecutorFile[]): Promise<string[]> {
 		const paths: string[] = [];
 		for (const file of files) {
-			const path = `${INPUT_DIR}/${executorInputName(file.name)}`;
+			const path = `${WORK_DIR}/${executorInputName(file.name)}`;
 			// A copy, then a transfer: transferring the caller's own buffer would
 			// detach the asset bytes it still holds — and digest is routinely
 			// called with the same files a run is about to use.
@@ -412,7 +408,7 @@ export function createPyExecutor(
 		async digest(files, previewRows) {
 			const channel = await ensureLoaded();
 			return guarded(channel, defaultTimeoutMs, undefined, async () => {
-				await channel.send({ type: 'reset', paths: [INPUT_DIR] });
+				await channel.send({ type: 'reset', paths: [WORK_DIR] });
 				const paths = await writeFiles(channel, files);
 				const result = await channel.send({
 					type: 'run',
@@ -428,7 +424,10 @@ export function createPyExecutor(
 			const timeoutMs = runOptions.timeoutMs ?? defaultTimeoutMs;
 			const channel = await ensureLoaded();
 			return guarded(channel, timeoutMs, runOptions.signal, async () => {
-				await channel.send({ type: 'reset', paths: [INPUT_DIR, OUTPUT_DIR] });
+				// The work directory first, then `outputs/` inside it: emptying a
+				// directory cannot remove a subdirectory, so the nested one says so
+				// for itself.
+				await channel.send({ type: 'reset', paths: [WORK_DIR, OUTPUT_DIR] });
 				await writeFiles(channel, files);
 				const result = await channel.send({
 					type: 'run',
