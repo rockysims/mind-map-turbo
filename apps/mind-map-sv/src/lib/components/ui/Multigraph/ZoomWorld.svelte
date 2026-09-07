@@ -12,6 +12,7 @@
 	} from './lib/entryGestureGate';
 	import { wheelDeltaPixels } from './lib/graphMath';
 	import { pointerDistance } from './lib/hitTest';
+	import { nestedScrollChain, yieldsToNestedScroll } from './lib/nestedScrollTarget';
 	import {
 		clampZoomWorldState,
 		pinchZoomWorld,
@@ -146,12 +147,17 @@
 		const bounds = currentBounds();
 		const point = localPoint(event.clientX, event.clientY);
 		if (!bounds || !point) return;
-		event.preventDefault();
-		event.stopPropagation();
 		// Normalized once, at the only place the raw event is in hand: the zoom
 		// math downstream reads a pixel delta, and Firefox reports a mouse wheel
 		// in lines (see `wheelDeltaPixels`).
 		const deltaY = wheelDeltaPixels(event, viewportHeightPx());
+		// Before anything is swallowed: a marked scroller inside the world with
+		// room left in this direction owns the wheel, and the browser scrolls it
+		// natively. At its end the wheel comes back here, which is what lets a
+		// wheel-out at the top of a tall surface still exit focus.
+		if (yieldsToNestedScroll(nestedScrollChain(event.target, worldRef), deltaY)) return;
+		event.preventDefault();
+		event.stopPropagation();
 		if (shouldSwallowEntryZoom(deltaY < 0 ? 'in' : 'out')) return;
 		if (exitBoundaryAmount > 0) {
 			exitBoundaryAmount = wheelExitBoundaryAmount(exitBoundaryAmount, deltaY, bounds);

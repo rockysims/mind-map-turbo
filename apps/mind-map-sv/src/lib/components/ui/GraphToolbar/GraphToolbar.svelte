@@ -159,6 +159,9 @@
 		<!--
 			Connected state rides in the accessible name, not in the fill alone: the
 			colour is the glance, the name is the answer for anyone who cannot see it.
+			The dot is the glance made legible — a filled glyph and an unfilled one
+			are the same shape, and a reader who has just pressed Connect wants a
+			difference they can name. `aria-hidden`, because the name already says it.
 		-->
 		<button
 			type="button"
@@ -167,7 +170,8 @@
 			title="Anthropic API key, model and data settings"
 			aria-label={aiConnected ? 'AI settings, connected' : 'AI settings, not connected'}
 			data-ai-connected={aiConnected}
-			onclick={() => onOpenAiSettings?.()}>✦</button
+			onclick={() => onOpenAiSettings?.()}
+			>✦<span class="ai-dot" data-ai-connected-dot={aiConnected} aria-hidden="true"></span></button
 		>
 	</div>
 	{#if severity === 'warning'}
@@ -219,9 +223,34 @@
 		gap: 0.5rem;
 	}
 
+	.graph-toolbar button.ai {
+		position: relative;
+	}
+
 	.graph-toolbar button.ai.connected {
 		background: #0f172a;
 		color: #ffffff;
+	}
+
+	/*
+	 * Parked in the corner of the glyph rather than beside it, so the control
+	 * keeps its 44px square and the state is read as belonging to it. The ring
+	 * is the button's own background, which keeps the dot legible on either fill.
+	 */
+	.graph-toolbar .ai-dot {
+		position: absolute;
+		right: 0.5rem;
+		bottom: 0.5rem;
+		width: 0.4rem;
+		height: 0.4rem;
+		border-radius: 999px;
+		background: #94a3b8;
+		box-shadow: 0 0 0 2px #e2e8f0;
+	}
+
+	.graph-toolbar button.ai.connected .ai-dot {
+		background: #4ade80;
+		box-shadow: 0 0 0 2px #0f172a;
 	}
 
 	/*

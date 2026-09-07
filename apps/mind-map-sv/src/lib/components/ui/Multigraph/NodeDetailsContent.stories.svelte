@@ -1254,6 +1254,8 @@
 		// content out of reach. So the card scrolls, or a deep cascade is lost.
 		const scroller = root.querySelector('[data-peek-scroll]') as HTMLElement;
 		expect(getComputedStyle(scroller).overflowY).toBe('auto');
+		// And the marker that makes ZoomWorld hand the wheel to it while it has room.
+		expect(scroller).toHaveAttribute('data-zoom-scroll');
 		await waitFor(() => {
 			expect(scroller.scrollHeight).toBeGreaterThan(scroller.clientHeight);
 		});

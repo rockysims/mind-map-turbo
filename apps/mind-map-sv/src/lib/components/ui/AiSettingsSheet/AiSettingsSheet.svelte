@@ -16,6 +16,7 @@
 	let {
 		settings,
 		connected = false,
+		connectedDelayMs = 600,
 		validateKey,
 		onSave,
 		onForget,
@@ -25,6 +26,13 @@
 		settings: AiSettings;
 		/** Whether a key is already in hand, shown rather than inferred from the field. */
 		connected?: boolean;
+		/**
+		 * How long the sheet stands on "Connected." before handing back to
+		 * `onConnected`, which closes it. Long enough to be read as an answer,
+		 * short enough not to be a wait — a sheet that vanishes the instant the
+		 * key is accepted leaves nothing behind that says it was. Stories pass 0.
+		 */
+		connectedDelayMs?: number;
 		validateKey: (key: string) => Promise<AiKeyValidation>;
 		onSave: (settings: AiSettings) => void;
 		onForget: () => void;
@@ -52,6 +60,8 @@
 	let sendPlots = $state(seed.sendPlots);
 
 	let connecting = $state(false);
+	/** Set by a Connect that succeeded, and never cleared: the sheet closes next. */
+	let justConnected = $state(false);
 	let errorMessage = $state<string | null>(null);
 	let keyInput = $state<HTMLInputElement | null>(null);
 
@@ -66,6 +76,20 @@
 
 	const reduceMotion = $derived(prefersReducedMotion());
 	const trimmedKey = $derived(apiKeyDraft.trim());
+
+	/**
+	 * One line, three states: what this browser had when the sheet opened, and —
+	 * for the moment between a successful Connect and the sheet closing — the
+	 * answer to the press the reader just made.
+	 */
+	const showsConnected = $derived(justConnected || connected);
+	const connectionText = $derived(
+		justConnected
+			? 'Connected.'
+			: connected
+				? 'Connected on this browser.'
+				: 'No key on this browser yet.'
+	);
 
 	function currentSettings(): AiSettings {
 		return {
@@ -102,6 +126,13 @@
 				return;
 			}
 			onSave(currentSettings());
+			// Say so, then hand back. The caller closes the sheet from
+			// `onConnected`, so anything shown after that call is shown to nobody —
+			// the pause is the whole of the reader's evidence that the key took.
+			justConnected = true;
+			if (connectedDelayMs > 0) {
+				await new Promise<void>((resolve) => setTimeout(resolve, connectedDelayMs));
+			}
 			onConnected?.();
 		} finally {
 			connecting = false;
@@ -141,8 +172,8 @@
 			<button type="button" onclick={onClose}>Close</button>
 		</header>
 
-		<p class="connection" data-ai-connection={connected ? 'connected' : 'disconnected'}>
-			{connected ? 'Connected on this browser.' : 'No key on this browser yet.'}
+		<p class="connection" data-ai-connection={showsConnected ? 'connected' : 'disconnected'}>
+			<span class="status-dot" class:on={showsConnected} aria-hidden="true"></span>{connectionText}
 		</p>
 
 		<label class="field" for="ai-settings-key">Anthropic API key</label>
@@ -180,7 +211,7 @@
 		<div class="actions">
 			<a href={KEY_CONSOLE_URL} target="_blank" rel="noreferrer noopener">Get a key</a>
 			<button type="button" class="primary" disabled={connecting} onclick={() => void connect()}>
-				{connecting ? 'Connecting…' : 'Connect'}
+				{justConnected ? 'Connected' : connecting ? 'Connecting…' : 'Connect'}
 			</button>
 		</div>
 
@@ -301,8 +332,24 @@
 	}
 
 	.connection {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
 		color: #475569;
 		font-size: 0.8125rem;
+	}
+
+	/* The same two states, in the same two colours, as the workbench line and the
+	   toolbar glyph — three places that answer one question. */
+	.status-dot {
+		width: 0.5rem;
+		height: 0.5rem;
+		border-radius: 999px;
+		background: #94a3b8;
+	}
+
+	.status-dot.on {
+		background: #16a34a;
 	}
 
 	.field {

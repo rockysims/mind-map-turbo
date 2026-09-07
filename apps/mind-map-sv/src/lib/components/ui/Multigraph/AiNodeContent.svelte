@@ -3,27 +3,34 @@
 	 * The `!ai` node's workbench: the focus-content variant that sits beside
 	 * `NodeDetailsContent` and is chosen when the focused node carries the add-on.
 	 *
-	 * Top to bottom it is one working order: the prompt, what will be sent, how
-	 * to run it, what the run is doing right now, what came back, the script that
-	 * produced it, and what it cost. Nothing here talks to the network, the graph
-	 * or the Python runtime — every act is a callback, and every state the run
-	 * pipeline can be in arrives as `runState`, so this file is drawable from a
-	 * story with fixed data.
+	 * Top to bottom it is one working order: the prompt, how to run it and the
+	 * press that does, what the run is doing right now, what came back, what
+	 * will be sent, the script that produced it, and what it cost. The controls
+	 * lead because a surface with several input files is taller than the frame,
+	 * and a Run button below the fold is a Run button nobody finds. Nothing here
+	 * talks to the network, the graph or the Python runtime — every act is a
+	 * callback, and every state the run pipeline can be in arrives as
+	 * `runState`, so this file is drawable from a story with fixed data.
 	 *
-	 * ## Why there is no scroll container
+	 * ## Why this one *is* a scroll container
 	 *
 	 * Focus mode's reader scrolls by zooming: a wheel over the surface reaches
 	 * `ZoomWorld` underneath and moves the world, exactly as it does over
-	 * `NodeDetailsContent`, whose story pins that nothing in its subtree may
-	 * become scrollable. A workbench is taller than a details view, so the
-	 * temptation to give the script panel its own scrollbar is real — and it
-	 * would put a dead zone in the middle of the surface where the reader's
-	 * usual gesture stops working. So the prompt field grows to its content
-	 * instead of scrolling, and every `<pre>` wraps. Pointer presses need no
-	 * handling either: `ZoomWorld` already declines to start a pan on a press
-	 * that lands on a control (see `startsOnInteractiveContent`), which is what
-	 * makes the textarea's caret and every button here work. Escape belongs to
-	 * the focus layer, so nothing here listens for it.
+	 * `NodeDetailsContent`, whose story still pins that nothing in *its* subtree
+	 * may become scrollable. A workbench is taller than a details view — several
+	 * inputs, a live run and its outputs — and the world's pan clamp puts
+	 * below-frame content out of reach, so the whole surface is one scroller
+	 * bounded by the frame instead. The dead zone that used to make is gone:
+	 * `ZoomWorld` reads the `data-zoom-scroll` marker on this root and yields the
+	 * wheel only while there is somewhere left to scroll, so a wheel-out at the
+	 * top still exits focus and a wheel-in at the bottom still zooms (see
+	 * `lib/nestedScrollTarget.ts`). Exactly one scroller, on the root: the prompt
+	 * field still grows to its text and every `<pre>` still wraps, so no inner
+	 * box competes for the same gesture. Pointer presses need no handling
+	 * either: `ZoomWorld` already declines to start a pan on a press that lands
+	 * on a control (see `startsOnInteractiveContent`), which is what makes the
+	 * textarea's caret and every button here work. Escape belongs to the focus
+	 * layer, so nothing here listens for it.
 	 */
 	import { untrack } from 'svelte';
 	import { APP_CONFIG } from '$lib/appConfig';
@@ -49,21 +56,35 @@
 	const NO_INPUTS: AiInput[] = [];
 	const NO_DIGESTS: Record<string, FileDigest> = {};
 
-	/**
-	 * The three modes, in the order they become available to a node: write a
-	 * script, edit it, run it again. Each label says what the run will *do*
-	 * rather than naming the mode, because "Refine" alone does not tell a reader
-	 * that the stored script is the thing being refined.
-	 */
 	/** Why Refine and Re-run are out of reach, said once and shown twice. */
 	const NO_SCRIPT_REASON = 'No stored script yet — run an analysis first.';
 
-	const MODES: { mode: AiRunMode; label: string; hint: string }[] = [
-		{ mode: 'analyse', label: 'Analyse', hint: 'Write a new script for this prompt' },
-		{ mode: 'refine', label: 'Refine', hint: 'Edit the stored script for the changed prompt' },
+	/**
+	 * The three modes, in the order they become available to a node: write a
+	 * script, edit it, run it again.
+	 *
+	 * `label` names the mode on the switch; `run` names the *act* on the button
+	 * beside it, because the switch is a choice and the button is what happens.
+	 * Reading "Analyse" on both used to make the switch look like three actions,
+	 * so pressing one appeared to do nothing.
+	 */
+	const MODES: { mode: AiRunMode; label: string; run: string; hint: string }[] = [
+		{
+			mode: 'analyse',
+			label: 'Analyse',
+			run: 'Run analysis',
+			hint: 'Write a new script for this prompt'
+		},
+		{
+			mode: 'refine',
+			label: 'Refine',
+			run: 'Refine and run',
+			hint: 'Edit the stored script for the changed prompt'
+		},
 		{
 			mode: 'rerun',
 			label: 'Re-run script',
+			run: 'Run script',
 			hint: 'Run the stored script again, with no model call'
 		}
 	];
@@ -78,6 +99,7 @@
 		assetScope = '',
 		runState = IDLE_RUN_STATE,
 		hasKey = false,
+		model = APP_CONFIG.ai.defaultModel,
 		titleForNodeId = (nodeId: string) => nodeId,
 		onPromptChange,
 		onRun,
@@ -111,6 +133,13 @@
 		runState?: AiRunState;
 		/** Whether a key is in hand. Without one, Run is replaced by the way to get one. */
 		hasKey?: boolean;
+		/**
+		 * The model a run would call, named on the connection line so the reader
+		 * can see that Connect took — the sheet closing behind them is not, on its
+		 * own, evidence of anything. Defaults to the configured model for a caller
+		 * with no settings in hand.
+		 */
+		model?: string;
 		/** Names the node a promoted output lives in. Identity for a caller with no graph. */
 		titleForNodeId?: (nodeId: string) => string;
 		/** The prompt, committed on blur or Cmd+Enter rather than on every keystroke. */
@@ -169,6 +198,9 @@
 			? fallbackMode
 			: modeOverride
 	);
+
+	/** The selected row of `MODES`; `analyse` is the one every node always has. */
+	const selectedMode = $derived(MODES.find((option) => option.mode === mode) ?? MODES[0]);
 
 	$effect(() => {
 		const current = ai.prompt;
@@ -255,6 +287,33 @@
 			: `${index}:${input.nodeId}`;
 	}
 
+	/**
+	 * The shape of a table, for the input's one line: `3 columns, 10000 rows`.
+	 * Empty for anything the probe could not read as a table, whose row then
+	 * reads as name and size — which is all there is to say about it.
+	 */
+	function digestShape(digest: FileDigest): string {
+		if (digest.kind !== 'table') return '';
+		const parts: string[] = [];
+		const columns = digest.columns?.length ?? 0;
+		if (columns > 0) parts.push(`${columns} ${columns === 1 ? 'column' : 'columns'}`);
+		if (digest.rows !== undefined) {
+			parts.push(`${digest.rows} ${digest.rows === 1 ? 'row' : 'rows'}`);
+		}
+		return parts.join(', ');
+	}
+
+	/**
+	 * The disclosure's summary. It names the preview depth rather than hiding it,
+	 * because the depth is the promise the settings sheet made about how much of
+	 * the file leaves the machine, and this is where it is kept.
+	 */
+	function digestDisclosureLabel(rows: number): string {
+		const depth = Math.max(Math.floor(rows), 0);
+		if (depth === 0) return 'What Claude will see (schema only)';
+		return `What Claude will see (${depth} ${depth === 1 ? 'row' : 'rows'})`;
+	}
+
 	function runtimeProgressText(): string {
 		const progress = runState.runtimeProgress;
 		if (progress === undefined) return 'Loading the Python runtime.';
@@ -308,7 +367,17 @@
 	</div>
 {/snippet}
 
-<div class="focus-content ai-workbench" data-ai-workbench data-focus-zoom-scale="1">
+<!--
+	`data-zoom-scroll` is the whole of the arrangement with `ZoomWorld`: it yields
+	the wheel to this box while the box can still move, and takes it back at
+	either end. See the note at the top of the script.
+-->
+<div
+	class="focus-content ai-workbench"
+	data-ai-workbench
+	data-zoom-scroll
+	data-focus-zoom-scale="1"
+>
 	<section class="prompt-section">
 		<label class="section-label" for="ai-prompt-{node.id}">Prompt</label>
 		<textarea
@@ -324,67 +393,35 @@
 		></textarea>
 	</section>
 
-	<section class="inputs-section" data-ai-inputs>
-		<h3 class="section-label">Inputs</h3>
-		{#if inputs.length === 0}
-			<p class="empty" data-ai-inputs-empty>
-				Nothing attached yet. Attach files here, or connect a node that has some.
-			</p>
-		{:else}
-			<ul>
-				{#each inputs as input, index (inputKey(input, index))}
-					<li
-						data-ai-input
-						data-ai-input-kind={input.kind}
-						data-ai-input-node={input.nodeId}
-						data-ai-input-asset-id={input.kind === 'file' ? input.assetId : undefined}
-					>
-						<div class="input-head">
-							<strong data-ai-input-name>{input.kind === 'file' ? input.name : input.title}</strong>
-							{#if input.label}
-								<span class="label-chip" data-ai-input-label>{input.label}</span>
-							{/if}
-							{#if input.kind === 'file'}
-								<span class="input-size" data-ai-input-size>{formatByteSize(input.size)}</span>
-							{/if}
-						</div>
-						{#if input.kind === 'file'}
-							{@const digest = digests[input.assetId]}
-							{#if digest}
-								<!-- Exactly what the request will carry about this file, rendered
-								     through the same function that builds it, so the promise the
-								     settings sheet makes is checkable on screen. -->
-								<pre class="digest" data-ai-digest>{renderDigest(digest, previewRows)}</pre>
-							{:else}
-								<p class="pending" data-ai-digest-pending>digesting…</p>
-							{/if}
-						{:else if input.description.trim() !== ''}
-							<p class="input-description" data-ai-input-description>{input.description}</p>
-						{/if}
-					</li>
-				{/each}
-			</ul>
-		{/if}
-	</section>
-
 	<section class="run-section" data-ai-run-controls>
-		<div class="modes" role="group" aria-label="Run mode">
-			{#each MODES as option (option.mode)}
-				<!-- Both of the other modes work *from* the stored script, so both are
-				     out of reach until a run has written one. -->
-				{@const disabled = option.mode !== 'analyse' && !hasScript}
-				<button
-					type="button"
-					class="mode"
-					data-ai-mode={option.mode}
-					aria-pressed={mode === option.mode}
-					{disabled}
-					title={disabled ? NO_SCRIPT_REASON : option.hint}
-					onclick={() => (modeOverride = option.mode)}
-				>
-					{option.label}
-				</button>
-			{/each}
+		<!--
+			A labelled switch rather than three bare buttons. Without the label and
+			the filled selection the row read as three actions, so pressing one
+			looked like an action that did nothing — the mode is a choice, and the
+			button beside it is the act.
+		-->
+		<div class="mode-block">
+			<span class="section-label" id="ai-mode-label-{node.id}">Mode</span>
+			<div class="modes" role="group" aria-labelledby="ai-mode-label-{node.id}">
+				{#each MODES as option (option.mode)}
+					<!-- Both of the other modes work *from* the stored script, so both are
+					     out of reach until a run has written one. -->
+					{@const disabled = option.mode !== 'analyse' && !hasScript}
+					<button
+						type="button"
+						class="mode"
+						data-ai-mode={option.mode}
+						aria-pressed={mode === option.mode}
+						{disabled}
+						title={disabled ? NO_SCRIPT_REASON : option.hint}
+						onclick={() => (modeOverride = option.mode)}
+					>
+						{option.label}
+					</button>
+				{/each}
+			</div>
+			<!-- What the selected mode will do, under the switch that selected it. -->
+			<p class="mode-hint" data-ai-mode-hint>{selectedMode.hint}</p>
 		</div>
 
 		{#if !hasScript}
@@ -396,6 +433,8 @@
 
 		<div class="run-actions">
 			{#if hasKey}
+				<!-- The button names the act of the selected mode, so the switch and the
+				     press agree about what is going to happen. -->
 				<button
 					type="button"
 					class="primary"
@@ -403,7 +442,11 @@
 					disabled={busy}
 					onclick={() => onRun?.(mode)}
 				>
-					Run
+					{#if busy}
+						<span class="dot" class:reduced-motion={reduceMotion} aria-hidden="true"></span>Running…
+					{:else}
+						{selectedMode.run}
+					{/if}
 				</button>
 			{:else}
 				<!-- The milestone's one-screen key flow, reached from the workbench: no
@@ -424,11 +467,15 @@
 			</button>
 		</div>
 
-		{#if !hasKey}
-			<p class="no-key" data-ai-no-key>
-				Running an AI node needs an Anthropic API key. It stays in this browser.
-			</p>
-		{/if}
+		<!--
+			Whether the key took, said here rather than left to the toolbar's fill.
+			Connect closes the sheet, and a sheet closing is not evidence of
+			anything; naming the model is.
+		-->
+		<p class="connection" data-ai-connection={hasKey ? 'connected' : 'disconnected'}>
+			<span class="status-dot" class:on={hasKey} aria-hidden="true"></span>
+			{hasKey ? `Connected · ${model}` : 'Not connected'}
+		</p>
 	</section>
 
 	{#if showLive}
@@ -609,6 +656,66 @@
 		</section>
 	{/if}
 
+	<!--
+		Below the controls and the answer, because it is the part a reader checks
+		rather than the part they act on. Each file is one line — name, size, and
+		the shape of the table — with the digest itself, which is the text that
+		actually leaves the machine, one disclosure away. It used to be open by
+		default, which put a screenful of somebody's CSV between the prompt and
+		the Run button.
+	-->
+	<section class="inputs-section" data-ai-inputs>
+		<h3 class="section-label">Inputs</h3>
+		{#if inputs.length === 0}
+			<p class="empty" data-ai-inputs-empty>
+				Nothing attached yet. Attach files here, or connect a node that has some.
+			</p>
+		{:else}
+			<ul>
+				{#each inputs as input, index (inputKey(input, index))}
+					{@const digest = input.kind === 'file' ? digests[input.assetId] : undefined}
+					<li
+						data-ai-input
+						data-ai-input-kind={input.kind}
+						data-ai-input-node={input.nodeId}
+						data-ai-input-asset-id={input.kind === 'file' ? input.assetId : undefined}
+					>
+						<div class="input-head" data-ai-digest-summary>
+							<strong data-ai-input-name>{input.kind === 'file' ? input.name : input.title}</strong>
+							{#if input.label}
+								<span class="label-chip" data-ai-input-label>{input.label}</span>
+							{/if}
+							{#if input.kind === 'file'}
+								<span class="input-size" data-ai-input-size>{formatByteSize(input.size)}</span>
+								{#if digest && digestShape(digest) !== ''}
+									<span class="input-shape" data-ai-input-shape>{digestShape(digest)}</span>
+								{/if}
+							{/if}
+						</div>
+						{#if input.kind === 'file'}
+							{#if digest}
+								{#if digest.kind === 'table'}
+									<!-- Exactly what the request will carry about this file, rendered
+									     through the same function that builds it, so the promise the
+									     settings sheet makes is checkable on screen — by a reader who
+									     asks for it, rather than at everyone all the time. -->
+									<details class="digest-panel">
+										<summary>{digestDisclosureLabel(previewRows)}</summary>
+										<pre class="digest" data-ai-digest>{renderDigest(digest, previewRows)}</pre>
+									</details>
+								{/if}
+							{:else}
+								<p class="pending" data-ai-digest-pending>digesting…</p>
+							{/if}
+						{:else if input.description.trim() !== ''}
+							<p class="input-description" data-ai-input-description>{input.description}</p>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	</section>
+
 	{#if hasScript}
 		<details class="script-panel" data-ai-script>
 			<summary>analysis.py</summary>
@@ -629,10 +736,30 @@
 	 */
 	.focus-content {
 		display: grid;
+		align-content: start;
 		gap: 1rem;
 		color: #334155;
 		font-size: 1.125rem;
 		line-height: 1.65;
+	}
+
+	/*
+	 * The one scroll container on this surface, bounded by the focus frame.
+	 * `100%` resolves because `NodeDetailsLayer` gives the body a definite
+	 * height; a caller that does not (a story) leaves it unbounded, which is the
+	 * old behaviour rather than a broken one. `hidden auto` rather than
+	 * `overflow-y: auto` alone: a single `visible` axis computes to `auto`, and a
+	 * horizontal scrollbar is not wanted — every `<pre>` here wraps.
+	 * `overscroll-behavior: contain` keeps the end of this scroll from becoming
+	 * the page's, and `touch-action: pan-y` reopens the one gesture `ZoomWorld`'s
+	 * `touch-action: none` would otherwise take from a finger.
+	 */
+	.ai-workbench {
+		box-sizing: border-box;
+		max-height: 100%;
+		overflow: hidden auto;
+		overscroll-behavior: contain;
+		touch-action: pan-y;
 	}
 
 	p,
@@ -716,6 +843,7 @@
 	}
 
 	.input-size,
+	.input-shape,
 	.pending,
 	.input-description {
 		color: #64748b;
@@ -755,10 +883,44 @@
 		font-size: 0.95rem;
 	}
 
+	.mode-block {
+		display: grid;
+		gap: 0.35rem;
+		justify-items: start;
+	}
+
+	/*
+	 * A segmented control: one bordered strip with hairlines between the
+	 * segments, so it reads as a choice of three rather than as three buttons
+	 * that each do something.
+	 */
 	.modes {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.4rem;
+		border: 1px solid #cbd5e1;
+		border-radius: 0.5rem;
+		overflow: hidden;
+		background: #ffffff;
+	}
+
+	.modes .mode {
+		border: 0;
+		border-radius: 0;
+		background: #ffffff;
+	}
+
+	.modes .mode + .mode {
+		border-left: 1px solid #cbd5e1;
+	}
+
+	.digest-panel summary {
+		color: #475569;
+		font-size: 0.8125rem;
+		cursor: pointer;
+	}
+
+	.digest-panel .digest {
+		margin-top: 0.35rem;
 	}
 
 	button {
@@ -790,6 +952,9 @@
 	}
 
 	button.primary {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.45rem;
 		border-color: #1d4ed8;
 		background: #1d4ed8;
 		color: #ffffff;
@@ -798,10 +963,37 @@
 		font-size: 1rem;
 	}
 
-	.no-key,
+	/* The running dot rides on a filled button, so it borrows the label's colour
+	   rather than the blue it uses on the pale live section. */
+	button.primary .dot {
+		background: currentcolor;
+	}
+
+	.mode-hint,
 	.mode-note {
 		color: #64748b;
 		font-size: 0.875rem;
+	}
+
+	.connection {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		color: #475569;
+		font-size: 0.875rem;
+	}
+
+	/* Grey until a key is in hand, green once one is: the same two states the
+	   toolbar's glyph carries, so the two agree at a glance. */
+	.status-dot {
+		width: 0.5rem;
+		height: 0.5rem;
+		border-radius: 999px;
+		background: #94a3b8;
+	}
+
+	.status-dot.on {
+		background: #16a34a;
 	}
 
 	.runtime,
@@ -829,8 +1021,11 @@
 	}
 
 	/* Both halves of the rule: the media query for a browser that answers it, the
-	   class for the runtime check the rest of the app uses. */
-	.running.reduced-motion .dot {
+	   class for the runtime check the rest of the app uses. The class sits on the
+	   line in the live section and on the dot itself inside the run button, which
+	   has no such line to carry it. */
+	.running.reduced-motion .dot,
+	.dot.reduced-motion {
 		animation: none;
 	}
 

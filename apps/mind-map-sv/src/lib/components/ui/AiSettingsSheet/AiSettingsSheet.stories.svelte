@@ -11,6 +11,9 @@
 		args: {
 			settings: defaultAiSettings(),
 			connected: false,
+			// No pause between a good key and the hand-back, so every story but the
+			// one about that pause asserts on the outcome rather than on a timer.
+			connectedDelayMs: 0,
 			validateKey: fn(async () => ({ ok: true }) as AiKeyValidation),
 			onSave: fn(),
 			onForget: fn(),
@@ -33,6 +36,7 @@
 		args: {
 			settings: AiSettings;
 			connected?: boolean;
+			connectedDelayMs?: number;
 			validateKey: (key: string) => Promise<AiKeyValidation>;
 			onSave: (settings: AiSettings) => void;
 			onForget: () => void;
@@ -178,5 +182,39 @@
 		// The run that opened the sheet is what continues from here (T08).
 		expect(spyFor(args.onConnected).mock.calls).toHaveLength(1);
 		expect(canvas.queryByRole('alert')).not.toBeInTheDocument();
+	}}
+/>
+
+<!--
+	`onConnected` closes the sheet, so a Connect that hands back immediately
+	leaves nothing on screen that says the key was accepted — the reader sees a
+	sheet vanish and a glyph change fill. The pause is the answer.
+-->
+<Story
+	name="UserSeesTheSheetSayConnectedBeforeItCloses"
+	args={{ connectedDelayMs: 500 }}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		const canvas = within(canvasElement);
+
+		await userEvent.type(canvas.getByLabelText('Anthropic API key'), 'sk-ant-good');
+		canvas.getByRole('button', { name: 'Connect' }).click();
+
+		const line = await waitFor(() => {
+			const found = canvasElement.querySelector('[data-ai-connection]');
+			expect(found?.textContent?.trim()).toBe('Connected.');
+			return found as HTMLElement;
+		});
+		expect(line).toHaveAttribute('data-ai-connection', 'connected');
+		// Green, the same green the workbench line and the toolbar dot use.
+		const dot = line.querySelector('span');
+		expect(getComputedStyle(dot as Element).backgroundColor).toBe('rgb(22, 163, 74)');
+		// The button agrees, and cannot be pressed a second time meanwhile.
+		expect(canvas.getByRole('button', { name: 'Connected' })).toBeDisabled();
+		// Still open: the hand-back that closes it has not happened yet.
+		expect(spyFor(args.onConnected).mock.calls).toHaveLength(0);
+
+		await waitFor(() => expect(spyFor(args.onConnected).mock.calls).toHaveLength(1), {
+			timeout: 3000
+		});
 	}}
 />

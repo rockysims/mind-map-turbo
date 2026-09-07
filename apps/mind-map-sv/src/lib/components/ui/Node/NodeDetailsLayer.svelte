@@ -45,9 +45,17 @@
 		grid-area: 1 / 1;
 		will-change: opacity;
 		display: grid;
+		/* The title, then everything else. `minmax(0, 1fr)` with `height: 100%` is
+		   what gives the body a *definite* height rather than a content-driven
+		   one, so a body that wants to be a scroll container (the AI workbench)
+		   can say `max-height: 100%` and land exactly on the frame. Content that
+		   does not — the details view — overflows the row and is clipped by the
+		   frame, which is what it already did when the article grew past it. */
+		grid-template-rows: auto minmax(0, 1fr);
 		align-content: start;
 		gap: 1rem;
 		width: 100%;
+		height: 100%;
 		min-height: 100%;
 		padding: clamp(1.25rem, 4vw, 3rem);
 		box-sizing: border-box;
@@ -66,7 +74,20 @@
 	}
 
 	.details-body {
-		display: grid;
+		/*
+		 * A column flex box rather than a grid, for one reason: a grid item's
+		 * percentage height resolves against its grid *area*, and an auto row's
+		 * area is sized by the item it holds, so `max-height: 100%` on the content
+		 * would silently mean `none`. A flex item's percentage resolves against
+		 * this box, whose height the row above makes definite. One child either
+		 * way, so it is the same box in the same place.
+		 */
+		display: flex;
+		flex-direction: column;
+		/* So this box can be shorter than the content inside it; without it the
+		   grid item's automatic minimum size pushes the row back out to content
+		   height and the definite height above is a fiction. */
+		min-height: 0;
 		gap: 1rem;
 		color: #334155;
 		font-size: 1.125rem;

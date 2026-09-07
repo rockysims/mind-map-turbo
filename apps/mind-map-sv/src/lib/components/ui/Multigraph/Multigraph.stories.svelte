@@ -6297,6 +6297,14 @@
 			);
 		});
 
+		// In the real focus frame, not just a story stage: the workbench is a
+		// scroller whose `max-height: 100%` actually resolves, which is the whole
+		// reason a tall one keeps its Run controls reachable. `none` here would
+		// mean the layer above it never handed down a definite height.
+		expect(getComputedStyle(workbench).overflowY).toBe('auto');
+		expect(getComputedStyle(workbench).maxHeight).not.toBe('none');
+		expect(workbench).toHaveAttribute('data-zoom-scroll');
+
 		(workbench.querySelector('[data-ai-run]') as HTMLElement).click();
 
 		// One run, committed once as a placeholder and once finished, with the
