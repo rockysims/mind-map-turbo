@@ -78,9 +78,13 @@
 		 * A column flex box rather than a grid, for one reason: a grid item's
 		 * percentage height resolves against its grid *area*, and an auto row's
 		 * area is sized by the item it holds, so `max-height: 100%` on the content
-		 * would silently mean `none`. A flex item's percentage resolves against
-		 * this box, whose height the row above makes definite. One child either
-		 * way, so it is the same box in the same place.
+		 * is only as definite as the browser chooses to make it. A flex item's
+		 * percentage resolves against this box, whose height the row above makes
+		 * definite, and that is stated rather than hoped for. (Once `ZoomWorld`
+		 * bound its subject to the frame, Chromium bounded the workbench through
+		 * the grid form too — but nothing in the spec promises that, and this app
+		 * ships to three engines.) One child either way, so it is the same box in
+		 * the same place.
 		 */
 		display: flex;
 		flex-direction: column;

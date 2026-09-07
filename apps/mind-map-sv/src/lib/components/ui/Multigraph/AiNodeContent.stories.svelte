@@ -6,6 +6,7 @@
 	import { collectAiInputs } from './lib/aiInputs';
 	import { IDLE_RUN_STATE, type AiRunState } from './lib/aiWorkbenchView';
 	import { makeGraph } from './lib/testFixtures';
+	import { APP_CONFIG } from '$lib/appConfig';
 	import { MemoryGraphAssetStore } from '$lib/assets/assetStore';
 	import type { FileDigest } from '$lib/ai/probeScript';
 	import type { GraphAssetMetadata, MultigraphData } from '../types/multigraph';
@@ -837,18 +838,31 @@
 		content.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 120 }));
 		expect(state).toHaveAttribute('data-stage-wheels', '0');
 
-		// At the top there is nowhere to scroll *up*, so a wheel-out reaches the
-		// world — which is the gesture that exits focus.
+		// At the top there is nowhere to scroll up, and magnifying a page of
+		// controls is not what that gesture meant: the world takes the wheel and
+		// does nothing with it. (Over a descendable image it would descend, which
+		// this surface has none of.)
 		content.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -120 }));
-		await waitFor(() => expect(state).toHaveAttribute('data-stage-wheels', '1'));
+		await waitFor(() => expect(state).toHaveAttribute('data-stage-swallows', '1'));
+		expect(state).toHaveAttribute('data-stage-wheels', '0');
 
-		// And at the bottom a wheel-down zooms again, so neither end is a dead end.
+		// At the bottom the wheel-out is the gesture that exits focus — but not
+		// while the scroll that got here is still coasting.
 		content.scrollTop = content.scrollHeight;
 		content.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 120 }));
-		await waitFor(() => expect(state).toHaveAttribute('data-stage-wheels', '2'));
+		await waitFor(() => expect(state).toHaveAttribute('data-stage-swallows', '2'));
+		expect(state).toHaveAttribute('data-stage-wheels', '0');
+
+		// Once the reader has paused, the same wheel reaches the world and leaves.
+		await new Promise((resolve) =>
+			setTimeout(resolve, APP_CONFIG.multigraph.focus.scrollerExitPauseMs + 60)
+		);
+		content.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 120 }));
+		await waitFor(() => expect(state).toHaveAttribute('data-stage-wheels', '1'));
 		// Still room upward from the bottom, so that direction stays the scroller's.
 		content.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -120 }));
-		expect(state).toHaveAttribute('data-stage-wheels', '2');
+		expect(state).toHaveAttribute('data-stage-wheels', '1');
+		expect(state).toHaveAttribute('data-stage-swallows', '2');
 
 		// A press on a control belongs to the control, not to a world pan — the
 		// rule `ZoomWorld` applies, checked here against every control this

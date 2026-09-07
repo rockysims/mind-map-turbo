@@ -292,6 +292,39 @@
 		);
 	}
 
+	/**
+	 * One wheel, answering the only question the focus surface's wheel policy
+	 * turns on: did the world take it (`preventDefault`), or is it the browser's
+	 * to scroll with? Note that a synthetic wheel carries no default action, so a
+	 * story that wants the scroll itself has to move `scrollTop` by hand.
+	 */
+	function wheelWasTaken(
+		target: HTMLElement,
+		deltaY: number,
+		clientX?: number,
+		clientY?: number
+	): boolean {
+		const center = getCenter(target);
+		const event = new WheelEvent('wheel', {
+			clientX: clientX ?? center.x,
+			clientY: clientY ?? center.y,
+			deltaY,
+			bubbles: true,
+			cancelable: true
+		});
+		target.dispatchEvent(event);
+		return event.defaultPrevented;
+	}
+
+	/** A block of nothing, tall enough to overflow whatever box it is put in. */
+	function appendTallFiller(host: HTMLElement, heightPx = 3000): HTMLElement {
+		const filler = document.createElement('div');
+		filler.dataset.storyFiller = 'true';
+		filler.style.height = `${heightPx}px`;
+		host.appendChild(filler);
+		return filler;
+	}
+
 	function sleep(ms: number = 0) {
 		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
@@ -6323,6 +6356,150 @@
 		expect(canvasElement.querySelector('[data-ai-stream-text]')).toHaveTextContent(
 			'Channel 2 rises steadily'
 		);
+	}}
+/>
+
+<!--
+	Reading a workbench taller than the frame, in the real frame.
+
+	The bug: `.zoom-world` had no grid template, so its one row was sized by the
+	subject and the subject by its content. A tall workbench therefore made the
+	world tall, `max-height: 100%` on the scroller resolved against the very
+	content it was meant to bound, and the scroller had no ends — so every wheel
+	went to the zoom and the reader could not scroll at all. The subject is now
+	exactly the frame, and what the reader feels is the policy above the
+	scroller: scroll while there is room, nothing at the top, and a paused
+	wheel-out at the bottom to leave.
+-->
+<Story
+	name="ATallWorkbenchScrollsBeforeAWheelReachesTheZoom"
+	args={{
+		multigraphData: AI_WORKBENCH_GRAPH,
+		defaultPrimaryNodeId: 'ai',
+		layoutSettings: { relaxIterations: 0 },
+		assetStore: aiAssetStore(),
+		assetScope: AI_SCOPE,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const dialog = await enterFocusOn(canvasElement, 'ai');
+		const workbench = await waitFor(() => {
+			const found = dialog.querySelector('[data-ai-workbench]');
+			expect(found).toBeInTheDocument();
+			return found as HTMLElement;
+		});
+		const world = dialog.querySelector('.zoom-world') as HTMLElement;
+		const subject = dialog.querySelector('.zoom-world-subject') as HTMLElement;
+
+		// The sizing everything below depends on: the subject is the frame, not
+		// whatever its content grew to.
+		expect(subject.offsetHeight).toBe(world.clientHeight);
+
+		// Taller than the frame — added here rather than fixtured, so the story
+		// says out loud what it is testing.
+		appendTallFiller(workbench);
+		await waitFor(() => {
+			expect(workbench.scrollHeight).toBeGreaterThan(workbench.clientHeight);
+		});
+		// ...and still bounded by it, which is what gives the scroller ends.
+		expect(workbench.clientHeight).toBeLessThanOrEqual(world.clientHeight);
+		expect(subject.offsetHeight).toBe(world.clientHeight);
+
+		// With room below, the wheel is the browser's: the world does not take it
+		// and does not move.
+		expect(wheelWasTaken(workbench, 120)).toBe(false);
+		expect(world.dataset.zoomWorldScale).toBe('1');
+		// The scroll a real wheel would have done; a synthetic one does nothing.
+		workbench.scrollTop = 240;
+		expect(workbench.scrollTop).toBeGreaterThan(0);
+
+		// Back at the top, a wheel-in is not a request to magnify a page of
+		// controls: the world takes it and does nothing with it.
+		workbench.scrollTop = 0;
+		expect(wheelWasTaken(workbench, -120)).toBe(true);
+		expect(world.dataset.zoomWorldScale).toBe('1');
+
+		// At the bottom the wheel-out is the gesture that leaves focus — but not
+		// while the scroll that got here is still coasting.
+		workbench.scrollTop = workbench.scrollHeight;
+		expect(wheelWasTaken(workbench, WHEEL_SLAM_OUT)).toBe(true);
+		expect(world.dataset.zoomWorldScale).toBe('1');
+		await expectFocusOn(canvasElement, 'ai');
+
+		// Once the reader has paused, the same wheel scrubs out and focus closes.
+		await sleep(APP_CONFIG.multigraph.focus.scrollerExitPauseMs + 60);
+		for (let attempt = 0; attempt < 8; attempt += 1) {
+			if (!canvasElement.querySelector('.focus-surface')) break;
+			wheelWasTaken(workbench, WHEEL_SLAM_OUT);
+			await sleep(60);
+		}
+		await waitFor(() => {
+			expect(canvasElement.querySelector('.focus-surface')).not.toBeInTheDocument();
+		});
+	}}
+/>
+
+<!--
+	The other content the same frame holds: the plain details view, which has no
+	scroller on purpose (it reads by zooming) and is simply clipped where the
+	frame ends. Binding the subject to the frame must not have changed that —
+	and the one scroller the details view does carry, the peek card's cascade,
+	still takes its own wheel.
+-->
+<Story
+	name="TheDetailsViewStillClipsToTheFrameWhileThePeekCardScrolls"
+	args={{
+		multigraphData: CONFIRM_FROM_A_PEEK,
+		defaultPrimaryNodeId: 'reader',
+		layoutSettings: NO_REVEALS,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const dialog = await enterFocusOn(canvasElement, 'reader');
+		const world = dialog.querySelector('.zoom-world') as HTMLElement;
+		const subject = dialog.querySelector('.zoom-world-subject') as HTMLElement;
+		const content = dialog.querySelector('.focus-content') as HTMLElement;
+
+		// Nothing here is a scroll container — checked before the peek card, which
+		// deliberately adds the only one this surface ever has.
+		for (const element of [content, ...content.querySelectorAll('*')]) {
+			const { overflowX, overflowY } = getComputedStyle(element);
+			expect([overflowX, overflowY]).not.toContain('scroll');
+			expect([overflowX, overflowY]).not.toContain('auto');
+		}
+
+		// Content taller than the frame overflows it and is clipped, exactly as
+		// before — what it must not do any more is make the frame taller.
+		expect(subject.offsetHeight).toBe(world.clientHeight);
+		appendTallFiller(content);
+		await waitFor(() => {
+			expect(content.getBoundingClientRect().bottom).toBeGreaterThan(
+				world.getBoundingClientRect().bottom
+			);
+		});
+		expect(subject.offsetHeight).toBe(world.clientHeight);
+
+		// The peek card's cascade is a marked scroller, so a wheel with room left
+		// in it belongs to the browser and the world stays put.
+		const card = await openPeekCard(canvasElement, 'g');
+		const scroller = card.querySelector('[data-peek-scroll]') as HTMLElement;
+		appendTallFiller(scroller, 800);
+		await waitFor(() => {
+			expect(scroller.scrollHeight).toBeGreaterThan(scroller.clientHeight);
+		});
+		scroller.scrollTop = 0;
+		expect(wheelWasTaken(scroller, 120)).toBe(false);
+		expect(world.dataset.zoomWorldScale).toBe('1');
+
+		// And a wheel over the description, which is inside no scroller at all,
+		// still zooms the world.
+		const description = content.querySelector('.description') as HTMLElement;
+		expect(wheelWasTaken(description, wheelFactor(2))).toBe(true);
+		await waitFor(() => {
+			expect(Number(world.dataset.zoomWorldScale)).toBeGreaterThan(1);
+		});
 	}}
 />
 

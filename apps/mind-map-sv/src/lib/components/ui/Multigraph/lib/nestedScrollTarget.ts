@@ -1,24 +1,43 @@
 /**
- * When a wheel over the zoom world belongs to a scroller inside it instead.
+ * What one wheel over the zoom world means when a scroller sits inside it.
  *
  * Focus mode reads by zooming: `ZoomWorld` swallows every wheel and moves the
  * world with it. That is the right default for a page of prose, and the wrong
  * one for a surface taller than the frame — the AI workbench with several input
  * files puts its Run controls below the frame, where the world's pan clamp
  * cannot reach them. So one kind of element is allowed to claim the wheel: a
- * marked (`data-zoom-scroll`) scroll container that still has somewhere to go in
- * the wheel's direction.
+ * marked (`data-zoom-scroll`) scroll container inside the world.
  *
- * The "still has somewhere to go" half is what keeps the world's gestures: a
- * scroller already at its top hands a wheel-out back, which is exactly the
- * gesture that exits focus, and one already at its bottom hands a wheel-in back
- * to the zoom. So the reader never hits a dead zone in either direction — the
- * boundary of the scroller is the boundary of the world's input.
+ * ## The three answers
+ *
+ * A marked scroller with room left in the wheel's direction takes it, and the
+ * browser scrolls natively (`scroll`). At either end of that scroller the wheel
+ * comes back — but handing it straight to the zoom is what made the surface
+ * feel broken, because the two ends mean different things:
+ *
+ * - Wheel-in (`deltaY < 0`, which also scrolls *up*) exhausted at the top:
+ *   magnifying a page of controls is never what that gesture meant, so the
+ *   world takes the wheel and does nothing (`swallow`). The one exception is a
+ *   descendable image under the cursor — that is the gesture that opens a plot
+ *   in the output grid into its own zoom level, so it still `zoom`s.
+ * - Wheel-out (`deltaY > 0`, which also scrolls *down*) exhausted at the
+ *   bottom: this is the scrub that leaves focus, so it does `zoom` — but only
+ *   after `exitPauseMs` of quiet. Trackpad momentum arrives as a long tail of
+ *   wheels after the finger has stopped, and without the pause that tail rides
+ *   straight off the end of a scroll and out of focus. Inside the pause the
+ *   wheel is swallowed instead, and the caller resets the exit scrub it may
+ *   already have accumulated.
+ *
+ * With no marked scroller in the chain, every wheel is a `zoom`, exactly as
+ * before any of this existed.
  *
  * The decision is stated over plain data so it can be specced without a DOM;
  * `nestedScrollChain` is the one-line adapter that reads that data off real
- * elements.
+ * elements. Deltas are in pixels — the caller normalizes with
+ * `wheelDeltaPixels` first — so a mouse wheel reporting lines and a trackpad
+ * reporting pixels are judged on the same scale.
  */
+import { APP_CONFIG } from '$lib/appConfig';
 
 /** One ancestor of the wheel's target, as the decision needs to see it. */
 export interface NestedScrollCandidate {
@@ -32,30 +51,87 @@ export interface NestedScrollCandidate {
 }
 
 /**
- * Whether the wheel should be left to the browser rather than zoomed.
+ * Who the wheel belongs to.
  *
- * `chain` runs from the wheel's target outward, stopping before the world
- * element itself; `deltaY` is the wheel's vertical delta, of which only the
- * sign is read. The nearest marked scroller that can still move in that
- * direction wins — a marked scroller at its end is passed over rather than
- * ending the walk, so a scrollable pane nested inside another one hands the
- * wheel outward before it hands it to the zoom.
- *
- * It declines to yield when: the delta is zero (nothing to scroll); no ancestor
- * is marked; a marked ancestor is not actually a scroll container
- * (`overflow-y` is anything but `auto` or `scroll`); or every marked scroller is
- * already at the end the wheel points at. The one-pixel slack in the bottom test
- * is for fractional layout heights, where `scrollTop + clientHeight` lands just
- * shy of `scrollHeight` at the very bottom.
+ * - `scroll`: the browser's — return without `preventDefault`, and remember
+ *   when it happened (the exit pause is measured from it).
+ * - `swallow`: the world's, and it does nothing with it — `preventDefault`, no
+ *   zoom, and any in-flight exit scrub goes back to zero.
+ * - `zoom`: the world's, on the usual terms.
  */
-export function yieldsToNestedScroll(chain: NestedScrollCandidate[], deltaY: number): boolean {
-	if (deltaY === 0) return false;
-	return chain.some((candidate) => canScrollBy(candidate, deltaY));
+type NestedWheelDecision = 'scroll' | 'swallow' | 'zoom';
+
+/** Everything the decision reads about one wheel. */
+export interface NestedWheelInput {
+	/** The wheel's target's ancestors, outward, stopping before the world. */
+	chain: NestedScrollCandidate[];
+	/** Pixel delta: negative zooms in and scrolls up, positive out and down. */
+	deltaY: number;
+	/** Since the last wheel this rule handed to a nested scroller. */
+	msSinceLastNestedScroll: number;
+	/** Whether a zoom-in here would descend into an image rather than magnify. */
+	descendableImageUnderCursor: boolean;
 }
 
+export function nestedWheelDecision(
+	input: NestedWheelInput,
+	exitPauseMs: number = APP_CONFIG.multigraph.focus.scrollerExitPauseMs
+): NestedWheelDecision {
+	const { chain, deltaY, msSinceLastNestedScroll, descendableImageUnderCursor } = input;
+	// No direction to scroll in, so nothing to hand over; the world's zoom math
+	// makes the same nothing of it.
+	if (deltaY === 0) return 'zoom';
+	// The nearest marked scroller that can still move wins — one at its end is
+	// passed over rather than ending the walk, so a scrollable pane nested inside
+	// another hands the wheel outward before it hands it to the world.
+	if (chain.some((candidate) => canScrollBy(candidate, deltaY))) return 'scroll';
+	if (!holdsMarkedScroller(chain)) return 'zoom';
+	if (deltaY < 0) return descendableImageUnderCursor ? 'zoom' : 'swallow';
+	return msSinceLastNestedScroll >= exitPauseMs ? 'zoom' : 'swallow';
+}
+
+/**
+ * The delta the exit scrub should accumulate, given where the wheel landed.
+ *
+ * Leaving focus from inside a scrollable surface is one gesture away from
+ * reading it, so it gets a bigger hump to roll over: the same wheel counts for
+ * `1 / resistance` of the scrub it would count for over plain content. A
+ * divisor on the delta rather than on the accumulated amount, because the scrub
+ * maps delta through the zoom curve — halving the delta is exactly "twice as
+ * much wheel", at any point in the zone.
+ */
+export function resistedExitDelta(
+	deltaY: number,
+	chain: NestedScrollCandidate[],
+	resistance: number = APP_CONFIG.multigraph.focus.scrollerExitResistance
+): number {
+	if (resistance <= 0 || !holdsMarkedScroller(chain)) return deltaY;
+	return deltaY / resistance;
+}
+
+/**
+ * Whether the chain holds a marked element that is really a scroll container
+ * with something to scroll. A marked box whose content fits is not one: it has
+ * no ends to be at, so every wheel over it is the world's, as it always was.
+ */
+export function holdsMarkedScroller(chain: NestedScrollCandidate[]): boolean {
+	return chain.some(
+		(candidate) =>
+			isMarkedScroller(candidate) && candidate.scrollHeight - candidate.clientHeight > 1
+	);
+}
+
+function isMarkedScroller(candidate: NestedScrollCandidate): boolean {
+	return candidate.marked && (candidate.overflowY === 'auto' || candidate.overflowY === 'scroll');
+}
+
+/**
+ * Whether this element can still move in the wheel's direction. The one-pixel
+ * slack in the bottom test is for fractional layout heights, where
+ * `scrollTop + clientHeight` lands just shy of `scrollHeight` at the very end.
+ */
 function canScrollBy(candidate: NestedScrollCandidate, deltaY: number): boolean {
-	if (!candidate.marked) return false;
-	if (candidate.overflowY !== 'auto' && candidate.overflowY !== 'scroll') return false;
+	if (!isMarkedScroller(candidate)) return false;
 	return deltaY < 0
 		? candidate.scrollTop > 0
 		: candidate.scrollTop + candidate.clientHeight < candidate.scrollHeight - 1;

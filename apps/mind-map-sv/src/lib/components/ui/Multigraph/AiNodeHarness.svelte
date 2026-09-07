@@ -18,7 +18,7 @@
 	import { collectAiInputs } from './lib/aiInputs';
 	import { promoteAiOutput, setAiPrompt } from './lib/aiNode';
 	import { IDLE_RUN_STATE, type AiRunState } from './lib/aiWorkbenchView';
-	import { nestedScrollChain, yieldsToNestedScroll } from './lib/nestedScrollTarget';
+	import { nestedScrollChain, nestedWheelDecision } from './lib/nestedScrollTarget';
 	import type { GraphAssetStore } from '$lib/assets/assetStore';
 	import type { FileDigest } from '$lib/ai/probeScript';
 	import type { MultigraphData } from '../types/multigraph';
@@ -61,6 +61,8 @@
 	let settingsOpens = $state(0);
 	/** Wheels that reached the stage — the zoom world's whole input in focus mode. */
 	let stageWheels = $state(0);
+	/** Wheels the world took and did nothing with, at an end of the scroller. */
+	let stageSwallows = $state(0);
 	/** Presses the world would have turned into a pan, which a control's must not. */
 	let stagePanStarts = $state(0);
 	/** The world's root, for the walk from a wheel's target up to it. */
@@ -81,12 +83,27 @@
 		);
 	}
 
+	/** When a wheel was last handed to the scroller, for the exit pause. */
+	let lastNestedScrollAt = 0;
+
 	/**
-	 * `ZoomWorld`'s other rule: a wheel inside a marked scroller that can still
-	 * move belongs to that scroller, and never reaches the world at all.
+	 * `ZoomWorld`'s other rule, imported rather than copied because it is a
+	 * shared module: a wheel inside a marked scroller that can still move belongs
+	 * to that scroller, and at either end the world takes it back — to zoom only
+	 * where zooming is what the gesture meant. Nothing on this surface is a
+	 * descendable image, and the real rule reads that off the DOM under the
+	 * cursor, which a harness has no business faking.
 	 */
-	function reachesWorld(event: WheelEvent): boolean {
-		return !yieldsToNestedScroll(nestedScrollChain(event.target, stage), event.deltaY);
+	function decideWheel(event: WheelEvent): void {
+		const decision = nestedWheelDecision({
+			chain: nestedScrollChain(event.target, stage),
+			deltaY: event.deltaY,
+			msSinceLastNestedScroll: Date.now() - lastNestedScrollAt,
+			descendableImageUnderCursor: false
+		});
+		if (decision === 'scroll') lastNestedScrollAt = Date.now();
+		else if (decision === 'swallow') stageSwallows += 1;
+		else stageWheels += 1;
 	}
 </script>
 
@@ -101,6 +118,7 @@
 		data-fixes={fixes}
 		data-settings-opens={settingsOpens}
 		data-stage-wheels={stageWheels}
+		data-stage-swallows={stageSwallows}
 		data-stage-pan-starts={stagePanStarts}
 	></div>
 	<!-- The zoom world's stand-in. `role="presentation"` for the same reason the
@@ -111,9 +129,7 @@
 		data-ai-stage
 		role="presentation"
 		style={frameHeightPx > 0 ? `height: ${frameHeightPx}px` : undefined}
-		onwheel={(event) => {
-			if (reachesWorld(event)) stageWheels += 1;
-		}}
+		onwheel={(event) => decideWheel(event)}
 		onpointerdown={(event) => {
 			if (wouldStartPan(event)) stagePanStarts += 1;
 		}}
