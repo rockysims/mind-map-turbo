@@ -1007,6 +1007,60 @@ describe('graph mutations', () => {
 
 				expect([...referencedAssetIds(graph)].sort()).toEqual(['a1', 'f1']);
 			});
+
+			// Nothing renders a run output as a content block, but the workbench
+			// shows it straight off the run record — so the sweep and the exporter
+			// have to count it or a downloaded document loses its history.
+			it('counts the outputs of an ai node run', () => {
+				const graph = makeGraph({
+					nodes: [
+						{
+							id: 'n0',
+							title: 'Analysis',
+							description: '',
+							addons: {
+								ai: {
+									prompt: '',
+									promoted: {},
+									runs: [
+										{
+											id: 'r1',
+											startedAt: 1,
+											status: 'done',
+											mode: 'analyse',
+											runtime: '0.27.7',
+											inputs: [],
+											summary: '',
+											outputs: [
+												{ name: 'plot.png', assetId: 'p1', mimeType: 'image/png' },
+												{ name: 'clean.csv', assetId: 'p2', mimeType: 'text/csv' }
+											],
+											toolCalls: 1
+										}
+									]
+								}
+							}
+						}
+					]
+				});
+
+				expect([...referencedAssetIds(graph)].sort()).toEqual(['p1', 'p2']);
+			});
+
+			it('counts nothing extra for an ai node that has never run', () => {
+				const graph = makeGraph({
+					nodes: [
+						{
+							id: 'n0',
+							title: 'Analysis',
+							description: '',
+							addons: { ai: { prompt: 'plot it', runs: [], promoted: {} } }
+						}
+					]
+				});
+
+				expect(referencedAssetIds(graph).size).toBe(0);
+			});
 		});
 
 		describe('updateNodeImageContent', () => {

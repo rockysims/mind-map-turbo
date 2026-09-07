@@ -1,0 +1,1053 @@
+<script lang="ts">
+	/**
+	 * The `!ai` node's workbench: the focus-content variant that sits beside
+	 * `NodeDetailsContent` and is chosen when the focused node carries the add-on.
+	 *
+	 * Top to bottom it is one working order: the prompt, what will be sent, how
+	 * to run it, what the run is doing right now, what came back, the script that
+	 * produced it, and what it cost. Nothing here talks to the network, the graph
+	 * or the Python runtime — every act is a callback, and every state the run
+	 * pipeline can be in arrives as `runState`, so this file is drawable from a
+	 * story with fixed data.
+	 *
+	 * ## Why there is no scroll container
+	 *
+	 * Focus mode's reader scrolls by zooming: a wheel over the surface reaches
+	 * `ZoomWorld` underneath and moves the world, exactly as it does over
+	 * `NodeDetailsContent`, whose story pins that nothing in its subtree may
+	 * become scrollable. A workbench is taller than a details view, so the
+	 * temptation to give the script panel its own scrollbar is real — and it
+	 * would put a dead zone in the middle of the surface where the reader's
+	 * usual gesture stops working. So the prompt field grows to its content
+	 * instead of scrolling, and every `<pre>` wraps. Pointer presses need no
+	 * handling either: `ZoomWorld` already declines to start a pan on a press
+	 * that lands on a control (see `startsOnInteractiveContent`), which is what
+	 * makes the textarea's caret and every button here work. Escape belongs to
+	 * the focus layer, so nothing here listens for it.
+	 */
+	import { untrack } from 'svelte';
+	import { APP_CONFIG } from '$lib/appConfig';
+	import type { GraphAssetStore } from '$lib/assets/assetStore';
+	import { renderDigest, type FileDigest } from '$lib/ai/probeScript';
+	import { prefersReducedMotion } from '$lib/reducedMotion';
+	import type { GraphAssetMetadata } from '../types/multigraph';
+	import type { AiAddon, AiRunMode, AiRunOutput, NodeData } from '../types/node';
+	import type { AiInput } from './lib/aiInputs';
+	import {
+		defaultRunMode,
+		latestDoneRun,
+		runMetadataLine,
+		staleOutputNames,
+		IDLE_RUN_STATE,
+		type AiRunState
+	} from './lib/aiWorkbenchView';
+	import { formatByteSize } from './lib/byteSize';
+
+	/** What a node without the add-on reads as, so this never renders half a surface. */
+	const EMPTY_AI: AiAddon = { prompt: '', runs: [], promoted: {} };
+
+	const NO_INPUTS: AiInput[] = [];
+	const NO_DIGESTS: Record<string, FileDigest> = {};
+
+	/**
+	 * The three modes, in the order they become available to a node: write a
+	 * script, edit it, run it again. Each label says what the run will *do*
+	 * rather than naming the mode, because "Refine" alone does not tell a reader
+	 * that the stored script is the thing being refined.
+	 */
+	/** Why Refine and Re-run are out of reach, said once and shown twice. */
+	const NO_SCRIPT_REASON = 'No stored script yet — run an analysis first.';
+
+	const MODES: { mode: AiRunMode; label: string; hint: string }[] = [
+		{ mode: 'analyse', label: 'Analyse', hint: 'Write a new script for this prompt' },
+		{ mode: 'refine', label: 'Refine', hint: 'Edit the stored script for the changed prompt' },
+		{
+			mode: 'rerun',
+			label: 'Re-run script',
+			hint: 'Run the stored script again, with no model call'
+		}
+	];
+
+	let {
+		node,
+		inputs = NO_INPUTS,
+		digests = NO_DIGESTS,
+		previewRows = APP_CONFIG.ai.previewRows,
+		assets = {},
+		assetStore = null,
+		assetScope = '',
+		runState = IDLE_RUN_STATE,
+		hasKey = false,
+		titleForNodeId = (nodeId: string) => nodeId,
+		onPromptChange,
+		onRun,
+		onCancel,
+		onPromote,
+		onFix,
+		onOpenSettings,
+		onJumpToNode
+	}: {
+		/** The focused node. Its `addons.ai` is what this whole surface draws. */
+		node: NodeData;
+		/** What a run would send, already collected by `collectAiInputs`. */
+		inputs?: AiInput[];
+		/**
+		 * The digest of each input file, keyed by asset id. A file with no entry
+		 * is still being measured, which is a state the reader sees rather than a
+		 * gap: the digest is what leaves the machine, so its absence is the one
+		 * reason not to press Run yet.
+		 */
+		digests?: Record<string, FileDigest>;
+		/**
+		 * The reader's preview-row setting, so the digest on screen is the digest
+		 * the request will carry. Defaults to the configured depth for a caller
+		 * that has no settings in hand.
+		 */
+		previewRows?: number;
+		assets?: Record<string, GraphAssetMetadata>;
+		assetStore?: GraphAssetStore | null;
+		assetScope?: string;
+		/** The run in flight, or `IDLE_RUN_STATE`. Never persisted (see `AiRunState`). */
+		runState?: AiRunState;
+		/** Whether a key is in hand. Without one, Run is replaced by the way to get one. */
+		hasKey?: boolean;
+		/** Names the node a promoted output lives in. Identity for a caller with no graph. */
+		titleForNodeId?: (nodeId: string) => string;
+		/** The prompt, committed on blur or Cmd+Enter rather than on every keystroke. */
+		onPromptChange?: (prompt: string) => void;
+		onRun?: (mode: AiRunMode) => void;
+		onCancel?: () => void;
+		/** Give one output a node of its own, bound by its name. */
+		onPromote?: (outputName: string) => void;
+		/**
+		 * Start a refine run against the traceback on screen. Offered only when
+		 * `runState.traceback` is there to send.
+		 */
+		onFix?: () => void;
+		/** Open the key sheet — the only thing offered when there is no key. */
+		onOpenSettings?: () => void;
+		/** Leave for a promoted node without pinning it, as the details view does. */
+		onJumpToNode?: (nodeId: string) => void;
+	} = $props();
+
+	const ai = $derived(node.addons?.ai ?? EMPTY_AI);
+	const hasScript = $derived((ai.script ?? '') !== '');
+	const latestRun = $derived(latestDoneRun(ai));
+	const metadataLine = $derived(latestRun === undefined ? '' : runMetadataLine(latestRun));
+	const staleNames = $derived(staleOutputNames(ai));
+	const reduceMotion = $derived(prefersReducedMotion());
+
+	const busy = $derived(runState.phase === 'running' || runState.phase === 'loading-runtime');
+
+	/**
+	 * The prompt as the reader has it, which is not the prompt the graph has
+	 * until a commit. Seeded once and re-seeded only when the graph's own prompt
+	 * moves underneath — an undo, or another surface editing the same node — so
+	 * typing is never fought by a re-render.
+	 */
+	let promptDraft = $state(untrack(() => (node.addons?.ai ?? EMPTY_AI).prompt));
+	let lastSeenPrompt = $state(untrack(() => (node.addons?.ai ?? EMPTY_AI).prompt));
+	let promptField = $state<HTMLTextAreaElement | null>(null);
+	/**
+	 * The mode the reader picked, or `null` for "whatever the node currently
+	 * calls for". Cleared on every prompt commit, because a commit is exactly the
+	 * event that changes the answer.
+	 */
+	let modeOverride = $state<AiRunMode | null>(null);
+	/** One object URL per output blob, revoked when the run or the node changes. */
+	let assetUrls = $state<Record<string, string>>({});
+
+	const fallbackMode = $derived(defaultRunMode(ai));
+	/**
+	 * The reader's pick, or what the node calls for. A pick that needs the stored
+	 * script falls back once the script goes — an undo can take it away while the
+	 * switch is sitting on Refine, and running an analyse in Refine's clothing
+	 * would be worse than moving the highlight.
+	 */
+	const mode = $derived<AiRunMode>(
+		modeOverride === null || (modeOverride !== 'analyse' && !hasScript)
+			? fallbackMode
+			: modeOverride
+	);
+
+	$effect(() => {
+		const current = ai.prompt;
+		if (current === untrack(() => lastSeenPrompt)) return;
+		lastSeenPrompt = current;
+		promptDraft = current;
+	});
+
+	/**
+	 * Grow the field to its text instead of scrolling it. `auto` first, so the
+	 * measured `scrollHeight` is the content's height rather than the height the
+	 * field already had — without it a field only ever grows.
+	 */
+	$effect(() => {
+		const field = promptField;
+		if (field === null) return;
+		// Read so the effect re-runs on every keystroke; the write below is what
+		// the measurement is for.
+		void promptDraft;
+		field.style.height = 'auto';
+		field.style.height = `${field.scrollHeight}px`;
+	});
+
+	const outputs = $derived<AiRunOutput[]>(latestRun?.outputs ?? []);
+	const imageOutputs = $derived(outputs.filter((output) => output.mimeType.startsWith('image/')));
+	const fileOutputs = $derived(outputs.filter((output) => !output.mimeType.startsWith('image/')));
+
+	/**
+	 * Object URLs for the outputs on screen, built up front for the same reason
+	 * `NodeDetailsContent` builds them up front: Open is an `<a href>`, and a
+	 * blob fetched from IndexedDB behind the tap would put an `await` between the
+	 * press and the navigation, which is the gap mobile Safari's popup blocker
+	 * and a `file://` page both refuse.
+	 */
+	$effect(() => {
+		let cancelled = false;
+		const urlsToRevoke: string[] = [];
+		const wanted = outputs.map((output) => output.assetId);
+		const store = assetStore;
+		const scope = assetScope;
+
+		async function loadOutputs(): Promise<void> {
+			if (store === null || scope === '') return;
+			const loaded: Record<string, string> = {};
+			for (const assetId of wanted) {
+				const asset = await store.get(scope, assetId);
+				if (!asset.ok) continue;
+				const url = URL.createObjectURL(asset.value.blob);
+				urlsToRevoke.push(url);
+				loaded[assetId] = url;
+			}
+			if (!cancelled) assetUrls = loaded;
+		}
+
+		void loadOutputs();
+		return () => {
+			cancelled = true;
+			for (const url of urlsToRevoke) URL.revokeObjectURL(url);
+		};
+	});
+
+	function commitPrompt(): void {
+		if (promptDraft === ai.prompt) return;
+		lastSeenPrompt = promptDraft;
+		modeOverride = null;
+		onPromptChange?.(promptDraft);
+	}
+
+	/**
+	 * Cmd+Enter commits without leaving the field, so a reader can settle the
+	 * prompt and press Run without a round trip through blur. Ctrl+Enter too:
+	 * the same keystroke on the other platform.
+	 */
+	function handlePromptKeydown(event: KeyboardEvent): void {
+		if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey)) return;
+		event.preventDefault();
+		commitPrompt();
+	}
+
+	/** A stable key per input row: the same asset can be attached to two nodes. */
+	function inputKey(input: AiInput, index: number): string {
+		return input.kind === 'file'
+			? `${index}:${input.nodeId}:${input.assetId}`
+			: `${index}:${input.nodeId}`;
+	}
+
+	function runtimeProgressText(): string {
+		const progress = runState.runtimeProgress;
+		if (progress === undefined) return 'Loading the Python runtime.';
+		const loaded = formatByteSize(progress.loadedBytes);
+		return progress.totalBytes === undefined
+			? `Loading the Python runtime — ${loaded} so far.`
+			: `Loading the Python runtime — ${loaded} of ${formatByteSize(progress.totalBytes)}.`;
+	}
+
+	function stepStatusText(exitCode: number | null): string {
+		if (exitCode === null) return 'running';
+		return exitCode === 0 ? 'finished' : `failed, exit ${exitCode}`;
+	}
+
+	/**
+	 * The response on screen: what is streaming while a run is live, and the
+	 * stored summary of the last completed run once nothing is.
+	 */
+	const streamedText = $derived(runState.phase === 'idle' ? '' : runState.text);
+	const storedSummary = $derived(
+		runState.phase === 'idle' && runState.error === undefined ? (latestRun?.summary ?? '') : ''
+	);
+	const showLive = $derived(
+		runState.phase !== 'idle' || runState.error !== undefined || runState.steps.length > 0
+	);
+</script>
+
+{#snippet outputActions(output: AiRunOutput)}
+	{@const promotedNodeId = ai.promoted[output.name]}
+	<div class="output-actions">
+		{#if promotedNodeId === undefined}
+			<button
+				type="button"
+				class="promote"
+				data-ai-promote={output.name}
+				onclick={() => onPromote?.(output.name)}
+			>
+				Promote
+			</button>
+		{:else}
+			<span class="promoted-note">In</span>
+			<button
+				type="button"
+				class="jump"
+				data-ai-jump={promotedNodeId}
+				onclick={() => onJumpToNode?.(promotedNodeId)}
+			>
+				{titleForNodeId(promotedNodeId)}
+			</button>
+		{/if}
+	</div>
+{/snippet}
+
+<div class="focus-content ai-workbench" data-ai-workbench data-focus-zoom-scale="1">
+	<section class="prompt-section">
+		<label class="section-label" for="ai-prompt-{node.id}">Prompt</label>
+		<textarea
+			id="ai-prompt-{node.id}"
+			class="prompt"
+			data-ai-prompt
+			rows="3"
+			bind:this={promptField}
+			bind:value={promptDraft}
+			placeholder="Plot channel 2 against time for each file on shared axes."
+			onblur={commitPrompt}
+			onkeydown={handlePromptKeydown}
+		></textarea>
+	</section>
+
+	<section class="inputs-section" data-ai-inputs>
+		<h3 class="section-label">Inputs</h3>
+		{#if inputs.length === 0}
+			<p class="empty" data-ai-inputs-empty>
+				Nothing attached yet. Attach files here, or connect a node that has some.
+			</p>
+		{:else}
+			<ul>
+				{#each inputs as input, index (inputKey(input, index))}
+					<li
+						data-ai-input
+						data-ai-input-kind={input.kind}
+						data-ai-input-node={input.nodeId}
+						data-ai-input-asset-id={input.kind === 'file' ? input.assetId : undefined}
+					>
+						<div class="input-head">
+							<strong data-ai-input-name>{input.kind === 'file' ? input.name : input.title}</strong>
+							{#if input.label}
+								<span class="label-chip" data-ai-input-label>{input.label}</span>
+							{/if}
+							{#if input.kind === 'file'}
+								<span class="input-size" data-ai-input-size>{formatByteSize(input.size)}</span>
+							{/if}
+						</div>
+						{#if input.kind === 'file'}
+							{@const digest = digests[input.assetId]}
+							{#if digest}
+								<!-- Exactly what the request will carry about this file, rendered
+								     through the same function that builds it, so the promise the
+								     settings sheet makes is checkable on screen. -->
+								<pre class="digest" data-ai-digest>{renderDigest(digest, previewRows)}</pre>
+							{:else}
+								<p class="pending" data-ai-digest-pending>digesting…</p>
+							{/if}
+						{:else if input.description.trim() !== ''}
+							<p class="input-description" data-ai-input-description>{input.description}</p>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	</section>
+
+	<section class="run-section" data-ai-run-controls>
+		<div class="modes" role="group" aria-label="Run mode">
+			{#each MODES as option (option.mode)}
+				<!-- Both of the other modes work *from* the stored script, so both are
+				     out of reach until a run has written one. -->
+				{@const disabled = option.mode !== 'analyse' && !hasScript}
+				<button
+					type="button"
+					class="mode"
+					data-ai-mode={option.mode}
+					aria-pressed={mode === option.mode}
+					{disabled}
+					title={disabled ? NO_SCRIPT_REASON : option.hint}
+					onclick={() => (modeOverride = option.mode)}
+				>
+					{option.label}
+				</button>
+			{/each}
+		</div>
+
+		{#if !hasScript}
+			<!-- The disabled buttons carry the reason as a tooltip, and a disabled
+			     button does not reliably show one — so the reason is also on the
+			     screen, where a reader who cannot hover will find it. -->
+			<p class="mode-note" data-ai-mode-note>{NO_SCRIPT_REASON}</p>
+		{/if}
+
+		<div class="run-actions">
+			{#if hasKey}
+				<button
+					type="button"
+					class="primary"
+					data-ai-run
+					disabled={busy}
+					onclick={() => onRun?.(mode)}
+				>
+					Run
+				</button>
+			{:else}
+				<!-- The milestone's one-screen key flow, reached from the workbench: no
+				     key means there is nothing to press Run for, so the button says
+				     what actually has to happen first. -->
+				<button type="button" class="primary" data-ai-connect onclick={() => onOpenSettings?.()}>
+					Connect to Claude
+				</button>
+			{/if}
+			<button
+				type="button"
+				class="cancel"
+				data-ai-cancel
+				disabled={!busy}
+				onclick={() => onCancel?.()}
+			>
+				Cancel
+			</button>
+		</div>
+
+		{#if !hasKey}
+			<p class="no-key" data-ai-no-key>
+				Running an AI node needs an Anthropic API key. It stays in this browser.
+			</p>
+		{/if}
+	</section>
+
+	{#if showLive}
+		<section class="live-section" data-ai-live data-ai-phase={runState.phase}>
+			{#if runState.phase === 'loading-runtime'}
+				<p class="runtime" data-ai-runtime-progress aria-live="polite">
+					{runtimeProgressText()}
+					<span class="runtime-note">Tens of megabytes, once per browser — cached after that.</span>
+				</p>
+			{/if}
+
+			{#if runState.phase === 'running'}
+				<p class="running" class:reduced-motion={reduceMotion} data-ai-running aria-live="polite">
+					<span class="dot" aria-hidden="true"></span>Running
+				</p>
+			{/if}
+
+			{#if runState.thinking.trim() !== ''}
+				<details class="thinking" data-ai-thinking>
+					<summary>Thinking</summary>
+					<p data-ai-thinking-text>{runState.thinking}</p>
+				</details>
+			{/if}
+
+			{#if streamedText.trim() !== ''}
+				<p class="response" data-ai-stream-text>{streamedText}</p>
+			{/if}
+
+			{#if runState.steps.length > 0}
+				<ol class="steps" data-ai-steps>
+					{#each runState.steps as step, index (index)}
+						<li
+							data-ai-step={index + 1}
+							data-ai-step-exit-code={step.exitCode === null ? 'running' : `${step.exitCode}`}
+						>
+							<p class="step-head">
+								<strong>analysis.py</strong>
+								<span data-ai-step-status>{stepStatusText(step.exitCode)}</span>
+							</p>
+							<pre class="stdout" data-ai-step-stdout>{step.stdoutTail}</pre>
+						</li>
+					{/each}
+				</ol>
+			{/if}
+
+			{#if runState.error !== undefined}
+				<!-- Refusals and failures land in the same place the response would,
+				     which is the milestone's rule; the flag is what separates "Claude
+				     declined" from "something broke" without parsing the sentence. -->
+				<div
+					class="error"
+					class:refusal={runState.refusal === true}
+					data-ai-error
+					data-ai-refusal={runState.refusal === true ? 'true' : 'false'}
+					role="alert"
+				>
+					<p>
+						<strong
+							>{runState.refusal === true
+								? 'Claude declined this request.'
+								: 'The run failed.'}</strong
+						>
+						<span data-ai-error-text>{runState.error}</span>
+					</p>
+					{#if runState.traceback !== undefined}
+						<!-- A re-run calls no model, so nothing has explained this failure
+						     to the reader: the traceback is the whole of what is known,
+						     and the button hands exactly it to a refine run. -->
+						<pre class="stdout" data-ai-traceback>{runState.traceback}</pre>
+						<div class="fix-actions">
+							<button type="button" data-ai-fix disabled={busy} onclick={() => onFix?.()}>
+								Fix with AI
+							</button>
+						</div>
+					{/if}
+				</div>
+			{/if}
+		</section>
+	{/if}
+
+	{#if storedSummary.trim() !== ''}
+		<p class="response" data-ai-summary>{storedSummary}</p>
+	{/if}
+
+	{#if outputs.length > 0}
+		<section class="outputs-section" data-ai-outputs>
+			<h3 class="section-label">Outputs</h3>
+			{#if imageOutputs.length > 0}
+				<!-- The same grid and the same `data-asset-id` the details view draws,
+				     which is the whole reason nested zoom works here for free. -->
+				<div class="image-grid" aria-label="Run outputs">
+					{#each imageOutputs as output (output.assetId)}
+						{@const asset = assets[output.assetId]}
+						<!-- The name leads, because it is the binding a promoted node is made
+						     by and the filename the script has to keep stable between runs.
+						     It is also where `<figcaption>` is allowed to sit given the
+						     actions row below the frame. -->
+						<figure data-ai-output={output.name}>
+							<figcaption>{output.name}</figcaption>
+							{#if assetUrls[output.assetId]}
+								<div class="image-frame" role="presentation">
+									<img
+										class="focus-image"
+										data-asset-id={output.assetId}
+										src={assetUrls[output.assetId]}
+										alt={output.name}
+									/>
+								</div>
+							{:else}
+								<div class="missing-image" role="img" aria-label={output.name}>
+									{asset?.name ?? output.name}
+								</div>
+							{/if}
+							{@render outputActions(output)}
+						</figure>
+					{/each}
+				</div>
+			{/if}
+
+			{#if fileOutputs.length > 0}
+				<ul class="file-list" aria-label="Run output files">
+					{#each fileOutputs as output (output.assetId)}
+						{@const url = assetUrls[output.assetId]}
+						{@const asset = assets[output.assetId]}
+						<li data-ai-output={output.name} data-file-asset-id={output.assetId}>
+							<div class="file-meta">
+								<strong data-file-name>{output.name}</strong>
+								<span data-file-type>{output.mimeType}</span>
+								<!-- The size comes off the registered metadata rather than the run
+								     record, which stores only what binds a promoted node. -->
+								<span data-file-size>{formatByteSize(asset?.size ?? 0)}</span>
+							</div>
+							{#if url}
+								<!-- An anchor, for the reason `NodeDetailsContent` gives: the URL is
+								     already in hand, so the tap is a navigation the reader made. -->
+								<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+								<a class="file-open" data-file-open href={url} target="_blank" rel="noopener"
+									>Open</a
+								>
+							{:else}
+								<span class="file-unavailable" data-file-unavailable>Unavailable</span>
+							{/if}
+							{@render outputActions(output)}
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		</section>
+	{/if}
+
+	{#if staleNames.length > 0}
+		<!-- A promoted figure the latest run stopped drawing keeps its image on the
+		     node and says so here. It is not in the grid above by construction —
+		     the grid is the latest run's outputs, and these are exactly the names
+		     that run did not produce. -->
+		<section class="stale-section" data-ai-stale-outputs>
+			<h3 class="section-label">Not produced by the last run</h3>
+			<ul>
+				{#each staleNames as name (name)}
+					{@const promotedNodeId = ai.promoted[name]}
+					<li data-ai-stale-output={name}>
+						<strong>{name}</strong>
+						<span class="stale-mark" data-ai-stale>stale</span>
+						{#if promotedNodeId !== undefined}
+							<span class="promoted-note">In</span>
+							<button
+								type="button"
+								class="jump"
+								data-ai-jump={promotedNodeId}
+								onclick={() => onJumpToNode?.(promotedNodeId)}
+							>
+								{titleForNodeId(promotedNodeId)}
+							</button>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+		</section>
+	{/if}
+
+	{#if hasScript}
+		<details class="script-panel" data-ai-script>
+			<summary>analysis.py</summary>
+			<pre class="script" data-ai-script-source>{ai.script}</pre>
+		</details>
+	{/if}
+
+	{#if metadataLine !== ''}
+		<p class="metadata" data-ai-metadata>{metadataLine}</p>
+	{/if}
+</div>
+
+<style>
+	/*
+	 * The details view's own shell, repeated rather than shared: both are
+	 * focus-content variants and both want the same reading measure, and Svelte
+	 * scopes styles per component so there is nothing to import.
+	 */
+	.focus-content {
+		display: grid;
+		gap: 1rem;
+		color: #334155;
+		font-size: 1.125rem;
+		line-height: 1.65;
+	}
+
+	p,
+	figure,
+	h3 {
+		margin: 0;
+	}
+
+	ul,
+	ol {
+		display: grid;
+		gap: 0.5rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.section-label {
+		display: block;
+		color: #475569;
+		font-size: 0.8125rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+	}
+
+	.prompt-section,
+	.inputs-section,
+	.run-section,
+	.live-section,
+	.outputs-section,
+	.stale-section {
+		display: grid;
+		gap: 0.5rem;
+	}
+
+	/*
+	 * `overflow: hidden` with a height written by the autosize effect: the field
+	 * grows to its text so it never becomes the scroll container this surface
+	 * must not have. `hidden` rather than `auto` for the same reason.
+	 */
+	.prompt {
+		box-sizing: border-box;
+		width: 100%;
+		min-height: 5rem;
+		overflow: hidden;
+		resize: none;
+		border: 1px solid #cbd5e1;
+		border-radius: 0.5rem;
+		padding: 0.625rem 0.75rem;
+		background: #ffffff;
+		color: #0f172a;
+		font: inherit;
+		font-size: 1.0625rem;
+		line-height: 1.5;
+	}
+
+	.inputs-section li {
+		display: grid;
+		gap: 0.35rem;
+		padding: 0.6rem 0.75rem;
+		border: 1px solid #cbd5e1;
+		border-radius: 0.5rem;
+		background: #f8fafc;
+		font-size: 0.95rem;
+	}
+
+	.input-head {
+		display: flex;
+		align-items: baseline;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+
+	.label-chip {
+		border-radius: 999px;
+		padding: 0.05rem 0.5rem;
+		background: #e2e8f0;
+		color: #334155;
+		font-size: 0.8125rem;
+	}
+
+	.input-size,
+	.pending,
+	.input-description {
+		color: #64748b;
+		font-size: 0.875rem;
+	}
+
+	.pending {
+		font-style: italic;
+	}
+
+	/*
+	 * Wrapped rather than scrolled, so a wide digest costs height instead of a
+	 * horizontal scrollbar inside a surface whose reader scrolls by zooming.
+	 */
+	.digest,
+	.stdout,
+	.script {
+		margin: 0;
+		border-radius: 0.35rem;
+		padding: 0.5rem 0.6rem;
+		background: #0f172a;
+		color: #e2e8f0;
+		font-family: ui-monospace, 'SF Mono', 'Menlo', monospace;
+		font-size: 0.8125rem;
+		line-height: 1.45;
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
+
+	.digest {
+		background: #eef2f7;
+		color: #334155;
+	}
+
+	.empty {
+		color: #64748b;
+		font-size: 0.95rem;
+	}
+
+	.modes {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+	}
+
+	button {
+		border: 1px solid #cbd5e1;
+		border-radius: 0.4rem;
+		background: #f8fafc;
+		color: #334155;
+		padding: 0.35rem 0.75rem;
+		font: inherit;
+		font-size: 0.95rem;
+		cursor: pointer;
+	}
+
+	button:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.mode[aria-pressed='true'] {
+		border-color: #0f172a;
+		background: #0f172a;
+		color: #ffffff;
+	}
+
+	.run-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	button.primary {
+		border-color: #1d4ed8;
+		background: #1d4ed8;
+		color: #ffffff;
+		min-height: 2.5rem;
+		padding: 0.4rem 1.25rem;
+		font-size: 1rem;
+	}
+
+	.no-key,
+	.mode-note {
+		color: #64748b;
+		font-size: 0.875rem;
+	}
+
+	.runtime,
+	.running {
+		display: flex;
+		align-items: baseline;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+		color: #475569;
+		font-size: 0.925rem;
+	}
+
+	.runtime-note {
+		color: #94a3b8;
+		font-size: 0.8125rem;
+	}
+
+	.dot {
+		align-self: center;
+		width: 0.5rem;
+		height: 0.5rem;
+		border-radius: 999px;
+		background: #1d4ed8;
+		animation: pulse 1.2s ease-in-out infinite;
+	}
+
+	/* Both halves of the rule: the media query for a browser that answers it, the
+	   class for the runtime check the rest of the app uses. */
+	.running.reduced-motion .dot {
+		animation: none;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.dot {
+			animation: none;
+		}
+	}
+
+	@keyframes pulse {
+		0%,
+		100% {
+			opacity: 1;
+		}
+
+		50% {
+			opacity: 0.3;
+		}
+	}
+
+	.thinking summary {
+		color: #475569;
+		font-size: 0.925rem;
+		cursor: pointer;
+	}
+
+	.thinking p {
+		padding-top: 0.35rem;
+		color: #64748b;
+		font-size: 0.925rem;
+		white-space: pre-wrap;
+	}
+
+	.response {
+		white-space: pre-wrap;
+	}
+
+	.steps li {
+		display: grid;
+		gap: 0.35rem;
+		padding: 0.5rem 0.6rem;
+		border-left: 3px solid #cbd5e1;
+	}
+
+	.steps li[data-ai-step-exit-code='running'] {
+		border-left-color: #1d4ed8;
+	}
+
+	/* Anything but a clean exit is amber: a traceback is the state the reader has
+	   to act on, and it is also the one the next refine run carries. */
+	.steps li:not([data-ai-step-exit-code='0']):not([data-ai-step-exit-code='running']) {
+		border-left-color: #f59e0b;
+	}
+
+	.step-head {
+		display: flex;
+		align-items: baseline;
+		gap: 0.5rem;
+		font-size: 0.875rem;
+	}
+
+	.step-head span {
+		color: #64748b;
+	}
+
+	.error {
+		display: grid;
+		gap: 0.45rem;
+		justify-items: start;
+		padding: 0.6rem 0.75rem;
+		border-left: 3px solid #ef4444;
+		background: #fef2f2;
+		font-size: 0.95rem;
+		white-space: pre-wrap;
+	}
+
+	/* The sentence keeps the two rows it had before the traceback joined it: what
+	   happened, then what was said about it. */
+	.error p {
+		display: grid;
+		gap: 0.2rem;
+	}
+
+	.error .stdout {
+		justify-self: stretch;
+	}
+
+	/* The one action inside a failure, on its own row so it is not read as part
+	   of the traceback above it. */
+	.fix-actions button {
+		border-color: #b91c1c;
+		background: #ffffff;
+		color: #b91c1c;
+	}
+
+	/* A refusal is an answer, not a failure, so it takes the informational edge
+	   the details view gives its "nobody has said so yet" states. */
+	.error.refusal {
+		border-left-color: #94a3b8;
+		background: #f1f5f9;
+	}
+
+	.image-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+		gap: 1rem;
+	}
+
+	figure {
+		display: grid;
+		gap: 0.5rem;
+	}
+
+	.image-frame,
+	.missing-image {
+		aspect-ratio: 4 / 3;
+		width: 100%;
+		border: 1px solid #cbd5e1;
+		border-radius: 0.5rem;
+		background: #f8fafc;
+		overflow: hidden;
+	}
+
+	img {
+		width: 100%;
+		height: 100%;
+		object-fit: contain;
+	}
+
+	.missing-image {
+		display: grid;
+		place-items: center;
+		color: #64748b;
+	}
+
+	figcaption {
+		color: #475569;
+		font-size: 0.925rem;
+	}
+
+	.file-list li,
+	.stale-section li {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.5rem 0.75rem;
+		padding: 0.6rem 0.75rem;
+		border: 1px solid #cbd5e1;
+		border-radius: 0.5rem;
+		background: #f8fafc;
+		font-size: 0.95rem;
+	}
+
+	.file-meta {
+		display: flex;
+		align-items: baseline;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		flex: 1 1 12rem;
+		min-width: 0;
+	}
+
+	.file-meta span {
+		color: #64748b;
+		font-size: 0.875rem;
+	}
+
+	.file-open {
+		border: 1px solid #94a3b8;
+		border-radius: 0.35rem;
+		background: #e2e8f0;
+		color: #0f172a;
+		padding: 0.4rem 0.9rem;
+		font-size: 0.95rem;
+		text-decoration: none;
+	}
+
+	.file-unavailable {
+		color: #64748b;
+		font-size: 0.875rem;
+		font-style: italic;
+	}
+
+	.output-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		margin-left: auto;
+	}
+
+	.promoted-note {
+		color: #64748b;
+		font-size: 0.875rem;
+	}
+
+	.stale-mark {
+		border-radius: 999px;
+		padding: 0.05rem 0.5rem;
+		background: #fef3c7;
+		color: #92400e;
+		font-size: 0.8125rem;
+		font-weight: 600;
+	}
+
+	.script-panel summary {
+		color: #475569;
+		font-size: 0.925rem;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.script-panel .script {
+		margin-top: 0.4rem;
+	}
+
+	.metadata {
+		color: #64748b;
+		font-size: 0.875rem;
+	}
+</style>

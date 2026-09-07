@@ -24,11 +24,20 @@
 		withRandomTagsAndDirections
 	} from './lib/testFixtures';
 	import type { MultigraphData, Point } from '../types/multigraph';
-	import type { QuantityDesignation } from '../types/node';
+	import type { AiRun, QuantityDesignation } from '../types/node';
 	import type { GraphCommitIntent } from '../types/history';
 	import type { ViewState } from '$lib/migrations';
 	import type { ExitingBuffer } from './lib/elementTransitions';
-	import type { GraphAssetStore, StoredGraphAsset } from '$lib/assets/assetStore';
+	import type Anthropic from '@anthropic-ai/sdk';
+	import type { AiClient, AiTurn } from '$lib/ai/aiClient';
+	import { createFakeAiClient } from '$lib/ai/fakeClient';
+	import { createFakeExecutor } from '$lib/ai/fakeExecutor';
+	import type { PyExecutor } from '$lib/ai/pyExecutor';
+	import {
+		MemoryGraphAssetStore,
+		type GraphAssetStore,
+		type StoredGraphAsset
+	} from '$lib/assets/assetStore';
 
 	const { Story } = defineMeta({
 		title: 'Components/Multigraph',
@@ -608,6 +617,189 @@
 	 * for: the reader can see that g comes from somewhere and cannot see where.
 	 */
 	const NO_REVEALS = { displayedLayers: 1, relaxIterations: 0, dataflowDisplayedLayers: 0 };
+
+	/* ---------------------------------------------------------------------- *
+	 * The `!ai` workbench, run end to end with the fakes.
+	 *
+	 * Nothing here is a network or a Python runtime: the client replays two
+	 * scripted turns and the executor answers with a fixed PNG, which is what
+	 * makes "press Run and an output lands in the grid" a deterministic
+	 * assertion rather than a wait on a model.
+	 * ---------------------------------------------------------------------- */
+
+	const AI_SCOPE = 'ai-story';
+	const AI_CSV_ASSET_ID = 'ai-csv-asset';
+	const AI_CSV_TEXT = 't,ch2\n0,1.0\n1,1.4\n2,1.9\n';
+	/** A stub PNG: the bytes only have to survive a round trip through a Blob. */
+	const AI_PLOT_BYTES = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3, 4]);
+
+	const AI_WORKBENCH_GRAPH: MultigraphData = {
+		...makeGraph({
+			nodes: [
+				{
+					id: 'ai',
+					title: 'Drift analysis',
+					description: '',
+					addons: { ai: { prompt: 'Plot channel 2 against time.', runs: [], promoted: {} } }
+				},
+				{
+					id: 'sweep',
+					title: 'Bench sweep',
+					description: 'Taken at 21 °C.',
+					content: [{ type: 'file', assetId: AI_CSV_ASSET_ID, name: 'sweep.csv' }]
+				}
+			],
+			edges: [{ source: 'sweep', target: 'ai', directed: true, tags: ['baseline'] }],
+			pinned: ['ai', 'sweep'],
+			posByNodeId: { ai: { x: 0, y: 0 }, sweep: { x: 320, y: 0 } }
+		}),
+		assets: {
+			[AI_CSV_ASSET_ID]: {
+				id: AI_CSV_ASSET_ID,
+				kind: 'file',
+				mimeType: 'text/csv',
+				name: 'sweep.csv',
+				size: AI_CSV_TEXT.length,
+				createdAt: 0
+			}
+		}
+	};
+
+	/** A store with the input CSV already in it; the run writes its outputs here. */
+	function aiAssetStore(): GraphAssetStore {
+		const store = new MemoryGraphAssetStore();
+		void store.put({
+			scope: AI_SCOPE,
+			assetId: AI_CSV_ASSET_ID,
+			blob: new Blob([AI_CSV_TEXT], { type: 'text/csv' }),
+			mimeType: 'text/csv',
+			name: 'sweep.csv',
+			size: AI_CSV_TEXT.length,
+			updatedAt: 0
+		});
+		return store;
+	}
+
+	/** Ask for one script run, then finish with a summary. */
+	function aiStoryClient(): AiClient {
+		const toolUse: Anthropic.ToolUseBlock = {
+			type: 'tool_use',
+			id: 'toolu_story',
+			name: 'run_analysis',
+			caller: { type: 'direct' },
+			input: { script: 'plt.savefig("outputs/drift.png")\n' }
+		};
+		const turns: AiTurn[] = [
+			{
+				content: [{ type: 'text', text: 'Reading the sweep.', citations: null }, toolUse],
+				stopReason: 'tool_use',
+				usage: { inputTokens: 120, outputTokens: 30 },
+				model: 'claude-opus-5'
+			},
+			{
+				content: [
+					{ type: 'text', text: 'Channel 2 rises steadily across the sweep.', citations: null }
+				],
+				stopReason: 'end_turn',
+				usage: { inputTokens: 240, outputTokens: 45 },
+				model: 'claude-opus-5'
+			}
+		];
+		return createFakeAiClient(turns);
+	}
+
+	function aiStoryExecutor(): PyExecutor {
+		return createFakeExecutor(
+			() => ({
+				exitCode: 0,
+				stdout: 'saved outputs/drift.png\n',
+				stderr: '',
+				durationMs: 40,
+				outputs: [{ name: 'drift.png', mimeType: 'image/png', bytes: AI_PLOT_BYTES }]
+			}),
+			[
+				{
+					name: 'sweep.csv',
+					size: AI_CSV_TEXT.length,
+					kind: 'table',
+					columns: ['t', 'ch2'],
+					dtypes: ['int64', 'float64'],
+					rows: 3,
+					head: [['0', '1.0']]
+				}
+			]
+		);
+	}
+
+	/* ---------------------------------------------------------------------- *
+	 * The same node, one run later: a finished analysis with a figure to file.
+	 * ---------------------------------------------------------------------- */
+
+	const AI_PLOT_ASSET_ID = 'ai-plot-asset';
+	const AI_PLOT_NAME = 'drift.png';
+	const AI_SCRIPT = 'plt.savefig("outputs/drift.png")\n';
+
+	const AI_DONE_RUN: AiRun = {
+		id: 'run-1',
+		startedAt: 1_700_000_000_000,
+		finishedAt: 1_700_000_012_000,
+		status: 'done',
+		mode: 'analyse',
+		prompt: 'Plot channel 2 against time.',
+		model: 'claude-opus-5',
+		runtime: APP_CONFIG.ai.runtime.version,
+		inputs: [],
+		summary: 'Channel 2 rises steadily across the sweep.',
+		outputs: [{ name: AI_PLOT_NAME, assetId: AI_PLOT_ASSET_ID, mimeType: 'image/png' }],
+		toolCalls: 1
+	};
+
+	const AI_PROMOTE_GRAPH: MultigraphData = {
+		...makeGraph({
+			nodes: [
+				{
+					id: 'ai',
+					title: 'Drift analysis',
+					description: '',
+					addons: {
+						ai: {
+							prompt: 'Plot channel 2 against time.',
+							script: AI_SCRIPT,
+							runs: [AI_DONE_RUN],
+							promoted: {}
+						}
+					}
+				}
+			],
+			pinned: ['ai'],
+			posByNodeId: { ai: { x: 0, y: 0 } }
+		}),
+		assets: {
+			[AI_PLOT_ASSET_ID]: {
+				id: AI_PLOT_ASSET_ID,
+				kind: 'image',
+				mimeType: 'image/png',
+				name: AI_PLOT_NAME,
+				size: AI_PLOT_BYTES.length,
+				createdAt: 1
+			}
+		}
+	};
+
+	/** The store the finished run left behind: one figure, ready to be filed. */
+	function aiPlotStore(): GraphAssetStore {
+		const store = new MemoryGraphAssetStore();
+		void store.put({
+			scope: AI_SCOPE,
+			assetId: AI_PLOT_ASSET_ID,
+			blob: new Blob([AI_PLOT_BYTES], { type: 'image/png' }),
+			mimeType: 'image/png',
+			name: AI_PLOT_NAME,
+			size: AI_PLOT_BYTES.length,
+			updatedAt: 1
+		});
+		return store;
+	}
 
 	/** `reader` needs g; `gravity` defines it, three authored hops away. */
 	const JUMP_TO_DEFINER = makeGraph({
@@ -6059,5 +6251,132 @@
 		// and a title editor. Confirming adds neither.
 		expect(canvasElement.querySelector('.title-input')).not.toBeInTheDocument();
 		expect(canvasElement.querySelector('[data-create-defining-node]')).not.toBeInTheDocument();
+	}}
+/>
+
+<!--
+	The `!ai` add-on's whole loop, from the map: focus the node, see what a run
+	would send, press Run, and read what came back. The fakes stand in for the
+	model and the runtime, so what this pins is the wiring — the workbench is
+	chosen over the details view, the collected inputs are the neighbours', and
+	one press ends with an output asset on the node.
+-->
+<Story
+	name="RunningAnAiNodeFromFocusLandsAnOutputInTheGrid"
+	args={{
+		multigraphData: AI_WORKBENCH_GRAPH,
+		defaultPrimaryNodeId: 'ai',
+		layoutSettings: { relaxIterations: 0 },
+		assetStore: aiAssetStore(),
+		assetScope: AI_SCOPE,
+		aiClient: aiStoryClient(),
+		aiExecutor: aiStoryExecutor(),
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		await enterFocusOn(canvasElement, 'ai');
+
+		// The workbench, not the details view.
+		const workbench = await waitFor(() => {
+			const found = canvasElement.querySelector('[data-ai-workbench]');
+			expect(found).toBeInTheDocument();
+			return found as HTMLElement;
+		});
+
+		// The inputs a run would send: the neighbour's text and its CSV, both
+		// labelled by the edge's tag, with the digest the request will carry.
+		const inputs = workbench.querySelectorAll('[data-ai-input]');
+		expect(inputs).toHaveLength(2);
+		expect(inputs[0].querySelector('[data-ai-input-name]')).toHaveTextContent('Bench sweep');
+		expect(inputs[1].querySelector('[data-ai-input-name]')).toHaveTextContent('sweep.csv');
+		expect(inputs[1].querySelector('[data-ai-input-label]')).toHaveTextContent('baseline');
+		await waitFor(() => {
+			expect(workbench.querySelector('[data-ai-digest]')).toHaveTextContent(
+				't (int64), ch2 (float64)'
+			);
+		});
+
+		(workbench.querySelector('[data-ai-run]') as HTMLElement).click();
+
+		// One run, committed once as a placeholder and once finished, with the
+		// script the executor actually ran and the figure it drew.
+		await waitFor(() => {
+			const ai = lastChangedGraph(args).nodes.find((node) => node.id === 'ai')?.addons?.ai;
+			expect(ai?.runs).toHaveLength(1);
+			expect(ai?.runs[0].status).toBe('done');
+			expect(ai?.script).toBe('plt.savefig("outputs/drift.png")\n');
+		});
+
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-ai-output="drift.png"]')).toBeInTheDocument();
+		});
+		// The reply the reader watched stream in is still on screen beside it.
+		expect(canvasElement.querySelector('[data-ai-stream-text]')).toHaveTextContent(
+			'Channel 2 rises steadily'
+		);
+	}}
+/>
+
+<!--
+	Promote, from the map: an output the reader wants to keep becomes a node of
+	its own, joined to the analysis that drew it. The commit goes through the
+	same write path every other edit takes, so what this pins is the shape of
+	what lands — a node titled by the filename, carrying the figure, on a
+	directed edge out of the AI node — and that the reader stays where they were.
+-->
+<Story
+	name="PromotingAnOutputGivesItANodeOfItsOwn"
+	args={{
+		multigraphData: AI_PROMOTE_GRAPH,
+		defaultPrimaryNodeId: 'ai',
+		layoutSettings: { relaxIterations: 0 },
+		assetStore: aiPlotStore(),
+		assetScope: AI_SCOPE,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		await enterFocusOn(canvasElement, 'ai');
+
+		const workbench = await waitFor(() => {
+			const found = canvasElement.querySelector('[data-ai-workbench]');
+			expect(found).toBeInTheDocument();
+			return found as HTMLElement;
+		});
+		(workbench.querySelector(`[data-ai-promote="${AI_PLOT_NAME}"]`) as HTMLElement).click();
+
+		// A node titled by the filename, holding the run's figure, and a directed
+		// edge saying which way the data went.
+		const promotedNodeId = await waitFor(() => {
+			const graph = lastChangedGraph(args);
+			const node = graph.nodes.find((candidate) => candidate.title === AI_PLOT_NAME);
+			expect(node?.content).toEqual([
+				{ type: 'image', assetId: AI_PLOT_ASSET_ID, alt: AI_PLOT_NAME }
+			]);
+			expect(graph.edges).toEqual([
+				expect.objectContaining({
+					sourceNodeId: 'ai',
+					targetNodeId: node?.id,
+					directed: true,
+					tags: []
+				})
+			]);
+			return node?.id ?? '';
+		});
+		// And the binding, which is what the next run refreshes in place.
+		const ai = lastChangedGraph(args).nodes.find((node) => node.id === 'ai')?.addons?.ai;
+		expect(ai?.promoted).toEqual({ [AI_PLOT_NAME]: promotedNodeId });
+
+		// The reader has not gone anywhere: they are still in the workbench, and
+		// the row they pressed now names where the figure lives.
+		await expectFocusOn(canvasElement, 'ai');
+		await waitFor(() => {
+			const row = canvasElement.querySelector(`[data-ai-output="${AI_PLOT_NAME}"]`);
+			expect(row?.querySelector('[data-ai-promote]')).toBeNull();
+			expect(row?.querySelector(`[data-ai-jump="${promotedNodeId}"]`)).toHaveTextContent(
+				AI_PLOT_NAME
+			);
+		});
 	}}
 />

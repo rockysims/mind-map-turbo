@@ -60,6 +60,11 @@ BUGS:
 
 - Edit dialog background (click to close) has very rounded edges and padding so it doesn't cover the full Stage.
 - Pinned node doesn't show description.
+- e2e `reload restores graph data and viewState from localStorage without file
+  import` flakes under a full parallel run: the failure snapshot shows the title
+  as `RootRefresh Test Node`, so `editFirstNodeTitle`'s `fill` landed before the
+  title input had cleared its initial value. Passes 3/3 in isolation. The helper
+  should wait for the field to hold what it typed before moving on.
 - e2e `deep zoom nests a node image as a second level and pops back to the node`
   fails: after the first wheel-in the node world's `data-zoom-world-scale` stays
   at 1, so the scrub never leaves the stage. Confirmed pre-existing on a clean
