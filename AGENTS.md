@@ -87,6 +87,7 @@ them after every small edit.
 | E2E                       | `apps/mind-map-sv/e2e/*.test.ts`                                        |
 | Roadmaps & plans          | `docs/roadmaps/<YYYY-MM-DD> <name>/`                                    |
 | Technical debt            | `docs/debt/` (conventions in `docs/debt/README.md`)                     |
+| UI decisions              | `docs/ui-decisions/` (conventions in `docs/ui-decisions/README.md`)     |
 | Agent reporting / footer  | `docs/agent-reporting.md`                                               |
 | Plan template             | `docs/roadmaps/PLAN_TEMPLATE.md`                                        |
 | Codex plan workflow       | `.agents/skills/mm-plan/SKILL.md`                                       |
@@ -97,6 +98,13 @@ them after every small edit.
 `ls docs/debt/` is the index. File one when something real is out of scope for
 the change you are making (a review's out-of-scope findings belong here rather
 than dropped or force-fixed). Conventions: `docs/debt/README.md`.
+
+## UI decisions
+
+`docs/ui-decisions/` records the owner's rulings about this interface — one
+file per ruling, and `ls docs/ui-decisions/` is the index. Read the README and
+the files whose names match before changing UI, and write a new file when the
+owner overrides a UI choice. Conventions: `docs/ui-decisions/README.md`.
 
 ## Reporting back
 
