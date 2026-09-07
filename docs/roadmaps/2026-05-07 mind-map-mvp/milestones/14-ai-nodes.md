@@ -1,6 +1,6 @@
 # Milestone 14: AI nodes
 
-**Status:** proposed
+**Status:** complete
 **Depends on:** milestone 13 (add-on registry, file attachments), milestone 12
 (undo, which is what makes removing an add-on that holds data safe), 06/06d
 (focus surface, nested image zoom), 04l/04n (self-contained HTML saves).

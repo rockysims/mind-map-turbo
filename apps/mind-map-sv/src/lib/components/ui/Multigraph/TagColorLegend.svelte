@@ -150,7 +150,10 @@
 		padding: 1rem;
 		background: #ffffff;
 		box-shadow: 0 -12px 40px rgb(0 0 0 / 22%);
-		touch-action: none;
+		/* A scroller gets back the one gesture it wants: `none` is right for the
+		   backdrop above, and wrong here, where a long tag list put every row
+		   below the fold out of a finger's reach. */
+		touch-action: pan-y;
 	}
 
 	header,

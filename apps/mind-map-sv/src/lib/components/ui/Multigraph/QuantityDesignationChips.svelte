@@ -330,7 +330,7 @@
 	.empty-column,
 	.hint {
 		margin: 0;
-		color: #94a3b8;
+		color: #64748b;
 		font-size: 0.8rem;
 	}
 </style>
