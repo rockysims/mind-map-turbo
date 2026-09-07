@@ -202,6 +202,7 @@
 	import { DEFAULT_MAX_SCALE, DEFAULT_MIN_SCALE } from './lib/graphMath.js';
 	import type { Rect } from './lib/zoomBoundary.js';
 	import type { StageRect } from './lib/stageCoordinates.js';
+	import { hasSize, usableStageRect } from './lib/stageCoordinates.js';
 	import { NODE_RADIUS, NODE_TEXT_FONT_SIZE } from '$lib/constants.js';
 
 	const CENTERED_POSITION: Point = { x: 0, y: 0 };
@@ -467,6 +468,16 @@
 	const stageScale = $derived(stageViewState.scale);
 	/** Stage element's live on-screen rect, reported by Stage — never measured here. */
 	let stageRect = $state<StageRect | null>(null);
+	/**
+	 * The last stage measurement with size, for the focus frame alone. The stage
+	 * keeps reporting empty measurements too (a window behind a native picker,
+	 * a layout pass caught mid-way), and a frame laid out from one collapsed to
+	 * a pixel; see `usableStageRect`.
+	 */
+	let lastSizedStageRect = $state<StageRect | null>(null);
+	$effect(() => {
+		if (stageRect !== null && hasSize(stageRect)) lastSizedStageRect = stageRect;
+	});
 	let reduceMotion = $derived(prefersReducedMotion());
 	let stageEntryGestureGateRequest = $state<{
 		id: number;
@@ -1590,7 +1601,7 @@
 	}
 
 	function focusFillRect(): Rect {
-		const rect = stageRect;
+		const rect = usableStageRect(stageRect, lastSizedStageRect);
 		const width = rect?.width ?? (typeof window === 'undefined' ? 800 : window.innerWidth);
 		const height = rect?.height ?? (typeof window === 'undefined' ? 600 : window.innerHeight);
 		return {

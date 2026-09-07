@@ -288,6 +288,15 @@
 	});
 </script>
 
+<script lang="ts">
+	/**
+	 * Claude's reply as it arrives, advanced from a `play` — so the closed prose
+	 * line can be watched moving rather than described. `args` are fixed for the
+	 * life of a render, and a ticker is exactly a thing that changes.
+	 */
+	let streamedReply = $state('Reading both');
+</script>
+
 <Story
 	name="IdleWithItsInputsAndNothingRunYet"
 	play={async ({ canvasElement }) => {
@@ -376,24 +385,35 @@
 
 <Story
 	name="RunningStreamsTheReplyAndEveryScriptItRan"
-	args={{
-		runState: runState({
-			phase: 'running',
-			text: 'Reading both files and plotting channel 2 on shared axes.',
-			thinking: 'The second file has a different sample rate, so resample first.',
-			steps: [
-				{ stdoutTail: 'Traceback: KeyError: ch2', exitCode: 1 },
-				{ stdoutTail: 'Wrote outputs/channel2.png', exitCode: null }
-			]
-		})
-	}}
 	play={async ({ canvasElement }) => {
+		// Reset rather than assumed: the stream is instance state, so a replay of
+		// this story starts where the reader's run does.
+		streamedReply = 'Reading both';
+		await waitFor(() => expect(text(canvasElement, '[data-ai-stream-text]')).toBe('Reading both'));
+
+		// The closed prose line is a status ticker while a run is in flight. Before
+		// any sentence has ended it is the fragment, so the line moves from the
+		// first token rather than sitting empty while Claude types.
+		expect(text(canvasElement, '[data-ai-prose-preview]')).toBe('Reading both');
+
+		streamedReply = 'Reading both files and plotting channel 2 on shared axes.';
+		await waitFor(() =>
+			expect(text(canvasElement, '[data-ai-prose-preview]')).toBe(
+				'Reading both files and plotting channel 2 on shared axes.'
+			)
+		);
 		expect(text(canvasElement, '[data-ai-stream-text]')).toContain('plotting channel 2');
 
-		// The closed prose line carries the first sentence of what is streaming, so
-		// the fold costs the reader nothing while they wait.
-		expect(text(canvasElement, '[data-ai-prose-preview]')).toBe(
-			'Reading both files and plotting channel 2 on shared axes.'
+		// And it keeps moving: the newest finished sentence, not the first one. A
+		// line frozen on "Reading both files." for the next forty seconds is what a
+		// reader watching a long run reads as nothing happening.
+		streamedReply =
+			'Reading both files and plotting channel 2 on shared axes. ' +
+			'The second file samples faster, so resampling it first.';
+		await waitFor(() =>
+			expect(text(canvasElement, '[data-ai-prose-preview]')).toBe(
+				'The second file samples faster, so resampling it first.'
+			)
 		);
 
 		// A summary, not the raw thinking, and folded away by default.
@@ -415,7 +435,25 @@
 		expect(required(canvasElement, '[data-ai-cancel]')).toBeEnabled();
 		expect(required(canvasElement, '[data-ai-run]')).toBeDisabled();
 	}}
-/>
+>
+	{#snippet template()}
+		<AiNodeContent
+			node={IDLE_NODE}
+			inputs={INPUTS}
+			digests={DIGESTS}
+			hasKey
+			runState={runState({
+				phase: 'running',
+				text: streamedReply,
+				thinking: 'The second file has a different sample rate, so resample first.',
+				steps: [
+					{ stdoutTail: 'Traceback: KeyError: ch2', exitCode: 1 },
+					{ stdoutTail: 'Wrote outputs/channel2.png', exitCode: null }
+				]
+			})}
+		/>
+	{/snippet}
+</Story>
 
 <Story
 	name="CancelIsThePressThatStopsARun"
@@ -770,14 +808,13 @@
 		expect(text(canvasElement, '[data-ai-mode="refine"]')).toBe('Change');
 		expect(text(canvasElement, '[data-ai-mode="rerun"]')).toBe('Run');
 
-		// Run's hint names the trap rather than the saving: every file is written
-		// into the script's folder, and only a script that scans that folder sees a
-		// new one. Reworded from "read only if the script reads by pattern", which
-		// stated the rule in the script's terms and left the reader unable to tell
-		// which kind of script they had.
+		// Run's hint names the trap rather than the saving, in terms the reader
+		// has. Reworded twice: "read only if the script reads by pattern" was the
+		// script's own vocabulary, and "scans its folder" named a folder this app
+		// has never shown anyone. What is left is two scripts a reader can picture.
 		expect(text(canvasElement, '[data-ai-mode-hint]')).toBe(
-			'Runs the stored script again on the current files. New files are seen only by a ' +
-				'script that scans its folder rather than opening fixed names.'
+			'Runs the stored script again on the current files. A script that opens files by name ' +
+				"won't notice a new one; a script that reads every attached file will."
 		);
 		expect(text(canvasElement, '[data-ai-run]')).toBe('Run');
 
@@ -1174,6 +1211,16 @@
 			'bench'
 		]);
 
+		// The one thing about this list that surprises people, said under the
+		// heading and before the first group: the bytes were copied at attach time,
+		// so a file edited on disk since then is not what the next run will read.
+		// The reader who hit this had edited a CSV and pressed Run twice.
+		const note = required(canvasElement, '[data-ai-inputs-note]');
+		expect(note.textContent?.trim()).toBe(
+			'Attached files are copies. To bring in an edited file, use Replace on its row.'
+		);
+		expect(note.compareDocumentPosition(groups[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
 		// This node leads, named for where the reader is standing rather than by
 		// its own title, and it is the group that offers Add file.
 		const own = required(canvasElement, '[data-ai-input-group="ai"]');
@@ -1286,6 +1333,16 @@
 			'measurements.csv was replaced since the last run. ' +
 				'Run re-runs the script on the new data; Change lets Claude adjust it.'
 		);
+
+		// The switch agrees with the note. It used to flip to Change on any file
+		// change at all, so the reader who had just swapped one export for another
+		// was pushed at a model call that could only rewrite the script it had —
+		// and Run, which they picked instead, was the thing that worked.
+		expect(required(canvasElement, '[data-ai-mode="rerun"]')).toHaveAttribute(
+			'aria-pressed',
+			'true'
+		);
+		expect(text(canvasElement, '[data-ai-run]')).toBe('Run');
 	}}
 >
 	{#snippet template()}

@@ -162,13 +162,20 @@ function fileInputs(inputs: AiInput[]): Extract<AiInput, { kind: 'file' }>[] {
  * - **refine** — the prompt has moved since the run that wrote the script, so
  *   the script needs editing to match. A run recorded before `AiRun.prompt`
  *   existed lands here too: an absent prompt cannot be claimed unchanged, and
- *   offering to edit the script is the recoverable half of that guess. Changed
- *   *files* land here as well, and for the same reason: the stored script names
- *   the files it was written for, so new data can need a new script even when
- *   the question has not moved an inch.
- * - **rerun** — the prompt and the files are both exactly what produced the
- *   stored script, so the only reason to run is that the bytes behind an
- *   attachment moved — and that needs no model call at all.
+ *   offering to edit the script is the recoverable half of that guess. A file
+ *   *added or removed* lands here as well, and for the same reason: the stored
+ *   script names the files it was written for, so a name it never mentions is
+ *   never read and a name that has gone is a failure waiting to happen.
+ * - **rerun** — the prompt is exactly what produced the stored script and no
+ *   file has come or gone, so the only reason to run is that the bytes behind
+ *   an attachment moved — and that needs no model call at all.
+ *
+ * A *replacement* is that case rather than a change of question: the same
+ * filenames over new bytes, which is what the workbench's own Replace does and
+ * what `inputChangesNote` already tells the reader to Run. Defaulting it to
+ * Change was the complaint that moved this — the reader had swapped one export
+ * for another, the script opened the same names, and the surface pushed them at
+ * a model call that could only rewrite the script it already had.
  *
  * `inputs` is optional because a caller that has not collected them cannot be
  * asked to invent them; without it the file question is simply not asked, which
@@ -178,7 +185,10 @@ export function defaultRunMode(ai: AiAddon, inputs?: AiInput[]): AiRunMode {
 	const latest = latestDoneRun(ai);
 	if (latest === undefined || ai.script === undefined) return 'analyse';
 	if (latest.prompt !== ai.prompt) return 'refine';
-	if (inputs !== undefined && hasInputChanges(inputsChangedSince(latest, inputs))) return 'refine';
+	if (inputs !== undefined) {
+		const changes = inputsChangedSince(latest, inputs);
+		if (changes.added.length > 0 || changes.removed.length > 0) return 'refine';
+	}
 	return 'rerun';
 }
 
@@ -269,9 +279,20 @@ export function digestDisclosureLabel(previewRows: number, digest: FileDigest): 
  *
  * Claude's prose is the part of a run a reader checks once and then scrolls
  * past, so it folds away; a disclosure with nothing on its summary but a title
- * folds away the fact that there is anything to read. The first sentence is the
- * answer often enough to save the click, and it is the same text either way:
- * the stream while a run is live, the stored summary once it is not.
+ * folds away the fact that there is anything to read.
+ *
+ * Which sentence it shows depends on whether the run is over, because the line
+ * is doing two different jobs:
+ *
+ * - **In flight** — a status ticker. The reader is watching a wait, so the line
+ *   is the *newest* thing Claude has finished saying, and it moves as the
+ *   stream arrives. The first sentence would be a line that froze on "Reading
+ *   both files." for the next forty seconds, which is the one thing a reader
+ *   watching a run reads as nothing happening. Before any sentence has ended it
+ *   is the trailing fragment, so the line moves from the first token; before any
+ *   text at all it is the step underneath, which is what is actually happening.
+ * - **Over** — a summary. There is nothing to track any more, and the first
+ *   sentence is the answer often enough to save the click.
  *
  * `storedSummary` is the caller's, because only the workbench knows whether the
  * run on screen is the stored one — an errored run's phase is over, and its
@@ -279,6 +300,9 @@ export function digestDisclosureLabel(previewRows: number, digest: FileDigest): 
  */
 export function prosePreviewLine(runState: AiRunState, storedSummary: string): string {
 	const streamed = runState.phase === 'idle' ? '' : runState.text;
+	const inFlight = runState.phase === 'running' || runState.phase === 'loading-runtime';
+	if (inFlight && streamed.trim() !== '') return latestSentence(streamed);
+
 	const said = streamed.trim() !== '' ? streamed : storedSummary;
 	if (said.trim() !== '') return firstSentence(said);
 
@@ -298,7 +322,34 @@ export function prosePreviewLine(runState: AiRunState, storedSummary: string): s
 function firstSentence(text: string, limit: number = 120): string {
 	const line = text.trim().split('\n')[0]?.trim() ?? '';
 	const stop = line.search(/[.!?](\s|$)/u);
-	const sentence = stop === -1 ? line : line.slice(0, stop + 1);
+	return cutToLine(stop === -1 ? line : line.slice(0, stop + 1), limit);
+}
+
+/**
+ * The last sentence `text` has *finished*, or the whole of it when none has —
+ * the ticker line, read off a stream that is still arriving.
+ *
+ * A finished sentence rather than the raw tail, because a tail redraws on every
+ * token and half a clause is not a status. A newline ends one as surely as a
+ * full stop, for the same reason `firstSentence` says so: the replies come in
+ * paragraphs, and the end of one is a thing Claude finished saying.
+ */
+function latestSentence(text: string, limit: number = 120): string {
+	const said = text.trim();
+	// Every place a sentence ends, in order, as an index one past the ending.
+	const ends = [...said.matchAll(/[.!?](?=\s|$)|\n/gu)].map(
+		(match) => match.index + match[0].length
+	);
+
+	// Nothing has ended yet: the fragment is all there is, and showing it is what
+	// keeps the line moving while the first sentence is still being typed.
+	const end = ends.at(-1) ?? said.length;
+	const start = ends.length === 0 ? 0 : (ends.at(-2) ?? 0);
+	return cutToLine(said.slice(start, end).trim(), limit);
+}
+
+/** One row of a summary line: `limit` characters, and an ellipsis if it ran on. */
+function cutToLine(sentence: string, limit: number): string {
 	return sentence.length > limit ? `${sentence.slice(0, limit).trimEnd()}…` : sentence;
 }
 

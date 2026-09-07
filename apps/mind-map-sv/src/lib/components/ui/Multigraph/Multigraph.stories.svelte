@@ -834,6 +834,160 @@
 		return store;
 	}
 
+	/* ---------------------------------------------------------------------- *
+	 * The state a bug report arrived in.
+	 *
+	 * A reader pressed Replace on a neighbour's CSV and said everything inside
+	 * the deep zoom went blank. What their tab did that a story does not is lose
+	 * the window while the native file dialog was up: `document.visibilityState`
+	 * goes `hidden`, `window` takes a `blur`, and the page's own
+	 * `visibilitychange` handler flushes the pending save. So the fixture is as
+	 * close to their node as fixtures reach — a finished run with two figures,
+	 * one of them promoted to a node of its own — and the story does the losing
+	 * and regaining of the window before it does the Replace.
+	 * ---------------------------------------------------------------------- */
+
+	const AI_RESIDUALS_ASSET_ID = 'ai-residuals-asset';
+	const AI_RESIDUALS_NAME = 'residuals.png';
+	const AI_PROMOTED_NODE_ID = 'drift-plot';
+
+	const AI_TWO_OUTPUT_RUN: AiRun = {
+		...AI_DONE_RUN,
+		inputs: [{ nodeId: 'sweep', assetId: AI_CSV_ASSET_ID, name: 'sweep.csv' }],
+		summary: 'Channel 2 rises steadily across the sweep. The residuals stay inside the band.',
+		outputs: [
+			{ name: AI_PLOT_NAME, assetId: AI_PLOT_ASSET_ID, mimeType: 'image/png' },
+			{ name: AI_RESIDUALS_NAME, assetId: AI_RESIDUALS_ASSET_ID, mimeType: 'image/png' }
+		]
+	};
+
+	const AI_REPLACE_GRAPH: MultigraphData = {
+		...makeGraph({
+			nodes: [
+				{
+					id: 'ai',
+					title: 'Drift analysis',
+					description: '',
+					addons: {
+						ai: {
+							prompt: 'Plot channel 2 against time.',
+							script: AI_SCRIPT,
+							runs: [AI_TWO_OUTPUT_RUN],
+							promoted: { [AI_PLOT_NAME]: AI_PROMOTED_NODE_ID }
+						}
+					}
+				},
+				{
+					id: 'sweep',
+					title: 'Bench sweep',
+					description: 'Taken at 21 °C.',
+					content: [{ type: 'file', assetId: AI_CSV_ASSET_ID, name: 'sweep.csv' }]
+				},
+				{
+					id: AI_PROMOTED_NODE_ID,
+					title: AI_PLOT_NAME,
+					description: '',
+					content: [{ type: 'image', assetId: AI_PLOT_ASSET_ID, alt: AI_PLOT_NAME }]
+				}
+			],
+			edges: [
+				{ source: 'sweep', target: 'ai', directed: true, tags: ['baseline'] },
+				{ source: 'ai', target: AI_PROMOTED_NODE_ID, directed: true }
+			],
+			pinned: ['ai', 'sweep', AI_PROMOTED_NODE_ID],
+			posByNodeId: {
+				ai: { x: 0, y: 0 },
+				sweep: { x: 320, y: 0 },
+				[AI_PROMOTED_NODE_ID]: { x: 0, y: 320 }
+			}
+		}),
+		assets: {
+			[AI_CSV_ASSET_ID]: {
+				id: AI_CSV_ASSET_ID,
+				kind: 'file',
+				mimeType: 'text/csv',
+				name: 'sweep.csv',
+				size: AI_CSV_TEXT.length,
+				createdAt: 0
+			},
+			[AI_PLOT_ASSET_ID]: {
+				id: AI_PLOT_ASSET_ID,
+				kind: 'image',
+				mimeType: 'image/png',
+				name: AI_PLOT_NAME,
+				size: AI_PLOT_BYTES.length,
+				createdAt: 1
+			},
+			[AI_RESIDUALS_ASSET_ID]: {
+				id: AI_RESIDUALS_ASSET_ID,
+				kind: 'image',
+				mimeType: 'image/png',
+				name: AI_RESIDUALS_NAME,
+				size: AI_PLOT_BYTES.length,
+				createdAt: 1
+			}
+		}
+	};
+
+	/** The bytes behind all three: the input the reader replaces, and both figures. */
+	function aiReplaceStore(): GraphAssetStore {
+		const store = new MemoryGraphAssetStore();
+		void store.put({
+			scope: AI_SCOPE,
+			assetId: AI_CSV_ASSET_ID,
+			blob: new Blob([AI_CSV_TEXT], { type: 'text/csv' }),
+			mimeType: 'text/csv',
+			name: 'sweep.csv',
+			size: AI_CSV_TEXT.length,
+			updatedAt: 0
+		});
+		for (const [assetId, name] of [
+			[AI_PLOT_ASSET_ID, AI_PLOT_NAME],
+			[AI_RESIDUALS_ASSET_ID, AI_RESIDUALS_NAME]
+		]) {
+			void store.put({
+				scope: AI_SCOPE,
+				assetId,
+				blob: new Blob([AI_PLOT_BYTES], { type: 'image/png' }),
+				mimeType: 'image/png',
+				name,
+				size: AI_PLOT_BYTES.length,
+				updatedAt: 1
+			});
+		}
+		return store;
+	}
+
+	/**
+	 * Lose the window, then get it back — what a native file dialog does to the
+	 * page under it. `visibilityState` lives on `Document.prototype`, so an own
+	 * property shadows it for as long as the story needs and is deleted after.
+	 */
+	async function withDocumentHidden(during: () => Promise<void> | void): Promise<void> {
+		Object.defineProperty(document, 'visibilityState', {
+			configurable: true,
+			get: () => 'hidden'
+		});
+		document.dispatchEvent(new Event('visibilitychange'));
+		window.dispatchEvent(new Event('blur'));
+		await during();
+		Reflect.deleteProperty(document, 'visibilityState');
+		document.dispatchEvent(new Event('visibilitychange'));
+		window.dispatchEvent(new Event('focus'));
+		await tick();
+	}
+
+	/**
+	 * Pick a file in a file input the way the browser does: a `DataTransfer`'s
+	 * list assigned to `files`, then the `change` the handler is listening for.
+	 */
+	function pickFileInto(input: HTMLInputElement, file: File): void {
+		const transfer = new DataTransfer();
+		transfer.items.add(file);
+		input.files = transfer.files;
+		input.dispatchEvent(new Event('change', { bubbles: true }));
+	}
+
 	/** `reader` needs g; `gravity` defines it, three authored hops away. */
 	const JUMP_TO_DEFINER = makeGraph({
 		nodes: [
@@ -6621,5 +6775,125 @@
 				AI_PLOT_NAME
 			);
 		});
+	}}
+/>
+
+<!--
+	The reported blank, chased in the real focus frame.
+
+	A reader pressed Replace on a neighbour's CSV and everything inside the deep
+	zoom went blank. The one thing their browser did that no story had done is
+	take the window away while the native dialog was up — `visibilityState` goes
+	`hidden`, `window` takes a `blur`, and the page's `visibilitychange` handler
+	flushes the pending save on the way. So this does all of that, in order, and
+	checks the surface after every step: the workbench root with its groups, its
+	outputs and its prose disclosure, the details layer still fully opaque, and
+	nothing on `console.error`.
+
+	It does not reproduce. What it pins instead is that none of those events can
+	blank this surface — so the next report has somewhere narrower to start.
+
+	One thing a component story cannot cover: the `visibilitychange` handler that
+	flushes the pending save lives in `routes/+page.svelte`, which is not mounted
+	here. What that handler reaches is `flushPendingSave`, and the only path out
+	of it that can take a focus surface away is a `storage` event — which is
+	raised in *other* tabs, never in the one that wrote.
+-->
+<Story
+	name="LosingTheWindowToAFileDialogLeavesTheWorkbenchOnScreen"
+	args={{
+		multigraphData: AI_REPLACE_GRAPH,
+		defaultPrimaryNodeId: 'ai',
+		layoutSettings: { relaxIterations: 0 },
+		assetStore: aiReplaceStore(),
+		assetScope: AI_SCOPE,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		const errors: string[] = [];
+		const realConsoleError = console.error;
+		console.error = (...parts: unknown[]) => {
+			errors.push(parts.map((part) => String(part)).join(' '));
+		};
+
+		try {
+			await waitForLayout();
+			const dialog = await enterFocusOn(canvasElement, 'ai');
+
+			/** Everything the reader says went blank, checked in one place. */
+			const expectStillDrawn = async (step: string): Promise<void> => {
+				const workbench = dialog.querySelector('[data-ai-workbench]');
+				expect(workbench, step).toBeInTheDocument();
+				const root = workbench as HTMLElement;
+				// The two input groups: this node, and the neighbour whose file it is.
+				expect(root.querySelectorAll('[data-ai-input-group]'), step).toHaveLength(2);
+				// Both figures the run drew, and the prose fold above them. The images
+				// are checked as images, not as rows: `AiNodeContent` falls back to a
+				// name-only placeholder when its object URL is gone, and a placeholder
+				// where a plot was is one of the things "went blank" could mean.
+				expect(root.querySelectorAll('[data-ai-output]'), step).toHaveLength(2);
+				const figures = [...root.querySelectorAll('[data-ai-output] img[data-asset-id]')];
+				expect(figures, step).toHaveLength(2);
+				for (const figure of figures) {
+					expect(figure.getAttribute('src') ?? '', step).toMatch(/^blob:/u);
+				}
+				expect(root.querySelector('[data-ai-prose]'), step).toBeInTheDocument();
+				// The promoted figure's binding, which is the row that names a node.
+				expect(
+					root.querySelector(`[data-ai-jump="${AI_PROMOTED_NODE_ID}"]`),
+					step
+				).toBeInTheDocument();
+				// And the layer it is all drawn on, at full opacity: a details layer
+				// faded to 0 is exactly what "blank inside the frame" would look like.
+				const layer = dialog.querySelector('[data-morph-layer="details"]') as HTMLElement;
+				expect(getComputedStyle(layer).opacity, step).toBe('1');
+				expect(errors, step).toEqual([]);
+			};
+
+			await waitFor(() => {
+				expect(dialog.querySelector('[data-ai-output] img[data-asset-id]')).toBeInTheDocument();
+			});
+			await expectStillDrawn('opened');
+
+			// The window goes, and comes back — twice, because a reader who cancels
+			// a dialog and opens it again does it twice too.
+			await withDocumentHidden(async () => {
+				await tick();
+				await expectStillDrawn('hidden');
+			});
+			await expectStillDrawn('visible again');
+			await withDocumentHidden(() => tick());
+			await expectStillDrawn('hidden and back a second time');
+
+			// And now the press itself, with the window lost across it exactly as a
+			// native dialog loses it: opened hidden, the file chosen, the window back.
+			const replace = dialog.querySelector(
+				`[data-ai-replace-file="${AI_CSV_ASSET_ID}"]`
+			) as HTMLInputElement;
+			expect(replace).toBeInTheDocument();
+			await withDocumentHidden(() => {
+				pickFileInto(replace, new File(['t,ch2\n0,9.9\n'], 'sweep.csv', { type: 'text/csv' }));
+			});
+
+			// The commit lands — the block keeps its name over a new asset id — and
+			// the surface the reader is standing on is still the one they were on.
+			const replacedAssetId = await waitFor(() => {
+				const block = lastChangedGraph(args)
+					.nodes.find((node) => node.id === 'sweep')
+					?.content?.find((entry) => entry.type === 'file');
+				expect(block?.name).toBe('sweep.csv');
+				expect(block?.assetId).not.toBe(AI_CSV_ASSET_ID);
+				return block?.assetId ?? '';
+			});
+			await expectFocusOn(canvasElement, 'ai');
+			await waitFor(() => {
+				expect(
+					dialog.querySelector(`[data-ai-input-asset-id="${replacedAssetId}"]`)
+				).toBeInTheDocument();
+			});
+			await expectStillDrawn('replaced');
+		} finally {
+			console.error = realConsoleError;
+		}
 	}}
 />

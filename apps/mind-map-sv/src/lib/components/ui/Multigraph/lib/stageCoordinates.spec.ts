@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { clientPointToGraphPoint, graphPointToClientPoint } from './stageCoordinates';
+import {
+	clientPointToGraphPoint,
+	graphPointToClientPoint,
+	usableStageRect,
+	hasSize
+} from './stageCoordinates';
 
 describe('clientPointToGraphPoint', () => {
 	const stageRect = { left: 0, top: 0, width: 100, height: 100 };
@@ -31,5 +36,32 @@ describe('clientPointToGraphPoint', () => {
 
 		expect(clientPointToGraphPoint(clientPoint, rect, pan, scale).x).toBeCloseTo(graphPoint.x);
 		expect(clientPointToGraphPoint(clientPoint, rect, pan, scale).y).toBeCloseTo(graphPoint.y);
+	});
+});
+
+describe('usableStageRect', () => {
+	const good = { left: 0, top: 0, width: 800, height: 600 };
+	const older = { left: 1, top: 1, width: 10, height: 10 };
+	const empty = { left: 0, top: 0, width: 0, height: 0 };
+
+	it('uses the current measurement when it has size', () => {
+		expect(usableStageRect(good, older)).toBe(good);
+		expect(usableStageRect(good, null)).toBe(good);
+	});
+
+	it('falls back to the last good measurement when the current one is empty', () => {
+		expect(usableStageRect(empty, good)).toBe(good);
+		expect(usableStageRect({ left: 0, top: 0, width: 800, height: 0 }, good)).toBe(good);
+		expect(usableStageRect({ left: 0, top: 0, width: Number.NaN, height: 600 }, good)).toBe(good);
+	});
+
+	it('hands back whatever there is when nothing good was ever measured', () => {
+		expect(usableStageRect(empty, null)).toBe(empty);
+		expect(usableStageRect(null, null)).toBeNull();
+	});
+
+	it('knows which measurements have size', () => {
+		expect(hasSize(good)).toBe(true);
+		expect(hasSize(empty)).toBe(false);
 	});
 });

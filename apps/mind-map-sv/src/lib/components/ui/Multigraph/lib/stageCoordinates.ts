@@ -36,3 +36,33 @@ export function graphPointToClientPoint(
 		y: centerY + graphPoint.y * scale
 	};
 }
+
+/**
+ * The stage rect the focus frame should lay out against.
+ *
+ * A browser can report a stage of no size for a moment — a window losing its
+ * viewport to a native picker or a sheet, a layout pass caught mid-way. The
+ * stage keeps reporting what it measures (other readers want the latest,
+ * empty or not), but the focus frame laid out from an empty measurement was
+ * clamped to one pixel with everything inside clipped away, which reads as
+ * the deep zoom going blank. So the frame uses the current measurement when
+ * it has size and otherwise the last one that did; with neither, whatever the
+ * stage reported, so the caller's own fallback still applies.
+ */
+export function usableStageRect(
+	current: StageRect | null,
+	lastGood: StageRect | null
+): StageRect | null {
+	if (current !== null && hasSize(current)) return current;
+	return lastGood ?? current;
+}
+
+/** Whether a measurement is one the frame can be laid out against. */
+export function hasSize(rect: StageRect): boolean {
+	return (
+		Number.isFinite(rect.width) &&
+		Number.isFinite(rect.height) &&
+		rect.width >= 1 &&
+		rect.height >= 1
+	);
+}

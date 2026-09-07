@@ -247,10 +247,62 @@ describe('prosePreviewLine', () => {
 		...patch
 	});
 
-	it('shows the first sentence of what is streaming', () => {
+	// The ticker half: a run in flight is a wait the reader is watching, so the
+	// line is the newest thing Claude has finished saying rather than the oldest.
+	it('tracks the latest sentence while a run is in flight', () => {
 		expect(
 			prosePreviewLine(
 				state({ phase: 'running', text: 'Reading both files. Then plotting them.' }),
+				''
+			)
+		).toBe('Then plotting them.');
+	});
+
+	it('moves as the stream arrives, one finished sentence at a time', () => {
+		const at = (text: string): string => prosePreviewLine(state({ phase: 'running', text }), '');
+
+		// Nothing has ended yet, so the fragment is what there is — the line moves
+		// from the first token rather than waiting for a full stop.
+		expect(at('Reading both')).toBe('Reading both');
+		expect(at('Reading both files.')).toBe('Reading both files.');
+		// Mid-sentence the line holds the last finished one rather than redrawing
+		// on every token; it moves again when that sentence ends.
+		expect(at('Reading both files. Then plott')).toBe('Reading both files.');
+		expect(at('Reading both files. Then plotting them.')).toBe('Then plotting them.');
+	});
+
+	it('treats the end of a paragraph as the end of a sentence', () => {
+		expect(
+			prosePreviewLine(state({ phase: 'running', text: 'Reading both files\nNow plotting' }), '')
+		).toBe('Reading both files');
+	});
+
+	it('tracks the stream while the runtime is still loading, too', () => {
+		// `loading-runtime` is in flight as much as `running` is, and a model that
+		// spoke before the runtime arrived has said the newest thing there is.
+		expect(
+			prosePreviewLine(
+				state({ phase: 'loading-runtime', text: 'Reading both files. Then plotting them.' }),
+				''
+			)
+		).toBe('Then plotting them.');
+	});
+
+	it('cuts a long latest sentence to one line', () => {
+		const long = `Done. ${'word '.repeat(60)}stop.`;
+		const preview = prosePreviewLine(state({ phase: 'running', text: long }), '');
+
+		expect(preview.length).toBeLessThanOrEqual(121);
+		expect(preview.endsWith('…')).toBe(true);
+		expect(preview.startsWith('word')).toBe(true);
+	});
+
+	// The summary half: the run is over, there is nothing left to track, and the
+	// first sentence is the answer often enough to save the click.
+	it('shows the first sentence of the reply once the run has finished', () => {
+		expect(
+			prosePreviewLine(
+				state({ phase: 'done', text: 'Reading both files. Then plotting them.' }),
 				''
 			)
 		).toBe('Reading both files.');
@@ -332,6 +384,82 @@ describe('defaultRunMode', () => {
 
 		expect(defaultRunMode(ai, [file('a.csv'), file('b.csv')])).toBe('refine');
 		expect(defaultRunMode(ai, [file('a.csv')])).toBe('rerun');
+	});
+
+	/*
+	 * The whole file table, because the difference between the three columns is
+	 * the only thing that decides which button the reader lands on — and getting
+	 * a replacement wrong is what started this: the reader swapped one export for
+	 * another, the stored script opened exactly the same names, and the surface
+	 * defaulted them to a model call that could only rewrite the script it had.
+	 */
+	describe('with a stored script and an unmoved prompt, by what the files did', () => {
+		const run = makeRun({
+			id: 'r1',
+			prompt: 'plot channel 2',
+			inputs: [sent('a.csv'), sent('b.csv')]
+		});
+		const ai = makeAddon({ prompt: 'plot channel 2', script: 'print(1)', runs: [run] });
+
+		/** The same names over new bytes, which is what the workbench's Replace does. */
+		const replacedA = file('a.csv', 'asset-a-v2');
+		const replacedB = file('b.csv', 'asset-b-v2');
+
+		it('nothing moved → rerun', () => {
+			expect(defaultRunMode(ai, [file('a.csv'), file('b.csv')])).toBe('rerun');
+		});
+
+		it('replaced only → rerun, one file or several', () => {
+			expect(defaultRunMode(ai, [replacedA, file('b.csv')])).toBe('rerun');
+			expect(defaultRunMode(ai, [replacedA, replacedB])).toBe('rerun');
+		});
+
+		it('added → refine', () => {
+			expect(defaultRunMode(ai, [file('a.csv'), file('b.csv'), file('c.csv')])).toBe('refine');
+		});
+
+		it('removed → refine', () => {
+			expect(defaultRunMode(ai, [file('a.csv')])).toBe('refine');
+		});
+
+		it('added and removed → refine', () => {
+			expect(defaultRunMode(ai, [file('a.csv'), file('c.csv')])).toBe('refine');
+		});
+
+		// A replacement alongside something that came or went is not the cheap
+		// case: the script still has a name it never mentions, or one that is gone.
+		it('replaced with an add → refine', () => {
+			expect(defaultRunMode(ai, [replacedA, file('b.csv'), file('c.csv')])).toBe('refine');
+		});
+
+		it('replaced with a removal → refine', () => {
+			expect(defaultRunMode(ai, [replacedA])).toBe('refine');
+		});
+
+		it('replaced with both → refine', () => {
+			expect(defaultRunMode(ai, [replacedA, file('c.csv')])).toBe('refine');
+		});
+
+		// The note and the default read the same answer, so they cannot disagree
+		// about what the reader should press.
+		it('agrees with the note it is drawn beside', () => {
+			const changes = inputsChangedSince(run, [replacedA, file('b.csv')]);
+
+			expect(changes).toEqual({ added: [], removed: [], replaced: ['a.csv'] });
+			expect(inputChangesNote(changes)).toContain('Run re-runs the script on the new data');
+		});
+	});
+
+	it('still offers a refine for a replacement once the prompt has moved too', () => {
+		// The prompt wins as it always has: a changed question needs a changed
+		// script, whatever the files did.
+		const ai = makeAddon({
+			prompt: 'plot channel 2, log scale on y',
+			script: 'print(1)',
+			runs: [makeRun({ id: 'r1', prompt: 'plot channel 2', inputs: [sent('a.csv')] })]
+		});
+
+		expect(defaultRunMode(ai, [file('a.csv', 'asset-a-v2')])).toBe('refine');
 	});
 
 	it('does not ask the file question when the caller has no inputs to give', () => {
