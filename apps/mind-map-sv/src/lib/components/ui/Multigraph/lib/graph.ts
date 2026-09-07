@@ -115,6 +115,16 @@ export function addNode(data: MultigraphData, input: AddNodeInput = {}): Multigr
 	};
 }
 
+/**
+ * Take the node out, with its position, its incident edges — and every `!ai`
+ * binding that named it.
+ *
+ * The bindings go because a promoted output whose node the reader deleted is
+ * not promoted any more: leaving `addons.ai.promoted` pointing at nothing had
+ * the workbench hiding the Promote icon and offering a jump to a node that no
+ * longer exists. Undo restores the whole graph, so the binding comes back with
+ * its node.
+ */
 export function removeNode(data: MultigraphData, id: string): MultigraphData {
 	if (!data.nodes.some((node) => node.id === id)) return data;
 
@@ -123,9 +133,25 @@ export function removeNode(data: MultigraphData, id: string): MultigraphData {
 
 	return {
 		...data,
-		nodes: data.nodes.filter((node) => node.id !== id),
+		nodes: data.nodes
+			.filter((node) => node.id !== id)
+			.map((node) => withoutPromotedBinding(node, id)),
 		edges: data.edges.filter((edge) => edge.sourceNodeId !== id && edge.targetNodeId !== id),
 		posByNodeId
+	};
+}
+
+/** The node with any `!ai` output binding to `removedNodeId` dropped. Same object when there is none. */
+function withoutPromotedBinding(node: NodeData, removedNodeId: string): NodeData {
+	const ai = node.addons?.ai;
+	if (ai === undefined) return node;
+
+	const entries = Object.entries(ai.promoted).filter(([, nodeId]) => nodeId !== removedNodeId);
+	if (entries.length === Object.keys(ai.promoted).length) return node;
+
+	return {
+		...node,
+		addons: { ...node.addons, ai: { ...ai, promoted: Object.fromEntries(entries) } }
 	};
 }
 

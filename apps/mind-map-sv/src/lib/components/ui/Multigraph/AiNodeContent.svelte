@@ -37,7 +37,7 @@
 	import { untrack } from 'svelte';
 	import { APP_CONFIG } from '$lib/appConfig';
 	import type { GraphAssetStore } from '$lib/assets/assetStore';
-	import { renderDigest, type FileDigest } from '$lib/ai/probeScript';
+	import { renderDigest, type DigestUnavailableReason, type FileDigest } from '$lib/ai/probeScript';
 	import { prefersReducedMotion } from '$lib/reducedMotion';
 	import type { GraphAssetMetadata } from '../types/multigraph';
 	import type { AiAddon, AiRunMode, AiRunOutput, NodeData } from '../types/node';
@@ -90,7 +90,13 @@
 			mode: 'rerun',
 			label: 'Run',
 			run: 'Run',
-			hint: 'Runs the stored script again on the current files, no model call'
+			// It names the trap rather than the saving: Run calls no model, but the
+			// stored script opens the names it was written for, so a file attached
+			// since then is written into the sandbox and never read unless the
+			// script globs for it. That is the failure that does not look like one.
+			hint:
+				'Runs the stored script again on the current files; files added since it was written ' +
+				'are read only if the script reads by pattern'
 		}
 	];
 
@@ -106,6 +112,7 @@
 		hasKey = false,
 		model = APP_CONFIG.ai.defaultModel,
 		titleForNodeId = (nodeId: string) => nodeId,
+		nodeExists = () => true,
 		onPromptChange,
 		onRun,
 		onCancel,
@@ -147,6 +154,17 @@
 		model?: string;
 		/** Names the node a promoted output lives in. Identity for a caller with no graph. */
 		titleForNodeId?: (nodeId: string) => string;
+		/**
+		 * Whether a node id still names a node on the map.
+		 *
+		 * A binding is `outputName → nodeId`, and the reader can delete that node.
+		 * Until this was asked, a binding alone counted as promoted: the row hid
+		 * the Promote icon and offered a jump to nothing. So "promoted" is a
+		 * question about the graph, not about the add-on, and this is how a caller
+		 * with a graph answers it. The default is for a caller that has none —
+		 * every binding it is handed is one it invented.
+		 */
+		nodeExists?: (nodeId: string) => boolean;
 		/** The prompt, committed on blur or Cmd+Enter rather than on every keystroke. */
 		onPromptChange?: (prompt: string) => void;
 		onRun?: (mode: AiRunMode) => void;
@@ -168,7 +186,7 @@
 	const hasScript = $derived((ai.script ?? '') !== '');
 	const latestRun = $derived(latestDoneRun(ai));
 	const metadataLine = $derived(latestRun === undefined ? '' : runMetadataLine(latestRun));
-	const staleNames = $derived(staleOutputNames(ai));
+	const staleNames = $derived(staleOutputNames(ai, nodeExists));
 	/**
 	 * What the files have done since the stored script was written, and the note
 	 * that says so. Empty for a node with no script to be out of date.
@@ -325,6 +343,17 @@
 		return `What Claude will see (${depth} ${depth === 1 ? 'row' : 'rows'})`;
 	}
 
+	/**
+	 * Why a file has no digest, in the reader's terms.
+	 *
+	 * Two different facts, and the difference is what to do about them: bytes
+	 * this browser does not hold are a syncing problem, and a runtime that did
+	 * not load is a network one that took every file with it.
+	 */
+	function digestUnavailableText(reason: DigestUnavailableReason): string {
+		return reason === 'runtime' ? 'Python runtime unavailable' : 'Unavailable in this browser';
+	}
+
 	function runtimeProgressText(): string {
 		const progress = runState.runtimeProgress;
 		if (progress === undefined) return 'Loading the Python runtime.';
@@ -353,7 +382,15 @@
 </script>
 
 {#snippet outputActions(output: AiRunOutput)}
-	{@const promotedNodeId = ai.promoted[output.name]}
+	<!--
+		The binding, and then the question the binding cannot answer: the reader may
+		have deleted the node it names. A binding to a node that is gone is not a
+		promotion, so the row offers Promote again — pressing it makes a fresh node
+		and rebinds, which is what `promoteAiOutput` does with a dangling binding.
+	-->
+	{@const boundNodeId = ai.promoted[output.name]}
+	{@const promotedNodeId =
+		boundNodeId !== undefined && nodeExists(boundNodeId) ? boundNodeId : undefined}
 	<div class="output-actions">
 		{#if promotedNodeId === undefined}
 			<!--
@@ -733,6 +770,14 @@
 										<summary>{digestDisclosureLabel(previewRows)}</summary>
 										<pre class="digest" data-ai-digest>{renderDigest(digest, previewRows)}</pre>
 									</details>
+								{:else if digest.kind === 'unavailable'}
+									<!-- Nothing was measured and nothing is coming: the name and the
+									     size above are the whole of what is known, and this says why
+									     there is no disclosure under them. Not an error block — the
+									     other files are fine, and this one is a fact about this row. -->
+									<p class="unavailable" data-ai-digest-unavailable={digest.reason}>
+										{digestUnavailableText(digest.reason)}
+									</p>
 								{/if}
 							{:else}
 								<p class="pending" data-ai-digest-pending>digesting…</p>
@@ -875,11 +920,16 @@
 	.input-size,
 	.input-shape,
 	.pending,
+	.unavailable,
 	.input-description {
 		color: #64748b;
 		font-size: 0.875rem;
 	}
 
+	/*
+	 * Only the pending line is italic: it is the one that is still going to
+	 * change. An unavailable row is an answer, so it reads like the rest of them.
+	 */
 	.pending {
 		font-style: italic;
 	}

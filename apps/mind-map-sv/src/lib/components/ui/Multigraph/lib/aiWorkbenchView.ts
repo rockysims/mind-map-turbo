@@ -230,10 +230,20 @@ function listPart(verb: string, names: string[]): string {
  * binding stale on that basis would be a lie about the data on screen. With no
  * completed run in history every binding is stale, which is the honest answer
  * for a node whose history was evicted out from under its promoted nodes.
+ *
+ * A binding whose node is gone is not stale either — it is not a binding any
+ * more. `nodeExists` is how a caller with a graph says so; the default answers
+ * for a caller that has only the add-on, which is every caller that cannot be
+ * wrong about it.
  */
-export function staleOutputNames(ai: AiAddon): string[] {
+export function staleOutputNames(
+	ai: AiAddon,
+	nodeExists: (nodeId: string) => boolean = () => true
+): string[] {
 	const produced = new Set((latestDoneRun(ai)?.outputs ?? []).map((output) => output.name));
-	return Object.keys(ai.promoted).filter((name) => !produced.has(name));
+	return Object.entries(ai.promoted)
+		.filter(([name, nodeId]) => !produced.has(name) && nodeExists(nodeId))
+		.map(([name]) => name);
 }
 
 /**

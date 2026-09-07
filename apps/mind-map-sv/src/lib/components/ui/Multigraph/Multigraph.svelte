@@ -3128,6 +3128,7 @@
 							hasKey={aiClient !== null}
 							model={aiSettings.model}
 							{titleForNodeId}
+							nodeExists={(nodeId) => nodeById[nodeId] !== undefined}
 							onPromptChange={(prompt) =>
 								commitUserGraph(
 									setAiPrompt(graph, detailsNode.id, prompt),

@@ -311,6 +311,29 @@ describe('staleOutputNames', () => {
 		expect(staleOutputNames(ai)).toEqual(['b.png', 'a.png']);
 	});
 
+	/*
+	 * A binding to a node the reader deleted is not stale — it is not a binding.
+	 * Marking it stale would put a name on screen with a jump to nothing behind
+	 * it, which is the bug this predicate exists to close.
+	 */
+	it('ignores bindings whose node is gone', () => {
+		const ai = makeAddon({
+			runs: [makeRun({ id: 'r1', outputs: [] })],
+			promoted: { 'gone.png': 'deleted-node', 'kept.png': 'live-node' }
+		});
+
+		expect(staleOutputNames(ai, (nodeId) => nodeId === 'live-node')).toEqual(['kept.png']);
+	});
+
+	it('treats every binding as live for a caller with no graph to ask', () => {
+		const ai = makeAddon({
+			runs: [makeRun({ id: 'r1', outputs: [] })],
+			promoted: { 'gone.png': 'deleted-node' }
+		});
+
+		expect(staleOutputNames(ai)).toEqual(['gone.png']);
+	});
+
 	it('reads the latest completed run, so a cancelled attempt stales nothing', () => {
 		const ai = makeAddon({
 			runs: [

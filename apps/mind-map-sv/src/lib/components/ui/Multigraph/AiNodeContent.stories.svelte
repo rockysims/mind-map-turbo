@@ -539,6 +539,107 @@
 	{/snippet}
 </Story>
 
+<!--
+	The reader promoted an output and then deleted the node it made. The binding
+	is gone with the node (`removeNode`), but a graph that predates that fix — or
+	a workbench looking at one mid-undo — can still hold one, so the surface
+	decides "promoted" by asking whether the node is there rather than by the
+	binding alone. Otherwise the row hides Promote and offers a jump to nothing.
+-->
+<Story
+	name="AnOutputBoundToANodeThatIsGoneOffersPromoteAgain"
+	play={async ({ canvasElement }) => {
+		const row = required(canvasElement, '[data-ai-output="residuals.png"]');
+		expect(row.querySelector('[data-ai-jump]')).toBeNull();
+
+		// A stale name whose node is gone is not stale either — there is nothing
+		// left on the map to be out of date.
+		expect(workbench(canvasElement).querySelector('[data-ai-stale-outputs]')).toBeNull();
+
+		const promote = required(row, '[data-ai-promote="residuals.png"]');
+		await userEvent.click(promote);
+		expect(harnessState(canvasElement)).toHaveAttribute('data-last-promote', 'residuals.png');
+
+		// The real `promoteAiOutput` ran on the harness's graph: a fresh node,
+		// titled by the filename, and the row names it.
+		await waitFor(() => {
+			expect(row.querySelector('[data-ai-promote]')).toBeNull();
+			expect(row.querySelector('[data-ai-jump]')?.textContent?.trim()).toBe('residuals.png');
+		});
+	}}
+>
+	{#snippet template()}
+		<AiNodeHarness
+			baseGraph={aiGraph({
+				script: SCRIPT,
+				runs: [DONE_RUN],
+				promoted: { 'residuals.png': 'deleted-node', 'drift.png': 'deleted-too' }
+			})}
+			nodeId="ai"
+			digests={DIGESTS}
+			assetStore={outputStore()}
+			assetScope="story"
+		/>
+	{/snippet}
+</Story>
+
+<!--
+	A document whose blob was never hydrated into this browser: there is nothing
+	to put in front of the probe and nothing is coming, so the row says so once
+	rather than measuring for ever. Name and size are still known, from the
+	graph's asset metadata.
+-->
+<Story
+	name="AFileWhoseBytesAreNotInThisBrowserSaysSoInsteadOfMeasuring"
+	args={{
+		digests: {
+			'asset-csv': {
+				name: 'measurements.csv',
+				size: 2048,
+				kind: 'unavailable',
+				reason: 'blob'
+			} satisfies FileDigest
+		}
+	}}
+	play={async ({ canvasElement }) => {
+		const row = required(canvasElement, '[data-ai-input-kind="file"]');
+		expect(text(row, '[data-ai-digest-unavailable]')).toBe('Unavailable in this browser');
+		expect(required(row, '[data-ai-digest-unavailable]')).toHaveAttribute(
+			'data-ai-digest-unavailable',
+			'blob'
+		);
+
+		// Nothing to disclose and no shape to state — and, crucially, not the
+		// pending line: the row is not waiting for anything.
+		expect(row.querySelector('details')).toBeNull();
+		expect(row.querySelector('[data-ai-input-shape]')).toBeNull();
+		expect(row.querySelector('[data-ai-digest-pending]')).toBeNull();
+		expect(text(row, '[data-ai-digest-summary]')).toContain('measurements.csv');
+		expect(text(row, '[data-ai-digest-summary]')).toContain('2 KB');
+	}}
+/>
+
+<!-- The runtime is one failure that takes every file with it, so every row says
+     that reason rather than each one claiming to be measuring. -->
+<Story
+	name="AFileMeasuredByARuntimeThatNeverLoadedNamesTheRuntime"
+	args={{
+		digests: {
+			'asset-csv': {
+				name: 'measurements.csv',
+				size: 2048,
+				kind: 'unavailable',
+				reason: 'runtime'
+			} satisfies FileDigest
+		}
+	}}
+	play={async ({ canvasElement }) => {
+		const row = required(canvasElement, '[data-ai-input-kind="file"]');
+		expect(text(row, '[data-ai-digest-unavailable]')).toBe('Python runtime unavailable');
+		expect(row.querySelector('[data-ai-digest-pending]')).toBeNull();
+	}}
+/>
+
 <Story
 	name="AFailedRunSaysSoWhereTheAnswerWouldBe"
 	args={{
@@ -632,8 +733,11 @@
 		expect(text(canvasElement, '[data-ai-mode="refine"]')).toBe('Change');
 		expect(text(canvasElement, '[data-ai-mode="rerun"]')).toBe('Run');
 
+		// Run's hint names the trap rather than the saving: it calls no model, but
+		// the stored script opens the names it was written for.
 		expect(text(canvasElement, '[data-ai-mode-hint]')).toBe(
-			'Runs the stored script again on the current files, no model call'
+			'Runs the stored script again on the current files; files added since it was written ' +
+				'are read only if the script reads by pattern'
 		);
 		expect(text(canvasElement, '[data-ai-run]')).toBe('Run');
 
