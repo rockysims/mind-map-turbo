@@ -511,10 +511,67 @@ describe('createAiRunController', () => {
 		expect(capped.executor.runs).toHaveLength(cap);
 		const run = capped.runs()[0];
 		expect(run.toolCalls).toBe(cap);
-		expect(run.error).toContain(`${cap} script runs`);
+		expect(run.error).toBe(
+			`Stopped after ${cap} executions without a finished analysis: ` +
+				'the last said: wrote a figure.'
+		);
 		// What ran is kept: the figures and the script that drew them.
 		expect(run.outputs).toHaveLength(1);
 		expect(capped.addon()?.script).toBe('print(1)');
+	});
+
+	it('counts the errors and the timeouts in the message it stops at the cap with', async () => {
+		const cap = APP_CONFIG.ai.maxToolCalls;
+		let execution = 0;
+		const capped = await harness({
+			turns: Array.from({ length: cap + 1 }, (_, index) => toolTurn('print(1)', `tool-${index}`)),
+			script: () => {
+				execution += 1;
+				// The last one runs away; every one before it raises.
+				if (execution === cap) {
+					throw new PyExecutorError('timeout', 'The script ran longer than 300000 ms.');
+				}
+				return {
+					exitCode: 1,
+					stdout: '',
+					stderr: "KeyError: 'ch2'\n",
+					durationMs: 4,
+					outputs: []
+				};
+			}
+		});
+
+		expect(await capped.controller.run('ai', 'analyse')).toBe('error');
+		// A timeout is an execution the run survived, not the end of it.
+		expect(capped.executor.runs).toHaveLength(cap);
+		expect(capped.runs()[0].error).toBe(
+			`Stopped after ${cap} executions without a finished analysis: ` +
+				`${cap - 1} ended in an error, 1 timed out, the last said: ` +
+				'The script was stopped after 300000 ms and nothing it printed was kept. ' +
+				'Do less in one execution, or work on a sample of the data.'
+		);
+		// The workbench reads the same sentence off the state.
+		expect(capped.controller.stateFor('ai').error).toBe(capped.runs()[0].error);
+	});
+
+	it('carries on past a script that ran out of time, telling Claude that it did', async () => {
+		let execution = 0;
+		const h = await harness({
+			turns: [toolTurn('print(1)', 'tool-0'), toolTurn('print(2)', 'tool-1'), endTurn('Done.')],
+			script: () => {
+				execution += 1;
+				if (execution === 1) {
+					throw new PyExecutorError('timeout', 'The script ran longer than 300000 ms.');
+				}
+				return pngResult('plot.png');
+			}
+		});
+
+		expect(await h.controller.run('ai', 'analyse')).toBe('done');
+		expect(h.executor.runs).toHaveLength(2);
+		// The timeout went back as the first execution's result, in words.
+		expect(JSON.stringify(h.client.requests[1].messages)).toContain('was stopped after 300000 ms');
+		expect(h.runs()[0].outputs).toHaveLength(1);
 	});
 
 	it('records a refusal as an error run flagged as a refusal', async () => {

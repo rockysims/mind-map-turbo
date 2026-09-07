@@ -15,6 +15,13 @@ describe('executorInputName', () => {
 		expect(executorInputName('  sweep.csv \n')).toBe('sweep.csv');
 	});
 
+	it('steps a file called outputs aside, because that name is the output directory', () => {
+		expect(executorInputName('outputs')).toBe('outputs.input');
+		// Only the exact name collides; the runtime's filesystem is case-sensitive.
+		expect(executorInputName('outputs.csv')).toBe('outputs.csv');
+		expect(executorInputName('Outputs')).toBe('Outputs');
+	});
+
 	it('substitutes a name for anything that would not be a file', () => {
 		expect(executorInputName('')).toBe('input');
 		expect(executorInputName('   ')).toBe('input');

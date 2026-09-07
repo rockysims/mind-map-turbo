@@ -99,6 +99,7 @@
 	import { deriveGraphLayout, withSettledGraphPositions } from './lib/graphLayout.js';
 	import { evaluateGraphQuery, type GraphQueryElementState } from './lib/graphQuery.js';
 	import { beaconNodeIds } from './lib/beacons.js';
+	import { pinScrollToOrigin } from './lib/pinScroll';
 	import { severedComponentAfterMutation } from './lib/severedComponent.js';
 	import type { LayoutSettings } from './lib/layoutSettings.js';
 	import { withDefaultLayoutSettings } from './lib/layoutSettings.js';
@@ -3124,9 +3125,12 @@
 
 	{#snippet focusFrame({ level, borderRadiusPx, borderWidthPx, content }: StackFrameArgs)}
 		{#if level.subjectKind === 'image'}
+			<!-- Pinned like the node frame beside it: a clipping box that is scrolled
+			     takes the whole level off screen (`lib/pinScroll.ts`). -->
 			<div
 				class="focus-image-frame"
 				style={`border-radius: ${borderRadiusPx}px; border-width: ${borderWidthPx}px;`}
+				onscroll={(event) => pinScrollToOrigin(event.currentTarget)}
 			>
 				{@render content()}
 			</div>
@@ -3473,6 +3477,7 @@
 		border-color: #334155;
 		background: #ffffff;
 		overflow: hidden;
+		overflow-anchor: none;
 	}
 
 	.focus-image-thumb {

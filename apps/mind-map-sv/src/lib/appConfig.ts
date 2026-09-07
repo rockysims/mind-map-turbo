@@ -10,9 +10,9 @@ export const APP_CONFIG = {
 		rememberKey: true, // keep the API key in this browser between sessions
 		historyLength: 3, // runs kept on a node before the oldest is evicted
 		effort: { analyse: 'high', refine: 'medium' }, // thinking effort per run mode
-		maxToolCalls: 8, // script executions one run may ask for before the loop ends
-		scriptTimeoutMs: 120000, // wall clock a single script execution may take
-		stdoutTailChars: 4000, // trailing stdout/stderr characters a tool result carries
+		maxToolCalls: 12, // script executions one run may ask for before the loop ends
+		scriptTimeoutMs: 300000, // wall clock a single script execution may take
+		stdoutTailChars: 8000, // trailing stdout/stderr characters a tool result carries
 		maxImagesPerResult: 4, // rendered plots sent back per script execution
 		maxImageBytes: 1_000_000, // largest rendered plot sent back, per image
 		summaryMaxChars: 4000, // summary length a run record stores, truncated on the way in

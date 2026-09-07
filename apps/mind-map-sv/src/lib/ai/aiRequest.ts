@@ -22,11 +22,31 @@ import type { AiSettings } from './aiSettings';
 import { renderDigest, type FileDigest } from './probeScript';
 
 /**
+ * The caps a run is actually subject to, as the prompt states them.
+ *
+ * Stated rather than left implicit because the first real run spent every one
+ * of its executions finding out: it hunted for a file it had been told was in
+ * the working directory but was not, and read the answers through a stdout
+ * tail that cut them off, with nothing telling it either budget existed.
+ */
+interface PromptLimits {
+	/** Executions this run may ask for; defaults to `APP_CONFIG.ai.maxToolCalls`. */
+	maxToolCalls?: number;
+	/** Tail of each stream a result carries; defaults to `APP_CONFIG.ai.stdoutTailChars`. */
+	stdoutTailChars?: number;
+}
+
+/**
  * The fixed instructions, drafted in the plan and iterated during the smoke
  * test. The attached filenames are appended by `buildSystemPrompt`, because
  * the rules refer to "the names listed below".
+ *
+ * A function rather than a constant so the two numbers the sandbox enforces
+ * are the numbers the prompt quotes: a budget the model is not told about is
+ * one it cannot spend well.
  */
-const SYSTEM_PROMPT_BODY = `You are the analysis engine inside one node of a mind map. The user has
+function systemPromptBody(maxToolCalls: number, stdoutTailChars: number): string {
+	return `You are the analysis engine inside one node of a mind map. The user has
 attached data files and written a request. You have one tool, run_analysis,
 which runs a complete Python script in the user's browser against the
 attached files and returns what it printed and what it saved. Nothing you
@@ -35,14 +55,19 @@ write runs anywhere else.
 Rules:
 - Keep all code in one script, analysis.py, and send the whole script on
   every run_analysis call; there is no other way to run code. The attached
-  files are in the working directory under the names listed below. pandas,
+  files are in the current directory under the names listed below. pandas,
   numpy, scipy and matplotlib are available; there is no network and no pip.
+- You have ${maxToolCalls} executions for this run; explore the data in as few
+  as possible, printing compactly, and put the analysis in the same script.
+- Only the last ${stdoutTailChars} characters of each execution's stdout and
+  stderr come back, so anything longer is cut off. The data files may be
+  large: print shapes, dtypes and summary numbers, never rows wholesale.
 - Save every figure to outputs/ as PNG using matplotlib's Agg backend. Save
   any derived table to outputs/ as CSV. Use short, stable, descriptive
   filenames; when a previous analysis.py is provided, keep its filenames
   unchanged so the mind map can refresh them in place.
 - When several files share a shape, read them by pattern (for example every
-  .csv in the working directory) rather than by hard-coded names, so the
+  .csv in the current directory) rather than by hard-coded names, so the
   script keeps working when a file is added or replaced.
 - Each tool result includes the images you produced. Look at them: axis
   labels with units, a legend when there is more than one series, a sensible
@@ -52,6 +77,7 @@ Rules:
 - Finish with a short summary in plain prose: what the data contained, what
   you did to it, what each output shows, and anything suspicious in the
   measurements. No code in the summary.`;
+}
 
 /**
  * What a refine run adds. It sits in the *user* message rather than the system
@@ -92,7 +118,7 @@ export const RUN_ANALYSIS_TOOL: Anthropic.Tool = {
  * depth the probe *actually ran at*, and a setting changed after the probe
  * must not silently widen what the request carries.
  */
-interface AiRequestBuild {
+interface AiRequestBuild extends PromptLimits {
 	prompt: string;
 	inputs: AiInput[];
 	digests: FileDigest[];
@@ -189,7 +215,11 @@ function baseRequest(build: AiRequestBuild, effort: AiEffort, text: string): AiR
 		// The names the runtime will actually write, not the names the graph
 		// stores: a script that opens the latter would not find the file.
 		system: buildSystemPrompt(
-			fileInputs(build.inputs).map((input) => executorInputName(input.name))
+			fileInputs(build.inputs).map((input) => executorInputName(input.name)),
+			{
+				...(build.maxToolCalls === undefined ? {} : { maxToolCalls: build.maxToolCalls }),
+				...(build.stdoutTailChars === undefined ? {} : { stdoutTailChars: build.stdoutTailChars })
+			}
 		),
 		messages: [{ role: 'user', content: text }],
 		tools: [RUN_ANALYSIS_TOOL],
@@ -203,13 +233,18 @@ function baseRequest(build: AiRequestBuild, effort: AiEffort, text: string): AiR
 	};
 }
 
-/** The rules, then the names the script will find in its working directory. */
-export function buildSystemPrompt(fileNames: string[]): string {
+/** The rules, then the names the script will find in its current directory. */
+export function buildSystemPrompt(fileNames: string[], limits: PromptLimits = {}): string {
+	const {
+		maxToolCalls = APP_CONFIG.ai.maxToolCalls,
+		stdoutTailChars = APP_CONFIG.ai.stdoutTailChars
+	} = limits;
+	const body = systemPromptBody(maxToolCalls, stdoutTailChars);
 	if (fileNames.length === 0) {
-		return `${SYSTEM_PROMPT_BODY}\n\nAttached files: none.`;
+		return `${body}\n\nAttached files: none.`;
 	}
 	const list = fileNames.map((name) => `- ${name}`).join('\n');
-	return `${SYSTEM_PROMPT_BODY}\n\nAttached files:\n${list}`;
+	return `${body}\n\nAttached files:\n${list}`;
 }
 
 /** The prompt, then the digests, then the neighbours' prose. */
@@ -295,6 +330,14 @@ type ToolResultContent = Exclude<NonNullable<Anthropic.ToolResultBlockParam['con
 /** One script execution, as the executor reports it. */
 export interface AiToolResult {
 	toolUseId: string;
+	/**
+	 * Which execution of the run this was, counting from 1.
+	 *
+	 * Required rather than optional: the whole point is that every result says
+	 * where the run has got to, and a result that silently left it out would be
+	 * the one that let a run walk into the cap unawares.
+	 */
+	execution: number;
 	exitCode: number;
 	stdout: string;
 	stderr: string;
@@ -307,6 +350,8 @@ export interface AiToolResult {
  */
 interface AppendToolResultOptions {
 	stdoutTailChars?: number;
+	/** The run's execution budget, for the `Execution K of N` line. */
+	maxToolCalls?: number;
 	maxImagesPerResult?: number;
 	maxImageBytes?: number;
 	/** The "send rendered plots back for checking" setting. */
@@ -332,6 +377,7 @@ export function appendToolResult(
 ): AiRequest {
 	const {
 		stdoutTailChars = APP_CONFIG.ai.stdoutTailChars,
+		maxToolCalls = APP_CONFIG.ai.maxToolCalls,
 		maxImagesPerResult = APP_CONFIG.ai.maxImagesPerResult,
 		maxImageBytes = APP_CONFIG.ai.maxImageBytes,
 		sendPlots = APP_CONFIG.ai.sendPlots
@@ -344,7 +390,10 @@ export function appendToolResult(
 	});
 
 	const content: ToolResultContent = [
-		{ type: 'text', text: renderToolResultText(toolResult, attachments, stdoutTailChars) },
+		{
+			type: 'text',
+			text: renderToolResultText(toolResult, attachments, stdoutTailChars, maxToolCalls)
+		},
 		...attachments
 			.filter((attachment) => attachment.attached)
 			.map((attachment): Anthropic.ImageBlockParam => {
@@ -423,11 +472,15 @@ function chooseImages(
 function renderToolResultText(
 	toolResult: AiToolResult,
 	attachments: ImageDecision[],
-	stdoutTailChars: number
+	stdoutTailChars: number,
+	maxToolCalls: number
 ): string {
 	const decisions = new Map(attachments.map((decision) => [decision.output, decision]));
 
 	const lines = [
+		// First line, before anything about this execution: a model that can see
+		// how much of the budget is left can decide to finish rather than probe.
+		`Execution ${toolResult.execution} of ${maxToolCalls}`,
 		`Exit code: ${toolResult.exitCode}`,
 		'',
 		renderStream('stdout', toolResult.stdout, stdoutTailChars),
