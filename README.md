@@ -108,18 +108,18 @@ to check, and Forget key.
   rather than accumulating. Cheaper and steadier than starting over.
 - **Run** — runs the stored script again on the current files, with **no model
   call at all**. Free, and the right button after changing the data behind an
-  attachment. New files are seen only by a script that scans its folder rather
-  than opening fixed names (see below).
+  attachment. A script that opens files by name won't notice a new one; a
+  script that reads every attached file will (see below).
 
-Every attached file — this node's and its one-hop neighbours' — is written into
-the script's folder on every run, under its own filename. So a script that scans
-that folder finds a file you added yesterday, and a script that opens fixed
-filenames does not: it is handed the new file and never reads it. When files
-have come or gone since the script was written the workbench says so above the
-switch, naming them, and starts on **Change**, which is how the script catches
-up. A file _replaced_ under the same name is the case Run was made for — the
-script opens that name either way — and the note says so rather than pushing you
-at a model call.
+Every attached file — this node's and its one-hop neighbours' — reaches the
+script on every run, under its own filename. So a script that reads every file
+it is handed finds one you attached yesterday, and a script that opens fixed
+filenames does not: it is given the new file and never reads it. When a file has
+come or gone since the script was written the workbench says so above the
+switch, naming it, and starts on **Change**, which is how the script catches up.
+A file _replaced_ under the same name is the case Run was made for — the script
+opens that name either way — so that one starts on **Run**, and the note says so
+rather than pushing you at a model call.
 
 An output can be promoted to a node of its own — the `⤴` button on its row. A
 later run that produces the same filename swaps the image on that node, and one

@@ -101,14 +101,16 @@
 			label: 'Run',
 			run: 'Run',
 			// It names the trap rather than the saving: Run calls no model, and every
-			// attached file is written into the script's folder on every run — but a
-			// script that opens fixed filenames never looks at a new one, and nothing
-			// about that answer looks wrong. An earlier wording ("read only if the
-			// script reads by pattern") named the rule in the script's terms rather
-			// than the reader's, and the reader could not tell which kind they had.
+			// attached file reaches the script on every run — but a script that opens
+			// fixed filenames never looks at a new one, and nothing about that answer
+			// looks wrong. Two earlier wordings said this in terms the reader does not
+			// have: "read only if the script reads by pattern" was the script's own
+			// vocabulary, and "scans its folder" named a folder nobody had been shown.
+			// What is left is the only distinction that matters to the reader, put as
+			// two scripts they can imagine.
 			hint:
-				'Runs the stored script again on the current files. New files are seen only by a ' +
-				'script that scans its folder rather than opening fixed names.'
+				'Runs the stored script again on the current files. A script that opens files by name ' +
+				"won't notice a new one; a script that reads every attached file will."
 		}
 	];
 
@@ -897,6 +899,18 @@
 	-->
 	<section class="inputs-section" data-ai-inputs>
 		<h3 class="section-label">Inputs</h3>
+		<!--
+			The one thing about attaching a file that surprises people: the bytes are
+			copied into the graph when the file is attached, so editing the original
+			on disk changes nothing here and a re-run reads the same numbers it read
+			last time. Said once, under the heading, and quietly — it is a fact about
+			the list rather than a warning about anything the reader just did — and it
+			names the way out on the same line, because Replace is already on every
+			row and nobody was reading it as "bring in the new version".
+		-->
+		<p class="inputs-note" data-ai-inputs-note>
+			Attached files are copies. To bring in an edited file, use Replace on its row.
+		</p>
 		{#if attachmentStatus !== ''}
 			<!-- A file dialog is a thing the reader cannot see the result of, and a
 			     cancelled or failed one leaves the list looking exactly as it did. -->
@@ -1399,8 +1413,11 @@
 		background: currentcolor;
 	}
 
+	/* `.inputs-note` is quiet rather than the amber `.inputs-changed` block:
+	   nothing has gone wrong, this is how attachments have always worked. */
 	.mode-hint,
-	.mode-note {
+	.mode-note,
+	.inputs-note {
 		color: #64748b;
 		font-size: 0.875rem;
 	}
