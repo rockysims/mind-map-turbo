@@ -19,7 +19,7 @@ import type {
 	RunOptions
 } from './pyExecutor';
 import { PyExecutorError } from './pyExecutor';
-import type { FileDigest } from './probeScript';
+import type { MeasuredFileDigest } from './probeScript';
 
 interface FakeRunCall {
 	script: string;
@@ -47,7 +47,7 @@ const FAKE_PROGRESS: LoadProgress[] = [
 
 export function createFakeExecutor(
 	script: (code: string) => ExecutionResult | Promise<ExecutionResult>,
-	digests: FileDigest[] = []
+	digests: MeasuredFileDigest[] = []
 ): FakeExecutor {
 	const runs: FakeRunCall[] = [];
 	const digestCalls: FakeDigestCall[] = [];

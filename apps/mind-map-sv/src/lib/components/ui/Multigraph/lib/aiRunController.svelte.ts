@@ -48,7 +48,7 @@ import {
 } from '$lib/ai/aiRequest';
 import type { AiSettings } from '$lib/ai/aiSettings';
 import { executorInputName } from '$lib/ai/inputFileName';
-import type { FileDigest } from '$lib/ai/probeScript';
+import type { DigestUnavailableReason, FileDigest } from '$lib/ai/probeScript';
 import type { ExecutionOutput, ExecutorFile, PyExecutor } from '$lib/ai/pyExecutor';
 import type { GraphAssetStore } from '$lib/assets/assetStore';
 import { tombstoneAsset } from '$lib/assets/assetTrash';
@@ -134,6 +134,16 @@ interface DigestCache {
 	byAssetId: Record<string, FileDigest>;
 }
 
+/** One attached file, as `collectAiInputs` resolved it against `graph.assets`. */
+type AiFileInput = Extract<AiInput, { kind: 'file' }>;
+
+/** What came back from the asset store, and what did not. */
+interface ReadFilesResult {
+	files: ExecutorFile[];
+	/** The inputs the store could not answer for, in input order. */
+	missing: AiFileInput[];
+}
+
 /** The live pieces of a run, kept locally and written into state as they move. */
 interface RunProgress {
 	text: string;
@@ -172,27 +182,47 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 		return digestCache[nodeId]?.byAssetId ?? EMPTY_DIGESTS;
 	}
 
-	/** The blobs behind this node's file inputs, deduplicated by asset. */
-	async function readFiles(inputs: AiInput[]): Promise<ExecutorFile[]> {
+	/**
+	 * The blobs behind this node's file inputs, deduplicated by asset — and the
+	 * inputs the store could not answer for.
+	 *
+	 * A missing blob is one input short, not a failed read: the script opens what
+	 * is there. But it is not nothing either, and reporting it is what lets the
+	 * caller record a digest-shaped "there is nothing to measure" for that file
+	 * instead of leaving its row measuring for ever.
+	 *
+	 * With no store at all nothing is claimed missing: the page mounts before the
+	 * store resolves, and a file whose bytes have not been *asked for* yet is not
+	 * a file whose bytes are gone.
+	 */
+	async function readFiles(inputs: AiInput[]): Promise<ReadFilesResult> {
 		const store = deps.assetStore();
 		const scope = deps.assetScope();
-		if (store === null || scope === null || scope === '') return [];
+		const wanted = dedupedFileInputs(inputs);
+		if (store === null || scope === null || scope === '') return { files: [], missing: [] };
 
 		const files: ExecutorFile[] = [];
-		const seen: string[] = [];
-		for (const input of inputs) {
-			if (input.kind !== 'file' || seen.includes(input.assetId)) continue;
-			seen.push(input.assetId);
+		const missing: AiFileInput[] = [];
+		for (const input of wanted) {
 			const stored = await store.get(scope, input.assetId);
-			// A missing blob is one input short, not a failed run: the digest says
-			// what was measured and the script opens what is there.
-			if (!stored.ok) continue;
+			if (!stored.ok) {
+				missing.push(input);
+				continue;
+			}
 			files.push({
 				name: input.name,
 				bytes: new Uint8Array(await stored.value.blob.arrayBuffer())
 			});
 		}
-		return files;
+		return { files, missing };
+	}
+
+	function putDigests(
+		nodeId: string,
+		previewRows: number,
+		byAssetId: Record<string, FileDigest>
+	): void {
+		digestCache = { ...digestCache, [nodeId]: { previewRows, byAssetId } };
 	}
 
 	/**
@@ -203,13 +233,20 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 	 * that rule, and the request builder applies the same one, so what the
 	 * workbench shows and what the request carries are the same rendering of the
 	 * same measurement.
+	 *
+	 * `missing` is remembered alongside the measurements, as an "unavailable"
+	 * digest apiece: the cache is what the workbench draws every file row from,
+	 * so a file that could not be read has to have an entry there saying so, or
+	 * its row waits on a measurement that is never coming. Only what the probe
+	 * actually measured is returned, because that is what a request may carry.
 	 */
 	async function measure(
 		nodeId: string,
 		executor: PyExecutor,
 		inputs: AiInput[],
 		files: ExecutorFile[],
-		previewRows: number
+		previewRows: number,
+		missing: AiFileInput[]
 	): Promise<FileDigest[]> {
 		const digests = await executor.digest(files, previewRows);
 
@@ -220,16 +257,23 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 			if (assetIdByName[key] === undefined) assetIdByName[key] = input.assetId;
 		}
 
-		const byAssetId: Record<string, FileDigest> = {};
+		const byAssetId: Record<string, FileDigest> = unavailableDigests(missing, 'blob');
 		for (const digest of digests) {
 			const assetId = assetIdByName[executorInputName(digest.name)];
 			if (assetId !== undefined) byAssetId[assetId] = digest;
 		}
-		digestCache = { ...digestCache, [nodeId]: { previewRows, byAssetId } };
+		putDigests(nodeId, previewRows, byAssetId);
 		return digests;
 	}
 
-	/** Whether every file input already has a digest measured at this depth. */
+	/**
+	 * Whether every file input already has an answer at this depth.
+	 *
+	 * An "unavailable" counts: it is an answer, and the thing it answers about
+	 * cannot change while the graph does not. A *run* asks for more than this —
+	 * see `runModelLoop`, which re-measures rather than build a request around a
+	 * gap that may have closed.
+	 */
 	function digestsAreFresh(nodeId: string, inputs: AiInput[], previewRows: number): boolean {
 		const cached = digestCache[nodeId];
 		if (cached === undefined || cached.previewRows !== previewRows) return false;
@@ -247,9 +291,12 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 		const previewRows = deps.settings().previewRows;
 		if (digestsAreFresh(nodeId, inputs, previewRows)) return;
 
-		const files = fileInputCount(inputs) === 0 ? [] : await readFiles(inputs);
-		if (files.length === 0) {
-			digestCache = { ...digestCache, [nodeId]: { previewRows, byAssetId: {} } };
+		const read = fileInputCount(inputs) === 0 ? NOTHING_READ : await readFiles(inputs);
+		if (read.files.length === 0) {
+			// Nothing for the probe to look at — either there are no files, or not
+			// one of them could be read. Both are final answers, and the second one
+			// has something to say about each file it covers.
+			putDigests(nodeId, previewRows, unavailableDigests(read.missing, 'blob'));
 			return;
 		}
 
@@ -273,9 +320,17 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 			} else {
 				await executor.load();
 			}
-			await measure(nodeId, executor, inputs, files, previewRows);
+			await measure(nodeId, executor, inputs, read.files, previewRows, read.missing);
 			if (owned) putState(nodeId, IDLE_RUN_STATE);
 		} catch (error) {
+			// The runtime is what failed, so every file is unmeasured for the same
+			// reason and every row says that reason once — the alternative is a list
+			// of files that all claim to be measuring, with nothing measuring them.
+			// The ones whose bytes were already out of reach keep their own reason.
+			putDigests(nodeId, previewRows, {
+				...unavailableDigests(dedupedFileInputs(inputs), 'runtime'),
+				...unavailableDigests(read.missing, 'blob')
+			});
 			if (owned) {
 				putState(nodeId, { ...IDLE_RUN_STATE, phase: 'error', error: messageOf(error) });
 			}
@@ -444,19 +499,27 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 					});
 				})
 			);
-			const files = await withAbort(abort.signal, readFiles(inputs));
+			const read = await withAbort(abort.signal, readFiles(inputs));
 
 			putState(nodeId, { phase: 'running', ...progress });
 
 			const finished =
 				mode === 'rerun'
-					? await runStoredScript(nodeId, executor, storedScript, files, abort.signal, progress)
+					? await runStoredScript(
+							nodeId,
+							executor,
+							storedScript,
+							read.files,
+							abort.signal,
+							progress
+						)
 					: await runModelLoop({
 							nodeId,
 							// `client` is null only when `mode !== 'rerun'` returned above.
 							client: nonNull(client),
 							executor,
-							files,
+							files: read.files,
+							missing: read.missing,
 							inputs,
 							mode,
 							settings,
@@ -566,6 +629,8 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 		client: AiClient;
 		executor: PyExecutor;
 		files: ExecutorFile[];
+		/** File inputs whose bytes the store could not hand over for this run. */
+		missing: AiFileInput[];
 		inputs: AiInput[];
 		mode: AiRunMode;
 		settings: AiSettings;
@@ -583,9 +648,16 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 		const { nodeId, client, executor, files, inputs, settings, signal, progress } = input;
 
 		const previewRows = settings.previewRows;
-		const digests = digestsAreFresh(nodeId, inputs, previewRows)
-			? Object.values(digestsFor(nodeId))
-			: await measure(nodeId, executor, inputs, files, previewRows);
+		const cached = Object.values(digestsFor(nodeId));
+		// An "unavailable" in the cache is a file nothing measured, and a run is
+		// exactly when that may have changed — the blob may have arrived, and the
+		// runtime just loaded. So it re-measures rather than send a request built
+		// around the gap. What a request carries is measurements only; the request
+		// builder already says name and size for a file that has no digest.
+		const digests =
+			digestsAreFresh(nodeId, inputs, previewRows) && cached.every(isMeasured)
+				? cached
+				: await measure(nodeId, executor, inputs, files, previewRows, input.missing);
 
 		const build = { prompt: input.prompt, inputs, digests, settings, previewRows };
 		let request: AiRequest =
@@ -721,8 +793,48 @@ interface FinishedRun {
 
 const EMPTY_DIGESTS: Record<string, FileDigest> = {};
 
+/** What `readFiles` answers for a node with no files to read. */
+const NOTHING_READ: ReadFilesResult = { files: [], missing: [] };
+
 function fileInputCount(inputs: AiInput[]): number {
 	return inputs.filter((input) => input.kind === 'file').length;
+}
+
+/** This node's file inputs, one per asset, in the order the workbench lists them. */
+function dedupedFileInputs(inputs: AiInput[]): AiFileInput[] {
+	const wanted: AiFileInput[] = [];
+	for (const input of inputs) {
+		if (input.kind !== 'file') continue;
+		if (wanted.some((seen) => seen.assetId === input.assetId)) continue;
+		wanted.push(input);
+	}
+	return wanted;
+}
+
+/**
+ * A digest-shaped "there is nothing to measure, and here is why", per asset.
+ *
+ * Name and size come from the graph's asset metadata, which is everything that
+ * is known about a file nobody could open.
+ */
+function unavailableDigests(
+	inputs: AiFileInput[],
+	reason: DigestUnavailableReason
+): Record<string, FileDigest> {
+	const byAssetId: Record<string, FileDigest> = {};
+	for (const input of inputs) {
+		byAssetId[input.assetId] = {
+			name: input.name,
+			size: input.size,
+			kind: 'unavailable',
+			reason
+		};
+	}
+	return byAssetId;
+}
+
+function isMeasured(digest: FileDigest): boolean {
+	return digest.kind !== 'unavailable';
 }
 
 function toRunInput(input: AiInput): AiRunInput {

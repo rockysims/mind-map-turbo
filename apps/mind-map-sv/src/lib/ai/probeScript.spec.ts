@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { PROBE_SCRIPT, parseProbeOutput, renderDigest, type FileDigest } from './probeScript';
+import {
+	PROBE_SCRIPT,
+	parseProbeOutput,
+	renderDigest,
+	type MeasuredFileDigest
+} from './probeScript';
 
-function tableDigest(rowCount: number, over: Partial<FileDigest> = {}): FileDigest {
+function tableDigest(rowCount: number, over: Partial<MeasuredFileDigest> = {}): MeasuredFileDigest {
 	return {
 		name: 'sweep.csv',
 		size: 2048,

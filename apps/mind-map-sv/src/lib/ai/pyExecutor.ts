@@ -19,7 +19,7 @@
 
 import { APP_CONFIG } from '$lib/appConfig';
 import { executorInputName } from './inputFileName';
-import { PROBE_SCRIPT, parseProbeOutput, type FileDigest } from './probeScript';
+import { PROBE_SCRIPT, parseProbeOutput, type MeasuredFileDigest } from './probeScript';
 import { pyWorkerSource, type PyRuntimeConfig } from './pyWorker';
 
 /** How long a worker has to post `ready` before the construction is called broken. */
@@ -73,7 +73,7 @@ export interface RunOptions {
 export interface PyExecutor {
 	/** Idempotent: the second call awaits the first load rather than starting another. */
 	load(onProgress?: (progress: LoadProgress) => void): Promise<void>;
-	digest(files: ExecutorFile[], previewRows: number): Promise<FileDigest[]>;
+	digest(files: ExecutorFile[], previewRows: number): Promise<MeasuredFileDigest[]>;
 	run(script: string, files: ExecutorFile[], options?: RunOptions): Promise<ExecutionResult>;
 	dispose(): void;
 }

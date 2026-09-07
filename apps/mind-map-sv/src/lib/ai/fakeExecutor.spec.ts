@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createFakeExecutor } from './fakeExecutor';
 import { PyExecutorError, type ExecutionResult } from './pyExecutor';
-import type { FileDigest } from './probeScript';
+import type { MeasuredFileDigest } from './probeScript';
 
 const OK: ExecutionResult = {
 	exitCode: 0,
@@ -11,7 +11,13 @@ const OK: ExecutionResult = {
 	durationMs: 5
 };
 
-const DIGEST: FileDigest = { name: 'sweep.csv', size: 12, kind: 'table', columns: ['t'], rows: 3 };
+const DIGEST: MeasuredFileDigest = {
+	name: 'sweep.csv',
+	size: 12,
+	kind: 'table',
+	columns: ['t'],
+	rows: 3
+};
 
 function file(name: string) {
 	return { name, bytes: new Uint8Array([1, 2]) };

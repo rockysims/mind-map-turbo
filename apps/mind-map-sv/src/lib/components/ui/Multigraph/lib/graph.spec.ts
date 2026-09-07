@@ -109,6 +109,55 @@ describe('graph mutations', () => {
 
 			expect(removeNode(graph, 'missing')).toBe(graph);
 		});
+
+		/*
+		 * A promoted output whose node is deleted is not promoted any more. Left
+		 * behind, the binding had the workbench hiding Promote and offering a jump
+		 * to nothing; undo restores the graph, so the binding comes back with it.
+		 */
+		it('drops the `!ai` promoted bindings that named the removed node', () => {
+			const graph = makeGraph({
+				nodes: [
+					{
+						id: 'n0',
+						title: 'Analysis',
+						description: '',
+						tags: [],
+						addons: {
+							ai: {
+								prompt: '',
+								runs: [],
+								promoted: { 'plot.png': 'n1', 'table.csv': 'n2' }
+							}
+						}
+					},
+					{ id: 'n1', title: 'Plot', description: '', tags: [] },
+					{ id: 'n2', title: 'Table', description: '', tags: [] }
+				]
+			});
+
+			const next = removeNode(graph, 'n1');
+
+			expect(next.nodes[0].addons?.ai?.promoted).toEqual({ 'table.csv': 'n2' });
+		});
+
+		it('leaves a node whose bindings named nobody removed exactly as it was', () => {
+			const graph = makeGraph({
+				nodes: [
+					{
+						id: 'n0',
+						title: 'Analysis',
+						description: '',
+						tags: [],
+						addons: { ai: { prompt: '', runs: [], promoted: { 'plot.png': 'n1' } } }
+					},
+					{ id: 'n1', title: 'Plot', description: '', tags: [] },
+					{ id: 'n2', title: 'Spare', description: '', tags: [] }
+				]
+			});
+
+			expect(removeNode(graph, 'n2').nodes[0]).toBe(graph.nodes[0]);
+		});
 	});
 
 	describe('addEdge', () => {

@@ -135,6 +135,7 @@
 			{hasKey}
 			assets={graph.assets ?? {}}
 			titleForNodeId={(id) => graph.nodes.find((candidate) => candidate.id === id)?.title ?? id}
+			nodeExists={(id) => graph.nodes.some((candidate) => candidate.id === id)}
 			onPromptChange={(prompt) => {
 				graph = setAiPrompt(graph, nodeId, prompt);
 				lastPrompt = prompt;

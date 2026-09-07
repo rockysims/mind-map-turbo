@@ -10,6 +10,7 @@ import {
 	setAiPrompt,
 	setAiScript
 } from './aiNode';
+import { removeNode } from './graph';
 import { makeGraph } from './testFixtures';
 import type { GraphAssetMetadata, MultigraphData } from '../../types/multigraph';
 import type { AiAddon, AiRun, AiRunOutput, NodeContentBlock, NodeData } from '../../types/node';
@@ -531,6 +532,28 @@ describe('promoteAiOutput', () => {
 
 		expect(aiAddon(graph).promoted).toEqual({ 'plot.png': 'fresh' });
 		expect(contentOf(graph, 'fresh')).toEqual([{ type: 'image', assetId: 'a1', alt: 'plot.png' }]);
+	});
+
+	/*
+	 * The two halves of "the reader deleted the promoted node" meeting: the
+	 * deletion takes the binding with it, and the next press is an ordinary
+	 * promote onto a new node rather than a no-op onto a node that is gone.
+	 */
+	it('promotes onto a fresh node after the promoted node was removed from the graph', () => {
+		const promoted = promoteAiOutput(promotableGraph(), 'ai', 'plot.png', {
+			position: AT,
+			nodeId: 'first'
+		});
+
+		const deleted = removeNode(promoted, 'first');
+		expect(aiAddon(deleted).promoted).toEqual({});
+		expect(deleted.edges).toHaveLength(0);
+
+		const again = promoteAiOutput(deleted, 'ai', 'plot.png', { position: AT, nodeId: 'second' });
+		expect(aiAddon(again).promoted).toEqual({ 'plot.png': 'second' });
+		expect(contentOf(again, 'second')).toEqual([{ type: 'image', assetId: 'a1', alt: 'plot.png' }]);
+		expect(again.edges).toHaveLength(1);
+		expect(again.edges[0]).toMatchObject({ sourceNodeId: 'ai', targetNodeId: 'second' });
 	});
 
 	it('returns the same graph when the latest done run did not produce that name', () => {

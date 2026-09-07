@@ -32,7 +32,7 @@ import { formatByteSize } from '$lib/components/ui/Multigraph/lib/byteSize';
  * holds already-stringified cells, because what the request carries is text and
  * the conversion belongs where the types are still known.
  */
-export interface FileDigest {
+export interface MeasuredFileDigest {
 	name: string;
 	size: number;
 	/** `'table'` when pandas read it; `'other'` when it did not, for any reason. */
@@ -42,6 +42,35 @@ export interface FileDigest {
 	rows?: number;
 	head?: string[][];
 }
+
+/**
+ * Why a file has no measurement at all.
+ *
+ * - `'blob'` — the asset store could not hand over the bytes, so nothing was
+ *   ever put in front of the probe. A document whose blob was never hydrated
+ *   into this browser is the case that happens.
+ * - `'runtime'` — the Python runtime did not load, so no file was measured.
+ */
+export type DigestUnavailableReason = 'blob' | 'runtime';
+
+/**
+ * A file the probe never saw, standing in its place.
+ *
+ * The probe cannot produce one — `parseProbeOutput` refuses the kind — because
+ * this is not a measurement: it is the run controller saying, in the one shape
+ * the workbench already draws a file by, that there is nothing to measure and
+ * why. Without it a file whose bytes are out of reach reads as "digesting…"
+ * for ever, which is a promise rather than an answer. Name and size come from
+ * the graph's asset metadata, which is all that is known.
+ */
+interface UnavailableFileDigest {
+	name: string;
+	size: number;
+	kind: 'unavailable';
+	reason: DigestUnavailableReason;
+}
+
+export type FileDigest = MeasuredFileDigest | UnavailableFileDigest;
 
 /**
  * The probe. Kept short and dependency-light on purpose: pandas and the
@@ -122,8 +151,11 @@ main()
  * went missing. Consecutive unparsable lines are reported as one error, so a
  * traceback reads as the one failure it is rather than six.
  */
-export function parseProbeOutput(stdout: string): { digests: FileDigest[]; errors: string[] } {
-	const digests: FileDigest[] = [];
+export function parseProbeOutput(stdout: string): {
+	digests: MeasuredFileDigest[];
+	errors: string[];
+} {
+	const digests: MeasuredFileDigest[] = [];
 	const errors: string[] = [];
 	let pending: string[] = [];
 
@@ -150,7 +182,7 @@ export function parseProbeOutput(stdout: string): { digests: FileDigest[]; error
 	return { digests, errors };
 }
 
-function parseDigestLine(line: string): FileDigest | undefined {
+function parseDigestLine(line: string): MeasuredFileDigest | undefined {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(line);
@@ -167,7 +199,7 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 	return value as Record<string, unknown>;
 }
 
-function toDigest(value: unknown): FileDigest | undefined {
+function toDigest(value: unknown): MeasuredFileDigest | undefined {
 	const record = asRecord(value);
 	if (!record) return undefined;
 	const { name, size, kind } = record;

@@ -13,7 +13,7 @@ import { APP_CONFIG } from '$lib/appConfig';
 import type { AiRequest, AiTurn } from '$lib/ai/aiClient';
 import { createFakeAiClient } from '$lib/ai/fakeClient';
 import { createFakeExecutor } from '$lib/ai/fakeExecutor';
-import type { ExecutionResult } from '$lib/ai/pyExecutor';
+import { PyExecutorError, type ExecutionResult } from '$lib/ai/pyExecutor';
 import { defaultAiSettings, type AiSettings } from '$lib/ai/aiSettings';
 import { MemoryGraphAssetStore } from '$lib/assets/assetStore';
 import type { GraphAssetStore } from '$lib/assets/assetStore';
@@ -59,6 +59,41 @@ function baseGraph(addon: Partial<AiAddon> = {}): MultigraphData {
 				name: 'sweep.csv',
 				size: CSV_TEXT.length,
 				createdAt: 1
+			}
+		}
+	};
+}
+
+const GHOST_ASSET_ID = 'ghost-asset';
+
+/**
+ * The same graph with a second file attached whose blob is not in the store —
+ * the mixed case, where one file has a digest and the other cannot.
+ */
+function graphWithAGhostFile(): MultigraphData {
+	const graph = baseGraph();
+	return {
+		...graph,
+		nodes: graph.nodes.map((node) =>
+			node.id === 'data'
+				? {
+						...node,
+						content: [
+							...(node.content ?? []),
+							{ type: 'file', assetId: GHOST_ASSET_ID, name: 'ghost.csv' }
+						]
+					}
+				: node
+		),
+		assets: {
+			...graph.assets,
+			[GHOST_ASSET_ID]: {
+				id: GHOST_ASSET_ID,
+				kind: 'file',
+				mimeType: 'text/csv',
+				name: 'ghost.csv',
+				size: 99,
+				createdAt: 2
 			}
 		}
 	};
@@ -133,6 +168,8 @@ interface HarnessOptions {
 	/** `null` for the no-key case. */
 	withClient?: boolean;
 	store?: GraphAssetStore | null;
+	/** Make `executor.load` reject, as it does with no network to fetch Pyodide from. */
+	loadFails?: boolean;
 }
 
 /** The controller with fakes underneath and every commit remembered. */
@@ -143,6 +180,13 @@ async function harness(options: HarnessOptions = {}) {
 	const executor = createFakeExecutor(options.script ?? (() => pngResult('plot.png')), [
 		{ name: 'sweep.csv', size: CSV_TEXT.length, kind: 'table', columns: ['t', 'ch2'], rows: 2 }
 	]);
+	// Replaced rather than parameterised: the fake's whole job is to load, and
+	// the one case that needs it not to is this one.
+	if (options.loadFails === true) {
+		executor.load = async () => {
+			throw new PyExecutorError('load-failed', 'The Python runtime could not be loaded.');
+		};
+	}
 	const store = options.store === undefined ? await storeWithCsv() : options.store;
 	const settings: AiSettings = { ...defaultAiSettings(), ...options.settings };
 
@@ -604,6 +648,85 @@ describe('createAiRunController', () => {
 		// Idempotent at the same depth: a second call measures nothing again.
 		await h.controller.digest('ai');
 		expect(h.executor.digests).toHaveLength(1);
+	});
+
+	/*
+	 * The bug this closes: one input whose blob the store cannot hand over left
+	 * `digest` with nothing to measure, so it cached nothing, so every file row
+	 * read "digesting…" for ever. A file that cannot be read is an answer, and
+	 * the cache is where the workbench reads answers from.
+	 */
+	it('answers for a file whose blob the store does not hold, rather than measuring for ever', async () => {
+		const h = await harness({ store: new MemoryGraphAssetStore() });
+
+		await h.controller.digest('ai');
+
+		expect(h.executor.digests).toHaveLength(0);
+		expect(h.controller.digestsFor('ai')[CSV_ASSET_ID]).toEqual({
+			name: 'sweep.csv',
+			size: CSV_TEXT.length,
+			kind: 'unavailable',
+			reason: 'blob'
+		});
+	});
+
+	it('digests the files it can read and says why the others have none', async () => {
+		const h = await harness({ graph: graphWithAGhostFile() });
+
+		await h.controller.digest('ai');
+
+		expect(h.executor.digests[0].files.map((file) => file.name)).toEqual(['sweep.csv']);
+		expect(h.controller.digestsFor('ai')[CSV_ASSET_ID]).toMatchObject({
+			name: 'sweep.csv',
+			kind: 'table'
+		});
+		expect(h.controller.digestsFor('ai')[GHOST_ASSET_ID]).toMatchObject({
+			kind: 'unavailable',
+			reason: 'blob'
+		});
+
+		// And it is a settled answer: a second pass measures nothing again.
+		await h.controller.digest('ai');
+		expect(h.executor.digests).toHaveLength(1);
+	});
+
+	it('says the runtime is what is unavailable when the executor cannot load', async () => {
+		const h = await harness({ loadFails: true });
+
+		await h.controller.digest('ai');
+
+		expect(h.controller.digestsFor('ai')[CSV_ASSET_ID]).toMatchObject({
+			name: 'sweep.csv',
+			kind: 'unavailable',
+			reason: 'runtime'
+		});
+		// And the failure is on the run state, where the workbench draws it once
+		// rather than on every file row as a mystery.
+		const state = h.controller.stateFor('ai');
+		expect(state.phase).toBe('error');
+		expect(state.error).toContain('Python runtime');
+	});
+
+	it('re-measures on a run when a file that was unavailable has arrived since', async () => {
+		const store = new MemoryGraphAssetStore();
+		const h = await harness({ store });
+
+		await h.controller.digest('ai');
+		expect(h.controller.digestsFor('ai')[CSV_ASSET_ID]).toMatchObject({ kind: 'unavailable' });
+
+		await store.put({
+			scope: SCOPE,
+			assetId: CSV_ASSET_ID,
+			blob: new Blob([CSV_TEXT], { type: 'text/csv' }),
+			mimeType: 'text/csv',
+			name: 'sweep.csv',
+			size: CSV_TEXT.length,
+			updatedAt: 2
+		});
+		await h.controller.run('ai', 'analyse');
+
+		expect(h.executor.digests).toHaveLength(1);
+		expect(h.controller.digestsFor('ai')[CSV_ASSET_ID]).toMatchObject({ kind: 'table' });
 	});
 
 	it('reports an idle state for a node that has never run', async () => {
