@@ -1,11 +1,11 @@
 /**
  * What the workbench shows about an `!ai` node, decided without a component.
  *
- * Three questions the surface cannot answer by looking at one field: which run
- * mode to offer by default, which promoted outputs the latest run stopped
- * producing, and how to say in one line what a run cost. All three read the
- * add-on and nothing else, so a story can pin them and the component can stay
- * markup.
+ * Four questions the surface cannot answer by looking at one field: which run
+ * modes to offer and which of them to start on, which promoted outputs the
+ * latest run stopped producing, and how to say in one line what a run cost. All
+ * of them read the add-on and what the caller has already collected — never the
+ * graph — so a story can pin them and the component can stay markup.
  */
 
 import { latestDoneRun } from './aiNode';
@@ -180,16 +180,98 @@ function fileInputs(inputs: AiInput[]): Extract<AiInput, { kind: 'file' }>[] {
  * `inputs` is optional because a caller that has not collected them cannot be
  * asked to invent them; without it the file question is simply not asked, which
  * is the answer this had before it could be.
+ *
+ * `options.inheritedScript` is the one addition a follow-up brings: a node with
+ * no script of its own but a parent that has one starts on **refine**, because
+ * a follow-up is an edit to what was just done and there is something to edit.
+ * Without it, a node with no script of its own still starts on `analyse`, and
+ * every other rule above is exactly as it was.
  */
-export function defaultRunMode(ai: AiAddon, inputs?: AiInput[]): AiRunMode {
+export function defaultRunMode(
+	ai: AiAddon,
+	inputs?: AiInput[],
+	options?: RunModeOptions
+): AiRunMode {
+	if (ai.script === undefined) {
+		return options?.inheritedScript === undefined ? 'analyse' : 'refine';
+	}
+
 	const latest = latestDoneRun(ai);
-	if (latest === undefined || ai.script === undefined) return 'analyse';
+	if (latest === undefined) return 'analyse';
 	if (latest.prompt !== ai.prompt) return 'refine';
 	if (inputs !== undefined) {
 		const changes = inputsChangedSince(latest, inputs);
 		if (changes.added.length > 0 || changes.removed.length > 0) return 'refine';
 	}
 	return 'rerun';
+}
+
+/** What a caller that has walked the graph can tell the mode rules. */
+export interface RunModeOptions {
+	/**
+	 * The direct AI parent's `analysis.py`, from `inheritedScript` — the script a
+	 * node with none of its own can still change. Absent for a node with no such
+	 * parent, which is every node that is not a follow-up.
+	 */
+	inheritedScript?: string;
+}
+
+/** One mode of the switch, and — when it cannot be picked — why not. */
+export interface RunModeAvailability {
+	mode: AiRunMode;
+	available: boolean;
+	/**
+	 * The sentence the notice line carries while this mode is out of reach.
+	 * Absent when the mode is available.
+	 */
+	reason?: string;
+}
+
+/** Said twice — on the mode that cannot be picked, and in the notice line. */
+const NO_SCRIPT_REASON = 'No stored script yet — write one first.';
+
+/**
+ * Which of Write, Change and Run the switch may offer, and why it may not.
+ *
+ * Three rules, in the order a node grows into them:
+ *
+ * - **Write** (`analyse`) is always available. It needs nothing but a prompt,
+ *   which is what a node with the add-on is.
+ * - **Change** (`refine`) needs a script to edit, and either the node's own or
+ *   its parent's will do — the second is what puts a fresh follow-up straight on
+ *   Change against the script that produced the thing it is following up on.
+ * - **Run** (`rerun`) needs the node's *own* script, because it calls no model
+ *   and so has nothing to turn a parent's script into this node's. A node that
+ *   can only reach an inherited one is told exactly that, rather than being told
+ *   there is no script anywhere when the reader can see there is.
+ *
+ * The reasons come back as strings rather than being written at the button,
+ * per `docs/ui-decisions/2026-08-30--a11y--say-why-a-control-is-disabled-in-the-notice-line.md`:
+ * the control stays reachable and the explanation goes to the one channel a
+ * touch reader has.
+ *
+ * Order is Write, Change, Run — how a node grows into them, and the order the
+ * switch has always drawn them in.
+ */
+export function availableRunModes(ai: AiAddon, options?: RunModeOptions): RunModeAvailability[] {
+	const ownScript = ai.script !== undefined;
+	const anyScript = ownScript || options?.inheritedScript !== undefined;
+
+	return [
+		{ mode: 'analyse', available: true },
+		anyScript
+			? { mode: 'refine', available: true }
+			: { mode: 'refine', available: false, reason: NO_SCRIPT_REASON },
+		ownScript
+			? { mode: 'rerun', available: true }
+			: {
+					mode: 'rerun',
+					available: false,
+					reason: anyScript
+						? "No stored script on this node yet — Change adapts the parent's and stores it here."
+						: NO_SCRIPT_REASON
+				}
+	];
 }
 
 /**

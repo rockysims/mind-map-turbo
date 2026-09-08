@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	availableRunModes,
 	defaultRunMode,
 	digestDisclosureLabel,
 	inputChangesNote,
@@ -11,11 +12,13 @@ import {
 	runMetadataLine,
 	staleOutputNames,
 	IDLE_RUN_STATE,
-	type AiRunState
+	type AiRunState,
+	type RunModeAvailability,
+	type RunModeOptions
 } from './aiWorkbenchView';
 import type { AiInput } from './aiInputs';
 import type { FileDigest } from '$lib/ai/probeScript';
-import type { AiAddon, AiRun, AiRunInput, AiRunOutput } from '../../types/node';
+import type { AiAddon, AiRun, AiRunInput, AiRunMode, AiRunOutput } from '../../types/node';
 
 const RUNTIME = '0.27.7';
 const STARTED = 1_700_000_000_000;
@@ -44,7 +47,15 @@ function output(name: string, assetId = `asset-${name}`): AiRunOutput {
 
 /** One attached file, as the workbench collects it. */
 function file(name: string, assetId = `asset-${name}`): AiInput {
-	return { kind: 'file', nodeId: 'bench', assetId, name, mimeType: 'text/csv', size: 2048 };
+	return {
+		kind: 'file',
+		nodeId: 'bench',
+		assetId,
+		name,
+		mimeType: 'text/csv',
+		size: 2048,
+		origin: 'attachment'
+	};
 }
 
 /** The same file, as a finished run recorded it. */
@@ -517,6 +528,102 @@ describe('defaultRunMode', () => {
 		});
 
 		expect(defaultRunMode(ai)).toBe('refine');
+	});
+});
+
+/*
+ * The four states a node can be in once a follow-up can inherit a script, in
+ * one table, because the default and the availability have to agree: a mode the
+ * switch starts on and then refuses to offer is the one combination that cannot
+ * be right.
+ */
+describe('the mode rules across the four script states', () => {
+	const INHERITED = { inheritedScript: 'print(2)' };
+
+	/** A follow-up before its first run: a prompt and nothing else. */
+	const fresh = makeAddon({ prompt: 'now fit a line' });
+	/** A node that has run and kept the script that run wrote. */
+	const ranAndStored = makeAddon({
+		prompt: 'plot channel 2',
+		script: 'print(1)',
+		runs: [makeRun({ id: 'r1', prompt: 'plot channel 2' })]
+	});
+
+	/** The modes the switch may offer, in the order it draws them. */
+	function offered(ai: AiAddon, options?: RunModeOptions): AiRunMode[] {
+		return availableRunModes(ai, options)
+			.filter((entry) => entry.available)
+			.map((entry) => entry.mode);
+	}
+
+	/** One mode's entry — every mode has one, available or not, and this says so. */
+	function entryFor(ai: AiAddon, mode: AiRunMode, options?: RunModeOptions): RunModeAvailability {
+		const entry = availableRunModes(ai, options).find((candidate) => candidate.mode === mode);
+		if (entry === undefined) throw new Error(`expected the switch to list ${mode}`);
+		return entry;
+	}
+
+	function reasonFor(ai: AiAddon, mode: AiRunMode, options?: RunModeOptions): string | undefined {
+		return entryFor(ai, mode, options).reason;
+	}
+
+	it('no run and nothing to inherit: writes, and offers Write alone', () => {
+		expect(defaultRunMode(fresh)).toBe('analyse');
+		expect(offered(fresh)).toEqual(['analyse']);
+	});
+
+	it('an inherited script only: changes it, and offers Write and Change but not Run', () => {
+		expect(defaultRunMode(fresh, undefined, INHERITED)).toBe('refine');
+		expect(offered(fresh, INHERITED)).toEqual(['analyse', 'refine']);
+	});
+
+	it('a script of its own: keeps the rules it had, and offers all three', () => {
+		expect(defaultRunMode(ranAndStored)).toBe('rerun');
+		expect(offered(ranAndStored)).toEqual(['analyse', 'refine', 'rerun']);
+	});
+
+	it('both scripts: its own decides, and all three stay on offer', () => {
+		expect(defaultRunMode(ranAndStored, undefined, INHERITED)).toBe('rerun');
+		expect(offered(ranAndStored, INHERITED)).toEqual(['analyse', 'refine', 'rerun']);
+	});
+
+	it('lists every mode, available or not, in the order the switch draws them', () => {
+		expect(availableRunModes(fresh).map((entry) => entry.mode)).toEqual([
+			'analyse',
+			'refine',
+			'rerun'
+		]);
+	});
+
+	it('says Change needs a script when there is none to reach', () => {
+		expect(reasonFor(fresh, 'refine')).toBe('No stored script yet — write one first.');
+	});
+
+	it('says Run needs a script when there is none to reach', () => {
+		expect(reasonFor(fresh, 'rerun')).toBe('No stored script yet — write one first.');
+	});
+
+	it('tells a node with only an inherited script that Run needs one of its own', () => {
+		// A different sentence from the one above on purpose: telling a reader
+		// there is no script, on a node whose parent's script they can see, is a
+		// lie about the state they are looking at.
+		expect(reasonFor(fresh, 'rerun', INHERITED)).toBe(
+			"No stored script on this node yet — Change adapts the parent's and stores it here."
+		);
+	});
+
+	it('gives an available mode no reason to show', () => {
+		expect(reasonFor(fresh, 'analyse')).toBeUndefined();
+		expect(reasonFor(ranAndStored, 'rerun')).toBeUndefined();
+	});
+
+	it('leaves a node that has a script but no completed run on Write, inherited or not', () => {
+		// The existing rule, pinned against the new option: an inherited script
+		// only speaks for a node that has none of its own.
+		const scriptWithoutRun = makeAddon({ prompt: 'plot channel 2', script: 'print(1)' });
+
+		expect(defaultRunMode(scriptWithoutRun)).toBe('analyse');
+		expect(defaultRunMode(scriptWithoutRun, undefined, INHERITED)).toBe('analyse');
 	});
 });
 
