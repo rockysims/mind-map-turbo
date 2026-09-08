@@ -106,17 +106,30 @@ export interface QuantityIndexerOptions extends NodeQuantitiesOptions {
 }
 
 /**
- * A node's *extraction* changes only when its title, description, or tags change,
- * since the opt-out is a tag. Designations are deliberately absent: they do not
+ * A node's *extraction* changes only when its title, description, tags, or
+ * derived math change — the opt-out is a tag, and `derivedMath` is a fourth
+ * thing the node states. Designations are deliberately absent: they do not
  * affect what the math says, and folding them in here would re-render every
  * equation in a node on each chip tap.
  *
  * The title must be in here. Omitting it produces a graph that is correct after
  * a reload and wrong until then, because a title edit would leave the cached
  * extraction in place — the hardest class of bug to notice.
+ *
+ * A *string* signature, and that is what keeps a drag cheap: it is built from
+ * the four things extraction reads and from nothing else, so a node arriving in
+ * a fresh object at a new position hashes to what it hashed to last frame.
+ * `derivedMath` is joined on `\u0001`, the separator tags already use — one
+ * above the `\u0000` that divides the fields — so a run recording a result
+ * changes the string and moving the node does not.
  */
 function signatureOf(node: IndexableNode): string {
-	return `${node.title ?? ''}\u0000${node.description}\u0000${node.tags.join('\u0001')}`;
+	return [
+		node.title ?? '',
+		node.description,
+		node.tags.join('\u0001'),
+		(node.derivedMath ?? []).join('\u0001')
+	].join('\u0000');
 }
 
 /**

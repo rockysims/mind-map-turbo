@@ -10,6 +10,7 @@
  * the caller tombstones them, exactly as `assetTrash.ts` describes.
  */
 
+import { renderResultTex } from '$lib/ai/aiResults';
 import { APP_CONFIG } from '$lib/appConfig';
 import type { GraphAssetMetadata, MultigraphData, Point } from '../../types/multigraph';
 import type {
@@ -250,6 +251,44 @@ export function latestDoneRun(ai: AiAddon): AiRun | undefined {
 		if (run.status === 'done') return run;
 	}
 	return undefined;
+}
+
+/**
+ * The one array every node with nothing to report shares.
+ *
+ * Identity, not just emptiness: the dataflow layer maps every node in the graph
+ * on every frame, and the overwhelming majority carry no add-on at all. A shared
+ * array lets that mapping skip allocating a wrapper object for them, which is
+ * what keeps a drag from rebuilding a graph's worth of objects sixty times a
+ * second. `readonly` so a caller cannot make one node's answer everyone's.
+ */
+const NO_RESULT_MATH: readonly string[] = [];
+
+/**
+ * What this node's latest run says it measured, as the LaTeX the quantity
+ * extractor reads.
+ *
+ * The bridge between the `!ai` add-on and milestone 09's dataflow: a run that
+ * printed `RESULT R_{th} = 12.3 K/W` makes its node a definer of `R_{th}`, and
+ * this is the only place that knows those two things belong together. The
+ * strings come from `renderResultTex`, the same renderer the workbench draws
+ * from, so the number on the node and the number the index parses cannot be two
+ * different strings.
+ *
+ * The *latest done* run, matching `refreshPromotedOutputs`: an errored or
+ * cancelled attempt after a good one reported nothing, and letting it clear the
+ * node's quantities would make an arrow vanish because a re-run timed out.
+ * Results ride on their run, so eviction and an `!ai` removal both take them
+ * with them — nothing here has to clean anything up.
+ */
+export function aiResultMath(node: NodeData): readonly string[] {
+	const ai = node.addons?.ai;
+	if (ai === undefined) return NO_RESULT_MATH;
+
+	const results = latestDoneRun(ai)?.results;
+	if (results === undefined || results.length === 0) return NO_RESULT_MATH;
+
+	return results.map(renderResultTex);
 }
 
 export function refreshPromotedOutputs(

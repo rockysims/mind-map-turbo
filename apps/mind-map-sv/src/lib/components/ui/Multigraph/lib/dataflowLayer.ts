@@ -7,9 +7,12 @@
  */
 
 import type { MultigraphData } from '../../types/multigraph';
+import type { NodeData } from '../../types/node';
+import { aiResultMath } from './aiNode';
 import { deriveDataflowEdges, isDerivedEdgeId, type DerivedEdge } from './derivedEdges';
 import {
 	createQuantityIndexer,
+	type IndexableNode,
 	type QuantityIndex,
 	type QuantityIndexerOptions
 } from './quantityIndex';
@@ -23,6 +26,30 @@ const EMPTY_MODEL: DataflowModel = {
 	index: { entries: new Map(), byNodeId: new Map() },
 	edges: []
 };
+
+/**
+ * Each node as the quantity index should read it: its own text, plus whatever an
+ * add-on says it states.
+ *
+ * This composition lives here and not in the index because the index is
+ * deliberately add-on-blind — `quantityIndex.ts` and `nodeQuantities.ts` know
+ * about strings, and having either import `aiNode.ts` would put a capability's
+ * name inside the math layer to buy nothing. This module is already the seam
+ * between authored data and what gets drawn, so it is where a producer of
+ * derived math is joined to the reader of it.
+ *
+ * A node whose `aiResultMath` is the shared empty array is passed through
+ * *unwrapped*. That is the whole graph on an ordinary frame, and the alternative
+ * — spreading every node into a new object — would allocate a graph's worth of
+ * objects per frame of a drag, which is the cost the index's memo exists to
+ * avoid paying.
+ */
+function withDerivedMath(nodes: readonly NodeData[]): readonly IndexableNode[] {
+	return nodes.map((node) => {
+		const derivedMath = aiResultMath(node);
+		return derivedMath.length === 0 ? node : { ...node, derivedMath };
+	});
+}
 
 /**
  * Build a reusable dataflow model over a graph's nodes.
@@ -45,7 +72,7 @@ export function createDataflowModel(options: QuantityIndexerOptions = {}) {
 		if (!enabled) {
 			return EMPTY_MODEL;
 		}
-		const index = buildIndex(data.nodes);
+		const index = buildIndex(withDerivedMath(data.nodes));
 		if (previous !== undefined && previous.index === index) {
 			return previous;
 		}

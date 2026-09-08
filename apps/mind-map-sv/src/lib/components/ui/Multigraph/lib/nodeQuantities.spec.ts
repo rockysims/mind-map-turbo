@@ -309,3 +309,117 @@ describe('nodeQuantities titles', () => {
 		expect(labels(titled('$x = 1$', 'and $x$ again').references)).toEqual([]);
 	});
 });
+
+// `derivedMath` is the third source: LaTeX a node states that its author never
+// typed — today, the numbers an `!ai` run reported. It is read on exactly the
+// terms the other two are, which is the point: nothing in this module knows an
+// add-on exists, and a produced equation is as good as a written one.
+describe('nodeQuantities derived math', () => {
+	function derived(derivedMath: string[], description = '', tags: string[] = []) {
+		return nodeQuantities({ description, tags, derivedMath });
+	}
+
+	function labelsOf(quantities: { defines: { symbol: { label: string } }[] }): string[] {
+		return quantities.defines.map((definition) => definition.symbol.label);
+	}
+
+	it('defines a quantity from a derived entry', () => {
+		expect(labelsOf(derived(['R_{th} = 12.3']))).toEqual(['R_th']);
+	});
+
+	it('references the right side of a derived definition', () => {
+		expect(derived(['w = m g']).references.map((symbol) => symbol.label)).toEqual(['m', 'g']);
+	});
+
+	it('reads a derived entry as display math, so it re-renders as one', () => {
+		const [definition] = derived(['R_{th} = 12.3']).defines;
+		expect(definition.displayMode).toBe(true);
+		expect(definition.sourceTex).toBe('R_{th} = 12.3');
+	});
+
+	it('reads a bare entry, without delimiters, the way a delimited one reads', () => {
+		expect(labelsOf(derived(['x = 1']))).toEqual(labelsOf(nodeQuantities(node('$$x = 1$$'))));
+	});
+
+	// The quantity a run reported is a quantity this node defines, so a
+	// description that goes on to talk about it is elaborating rather than
+	// depending on somebody else — the same rule a title definition already gets.
+	it('does not count a description mention of a derived definition as a reference', () => {
+		const quantities = derived(['R_{th} = 12.3'], 'The measured $R_{th}$ is high.');
+		expect(labelsOf(quantities)).toEqual(['R_th']);
+		expect(quantities.references).toEqual([]);
+	});
+
+	it('lets a description reference a symbol the derived entry consumes', () => {
+		const quantities = derived(['w = m g'], 'Mass $m$ comes from the bench sheet.');
+		expect(quantities.references.map((symbol) => symbol.label)).toEqual(['m', 'g']);
+	});
+
+	it('reads derived entries after the title and the description', () => {
+		const quantities = nodeQuantities({
+			title: '$a = 1$',
+			description: '$b = 2$',
+			tags: [],
+			derivedMath: ['c = 3']
+		});
+		expect(labelsOf(quantities)).toEqual(['a', 'b', 'c']);
+	});
+
+	it('defines each of several derived entries', () => {
+		expect(labelsOf(derived(['x = 1', 'y = 2']))).toEqual(['x', 'y']);
+	});
+
+	it('ignores a derived entry that does not parse', () => {
+		expect(labelsOf(derived(['\\frac{1}{', 'x = 1']))).toEqual(['x']);
+	});
+
+	it('ignores a derived entry with no equality', () => {
+		expect(labelsOf(derived(['12.3']))).toEqual([]);
+	});
+
+	it('treats a missing derivedMath as none', () => {
+		expect(nodeQuantities({ description: '$$a = 1$$', tags: [] }).defines).toHaveLength(1);
+	});
+
+	// Milestone 09's within-node conflict, now reachable a second way: what the
+	// author wrote and what the run measured are two claims about one quantity,
+	// and collapsing them would hide the disagreement this state exists to show.
+	it('keeps both statements when the text and a derived entry disagree', () => {
+		expect(labelsOf(derived(['R = 2'], '$$R = 1$$'))).toEqual(['R', 'R']);
+	});
+
+	it('distinguishes the disagreeing statements by their bodies', () => {
+		const bodies = derived(['R = 2'], '$$R = 1$$').defines.map((definition) => definition.bodyKey);
+		expect(new Set(bodies).size).toBe(2);
+	});
+
+	// Restating is not disagreeing: a run reporting what the node already says is
+	// one claim made twice, exactly as a title and a description agreeing are.
+	it('collapses a derived entry that restates what the text says', () => {
+		expect(labelsOf(derived(['R = 1'], '$$R = 1$$'))).toEqual(['R']);
+	});
+
+	// One tag, one meaning. A node opted out of the dataflow layer contributes
+	// nothing, and a source it did not type is not an exception to that.
+	it('suppresses derived entries for an opted-out node', () => {
+		expect(derived(['R_{th} = 12.3'], '', [DEFAULT_DATAFLOW_OPT_OUT_TAG])).toEqual({
+			defines: [],
+			references: []
+		});
+	});
+
+	it('honours a custom opt-out tag for derived entries too', () => {
+		expect(
+			nodeQuantities(
+				{ description: '', tags: ['scratch'], derivedMath: ['R_{th} = 12.3'] },
+				{ optOutTag: 'scratch' }
+			)
+		).toEqual({ defines: [], references: [] });
+	});
+
+	// The unit a run reports arrives inside `\text{}`, which the symbol reader
+	// already refuses to look into — so a definition survives its own unit.
+	it('defines from a rendered result carrying a unit', () => {
+		expect(labelsOf(derived(['R_{th} = 12.3\\ \\text{K/W}']))).toEqual(['R_th']);
+	});
+});

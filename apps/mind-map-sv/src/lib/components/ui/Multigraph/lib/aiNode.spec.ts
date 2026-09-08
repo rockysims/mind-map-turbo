@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	AI_RUN_STATUSES,
+	aiResultMath,
 	createFollowUpNode,
 	inheritedScript,
 	isAiRunStatus,
@@ -1219,5 +1220,83 @@ describe('inheritedScript', () => {
 				expect(inheritedScript(graph, 'child') !== undefined).toBe(orientation.feeds);
 			});
 		}
+	});
+});
+
+// The bridge to the dataflow layer: a run that printed a `RESULT` line makes its
+// node a definer of that quantity. The strings are `renderResultTex`'s, so what
+// the workbench draws and what the quantity index parses are one string.
+describe('aiResultMath', () => {
+	function nodeWithRuns(runs: AiRun[]): NodeData {
+		return {
+			id: 'ai',
+			title: 'Analysis',
+			description: '',
+			tags: [],
+			addons: { ai: { prompt: '', runs, promoted: {} } }
+		};
+	}
+
+	it('reports nothing for a node with no add-on', () => {
+		expect(aiResultMath({ id: 'plain', title: 'Notes', description: '', tags: [] })).toEqual([]);
+	});
+
+	it('reports nothing for an ai node that has never run', () => {
+		expect(aiResultMath(nodeWithRuns([]))).toEqual([]);
+	});
+
+	it('reports nothing when the latest run errored', () => {
+		expect(
+			aiResultMath(nodeWithRuns([makeRun({ id: 'r1', status: 'error', results: [] })]))
+		).toEqual([]);
+	});
+
+	it('reports nothing for a done run that printed no RESULT line', () => {
+		expect(aiResultMath(nodeWithRuns([makeRun({ id: 'r1' })]))).toEqual([]);
+	});
+
+	it('renders every result of the latest done run, in order', () => {
+		const run = makeRun({
+			id: 'r1',
+			results: [
+				{ symbol: 'R_{th}', value: '12.3', unit: 'K/W' },
+				{ symbol: '\\tau', value: '0.8' }
+			]
+		});
+		expect(aiResultMath(nodeWithRuns([run]))).toEqual([
+			'R_{th} = 12.3\\ \\text{K/W}',
+			'\\tau = 0.8'
+		]);
+	});
+
+	// The latest *done* run, matching `refreshPromotedOutputs`: a re-run that
+	// timed out reported nothing, and must not take the last good answer's
+	// arrows off the canvas with it.
+	it('reaches past a later errored run to the last done one', () => {
+		const graph = [
+			makeRun({ id: 'r1', results: [{ symbol: 'g', value: '9.8' }] }),
+			makeRun({ id: 'r2', status: 'error' })
+		];
+		expect(aiResultMath(nodeWithRuns(graph))).toEqual(['g = 9.8']);
+	});
+
+	it('prefers the newer done run when both reported', () => {
+		expect(
+			aiResultMath(
+				nodeWithRuns([
+					makeRun({ id: 'r1', results: [{ symbol: 'g', value: '9.8' }] }),
+					makeRun({ id: 'r2', results: [{ symbol: 'g', value: '9.81' }] })
+				])
+			)
+		).toEqual(['g = 9.81']);
+	});
+
+	// Identity, not just emptiness: the dataflow layer skips wrapping a node whose
+	// answer is this array, and that skip is what keeps a drag from allocating a
+	// graph's worth of objects per frame.
+	it('hands every empty answer the same array', () => {
+		expect(aiResultMath(nodeWithRuns([]))).toBe(
+			aiResultMath({ id: 'plain', title: 'Notes', description: '', tags: [] })
+		);
 	});
 });

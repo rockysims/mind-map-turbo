@@ -787,3 +787,127 @@ describe('index identity', () => {
 		expect(build(confirmed.map((each) => ({ ...each })))).toBe(after);
 	});
 });
+
+// `derivedMath` is a fourth thing extraction reads, so it has to be a fourth
+// thing the extraction memo watches. Leaving it out gives a graph that is right
+// after a reload and wrong until then — the bug the title comment above warns
+// about, one field along.
+describe('derived math', () => {
+	function countingIndexer() {
+		const extract = vi.fn((candidate: { description: string; tags: string[] }) =>
+			nodeQuantities(candidate)
+		);
+		return { extract, build: createQuantityIndexer({ extract }) };
+	}
+
+	/** The one `RESULT` line the fixture's run reported, rendered. */
+	const REPORTED = 'R_{th} = 12.3';
+
+	const reported: IndexableNode = {
+		id: 'ai',
+		title: 'Analysis',
+		description: '',
+		tags: [],
+		derivedMath: [REPORTED],
+		outputs: [{ base: 'R', subscript: 'th' }]
+	};
+
+	it('records a definer for a confirmed quantity a derived entry states', () => {
+		expect(definersOf(buildQuantityIndex([reported]), 'R_th')).toEqual(['ai']);
+	});
+
+	it('records an unconfirmed derived definition as a text definer', () => {
+		const { derivedMath, id, title, description, tags } = reported;
+		const index = buildQuantityIndex([{ id, title, description, tags, derivedMath }]);
+		expect(entryFor(index, 'R_th')?.textDefinerNodeIds).toEqual(['ai']);
+	});
+
+	it('joins a derived definer to a node that consumes the quantity', () => {
+		const index = buildQuantityIndex([
+			reported,
+			{
+				id: 'use',
+				title: 'Budget',
+				description: '$$T = R_{th} P$$',
+				tags: [],
+				inputs: [{ base: 'R', subscript: 'th' }]
+			}
+		]);
+		expect(consumersOf(index, 'R_th')).toEqual(['use']);
+	});
+
+	it('extracts each node once on a first pass', () => {
+		const { extract, build } = countingIndexer();
+		build([reported]);
+		expect(extract).toHaveBeenCalledTimes(1);
+	});
+
+	it('re-extracts a node whose run reported a new result', () => {
+		const { extract, build } = countingIndexer();
+		build([reported]);
+		extract.mockClear();
+		build([{ ...reported, derivedMath: ['R_{th} = 14.1'] }]);
+		expect(extract).toHaveBeenCalledTimes(1);
+	});
+
+	it('reflects the new result rather than serving the memoized definition', () => {
+		const { build } = countingIndexer();
+		build([reported]);
+		const after = build([{ ...reported, derivedMath: ['R_{th} = 14.1'] }]);
+		expect(entryFor(after, 'R_th')?.definitions.map((record) => record.sourceTex)).toEqual([
+			'R_{th} = 14.1'
+		]);
+	});
+
+	it('re-extracts a node whose results were evicted with their run', () => {
+		const { extract, build } = countingIndexer();
+		build([reported]);
+		extract.mockClear();
+		build([{ ...reported, derivedMath: [] }]);
+		expect(extract).toHaveBeenCalledTimes(1);
+	});
+
+	// The load-bearing half: the graph hands the index rebuilt node objects on
+	// every frame of a drag, and the signature is a string precisely so an
+	// unchanged run hashes to what it hashed to before.
+	it('does not re-extract when the same results arrive in a fresh array', () => {
+		const { extract, build } = countingIndexer();
+		build([reported]);
+		extract.mockClear();
+		build([{ ...reported, derivedMath: [REPORTED] }]);
+		expect(extract).not.toHaveBeenCalled();
+	});
+
+	it('returns the identical index when the same results arrive in a fresh array', () => {
+		const { build } = countingIndexer();
+		const first = build([reported]);
+		expect(build([{ ...reported, derivedMath: [REPORTED] }])).toBe(first);
+	});
+
+	it('returns a fresh index when a run reported a new result', () => {
+		const { build } = countingIndexer();
+		const first = build([reported]);
+		expect(build([{ ...reported, derivedMath: ['R_{th} = 14.1'] }])).not.toBe(first);
+	});
+
+	// Absent and empty are the same claim — no results — so they must hash the
+	// same, or a node acquires a rebuild by being handed its own emptiness twice.
+	it('treats no derived math and an empty list as one signature', () => {
+		const { extract, build } = countingIndexer();
+		const bare: IndexableNode = { id: 'ai', title: 'Analysis', description: '', tags: [] };
+		build([bare]);
+		extract.mockClear();
+		build([{ ...bare, derivedMath: [] }]);
+		expect(extract).not.toHaveBeenCalled();
+	});
+
+	// A separator below the one that divides the fields would let a result run
+	// into the tag list, so two different nodes could hash the same.
+	it('tells a result apart from a tag spelled the same way', () => {
+		const { build } = countingIndexer();
+		const first = build([{ id: 'a', title: '', description: '', tags: ['x = 1'] }]);
+		expect(
+			build([{ id: 'a', title: '', description: '', tags: [], derivedMath: ['x = 1'] }])
+		).not.toBe(first);
+	});
+});
