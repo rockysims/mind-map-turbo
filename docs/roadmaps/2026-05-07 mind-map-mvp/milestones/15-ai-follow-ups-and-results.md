@@ -102,8 +102,10 @@ own to run.
 "conversation so far" section built by walking from AI node to AI node — by the
 same adjacency rule the file inputs use, an incoming directed edge or an
 undirected one — up to three hops. Each ancestor contributes its prompt and the
-summary of its latest done run; only the direct parent contributes its script.
-This is
+summary of its latest done run; the direct parent contributes its script too,
+but only when the request is not already carrying it — a Change request sends
+that script as the thing it is editing, so the prose section leaves it out
+rather than sending the largest block twice. This is
 prose in the user message, separate from the file inputs, and it is subject to a
 byte cap in `APP_CONFIG` that drops the farthest ancestors first. The workbench's
 "What Claude will see" disclosure shows it verbatim, because the milestone 14
@@ -220,7 +222,10 @@ run`, in flight) exactly as it does for a run the reader started by hand.
   two nodes are related rather than which came first; it was dropped because a
   reader holding two adjacency rules in their head will predict neither.
 - Each ancestor contributes its title, its prompt and its latest done run's
-  summary. The direct parent also contributes `analysis.py`.
+  summary. The direct parent also contributes `analysis.py` — but only for a
+  request that is not already carrying it. Change mode sends the parent's script
+  as the script it is editing, so its context section omits it; Write mode,
+  which has no such block, includes it.
 - The rendered section goes in the user message rather than the system prompt,
   so the system prompt stays byte-identical between modes and the cached prefix
   survives a session of Write, Change, Run.
@@ -358,11 +363,14 @@ reopened.
 3. What does the child's request know about the parent? **Up to three hops of AI
    ancestors, reached by the same adjacency rule the file inputs use — an
    incoming directed edge or an undirected one — each contributing its prompt and
-   its latest summary, with the direct parent also contributing its script;
-   capped in bytes and shown in the request preview.** Data stays at one hop; the
+   its latest summary, with the direct parent also contributing its script when
+   the request is not already carrying it; capped in bytes and shown in the
+   request preview.** Data stays at one hop; the
    _rule_ for who is adjacent is one rule for both.
    (Resolved 2026-09-07; a directed-only walk was the first draft and the owner
-   chose the single rule.)
+   chose the single rule. The "only when not already carried" clause was added
+   the same day, at the owner's direction — _"drop it"_ — after review found
+   Change mode would otherwise send the parent's script twice.)
 4. What is the child's default mode? **Change, against the parent's script.**
    Write is available; Run is not until the child has a script of its own.
    (Resolved 2026-09-07.)
@@ -383,6 +391,14 @@ reopened.
    label in the request, and a word on every follow-up edge is a role nobody
    chose. (Resolved 2026-09-07; "not pinned, matching Define and Promote" was the
    first draft and the owner replaced it with the transfer.)
+8. Does submitting the composer also start the child's first run? **Yes.** The
+   reader has just written a request and pressed a verb; a second press on a node
+   they did not choose to visit answers no question. A mis-press spends tokens,
+   which is what the deliberate two-step composer, the unsubmittable empty
+   prompt, and the Cancel beside `Ask` are for. (Resolved 2026-09-07, in the
+   owner's words: _"yes, auto-run on submit"_ — the one question the plan
+   answered on its own, ruled the same way in review and logged as
+   `docs/ui-decisions/2026-09-07--editing--submitting-a-follow-up-also-starts-its-run.md`.)
 
 Still binding from milestone 14 and not reopened here: Messages API only, called
 with a raw `fetch`; the executor is local Pyodide in a worker; the key is never

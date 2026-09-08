@@ -28,8 +28,10 @@ number that draws an arrow.
 ## Open questions resolved
 
 Every open question from the milestone doc, with the decision and why. The first
-five were settled with the owner before drafting; the last four are this plan's
-own and are the ones the milestone points here for.
+five were settled with the owner before drafting; the last four were this plan's
+own and are the ones the milestone points here for — and two of those (the
+duplicated parent script, and whether submitting also runs) were ruled by the
+owner in the 2026-09-07 readiness review, so nothing below is still open.
 
 - **Do outputs reach downstream nodes automatically?** **Yes — the latest done
   run's outputs, to any neighbour the existing proximity rule already collects
@@ -44,10 +46,16 @@ own and are the ones the milestone points here for.
 - **What does the child's request know?** **Up to three hops of AI ancestors,
   reached by the same adjacency rule the file inputs use — an incoming directed
   edge or an undirected one — prompt and latest summary each, plus the direct
-  parent's script, as prose in the user message under a hard character cap.**
+  parent's script — but only when the request is not already carrying it — as
+  prose in the user message under a hard character cap.**
   Files stay at one hop; the rule for _who is adjacent_ is one rule for both, and
   the directed-only variant was dropped because two adjacency rules is one more
-  than a reader can predict.
+  than a reader can predict. The "only when not already carried" clause is the
+  owner's ruling of 2026-09-07 (_"drop it"_): a Change request already carries
+  that script as `previousScript`, so repeating it in the prose section would
+  send the largest thing in the request twice under two different labels. The
+  context block carries it only when the request will not — a Write request,
+  which has no `previousScript` of its own.
 - **The child's default mode.** **Change, against the parent's script**, because
   a follow-up is an edit to what was just done. Write is offered; Run is not
   until the child has a script of its own.
@@ -110,19 +118,21 @@ own and are the ones the milestone points here for.
   One commit for node, add-on, prompt, edge and both pin changes so one Undo
   takes the whole thing — including giving the parent its pin back — per
   `docs/ui-decisions/2026-08-30--destructive--ship-new-destructive-actions-without-a-confirm.md`.
-- **Does submitting the composer also start the child's run?** **Yes.** The
-  reader has just written a request and pressed a verb; making them find and
+- **Does submitting the composer also start the child's run?** **Yes — the
+  owner ruled it on 2026-09-07 (_"yes, auto-run on submit"_), logged in
+  `docs/ui-decisions/2026-09-07--editing--submitting-a-follow-up-also-starts-its-run.md`.**
+  The reader has just written a request and pressed a verb; making them find and
   press a second control on a node they did not choose to visit is a step that
   answers no question. It also makes the two-step shape honest: the composer is
   where you decide, and submit is where it happens. Named accordingly (`Ask`,
   saying so while it works), per
   `docs/ui-decisions/2026-09-06--status--name-the-run-action-per-mode.md`. The
   cost is that a mis-press spends tokens, which is why the composer is
-  deliberate and Cancel sits beside Ask; and the fallback, if the smoke test says
-  the auto-run surprises rather than serves, is to create and focus without
-  running and let the child's own `Change & run` start it — a one-line change in
-  `askAiFollowUp` and one story rename, with nothing else in the plan depending
-  on which way it goes.
+  deliberate and Cancel sits beside Ask. It is settled rather than pending, so
+  build it this way; if it is ever revisited, the way back is to create and
+  focus without running and let the child's own `Change & run` start it — a
+  one-line change in `askAiFollowUp` and one story rename, with nothing else in
+  the plan depending on which way it goes.
 - **What does focus land on, now that the prompt is already written?** **The
   child's workbench with its run in flight**, and no caret hand-off. The earlier
   draft ended by putting the caret in an empty prompt; there is nothing to type
@@ -211,14 +221,14 @@ a milestone 15 document rather than calling it malformed. `APP_CONFIG.ai` gains
 
 ### T02 — Teach the quantity extractor a third source
 
-|                |                                                                                                                        |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| **Depends on** | T01, T05 (file only)                                                                                                   |
-| **Wave**       | 2                                                                                                                      |
-| **Agent**      | opus (Fable reviews the memoisation)                                                                                   |
-| **Effort**     | M                                                                                                                      |
-| **Files**      | `Multigraph/lib/nodeQuantities.ts` + spec, `Multigraph/lib/quantityIndex.ts` + spec, `Multigraph/lib/aiNode.ts` + spec |
-| **PR title**   | `feat(dataflow): read an ai node's recorded results as definitions`                                                    |
+|                |                                                                                                                                                                  |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Depends on** | T01, T05 (file only)                                                                                                                                             |
+| **Wave**       | 2                                                                                                                                                                |
+| **Agent**      | opus (Fable reviews the memoisation)                                                                                                                             |
+| **Effort**     | M                                                                                                                                                                |
+| **Files**      | `Multigraph/lib/nodeQuantities.ts` + spec, `Multigraph/lib/quantityIndex.ts` + spec, `Multigraph/lib/aiNode.ts` + spec, `Multigraph/lib/dataflowLayer.ts` + spec |
+| **PR title**   | `feat(dataflow): read an ai node's recorded results as definitions`                                                                                              |
 
 `QuantityBearingNode` gains `derivedMath?: readonly string[]` — LaTeX strings
 this node states that are not in its title or description. `nodeQuantities`
@@ -232,11 +242,24 @@ done run's results through `renderResultTex`, empty for a node with no add-on,
 no done run or no results, and returning a shared empty array so identity
 comparison is cheap.
 
-`quantityIndex.ts` composes the two: the indexer's per-node extraction feeds
-`derivedMath: aiResultMath(node)`, and the memoisation key gains the results —
-so a recorded run invalidates the node's entry and a position change still does
-not. This is the load-bearing line of the task: milestone 11 made a point of the
-index surviving a drag, and a naive key would undo it.
+The wiring is the part to get right, and it is not where the first draft put it.
+`createQuantityIndexer` takes `IndexableNode[]`, and its only caller is
+`createDataflowModel`, which passes `data.nodes` straight through
+(`dataflowLayer.ts:48`). So **`dataflowLayer.ts` is where `aiResultMath` is
+applied** — it maps each node to `{ ...node, derivedMath: aiResultMath(node) }`
+before calling the index. `quantityIndex.ts` and `nodeQuantities.ts` stay
+add-on-blind, which is the rule this task is otherwise about; having the index
+import `aiNode.ts` would break it and add a Multigraph-lib import cycle risk for
+nothing.
+
+The memo is a **string** (`signatureOf`, `quantityIndex.ts:117`), not an object
+identity: it must gain the rendered result strings joined with a separator above
+`\u0000`, exactly as title, description and tags are joined now. A recorded run
+then invalidates the node's entry and a position change still does not — which
+is the load-bearing line of the task, because milestone 11 made a point of the
+index surviving a drag and a naive key would undo it. `aiResultMath` returning a
+shared empty array keeps the mapping cheap for the overwhelming majority of
+nodes, which carry no add-on at all.
 
 **Acceptance**
 
@@ -248,19 +271,23 @@ index surviving a drag, and a naive key would undo it.
 - Spec (`quantityIndex`): the same node with new results re-extracts; the same
   node at a new position does not, asserted with a counting extractor double the
   way the milestone 11 specs do.
+- Spec (`dataflowLayer`): a node whose latest done run reports a result draws a
+  derived edge end to end through `createDataflowModel`, and dragging that node
+  returns the _same model object_ — the existing identity assertion, now with an
+  ai node in the graph. `quantityIndex.ts` imports nothing from `aiNode.ts`.
 - Spec (`aiNode`): `aiResultMath` on a node with no add-on, a node whose latest
   run is `error`, and a node whose latest done run carries two results.
 
 ### T03 — A neighbour's run outputs are inputs
 
-|                |                                                                                                             |
-| -------------- | ----------------------------------------------------------------------------------------------------------- |
-| **Depends on** | —                                                                                                           |
-| **Wave**       | 1                                                                                                           |
-| **Agent**      | opus (Fable reviews the `AiInput` shape)                                                                    |
-| **Effort**     | M                                                                                                           |
-| **Files**      | `Multigraph/lib/aiInputs.ts` + spec, `src/lib/ai/inputFileName.ts` + spec, `src/lib/ai/aiRequest.ts` + spec |
-| **PR title**   | `feat(ai): collect a neighbour's latest run outputs as inputs, with unique filenames`                       |
+|                |                                                                                                                                                                                                   |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Depends on** | —                                                                                                                                                                                                 |
+| **Wave**       | 1                                                                                                                                                                                                 |
+| **Agent**      | opus (Fable reviews the `AiInput` shape)                                                                                                                                                          |
+| **Effort**     | M                                                                                                                                                                                                 |
+| **Files**      | `Multigraph/lib/aiInputs.ts` + spec, `src/lib/ai/inputFileName.ts` + spec, `src/lib/ai/aiRequest.ts` + spec, `src/lib/ai/pyExecutor.ts` + spec, `Multigraph/lib/aiRunController.svelte.ts` + spec |
+| **PR title**   | `feat(ai): collect a neighbour's latest run outputs as inputs, with unique filenames`                                                                                                             |
 
 `AiFileInput` gains a required `origin: 'attachment' | 'run-output'`.
 `collectAiInputs` appends, for each qualifying neighbour carrying the `ai`
@@ -279,9 +306,22 @@ anything else.
 string[]` — `executorInputName` applied to each, then a deterministic suffix on
 every repeat (`plot.png`, `plot-2.png`, `plot-3.png`; the suffix goes before the
 extension), first occurrence unchanged. Pure, order-dependent and only
-order-dependent, so the same collected inputs always yield the same names. Every
-one of the three places that must agree on a filename — the executor, the probe
-and the request — goes through it.
+order-dependent, so the same collected inputs always yield the same names.
+
+**This cannot be a drop-in swap, and that is most of the task.** `executorInputName`
+is applied _per name_ at five call sites in three modules today — `pyExecutor.ts:392`
+(the write into `/work`), `aiRunController.svelte.ts:264` and `:270` (the
+digest → asset-id map, which with two same-named files collapses both onto the
+first asset id through its `if undefined` guard), and four spots in
+`aiRequest.ts`. A list-wise rule cannot be reached from any of them. So the name
+is decided **once per collection** and carried: the controller computes the
+disambiguated list alongside `collectAiInputs`, and it is that list that feeds
+`ExecutorFile.name`, the digest → asset-id map, the request render, and
+`toRunInput`'s recorded `AiRunInput.name` — the fourth place, and the one the
+workbench's amber changed-since line reads back, so a mismatch there names a
+file the script never saw. `executorInputName` stays as the per-name
+sanitisation the map is built out of; nothing else calls it directly on an input
+name any more.
 
 `aiRequest.ts`: a run-output file's digest line says so
 (`plot.png — 41 KB — output of "Sweep A"`), because a model told a file is a
@@ -298,6 +338,11 @@ produced figure reads it differently from one told it is a measurement.
 - Spec: two neighbours each producing `plot.png` yield two distinct names; an
   attachment named the same as an output yields two distinct names; the mapping
   is stable across repeated calls and across an unrelated graph edit.
+- Spec (controller, with the fakes): with two same-named inputs, the files
+  written to `/work`, the digest rows in the workbench, the filenames in the
+  request and the `name`s on the recorded `AiRunInput`s are the same four
+  strings — no digest lands on the wrong asset, and `inputsChangedSince` against
+  that run reports nothing changed when nothing has.
 - Spec: the rendered request names a run output as one, and a request built from
   a parent output of 10,000 rows still carries only the configured preview rows.
 
@@ -327,20 +372,32 @@ produced figure reads it differently from one told it is a measurement.
   in `graph.nodes` order so the list is stable. `script` is populated only for
   `hops === 1`; two direct parents resolve in `graph.nodes` order, matching
   `inheritedScript` in T05.
-- `renderAncestorContext(ancestors, limits)` → the prose section, or `''` for no
-  ancestors. Headed `Conversation so far (nearest first):`; each entry gives the
-  title, `Asked:` and `Result:`; the direct parent's `analysis.py` follows in a
-  fenced block. Over `maxChars`: trim each summary to `summaryMaxChars` first,
+- `renderAncestorContext(ancestors, limits, { includeParentScript })` → the prose
+  section, or `''` for no ancestors. Headed `Conversation so far (nearest first):`;
+  each entry gives the title, `Asked:` and `Result:`; the direct parent's
+  `analysis.py` follows in a fenced block **only when `includeParentScript` is
+  true**. Over `maxChars`: trim each summary to `ancestorSummaryMaxChars` first,
   then drop the farthest ancestor whole and repeat, appending
-  `(N earlier steps omitted.)`. The parent's script is the last thing dropped,
-  because it is what Change mode is editing.
+  `(N earlier steps omitted.)`. When the parent's script is present it is the
+  last thing dropped; the ancestors' prose goes first.
+- **The script is never sent twice.** `buildRefineRequest` already appends
+  `Previous analysis.py:` with the script Change mode is editing, so a Change
+  request passes `includeParentScript: false` and a Write request passes `true`
+  — for a fresh child the default mode is Change, which is the common path, and
+  the first draft would have sent the largest block in the request twice under
+  two labels. The caller decides, not the renderer: `aiRequest.ts` knows which
+  builder it is about to call, and `renderAncestorContext` stays pure and
+  ignorant of run modes. (Owner's ruling of 2026-09-07: _"drop it"_.)
 
 `aiRequest.ts` puts the section in the **user message**, after the prompt and
 before `Attached files:` — not in the system prompt, so the cached prefix
 survives a session of Write, Change and Run. `buildAnalyseRequest` and
 `buildRefineRequest` both take an optional `ancestorContext: string`.
 `APP_CONFIG.ai.ancestorContext` gains `maxHops` (3), `maxChars` (12000) and
-`summaryMaxChars` (1200).
+`ancestorSummaryMaxChars` (1200) — named in full rather than `summaryMaxChars`,
+because `APP_CONFIG.ai.summaryMaxChars` already exists at 4000 (the cap a run
+record's own summary is stored under) and two knobs sharing one name is a
+question every reader of this file would have to answer twice.
 
 **Acceptance**
 
@@ -357,8 +414,13 @@ survives a session of Write, Change and Run. `buildAnalyseRequest` and
 - Spec: only the direct parent carries a script; an ancestor whose latest run is
   not `done` contributes its prompt and an empty summary.
 - Spec: a chain whose rendered section exceeds `maxChars` trims summaries first,
-  then drops the farthest ancestor, keeps the parent's script, and says how many
-  were omitted; the result is never longer than `maxChars`.
+  then drops the farthest ancestor, keeps the parent's script when it is
+  included at all, and says how many were omitted; the result is never longer
+  than `maxChars`.
+- Spec: `includeParentScript: false` renders no script block, and the built
+  Change request contains the parent's script **exactly once** — under
+  `Previous analysis.py:` and nowhere else; a Write request built from the same
+  graph carries it once, in the context section.
 - Spec: the built request carries the section in the user message and the system
   prompt is byte-identical to the one built without it.
 
@@ -385,7 +447,11 @@ survives a session of Write, Change and Run. `buildAnalyseRequest` and
   whitespace-only prompt returns the same graph object, so the "cannot submit
   empty" rule holds at the mutation as well as at the button. Same graph object
   back for an unknown node, or a node without the add-on. Placement is the
-  caller's, exactly as for `promoteAiOutput`.
+  caller's, exactly as for `promoteAiOutput`. Note that `AddNodeInput`
+  (`graph.ts:21`) carries no `addons` field and does not gain one here: add the
+  node, then apply `withNodeAddon` and the prompt to the node `addNode`
+  appended, the way `promoteAiOutput` already works with what it is handed.
+  `graph.ts` is not in this task's file list and does not need to be.
 - The pin transfer, in that same returned graph: if the parent is pinned, unpin
   it with `setNodePinned(data, aiNodeId, false)` (`Multigraph/lib/graph.ts`,
   which `togglePinned` delegates to) **first**, then add the child with
@@ -452,7 +518,11 @@ Four additions to the workbench, each following the rulings already in
 3. A **What Claude will see** disclosure in the run section for the ancestor
    context, matching the per-file one 14 shipped: closed by default, its summary
    line naming the number of steps and the character count, its body the
-   rendered section verbatim. `data-ai-context`.
+   rendered section verbatim. `data-ai-context`. It renders the section **for
+   the currently selected mode**: T04 omits the parent's script from a Change
+   request's context (the request carries it separately), so a preview that
+   ignored the mode would show the reader something other than what is about to
+   be sent — which is the one thing milestone 14's promise does not allow.
 4. **Ask a follow-up**, a labelled button beside the outputs, `aria-disabled`
    with the reason in the notice line until the node has a done run. It does not
    create anything: it opens a composer in this workbench, and only the
@@ -537,14 +607,16 @@ and `…2026-09-06--status--name-the-run-action-per-mode.md`.
 | **Files**      | `Multigraph/lib/aiRunController.svelte.ts` + spec, `Multigraph.svelte`, `src/routes/+page.svelte` if the props reach it |
 | **PR title**   | `feat(ai): record run results and turn a composed follow-up into a focused, running node`                               |
 
-The controller: parse `RESULT` lines from the **full** stdout of the last
-execution that exited 0 (the worker joins every chunk before it replies, so the
-whole string reaches the main thread; the `stdoutTailChars` cut applies only to
-what the request carries). A run whose last execution failed reports no
-results, even if an earlier one printed some: a number from a script Claude
-then rewrote is not the run's answer. and put them on
-the terminal run record through the existing `replaceAiRun` commit — no second
-write path. Requests are built with `collectAiAncestors` + `renderAncestorContext`,
+The controller: parse `RESULT` lines from the **full** stdout of the run's
+**final** execution, and only when that execution exited 0 — not "the last
+execution that exited 0", which would reach back past a failure. A run whose
+final execution failed reports no results even if an earlier one printed some:
+a number from a script Claude then rewrote is not the run's answer. The full
+string is available because the worker joins every chunk before it replies; the
+`stdoutTailChars` cut is applied at render time in `aiRequest.ts` and by `tail()`
+for the live run state, so it never touches what the parser sees. The parsed
+results go onto the terminal run record through the existing `replaceAiRun`
+commit — no second write path. Requests are built with `collectAiAncestors` + `renderAncestorContext`,
 and Change mode falls back to `inheritedScript` with a second instruction
 (`INHERITED_REFINE_INSTRUCTION`: "The previous analysis.py is from the step
 before this one. Modify it to satisfy the request above.") when the node has no
@@ -578,11 +650,23 @@ editIntent('ask a follow-up'))` — one entry, so one Undo removes the child and
 
 Steps 3 and 4 are `jumpToNode`'s body; extract the shared part rather than
 copying it, so a third caller does not become a third divergence. Extract the
-`origin.y + NODE_RADIUS * 2.5` placement too — it is already duplicated verbatim
-between promote and define, and this is the third.
+placement too, but as an offset helper rather than a shared constant: promote
+(`Multigraph.svelte:618`) and define (`:1909`) both place at
+`origin.y + NODE_RADIUS * 2.5`, and a follow-up places _beside_ at
+`origin.x + NODE_RADIUS * 2.5` so it does not land on the same spot as a
+promoted figure. One helper taking the direction, three callers — not a third
+caller of the below-placement, which is what an earlier draft of this line
+claimed.
 
-If the smoke test rules against the auto-run, step 5 is the only thing that goes
-and the rest of the flow is unchanged.
+One consequence of step 5 to build deliberately: `startAiRun` opens the key
+sheet when a run comes back `needs-key`, so a reader with no key configured
+submits a follow-up and lands on a brand-new node with the settings sheet over
+it. That is the right outcome — the run is what they asked for and the key is
+what it needs — but the story that covers it should assert the child is created
+and focused regardless, so a missing key never costs the node.
+
+The auto-run itself is settled (owner, 2026-09-07). If it is ever revisited,
+step 5 is the only thing that goes and the rest of the flow is unchanged.
 
 **Acceptance**
 
@@ -662,21 +746,20 @@ README section: what a follow-up is (compose on the parent, submit to create),
 what the pin transfer does, what a child reads from its parent, how far context
 reaches and what it costs, what a `RESULT` line does, and the sentence that
 values do not flow yet. Record the offline shell size before and after in Notes.
-The owner's three rulings of 2026-09-07 are already logged in
+The owner's four rulings of 2026-09-07 are already logged in
 `docs/ui-decisions/` (the composer instead of create-then-type, the pin
-transferring from parent to child, and one adjacency rule for files and prose).
-One decision is this plan's own and becomes a ruling only once the owner has
-used it: submit starting the child's run. Log it after the smoke test, whichever
-way the owner rules, and write a file for every further ruling made there — the
-control's label and the composer owning Escape are the two most likely —
+transferring from parent to child, one adjacency rule for files and prose, and
+submitting a follow-up starting its run). Nothing here is waiting on a first use
+to become a ruling. Write a file for every further ruling made at the smoke test
+— the control's label and the composer owning Escape are the two most likely —
 following `docs/ui-decisions/README.md`. File `docs/debt/` entries for anything
 real found and deliberately not fixed. Flip the plan to `done`, the milestone to
 `complete`, and the roadmap row with it.
 
 **Acceptance**
 
-- Shell size delta in Notes; README section present; the submit-runs ruling
-  and any smoke-test rulings written to `docs/ui-decisions/`; every gate green;
+- Shell size delta in Notes; README section present; any smoke-test rulings
+  written to `docs/ui-decisions/`; every gate green;
   no tracked changes under `.svelte-kit/` or any `*storybook*.log`.
 
 ## Wave plan
@@ -709,9 +792,13 @@ merged.
   their run, so the wrong edge is never permanent. Worth a sentence in the
   README rather than a mechanism.
 - **The memoisation key regresses the drag path.** T02's own spec is the guard,
-  and it is the reason Fable reviews that task. If the counting double shows a
-  rebuild per frame, the fix is keying on the results _array identity_ rather
-  than its contents — runs are immutable, so identity is enough.
+  and it is the reason Fable reviews that task. Note the memo is a _string_
+  signature, so "key on the array identity instead" is not available as a
+  fallback without changing the cache's shape; if the counting double shows a
+  rebuild per frame, the cause will be the mapping in `dataflowLayer.ts`
+  allocating a fresh object per node per frame rather than the key itself, and
+  the fix is to skip the spread for a node with no results (the shared empty
+  array makes that a cheap check).
 - **Context makes runs cost more.** Three hops of prose is added to every request
   on a chained node, and the metadata line already shows tokens per run. If the
   smoke test says it is expensive, `maxHops` and `maxChars` are one config change
@@ -733,9 +820,10 @@ merged.
   `Undo`. The mitigation is the shape the owner asked for: the composer is a
   deliberate two-step — open it, write a prompt, then submit — an empty prompt
   cannot be submitted at all, and Cancel sits beside Ask so the way out is as
-  close to hand as the way on. If the smoke test still finds it surprising, the
-  fallback is T07's step 5 alone: create and focus without running, and let the
-  child's own `Change & run` start it.
+  close to hand as the way on. The owner ruled for it on 2026-09-07 knowing the
+  cost, so it is not an open question; if it is ever revisited, the way back is
+  T07's step 5 alone: create and focus without running, and let the child's own
+  `Change & run` start it.
 - **The pin transfer moves something the reader did not press pin on.** Following
   up on a pinned node silently unpins it. The label says what happened
   (`ask a follow-up`), one Undo puts it back with the child, and the two changes
@@ -768,19 +856,38 @@ merged.
   plan execution until the owner explicitly says so** — this document is drafted
   and waiting, and no task is to be started before that go-ahead.
 - 2026-09-07: whether submitting also starts the child's first run was left to
-  this plan, and the answer here is **yes** — see the open question above for the
-  reasoning and the one-line fallback. Two consequences to raise with the owner
-  at the smoke test rather than guess at: the `Ask` label, and whether an
-  auto-started run on a node the reader has not yet looked at reads as helpful or
-  as presumptuous.
+  this plan, which answered **yes**, and the owner then ruled the same way in
+  review: _"yes, auto-run on submit"_. Logged as
+  `docs/ui-decisions/2026-09-07--editing--submitting-a-follow-up-also-starts-its-run.md`.
+  One consequence still worth raising at the smoke test rather than guessing at:
+  the `Ask` label itself.
 - 2026-09-07: plan drafted, not started. Written against the milestone 14 code as
   it stands after the 2026-09-07 evening session (scripts run in `/work`, the cap
   is twelve executions, inputs are grouped by node with Add/Replace/Remove).
 - 2026-09-07: the `origin.y + NODE_RADIUS * 2.5` placement is already duplicated
   verbatim between `promoteAiOutputToNode` (`Multigraph.svelte:618`) and
-  `createDefiningNode` (`Multigraph.svelte:1891`). T07 makes it a third caller
-  and extracts it; if T07 slips, the duplication is worth filing as debt rather
-  than leaving unremarked.
+  `createDefiningNode` (`Multigraph.svelte:1909`, the function opens at
+  `:1883`). T07 adds a third _caller_ of a placement helper but not a third copy
+  of that offset — a follow-up places beside, not below — so the helper takes
+  the direction. If T07 slips, the existing duplication is worth filing as debt
+  rather than leaving unremarked.
+- 2026-09-07: **readiness review against the code, before any execution.** Every
+  file, function and ui-decision the plan names exists; M14 is complete; the wave
+  order sequences both real file collisions; `inputsChangedSince` does report a
+  re-run parent's outputs as `replaced` and `defaultRunMode` does return `rerun`
+  for that, so acceptance criterion 2 holds as written; the executor's result
+  carries full stdout, so criterion 12 is reachable; and `aiRun.run` is already
+  callable from `Multigraph.svelte` via `runAiNode`, so T07 step 5 needs no new
+  plumbing. Six things were wrong and are fixed above: T03 was two files short
+  and could not have met criterion 3 (the disambiguated name has to be decided
+  once and carried through the executor, the digest map, the request and the run
+  record); the parent's script was being sent twice in the default Change path;
+  T02 had no wiring file and mis-stated the memo as an object key; T07 stated
+  the results rule two ways and had a dropped clause; T07's placement extraction
+  claimed a third caller it does not have; and the second `summaryMaxChars` was
+  renamed. The owner ruled on the two open items the same day (auto-run: yes;
+  duplicated script: drop it). **Still no go-ahead to execute** — the plan is
+  patched and holding.
 - 2026-09-07: `NAV_STACK_LIMIT` is 8. A chain of more than eight follow-ups
   silently loses the oldest crumb. Not addressed here; noted so a "Back stopped
   going far enough" report has an answer.
