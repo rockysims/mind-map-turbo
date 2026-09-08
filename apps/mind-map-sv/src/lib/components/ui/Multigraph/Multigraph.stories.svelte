@@ -4199,6 +4199,17 @@
 			'data-edge-visibility',
 			'boundary'
 		);
+		// And each one is long enough to be seen fading. The nodes on the far end of
+		// these two are hidden, so the settle this graph got on the way in sized them
+		// at `minScale` and parked them right beside the beacon — halfway to one is
+		// inside the beacon's own circle. The reader gets the same hint here as after
+		// pinning and unpinning the beacon, which is what they used to have to do.
+		for (const edgeId of ['e1', 'e2']) {
+			const boundaryEdge = getEdge(canvasElement, edgeId);
+			const fadeRadius = Number(boundaryEdge.dataset.boundaryFadeRadius);
+			expect(fadeRadius).toBeGreaterThan(0);
+			expect(Number.parseFloat(boundaryEdge.style.width)).toBeGreaterThanOrEqual(fadeRadius * 2);
+		}
 
 		// Pinning the beacon through the normal gesture brings its component back.
 		const beaconCircle = getCircle(canvasElement, 'n3');
