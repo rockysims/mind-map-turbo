@@ -6,6 +6,7 @@
 	import { collectAiInputs } from './lib/aiInputs';
 	import { IDLE_RUN_STATE, type AiRunState } from './lib/aiWorkbenchView';
 	import { makeGraph } from './lib/testFixtures';
+	import { APP_CONFIG } from '$lib/appConfig';
 	import { MemoryGraphAssetStore } from '$lib/assets/assetStore';
 	import type { FileDigest } from '$lib/ai/probeScript';
 	import type { GraphAssetMetadata, MultigraphData } from '../types/multigraph';
@@ -275,6 +276,13 @@
 	function required(canvasElement: HTMLElement, selector: string): HTMLElement {
 		const found = canvasElement.querySelector(selector);
 		if (!(found instanceof HTMLElement)) throw new Error(`no ${selector}`);
+		return found;
+	}
+
+	/** The same, narrowed: the model picker on the connection line. */
+	function requiredSelect(canvasElement: HTMLElement, selector: string): HTMLSelectElement {
+		const found = canvasElement.querySelector(selector);
+		if (!(found instanceof HTMLSelectElement)) throw new Error(`no select ${selector}`);
 		return found;
 	}
 
@@ -832,13 +840,66 @@
 	play={async ({ canvasElement }) => {
 		const connection = required(canvasElement, '[data-ai-connection]');
 		expect(connection).toHaveAttribute('data-ai-connection', 'connected');
-		expect(connection.textContent?.trim()).toBe('Connected · claude-sonnet-5');
+		expect(connection.textContent).toContain('Connected ·');
+		// The name is the picker's own value rather than text beside it, which is
+		// what makes the line say what a run would call *and* change it.
+		const picker = requiredSelect(canvasElement, '[data-ai-model]');
+		expect(picker.value).toBe('claude-sonnet-5');
+		expect(picker).toHaveAttribute('aria-label', 'Model for this node');
+		expect([...picker.options].map((option) => option.value)).toEqual([...APP_CONFIG.ai.models]);
 		// Green, and the same green the toolbar's dot uses.
 		const dot = connection.querySelector('span');
 		expect(dot).not.toBeNull();
 		expect(getComputedStyle(dot as Element).backgroundColor).toBe('rgb(22, 163, 74)');
 	}}
 />
+
+<!--
+	The model is a property of the work, not of the session: one node's script is
+	a two-line reshape and another's is the analysis the graph exists for. So the
+	pick lands on the node and stays there, and every node that has not made one
+	goes on following the app-wide choice in the settings sheet.
+-->
+<Story
+	name="PickingAModelOnTheConnectionLineSticksToTheNode"
+	play={async ({ canvasElement }) => {
+		const picker = requiredSelect(canvasElement, '[data-ai-model]');
+		// An unpinned node follows the app-wide choice.
+		expect(picker.value).toBe('claude-opus-5');
+		expect(harnessState(canvasElement)).toHaveAttribute('data-node-model', '');
+
+		await userEvent.selectOptions(picker, 'claude-sonnet-5');
+
+		// On the node, not in the component: the harness commits the same pure
+		// mutation `Multigraph` commits, and the line redraws from the graph.
+		expect(harnessState(canvasElement)).toHaveAttribute('data-node-model', 'claude-sonnet-5');
+		expect(harnessState(canvasElement)).toHaveAttribute('data-last-model', 'claude-sonnet-5');
+		expect(requiredSelect(canvasElement, '[data-ai-model]').value).toBe('claude-sonnet-5');
+	}}
+>
+	{#snippet template()}
+		<AiNodeHarness baseGraph={aiGraph()} nodeId="ai" appModel="claude-opus-5" />
+	{/snippet}
+</Story>
+
+<!--
+	The picker is a control on a surface whose wheel and pointer belong to the
+	zoom world underneath, so the same two rules every other control here is held
+	to: a press on it starts no pan.
+-->
+<Story
+	name="PressingTheModelPickerDoesNotPanTheWorld"
+	play={async ({ canvasElement }) => {
+		const picker = requiredSelect(canvasElement, '[data-ai-model]');
+		picker.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+
+		expect(harnessState(canvasElement)).toHaveAttribute('data-stage-pan-starts', '0');
+	}}
+>
+	{#snippet template()}
+		<AiNodeHarness baseGraph={aiGraph()} nodeId="ai" appModel="claude-opus-5" />
+	{/snippet}
+</Story>
 
 <!--
 	Three modes read as three actions until the switch says it is one. The label

@@ -38,7 +38,8 @@
 	import { tombstoneAsset } from '$lib/assets/assetTrash';
 	import { prefersReducedMotion } from '$lib/reducedMotion';
 	import { collectAiInputs } from './lib/aiInputs';
-	import { promoteAiOutput, setAiPrompt } from './lib/aiNode';
+	import { promoteAiOutput, setAiModel, setAiPrompt } from './lib/aiNode';
+	import { resolveAiModel } from './lib/aiWorkbenchView';
 	import { createAiRunController, type AiRunOutcome } from './lib/aiRunController.svelte';
 	import type { AiRunMode, NodeContentBlock, NodeData } from '../types/node';
 	import type { EdgeData } from '../types/edge';
@@ -3224,13 +3225,18 @@
 							{assetScope}
 							runState={aiRun.stateFor(detailsNode.id)}
 							hasKey={aiClient !== null}
-							model={aiSettings.model}
+							model={resolveAiModel(detailsNode.addons.ai, aiSettings.model)}
 							{titleForNodeId}
 							nodeExists={(nodeId) => nodeById[nodeId] !== undefined}
 							onPromptChange={(prompt) =>
 								commitUserGraph(
 									setAiPrompt(graph, detailsNode.id, prompt),
 									editIntent('edit AI prompt')
+								)}
+							onModelChange={(nextModel) =>
+								commitUserGraph(
+									setAiModel(graph, detailsNode.id, nextModel),
+									editIntent('choose AI model')
 								)}
 							onRun={(mode) => runAiNode(detailsNode.id, mode)}
 							onCancel={() => aiRun.cancel(detailsNode.id)}

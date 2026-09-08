@@ -132,11 +132,13 @@
 		runState = IDLE_RUN_STATE,
 		hasKey = false,
 		model = APP_CONFIG.ai.defaultModel,
+		models = APP_CONFIG.ai.models,
 		titleForNodeId = (nodeId: string) => nodeId,
 		nodeExists = () => true,
 		confirmAttachment = (message: string) => window.confirm(message),
 		warnBytesPerFile = APP_CONFIG.multigraph.attachments.warnBytesPerFile,
 		onPromptChange,
+		onModelChange,
 		onRun,
 		onCancel,
 		onPromote,
@@ -176,8 +178,14 @@
 		 * can see that Connect took — the sheet closing behind them is not, on its
 		 * own, evidence of anything. Defaults to the configured model for a caller
 		 * with no settings in hand.
+		 *
+		 * Already resolved by the caller (`resolveAiModel`): this node's own pin
+		 * when it has one, the app-wide choice when it does not. The surface draws
+		 * what it is handed and reports a change through `onModelChange`.
 		 */
 		model?: string;
+		/** The models the picker offers. The configured list unless a test pins one. */
+		models?: readonly string[];
 		/** Names the node a promoted output lives in. Identity for a caller with no graph. */
 		titleForNodeId?: (nodeId: string) => string;
 		/**
@@ -193,6 +201,12 @@
 		nodeExists?: (nodeId: string) => boolean;
 		/** The prompt, committed on blur or Cmd+Enter rather than on every keystroke. */
 		onPromptChange?: (prompt: string) => void;
+		/**
+		 * Pin this node to another model. Committed on the change, with no Save:
+		 * the picker's own value is the acknowledgement, and undo covers it like
+		 * every other edit to the node.
+		 */
+		onModelChange?: (model: string) => void;
 		onRun?: (mode: AiRunMode) => void;
 		onCancel?: () => void;
 		/** Give one output a node of its own, bound by its name. */
@@ -679,10 +693,31 @@
 			Whether the key took, said here rather than left to the toolbar's fill.
 			Connect closes the sheet, and a sheet closing is not evidence of
 			anything; naming the model is.
+
+			The name is also the control that changes it, because this is where the
+			reader is when the question comes up — beside the button that would
+			spend the tokens. A native `<select>` rather than a popover: it is the
+			whole of the keyboard and the whole of the phone's picker for free, and
+			the choice is exclusive, which is what a select is for.
 		-->
 		<p class="connection" data-ai-connection={hasKey ? 'connected' : 'disconnected'}>
 			<span class="status-dot" class:on={hasKey} aria-hidden="true"></span>
-			{hasKey ? `Connected · ${model}` : 'Not connected'}
+			{#if hasKey}
+				Connected ·
+				<select
+					class="model"
+					data-ai-model
+					aria-label="Model for this node"
+					value={model}
+					onchange={(event) => onModelChange?.(event.currentTarget.value)}
+				>
+					{#each models as option (option)}
+						<option value={option}>{option}</option>
+					{/each}
+				</select>
+			{:else}
+				Not connected
+			{/if}
 		</p>
 	</section>
 
@@ -1492,8 +1527,43 @@
 		display: flex;
 		align-items: center;
 		gap: 0.4rem;
+		/* The line is one thumb tall so the picker inside it can be, without the
+		   picker having to look like a form field on a status line. */
+		min-height: 2.75rem;
 		color: #475569;
 		font-size: 0.875rem;
+	}
+
+	/* Reads as the model's name, presses as a control: the underline and the
+	   caret are what say it can be changed, and the box is the full height of
+	   the line so a thumb has something to land on. */
+	.model {
+		align-self: stretch;
+		box-sizing: border-box;
+		margin-left: -0.15rem;
+		border: 0;
+		border-radius: 0.375rem;
+		background: transparent;
+		padding: 0 1.1rem 0 0.15rem;
+		color: inherit;
+		font: inherit;
+		text-decoration: underline dotted currentcolor;
+		text-underline-offset: 0.2em;
+		appearance: none;
+		background-image:
+			linear-gradient(45deg, transparent 50%, currentcolor 50%),
+			linear-gradient(135deg, currentcolor 50%, transparent 50%);
+		background-position:
+			right 0.45rem center,
+			right 0.15rem center;
+		background-size:
+			0.3rem 0.3rem,
+			0.3rem 0.3rem;
+		background-repeat: no-repeat;
+	}
+
+	.model:hover {
+		color: #0f172a;
 	}
 
 	/* Grey until a key is in hand, green once one is: the same two states the

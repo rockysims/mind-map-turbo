@@ -146,7 +146,9 @@
 		canvas.getByText('Model, cost and data').click();
 		await waitFor(() => expect(section(canvasElement).open).toBe(true));
 
-		const model = canvas.getByLabelText('Model') as HTMLSelectElement;
+		// "Default model": a node that picked its own on the workbench keeps it,
+		// and this is what every node that has not picked one calls.
+		const model = canvas.getByLabelText('Default model') as HTMLSelectElement;
 		await expect(model.value).toBe(defaultAiSettings().model);
 		await expect(canvas.getByLabelText('Preview rows sent per file')).toBeInTheDocument();
 		await expect(

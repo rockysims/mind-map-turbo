@@ -71,6 +71,31 @@ export function setAiPrompt(data: MultigraphData, nodeId: string, prompt: string
 }
 
 /**
+ * Pin the node to a model, or clear the pin with `undefined` so it follows the
+ * app-wide choice again. Same graph object when the pin is unchanged.
+ *
+ * Stored per node rather than per graph because the choice is about the work:
+ * one node's script is a two-line reshape and another's is the analysis the
+ * whole graph exists for, and a reader who picked a model for the second should
+ * not have to pick it again on their next visit.
+ */
+export function setAiModel(
+	data: MultigraphData,
+	nodeId: string,
+	model: string | undefined
+): MultigraphData {
+	const ai = aiAddonOf(data, nodeId);
+	if (ai === undefined || ai.model === model) return data;
+	const next: AiAddon = { ...ai };
+	// Cleared rather than set to `undefined`: the add-on is persisted as JSON,
+	// where an absent field and one holding `undefined` are the same document,
+	// and only the absent one survives a round trip unchanged.
+	if (model === undefined) delete next.model;
+	else next.model = model;
+	return withAiAddon(data, nodeId, next);
+}
+
+/**
  * Replace the node's stored `analysis.py`. Same graph object when the text is
  * unchanged — a refine run that hands back a byte-identical script is not an
  * edit.

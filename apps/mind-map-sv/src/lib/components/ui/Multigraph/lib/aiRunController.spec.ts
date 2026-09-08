@@ -237,6 +237,29 @@ async function until(predicate: () => boolean, what: string): Promise<void> {
 }
 
 describe('createAiRunController', () => {
+	it('calls the model the node is pinned to rather than the app-wide one', async () => {
+		const h = await harness({
+			graph: baseGraph({ model: 'claude-sonnet-5' }),
+			settings: { model: 'claude-opus-5' },
+			turns: [endTurn('Nothing to do.')]
+		});
+
+		await h.controller.run('ai', 'analyse');
+
+		expect(h.client.requests[0].model).toBe('claude-sonnet-5');
+	});
+
+	it('calls the app-wide model for a node that has pinned none', async () => {
+		const h = await harness({
+			settings: { model: 'claude-sonnet-5' },
+			turns: [endTurn('Nothing to do.')]
+		});
+
+		await h.controller.run('ai', 'analyse');
+
+		expect(h.client.requests[0].model).toBe('claude-sonnet-5');
+	});
+
 	it('commits exactly one run for a success path with two tool calls', async () => {
 		const scripts: string[] = [];
 		const h = await harness({

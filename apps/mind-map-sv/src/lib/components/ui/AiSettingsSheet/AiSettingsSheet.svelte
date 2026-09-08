@@ -223,7 +223,9 @@
 			<summary>Model, cost and data</summary>
 
 			<div class="section-body">
-				<label class="field" for="ai-settings-model">Model</label>
+				<!-- "Default", because a node can pick its own on its connection line
+				     and keeps it: this is what the ones that have not picked call. -->
+				<label class="field" for="ai-settings-model">Default model</label>
 				<select
 					id="ai-settings-model"
 					value={model}

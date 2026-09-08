@@ -67,6 +67,7 @@ import { recordAiRun, refreshPromotedOutputs, replaceAiRun, setAiScript } from '
 import {
 	hasInputChanges,
 	inputChangesForAddon,
+	resolveAiModel,
 	IDLE_RUN_STATE,
 	type AiInputChanges,
 	type AiRunState,
@@ -468,7 +469,14 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 			return 'error';
 		}
 
-		const settings = deps.settings();
+		// The app-wide preferences, with the model this node is pinned to standing
+		// in for the app-wide one. Resolved here rather than at the press so the
+		// run calls what the workbench was naming when it was made.
+		const appSettings = deps.settings();
+		const settings: AiSettings = {
+			...appSettings,
+			model: resolveAiModel(ai, appSettings.model)
+		};
 		const inputs = collectAiInputs(startGraph, nodeId);
 		const runId = randomId();
 		const startedAt = now();

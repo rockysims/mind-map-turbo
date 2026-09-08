@@ -8,6 +8,7 @@
  * markup.
  */
 
+import { APP_CONFIG } from '$lib/appConfig';
 import { latestDoneRun } from './aiNode';
 import type { AiInput } from './aiInputs';
 import type { FileDigest } from '$lib/ai/probeScript';
@@ -190,6 +191,25 @@ export function defaultRunMode(ai: AiAddon, inputs?: AiInput[]): AiRunMode {
 		if (changes.added.length > 0 || changes.removed.length > 0) return 'refine';
 	}
 	return 'rerun';
+}
+
+/**
+ * The model this node's next run would call: its own pin when it carries one
+ * the app still offers, and the app-wide choice otherwise.
+ *
+ * A pin outside `models` falls back rather than being honoured, for the reason
+ * `loadAiSettings` drops a stored model it does not recognise: the workbench
+ * draws this answer in a select whose options are exactly that list, and a
+ * value with no option renders as an empty control. A graph written on a
+ * browser that offered a model this one does not is what reaches it.
+ */
+export function resolveAiModel(
+	ai: AiAddon | undefined,
+	fallback: string,
+	models: readonly string[] = APP_CONFIG.ai.models
+): string {
+	const pinned = ai?.model;
+	return pinned !== undefined && models.includes(pinned) ? pinned : fallback;
 }
 
 /**
