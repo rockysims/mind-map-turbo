@@ -8,17 +8,39 @@
  * promoted output node from feeding the node that produced it. Derived
  * dataflow edges are never consulted — only `graph.edges`.
  *
+ * A neighbour carrying the `ai` add-on contributes its *latest done run's*
+ * outputs as well, on exactly the same terms as its attachments — same
+ * proximity rule, same label from the same edge — which is what lets one node
+ * read the CSV the node before it wrote without anyone promoting it first.
+ * Latest done run only: a run's outputs are that node's current answer, and
+ * three generations of `drift.png` would make the filename meaningless. The
+ * node's own outputs are never collected, because self is not a neighbour.
+ *
  * Order is stable by construction so the workbench list does not reshuffle
  * while the user edits the map: the node's own attachments first in
  * `node.content` order, then each qualifying neighbour in `graph.nodes` order
  * (not edge order, so inserting an unrelated edge moves nothing), and within a
- * neighbour its text entry before its attachments. A neighbour joined by
- * several edges appears once, with the labels of those edges merged.
+ * neighbour its text entry, then its attachments, then its run outputs in run
+ * order. A neighbour joined by several edges appears once, with the labels of
+ * those edges merged.
+ *
+ * ## One name, decided here
+ *
+ * `AiFileInput.name` is the name the file takes *inside the runtime*: the
+ * executor writes it under that name, the probe reports its digest under it,
+ * the request lists it as a name the script may open, and the run record keeps
+ * it so the next run can say what moved. Those four have to agree, and two
+ * neighbours can each produce `plot.png`, so the name cannot be decided one
+ * file at a time — `disambiguateExecutorNames` decides the whole collection's
+ * names at the end of `collectAiInputs`, and every consumer carries what it is
+ * given rather than re-deriving it.
  */
 
 import type { EdgeData } from '../../types/edge';
+import { disambiguateExecutorNames } from '$lib/ai/inputFileName';
 import type { GraphAssetMetadata, MultigraphData } from '../../types/multigraph';
 import type { NodeContentBlock, NodeData } from '../../types/node';
+import { latestDoneRun } from './aiNode';
 
 interface AiTextInput {
 	kind: 'text';
@@ -33,10 +55,23 @@ export interface AiFileInput {
 	kind: 'file';
 	nodeId: string;
 	assetId: string;
+	/** The name the runtime writes it under, unique across one collection. */
 	name: string;
 	mimeType: string;
 	size: number;
 	label?: string;
+	/**
+	 * Where this file came from: a file the reader attached to a node, or a
+	 * neighbour's latest run output.
+	 *
+	 * Required rather than optional, and not persisted — inputs are recomputed
+	 * from the graph on every collection — so it costs no migration and every
+	 * construction site has to say which kind it is building. Three things read
+	 * it: the workbench lists outputs in a sub-list of their own, Add, Replace
+	 * and Remove are not drawn for them, and the request's digest line tells the
+	 * model the file is a produced one.
+	 */
+	origin: 'attachment' | 'run-output';
 }
 
 /** One thing the request will carry, already resolved against `graph.assets`. */
@@ -76,12 +111,38 @@ export function collectAiInputs(graph: MultigraphData, nodeId: string): AiInput[
 			description: node.description,
 			...(label === undefined ? {} : { label })
 		});
-		for (const file of fileInputsFor(graph, node)) {
+		for (const file of [...fileInputsFor(graph, node), ...runOutputInputsFor(graph, node)]) {
 			inputs.push(label === undefined ? file : { ...file, label });
 		}
 	}
 
-	return inputs;
+	return withRuntimeNames(inputs);
+}
+
+/**
+ * The same inputs with `name` replaced by the name the runtime will use.
+ *
+ * Names are assigned per *asset*, not per row: the same asset can reach a node
+ * twice — attached to one neighbour and promoted onto another — and the
+ * executor writes it once, so both rows have to say the one name it was
+ * written under. Everything else keeps its position, because the order is what
+ * makes the naming reproducible.
+ */
+function withRuntimeNames(inputs: AiInput[]): AiInput[] {
+	const assetIds: string[] = [];
+	const rawNames: string[] = [];
+	for (const input of inputs) {
+		if (input.kind !== 'file' || assetIds.includes(input.assetId)) continue;
+		assetIds.push(input.assetId);
+		rawNames.push(input.name);
+	}
+	if (assetIds.length === 0) return inputs;
+
+	const runtimeNames = disambiguateExecutorNames(rawNames);
+	const byAssetId = new Map(assetIds.map((assetId, index) => [assetId, runtimeNames[index]]));
+	return inputs.map((input) =>
+		input.kind === 'file' ? { ...input, name: byAssetId.get(input.assetId) ?? input.name } : input
+	);
 }
 
 /**
@@ -109,7 +170,18 @@ export interface AiInputGroup {
 	description: string;
 	/** The role the connecting edge gives this neighbour, if it has one. */
 	label?: string;
+	/** The files attached to this node, which Add, Replace and Remove act on. */
 	files: AiFileInput[];
+	/**
+	 * The files this node's latest done run produced, which nothing acts on.
+	 *
+	 * A list of their own rather than a flag on each row, so the surface can
+	 * draw them as a sub-list under the node and simply not draw the three file
+	 * actions there — there is no action behind them to explain, and a disabled
+	 * control that can never be enabled is a worse answer than no control.
+	 * Always the self group's empty list: a node never reads its own outputs.
+	 */
+	outputs: AiFileInput[];
 }
 
 /**
@@ -128,7 +200,8 @@ export function groupAiInputs(inputs: AiInput[], selfNodeId: string): AiInputGro
 		self: true,
 		title: '',
 		description: '',
-		files: []
+		files: [],
+		outputs: []
 	};
 	const groups: AiInputGroup[] = [selfGroup];
 	const byNodeId = new Map<string, AiInputGroup>([[selfNodeId, selfGroup]]);
@@ -151,16 +224,19 @@ export function groupAiInputs(inputs: AiInput[], selfNodeId: string): AiInputGro
 				title: input.title,
 				description: input.description,
 				...(input.label === undefined ? {} : { label: input.label }),
-				files: []
+				files: [],
+				outputs: []
 			};
 			byNodeId.set(input.nodeId, group);
 			groups.push(group);
 			continue;
 		}
 
+		// Routed by origin alone, so the surface never has to work out which list
+		// a row belongs in from anything else about it.
 		const existing = byNodeId.get(input.nodeId);
 		if (existing !== undefined) {
-			existing.files.push(input);
+			listFor(existing, input).push(input);
 			continue;
 		}
 		const group: AiInputGroup = {
@@ -169,13 +245,19 @@ export function groupAiInputs(inputs: AiInput[], selfNodeId: string): AiInputGro
 			title: input.nodeId,
 			description: '',
 			...(input.label === undefined ? {} : { label: input.label }),
-			files: [input]
+			files: [],
+			outputs: []
 		};
+		listFor(group, input).push(input);
 		byNodeId.set(input.nodeId, group);
 		groups.push(group);
 	}
 
 	return groups;
+}
+
+function listFor(group: AiInputGroup, input: AiFileInput): AiFileInput[] {
+	return input.origin === 'run-output' ? group.outputs : group.files;
 }
 
 /**
@@ -249,7 +331,44 @@ function fileInputsFor(graph: MultigraphData, node: NodeData): AiFileInput[] {
 			assetId: block.assetId,
 			name: fileNameFor(block, asset),
 			mimeType: asset.mimeType,
-			size: asset.size
+			size: asset.size,
+			origin: 'attachment'
+		});
+	}
+	return inputs;
+}
+
+/**
+ * The files `node`'s latest done run wrote, as inputs.
+ *
+ * A node with no `ai` add-on, or with no done run, contributes nothing — and so
+ * does a run whose output asset is no longer in the graph. An evicted output is
+ * a file that is not there any more, which is the same thing as an attachment
+ * the reader removed, and offering the script a name with no bytes behind it
+ * would be a failure the run only discovers when it opens the file. The
+ * parent's *latest* run is never the one eviction takes, so this is the rare
+ * case rather than the ordinary one.
+ */
+function runOutputInputsFor(graph: MultigraphData, node: NodeData): AiFileInput[] {
+	const ai = node.addons?.ai;
+	if (ai === undefined) return [];
+	const latest = latestDoneRun(ai);
+	if (latest === undefined) return [];
+
+	const inputs: AiFileInput[] = [];
+	for (const output of latest.outputs) {
+		const asset = graph.assets?.[output.assetId];
+		if (!asset) continue;
+		inputs.push({
+			kind: 'file',
+			nodeId: node.id,
+			assetId: output.assetId,
+			name: output.name,
+			// The run record says what it wrote; the asset is consulted for the size
+			// and for the fact that the bytes are still reachable at all.
+			mimeType: output.mimeType,
+			size: asset.size,
+			origin: 'run-output'
 		});
 	}
 	return inputs;

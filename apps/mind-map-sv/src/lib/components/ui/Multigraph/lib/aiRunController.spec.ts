@@ -15,11 +15,14 @@ import { createFakeAiClient } from '$lib/ai/fakeClient';
 import { createFakeExecutor } from '$lib/ai/fakeExecutor';
 import { PyExecutorError, type ExecutionResult } from '$lib/ai/pyExecutor';
 import { defaultAiSettings, type AiSettings } from '$lib/ai/aiSettings';
+import type { MeasuredFileDigest } from '$lib/ai/probeScript';
 import { MemoryGraphAssetStore } from '$lib/assets/assetStore';
 import type { GraphAssetStore } from '$lib/assets/assetStore';
 import type { MultigraphData } from '../../types/multigraph';
 import type { AiAddon, AiRun } from '../../types/node';
 import { promoteAiOutput } from './aiNode';
+import { collectAiInputs } from './aiInputs';
+import { inputChangesForAddon } from './aiWorkbenchView';
 import {
 	AI_RUN_COMMIT_LABEL,
 	createAiRunController,
@@ -170,6 +173,11 @@ interface HarnessOptions {
 	store?: GraphAssetStore | null;
 	/** Make `executor.load` reject, as it does with no network to fetch Pyodide from. */
 	loadFails?: boolean;
+	/**
+	 * What the probe answers, named as the executor wrote each file. Defaults to
+	 * the one CSV `baseGraph` attaches.
+	 */
+	digests?: MeasuredFileDigest[];
 }
 
 /** The controller with fakes underneath and every commit remembered. */
@@ -177,9 +185,12 @@ async function harness(options: HarnessOptions = {}) {
 	const commits: { graph: MultigraphData; label: string }[] = [];
 	let graph = options.graph ?? baseGraph();
 	const client = createFakeAiClient(options.turns ?? [endTurn('Nothing to do.')]);
-	const executor = createFakeExecutor(options.script ?? (() => pngResult('plot.png')), [
-		{ name: 'sweep.csv', size: CSV_TEXT.length, kind: 'table', columns: ['t', 'ch2'], rows: 2 }
-	]);
+	const executor = createFakeExecutor(
+		options.script ?? (() => pngResult('plot.png')),
+		options.digests ?? [
+			{ name: 'sweep.csv', size: CSV_TEXT.length, kind: 'table', columns: ['t', 'ch2'], rows: 2 }
+		]
+	);
 	// Replaced rather than parameterised: the fake's whole job is to load, and
 	// the one case that needs it not to is this one.
 	if (options.loadFails === true) {
@@ -819,5 +830,173 @@ describe('createAiRunController', () => {
 		expect(state.phase).toBe('done');
 		expect(state.text).toContain('All done.');
 		expect(state.steps).toEqual([{ stdoutTail: 'wrote a figure', exitCode: 0 }]);
+	});
+});
+
+/**
+ * Two inputs called `plot.png`: a neighbour's run output, and an attachment.
+ *
+ * The one thing this milestone can get quietly wrong is a name decided twice.
+ * Four places have to say the same string — the file the executor writes, the
+ * digest row the workbench draws, the filename the request lists, and the name
+ * the run record keeps — and a disagreement between any two of them is silent:
+ * the model is told about a file that is not there, or a measurement lands on
+ * the wrong asset, or the next run claims a file it has always had is new.
+ */
+describe('createAiRunController: two inputs of the same name', () => {
+	const PARENT_OUTPUT_ASSET_ID = 'parent-plot';
+	const ATTACHED_ASSET_ID = 'attached-plot';
+	const PNG_BYTES = new Uint8Array([137, 80, 78, 71]);
+
+	function collidingGraph(): MultigraphData {
+		return {
+			...makeGraph({
+				nodes: [
+					{
+						id: 'ai',
+						title: 'Compare',
+						description: '',
+						addons: { ai: { prompt: 'Compare the two.', runs: [], promoted: {} } }
+					},
+					{
+						id: 'parent',
+						title: 'Sweep A',
+						description: '',
+						addons: {
+							ai: {
+								prompt: 'Plot it.',
+								runs: [
+									{
+										id: 'parent-run',
+										startedAt: 1,
+										finishedAt: 2,
+										status: 'done',
+										mode: 'analyse',
+										runtime: APP_CONFIG.ai.runtime.version,
+										inputs: [],
+										summary: 'Plotted.',
+										outputs: [
+											{
+												name: 'plot.png',
+												assetId: PARENT_OUTPUT_ASSET_ID,
+												mimeType: 'image/png'
+											}
+										],
+										toolCalls: 1
+									}
+								],
+								promoted: {}
+							}
+						}
+					},
+					{
+						id: 'bench',
+						title: 'Bench',
+						description: '',
+						content: [{ type: 'file', assetId: ATTACHED_ASSET_ID, name: 'plot.png' }]
+					}
+				],
+				edges: [
+					{ source: 'parent', target: 'ai', directed: true, tags: [] },
+					{ source: 'bench', target: 'ai', directed: true, tags: [] }
+				]
+			}),
+			assets: {
+				[PARENT_OUTPUT_ASSET_ID]: {
+					id: PARENT_OUTPUT_ASSET_ID,
+					kind: 'image',
+					mimeType: 'image/png',
+					name: 'plot.png',
+					size: PNG_BYTES.length,
+					createdAt: 1
+				},
+				[ATTACHED_ASSET_ID]: {
+					id: ATTACHED_ASSET_ID,
+					kind: 'image',
+					mimeType: 'image/png',
+					name: 'plot.png',
+					size: PNG_BYTES.length,
+					createdAt: 2
+				}
+			}
+		};
+	}
+
+	async function storeWithBothPngs(): Promise<GraphAssetStore> {
+		const store = new MemoryGraphAssetStore();
+		for (const assetId of [PARENT_OUTPUT_ASSET_ID, ATTACHED_ASSET_ID]) {
+			await store.put({
+				scope: SCOPE,
+				assetId,
+				blob: new Blob([PNG_BYTES], { type: 'image/png' }),
+				mimeType: 'image/png',
+				name: 'plot.png',
+				size: PNG_BYTES.length,
+				updatedAt: 1
+			});
+		}
+		return store;
+	}
+
+	/**
+	 * The probe answers under the names the executor wrote, which is what the
+	 * real one does (`os.path.basename` of the path it was handed).
+	 */
+	function digestsForWrittenFiles(): MeasuredFileDigest[] {
+		return [
+			{ name: 'plot.png', size: PNG_BYTES.length, kind: 'other' },
+			{ name: 'plot-2.png', size: PNG_BYTES.length, kind: 'other' }
+		];
+	}
+
+	async function collidingHarness() {
+		return harness({
+			graph: collidingGraph(),
+			store: await storeWithBothPngs(),
+			turns: [toolTurn('print("ok")'), endTurn('Both plotted.')],
+			digests: digestsForWrittenFiles()
+		});
+	}
+
+	it('says the same two names in /work, in the digests, in the request and on the record', async () => {
+		const h = await collidingHarness();
+
+		expect(await h.controller.run('ai', 'analyse')).toBe('done');
+
+		// 1. What the executor wrote. The parent's output comes first because the
+		// parent comes first in `graph.nodes`.
+		expect(h.executor.runs[0].files.map((file) => file.name)).toEqual(['plot.png', 'plot-2.png']);
+
+		// 2. The digest rows the workbench draws, per asset. Without a
+		// collection-wide name both would land on the first asset id.
+		const digests = h.controller.digestsFor('ai');
+		expect(digests[PARENT_OUTPUT_ASSET_ID]?.name).toBe('plot.png');
+		expect(digests[ATTACHED_ASSET_ID]?.name).toBe('plot-2.png');
+
+		// 3. The filenames the request lists as openable.
+		const system = h.client.requests[0].system;
+		expect(system).toContain('- plot.png');
+		expect(system).toContain('- plot-2.png');
+		// And the produced one is named as produced.
+		expect(userText(h.client.requests[0])).toContain('output of "Sweep A"');
+
+		// 4. The names the run record keeps, which is what the next run reads back.
+		expect(h.runs()[0].inputs.filter((input) => input.assetId !== undefined)).toEqual([
+			{ nodeId: 'parent', assetId: PARENT_OUTPUT_ASSET_ID, name: 'plot.png' },
+			{ nodeId: 'bench', assetId: ATTACHED_ASSET_ID, name: 'plot-2.png' }
+		]);
+	});
+
+	it('reports nothing changed since that run while nothing has', async () => {
+		const h = await collidingHarness();
+		await h.controller.run('ai', 'analyse');
+
+		const addon = h.addon();
+		if (addon === undefined) throw new Error('the ai node should carry its add-on');
+		expect(inputChangesForAddon(addon, collectAiInputs(h.graph, 'ai'))).toEqual({
+			added: [],
+			removed: [],
+			replaced: []
+		});
 	});
 });

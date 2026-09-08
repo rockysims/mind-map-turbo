@@ -339,6 +339,27 @@ describe('createPyExecutor', () => {
 		executor.dispose();
 	});
 
+	// The caller decides the names — `collectAiInputs` decides all of them at
+	// once — and the executor writes what it is handed. If it re-derived a name
+	// here, two files the collection had already told apart would land on one
+	// path and the model would be reading a file it was never shown.
+	it('writes each file under the name it was handed, collisions already resolved', async () => {
+		const { executor, workers } = executorWithFakes();
+
+		await executor.run('pass', [
+			file('plot.png', 'a'),
+			file('plot-2.png', 'b'),
+			file('outputs.input', 'c')
+		]);
+
+		expect(workers[0].sentOfType('writeFile').map((message) => message.path)).toEqual([
+			'/work/plot.png',
+			'/work/plot-2.png',
+			'/work/outputs.input'
+		]);
+		executor.dispose();
+	});
+
 	it('reports a script that raised as a result, never as a rejection', async () => {
 		const { executor } = executorWithFakes({
 			run: () => ({

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { executorInputName } from './inputFileName';
+import { disambiguateExecutorNames, executorInputName } from './inputFileName';
 
 describe('executorInputName', () => {
 	it('leaves an ordinary filename alone', () => {
@@ -28,5 +28,62 @@ describe('executorInputName', () => {
 		expect(executorInputName('.')).toBe('input');
 		expect(executorInputName('data/..')).toBe('input');
 		expect(executorInputName('outputs/')).toBe('input');
+	});
+});
+
+describe('disambiguateExecutorNames', () => {
+	it('sanitises every name and leaves a list with no repeats alone', () => {
+		expect(disambiguateExecutorNames(['bench/sweep.csv', '  notes.txt ', 'outputs'])).toEqual([
+			'sweep.csv',
+			'notes.txt',
+			'outputs.input'
+		]);
+	});
+
+	it('keeps the first occurrence and numbers the repeats before the extension', () => {
+		expect(disambiguateExecutorNames(['plot.png', 'plot.png', 'plot.png'])).toEqual([
+			'plot.png',
+			'plot-2.png',
+			'plot-3.png'
+		]);
+	});
+
+	it('numbers repeats that only collide once they are sanitised', () => {
+		// An attachment carrying a directory and a run output written under the
+		// bare name are the same name by the time either reaches the runtime.
+		expect(disambiguateExecutorNames(['run-a/clean.csv', 'clean.csv'])).toEqual([
+			'clean.csv',
+			'clean-2.csv'
+		]);
+	});
+
+	it('steps past a suffixed name that a later original asks for', () => {
+		expect(disambiguateExecutorNames(['plot.png', 'plot.png', 'plot-2.png'])).toEqual([
+			'plot.png',
+			'plot-2.png',
+			'plot-2-2.png'
+		]);
+	});
+
+	it('suffixes a name with no extension, and a dotfile, at the end', () => {
+		expect(disambiguateExecutorNames(['README', 'README'])).toEqual(['README', 'README-2']);
+		expect(disambiguateExecutorNames(['.env', '.env'])).toEqual(['.env', '.env-2']);
+	});
+
+	it('keeps the last dot as the extension, so a double extension survives', () => {
+		expect(disambiguateExecutorNames(['archive.tar.gz', 'archive.tar.gz'])).toEqual([
+			'archive.tar.gz',
+			'archive.tar-2.gz'
+		]);
+	});
+
+	it('depends on the order and on nothing else', () => {
+		const names = ['plot.png', 'clean.csv', 'plot.png'];
+		expect(disambiguateExecutorNames(names)).toEqual(disambiguateExecutorNames([...names]));
+		expect(disambiguateExecutorNames(['plot.png', 'plot.png'])).toEqual(['plot.png', 'plot-2.png']);
+	});
+
+	it('answers an empty list with an empty list', () => {
+		expect(disambiguateExecutorNames([])).toEqual([]);
 	});
 });

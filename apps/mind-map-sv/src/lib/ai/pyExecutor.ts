@@ -25,7 +25,16 @@ import { OUTPUT_DIR, WORK_DIR, pyWorkerSource, type PyRuntimeConfig } from './py
 /** How long a worker has to post `ready` before the construction is called broken. */
 const DEFAULT_READY_TIMEOUT_MS = 15000;
 
-/** One file on its way into the runtime, named as the attachment is named. */
+/**
+ * One file on its way into the runtime.
+ *
+ * `name` is the name the caller has already decided this file takes in the
+ * work directory — `collectAiInputs` decides all of them at once, so that two
+ * neighbours each producing `plot.png` do not write over each other and the
+ * request can list both. The executor does not choose it and does not
+ * disambiguate: it writes what it is handed, past one last check that the name
+ * cannot escape `/work` (see `writeFiles`).
+ */
 export interface ExecutorFile {
 	name: string;
 	bytes: Uint8Array;
@@ -386,6 +395,16 @@ export function createPyExecutor(
 		}
 	}
 
+	/**
+	 * Write each file into the work directory under the name the caller gave it.
+	 *
+	 * `executorInputName` here is a guard on the *path*, not a naming decision:
+	 * a name that already came through the collection-wide pass passes through
+	 * it unchanged, and one that did not — a hand-built `ExecutorFile`, a name
+	 * out of a document written by someone else — cannot climb out of `/work`
+	 * with a `../`. Two files can still only be given one path each because the
+	 * caller made their names unique before handing them over.
+	 */
 	async function writeFiles(channel: PyWorkerChannel, files: ExecutorFile[]): Promise<string[]> {
 		const paths: string[] = [];
 		for (const file of files) {

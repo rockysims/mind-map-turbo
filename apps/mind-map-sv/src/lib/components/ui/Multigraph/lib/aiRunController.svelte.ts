@@ -49,7 +49,6 @@ import {
 	RUN_ANALYSIS_TOOL
 } from '$lib/ai/aiRequest';
 import type { AiSettings } from '$lib/ai/aiSettings';
-import { executorInputName } from '$lib/ai/inputFileName';
 import type { DigestUnavailableReason, FileDigest } from '$lib/ai/probeScript';
 import { PyExecutorError } from '$lib/ai/pyExecutor';
 import type {
@@ -218,6 +217,8 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 				continue;
 			}
 			files.push({
+				// The collection's name for it, which is what the executor writes,
+				// what the probe reports and what the request lists.
 				name: input.name,
 				bytes: new Uint8Array(await stored.value.blob.arrayBuffer())
 			});
@@ -237,10 +238,12 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 	 * Measure `files` and remember the answers against the assets they came from.
 	 *
 	 * The probe reports each digest under the name the executor wrote the file
-	 * as, which is how it is matched back to an asset id; `executorInputName` is
-	 * that rule, and the request builder applies the same one, so what the
-	 * workbench shows and what the request carries are the same rendering of the
-	 * same measurement.
+	 * as, which is how it is matched back to an asset id — and that name is
+	 * `AiFileInput.name`, decided once for the whole collection by
+	 * `collectAiInputs` and carried unchanged through the executor, this map,
+	 * the request and the run record. Nothing here re-derives it: two neighbours
+	 * can each produce `plot.png`, and a rule applied one name at a time would
+	 * put both digests on the first asset.
 	 *
 	 * `missing` is remembered alongside the measurements, as an "unavailable"
 	 * digest apiece: the cache is what the workbench draws every file row from,
@@ -261,13 +264,12 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 		const assetIdByName: Record<string, string> = {};
 		for (const input of inputs) {
 			if (input.kind !== 'file') continue;
-			const key = executorInputName(input.name);
-			if (assetIdByName[key] === undefined) assetIdByName[key] = input.assetId;
+			if (assetIdByName[input.name] === undefined) assetIdByName[input.name] = input.assetId;
 		}
 
 		const byAssetId: Record<string, FileDigest> = unavailableDigests(missing, 'blob');
 		for (const digest of digests) {
-			const assetId = assetIdByName[executorInputName(digest.name)];
+			const assetId = assetIdByName[digest.name];
 			if (assetId !== undefined) byAssetId[assetId] = digest;
 		}
 		putDigests(nodeId, previewRows, byAssetId);
@@ -874,7 +876,10 @@ function toRunInput(input: AiInput): AiRunInput {
 	return {
 		nodeId: input.nodeId,
 		// The name as well as the id: what the next run compares against is the
-		// filename the script was written to open.
+		// filename the script was written to open — so it is the collection's
+		// name, the same one the executor wrote and the request listed. Recording
+		// anything else would make the workbench's "changed since" line name a
+		// file the script never saw.
 		...(input.kind === 'file' ? { assetId: input.assetId, name: input.name } : {}),
 		...(input.label === undefined ? {} : { label: input.label })
 	};
