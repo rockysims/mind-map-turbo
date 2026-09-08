@@ -2921,6 +2921,60 @@
 />
 
 <Story
+	name="UserDeletesTheOnlyPinnedNode"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 5,
+			pinned: [0],
+			// Deleting n0 leaves nothing pinned anywhere, so every node is orphaned at
+			// once and there is no survivor to play a reveal wave from. The beacon
+			// election still has to land next to the deletion: n2 is both the
+			// highest-degree node and the one with pin history, so it would win the
+			// component outright on the ordinary rules — off to the side of the node
+			// the reader just deleted.
+			edges: [
+				[0, 1],
+				[1, 2],
+				[2, 3],
+				[2, 4]
+			],
+			pinHistory: { 2: 4 },
+			posByNodeId: {
+				n0: { x: -400, y: 0 },
+				n1: { x: -200, y: 0 },
+				n2: { x: 0, y: 0 },
+				n3: { x: 200, y: 160 },
+				n4: { x: 200, y: -160 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { relaxIterations: 0, enterExitDurationMs: 0 },
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+
+		await dispatchLongPress(circle, center.x, center.y);
+		within(canvasElement).getByRole('menuitem', { name: 'Delete' }).click();
+		await sleep();
+		await waitForLayout();
+
+		expect(lastChangedGraph(args).nodes.map((node) => node.id)).toEqual(['n1', 'n2', 'n3', 'n4']);
+
+		// The component stays on screen as its beacon, and the beacon is the
+		// neighbour of the deletion — one hop from where the reader is already
+		// looking — rather than the node pin recency and degree would have picked.
+		expect(canvasElement.querySelectorAll('.node-wrapper')).toHaveLength(1);
+		expect(getNodeWrapper(canvasElement, 'n1')).toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-node-id="n1"] .node')).not.toHaveAttribute(
+			'data-pinned'
+		);
+	}}
+/>
+
+<Story
 	name="UserLongPressesTinyDistantNode"
 	args={{
 		multigraphData: makeGraph({
@@ -4456,6 +4510,17 @@
 			'data-edge-visibility',
 			'boundary'
 		);
+		// And each one is long enough to be seen fading. The nodes on the far end of
+		// these two are hidden, so the settle this graph got on the way in sized them
+		// at `minScale` and parked them right beside the beacon — halfway to one is
+		// inside the beacon's own circle. The reader gets the same hint here as after
+		// pinning and unpinning the beacon, which is what they used to have to do.
+		for (const edgeId of ['e1', 'e2']) {
+			const boundaryEdge = getEdge(canvasElement, edgeId);
+			const fadeRadius = Number(boundaryEdge.dataset.boundaryFadeRadius);
+			expect(fadeRadius).toBeGreaterThan(0);
+			expect(Number.parseFloat(boundaryEdge.style.width)).toBeGreaterThanOrEqual(fadeRadius * 2);
+		}
 
 		// Pinning the beacon through the normal gesture brings its component back.
 		const beaconCircle = getCircle(canvasElement, 'n3');

@@ -2062,7 +2062,10 @@
 		const neighborIds = neighborsOf(graph, nodeId).map((neighbor) => neighbor.id);
 		const nextGraph = removeNode(graph, nodeId);
 		const { survivorNodeId, severed } = severedComponentAfterMutation(nextGraph, neighborIds);
-		// Only a severing deletion creates a pinless component to hint about.
+		// A deletion that orphaned any neighbour created a pinless component, so the
+		// election that follows is told where the reader was looking. That includes
+		// deleting the last pinned node, which orphans every neighbour at once and
+		// so leaves no survivor to play a wave from.
 		severedBeaconPreference = severed ? neighborIds : [];
 
 		// Before the commit, and against `nextGraph`: the fallback must not pick the
@@ -3450,9 +3453,9 @@
 				const nextGraph = removeEdge(graph, confirmEdgeId);
 				const endpointIds = removedEdge ? [removedEdge.sourceNodeId, removedEdge.targetNodeId] : [];
 				const { survivorNodeId, severed } = severedComponentAfterMutation(nextGraph, endpointIds);
-				// Only a severing removal creates a pinless component to hint about;
-				// keeping a stale hint would steer a later beacon election (e.g. after
-				// removing one of two parallel edges, which severs nothing).
+				// Only a removal that orphaned an endpoint creates a pinless component to
+				// hint about; keeping a stale hint would steer a later beacon election
+				// (e.g. after removing one of two parallel edges, which severs nothing).
 				severedBeaconPreference = severed ? endpointIds : [];
 
 				if (severed && survivorNodeId !== null) {

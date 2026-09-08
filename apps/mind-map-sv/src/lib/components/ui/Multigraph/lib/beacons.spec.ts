@@ -58,10 +58,27 @@ describe('beaconNodeIds', () => {
 		expect(beaconNodeIds(graph)).toEqual(new Set(['n2']));
 	});
 
-	it('pin recency outranks the preferred-node hint', () => {
+	it('the preferred-node hint outranks pin recency', () => {
+		// n1 is where the removal was, so it beats the node the reader pinned at some
+		// earlier point somewhere else in the same component.
 		const graph = makeGraph({ nodeCount: 2, edges: [[0, 1]], pinHistory: { 0: 1 } });
 
-		expect(beaconNodeIds(graph, { preferredNodeIds: ['n1'] })).toEqual(new Set(['n0']));
+		expect(beaconNodeIds(graph, { preferredNodeIds: ['n1'] })).toEqual(new Set(['n1']));
+	});
+
+	it('settles the preferred nodes among themselves by pin recency', () => {
+		// Both endpoints of a removed edge are equally close to it, so the ordinary
+		// rules pick between them — and skip n2, which the hint does not name.
+		const graph = makeGraph({
+			nodeCount: 3,
+			edges: [
+				[0, 1],
+				[1, 2]
+			],
+			pinHistory: { 1: 2, 2: 9 }
+		});
+
+		expect(beaconNodeIds(graph, { preferredNodeIds: ['n0', 'n1'] })).toEqual(new Set(['n1']));
 	});
 
 	it('uses the preferred-node hint when the component has no pin history', () => {

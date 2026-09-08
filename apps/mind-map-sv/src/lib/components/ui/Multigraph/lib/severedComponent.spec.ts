@@ -47,14 +47,15 @@ describe('severedComponentAfterMutation', () => {
 		expect(severedComponentAfterMutation(graph, ['n3', 'n2', 'n1']).survivorNodeId).toBe('n2');
 	});
 
-	it('reports no severing when nothing at all can reach a pinned node', () => {
-		// Nowhere to play a reveal wave from, so this is not the severing case even
-		// though every candidate is unreachable.
+	it('reports severing with no survivor when nothing at all can reach a pinned node', () => {
+		// What deleting the only pinned node leaves behind: nowhere to play a reveal
+		// wave from, but a pinless component the beacon election still has to be
+		// pointed at, or it anchors the component somewhere off screen.
 		const graph = makeGraph({ nodeCount: 2, edges: [[0, 1]] });
 
 		expect(severedComponentAfterMutation(graph, ['n0', 'n1'])).toEqual({
 			survivorNodeId: null,
-			severed: false
+			severed: true
 		});
 	});
 

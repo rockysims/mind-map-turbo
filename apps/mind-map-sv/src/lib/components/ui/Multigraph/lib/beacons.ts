@@ -17,9 +17,9 @@ export const BEACON_HOP = 1;
 
 interface BeaconOptions {
 	/**
-	 * Session-transient hint (e.g. the endpoints of a just-removed edge),
-	 * consulted only when a pinless component has no pin history at all.
-	 * Array order is preference order.
+	 * Session-transient hint: the nodes a just-removed node or edge was attached
+	 * to. Order carries no meaning — every entry is one hop from what was removed,
+	 * so they are equally close to it and the ordinary rules settle which one wins.
 	 */
 	preferredNodeIds?: readonly string[];
 }
@@ -34,9 +34,14 @@ interface BeaconOptions {
  * equation about one of its nodes.
  *
  * Selection priority within such a component:
- *   1. highest pin recency (`lastPinnedSeq`),
- *   2. the first `preferredNodeIds` entry inside the component,
+ *   1. the `preferredNodeIds` inside it, when it holds any — they are the
+ *      neighbours of the removal that orphaned it, and nothing in the component
+ *      is fewer hops from what was taken away,
+ *   2. highest pin recency (`lastPinnedSeq`),
  *   3. highest distinct-neighbor degree, tie-broken by lowest node id.
+ *
+ * Rules 2 and 3 settle the election among whatever rule 1 left, so a component
+ * with no hint about it runs exactly the election it always did.
  *
  * An edge-less node is its own component, so it is always its own beacon and
  * therefore always visible.
@@ -76,7 +81,7 @@ function computeBeaconNodeIds(
 	const adjacency = buildAdjacency(data);
 	const degreeByNodeId = distinctDegrees(adjacency);
 	const nodeById = new Map(data.nodes.map((node) => [node.id, node]));
-	const preferenceRank = new Map((preferredNodeIds ?? []).map((nodeId, index) => [nodeId, index]));
+	const preferred = new Set(preferredNodeIds ?? []);
 	const beacons = new Set<string>();
 	const visited = new Set<string>();
 
@@ -104,7 +109,7 @@ function computeBeaconNodeIds(
 
 		if (hasPinned) continue;
 
-		beacons.add(selectBeacon(componentNodes, degreeByNodeId, preferenceRank));
+		beacons.add(selectBeacon(componentNodes, degreeByNodeId, preferred));
 	}
 
 	return beacons;
@@ -131,21 +136,25 @@ export function withBeaconHops(
 function selectBeacon(
 	componentNodes: NodeData[],
 	degreeByNodeId: ReadonlyMap<string, number>,
-	preferenceRank: ReadonlyMap<string, number>
+	preferredNodeIds: ReadonlySet<string>
 ): string {
-	const byRecency = componentNodes.filter((node) => node.lastPinnedSeq !== undefined);
+	// The hinted nodes are one hop from the removal that orphaned this component,
+	// which is where the reader is looking and is as close to it as anything in
+	// the component can be. So the election narrows to them, rather than ranking
+	// them against a node that may sit clusters away — a graph the reader has
+	// pinned all over would otherwise answer a deletion by anchoring somewhere
+	// they never touched.
+	const candidates = componentNodes.filter((node) => preferredNodeIds.has(node.id));
+	const field = candidates.length > 0 ? candidates : componentNodes;
+
+	const byRecency = field.filter((node) => node.lastPinnedSeq !== undefined);
 	if (byRecency.length > 0) {
 		return byRecency.reduce((best, node) =>
 			(node.lastPinnedSeq ?? 0) > (best.lastPinnedSeq ?? 0) ? node : best
 		).id;
 	}
 
-	const preferred = componentNodes
-		.filter((node) => preferenceRank.has(node.id))
-		.sort((a, b) => (preferenceRank.get(a.id) ?? 0) - (preferenceRank.get(b.id) ?? 0));
-	if (preferred.length > 0) return preferred[0].id;
-
-	return componentNodes.reduce((best, node) => {
+	return field.reduce((best, node) => {
 		const nodeDegree = degreeByNodeId.get(node.id) ?? 0;
 		const bestDegree = degreeByNodeId.get(best.id) ?? 0;
 		if (nodeDegree !== bestDegree) return nodeDegree > bestDegree ? node : best;
