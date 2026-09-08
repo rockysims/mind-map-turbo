@@ -518,6 +518,53 @@ describe('buildRefineRequest', () => {
 	});
 });
 
+describe('the ancestor context section', () => {
+	const ancestorContext =
+		'Conversation so far (nearest first):\n\n1 step back — Sweep A\nAsked: clean it\nResult: done';
+
+	const build = {
+		prompt: 'Fit a line to it.',
+		inputs: [fileInput('clean.csv')],
+		digests: [tableDigest('clean.csv', 10, 1)],
+		settings
+	};
+
+	it('sits in the user message, after the prompt and before the attached files', () => {
+		const text = userText(buildAnalyseRequest({ ...build, ancestorContext }));
+
+		expect(text.startsWith('Fit a line to it.\n\nConversation so far (nearest first):')).toBe(true);
+		expect(text.indexOf(ancestorContext)).toBeLessThan(text.indexOf('Attached files:'));
+	});
+
+	it('leaves the system prompt byte-identical, with it and without it', () => {
+		// The section is context for this request, not a rule about how to work, so
+		// putting it in the system prompt would break the cached prefix for every
+		// mode the reader switches between.
+		expect(buildAnalyseRequest({ ...build, ancestorContext }).system).toBe(
+			buildAnalyseRequest(build).system
+		);
+		expect(buildAnalyseRequest({ ...build, ancestorContext }).system).not.toContain(
+			'Conversation so far'
+		);
+	});
+
+	it('reaches a refine request too, above the instruction and the previous script', () => {
+		const text = userText(
+			buildRefineRequest({ ...build, ancestorContext, previousScript: 'print(1)' })
+		);
+
+		expect(text.indexOf(ancestorContext)).toBeLessThan(text.indexOf(REFINE_INSTRUCTION));
+		expect(text.indexOf(REFINE_INSTRUCTION)).toBeLessThan(text.indexOf('Previous analysis.py:'));
+	});
+
+	it('adds nothing when it is absent or only whitespace', () => {
+		const plain = userText(buildAnalyseRequest(build));
+
+		expect(userText(buildAnalyseRequest({ ...build, ancestorContext: '' }))).toBe(plain);
+		expect(userText(buildAnalyseRequest({ ...build, ancestorContext: '  \n\n ' }))).toBe(plain);
+	});
+});
+
 describe('appendToolResult', () => {
 	const request = buildAnalyseRequest({
 		prompt: 'Plot it.',

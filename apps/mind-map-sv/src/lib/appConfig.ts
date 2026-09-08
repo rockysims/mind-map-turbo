@@ -16,6 +16,15 @@ export const APP_CONFIG = {
 		maxImagesPerResult: 4, // rendered plots sent back per script execution
 		maxImageBytes: 1_000_000, // largest rendered plot sent back, per image
 		summaryMaxChars: 4000, // summary length a run record stores, truncated on the way in
+		// What a follow-up's request carries about the steps before it. Named in
+		// full rather than `summaryMaxChars`, which is taken above by the cap a run
+		// record's own summary is stored under: two knobs sharing one name is a
+		// question every reader of this file would have to answer twice.
+		ancestorContext: {
+			maxHops: 3, // ai steps back the walk reaches before it stops
+			maxChars: 12000, // characters the rendered context section may take
+			ancestorSummaryMaxChars: 1200 // each summary's cap once the section is over budget
+		},
 		maxResultsPerRun: 20, // distinct RESULT symbols one run may record
 		resultUnitMaxChars: 32, // characters a RESULT line's unit is truncated to
 		maxTokens: 32000, // output-token ceiling per Messages call

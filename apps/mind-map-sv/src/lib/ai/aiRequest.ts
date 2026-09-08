@@ -131,6 +131,19 @@ interface AiRequestBuild extends PromptLimits {
 	previewRows?: number;
 	effort?: AiEffort;
 	maxTokens?: number;
+	/**
+	 * What the earlier steps of this chain asked and reported, already rendered
+	 * by `renderAncestorContext`. Absent, or empty, for a node with no `!ai`
+	 * ancestors — which is every node until someone asks a follow-up.
+	 *
+	 * A finished string rather than the ancestors themselves, because the caller
+	 * is the one that knows whether this request is about to carry the parent's
+	 * script separately, and the renderer stays ignorant of run modes. It goes in
+	 * the *user* message, not the system prompt: the system prompt has to stay
+	 * byte-identical between analyse, refine and rerun for the cached prefix to
+	 * survive a session of switching between them.
+	 */
+	ancestorContext?: string;
 }
 
 interface AiRefineRequestBuild extends AiRequestBuild {
@@ -255,10 +268,15 @@ export function buildSystemPrompt(fileNames: string[], limits: PromptLimits = {}
 	return `${body}\n\nAttached files:\n${list}`;
 }
 
-/** The prompt, then the digests, then the neighbours' prose. */
+/** The prompt, then the conversation so far, then the digests, then the neighbours' prose. */
 function userMessageText(build: AiRequestBuild): string {
 	const { inputs, digests, previewRows = APP_CONFIG.ai.previewRows } = build;
 	const sections = [build.prompt.trim()];
+
+	// Straight after the prompt: what came before is context for the question,
+	// and it reads as an aside once the file digests have gone by.
+	const ancestorContext = build.ancestorContext?.trim() ?? '';
+	if (ancestorContext !== '') sections.push(ancestorContext);
 
 	const files = fileInputs(inputs);
 	if (files.length > 0) {
