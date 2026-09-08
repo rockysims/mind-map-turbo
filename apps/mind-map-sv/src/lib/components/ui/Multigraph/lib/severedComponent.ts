@@ -7,10 +7,10 @@ import { hopsFromPinned } from './layout';
  *
  * The question a removal has to answer twice — once for a deleted node's
  * neighbours, once for a removed edge's endpoints — and the two call sites used
- * to answer it with the same six lines each. The rule is subtle enough (a
- * *severing* removal is the only one that creates a pinless component worth
- * hinting a beacon about; removing one of two parallel edges severs nothing)
- * that it deserves one tested home rather than two copies drifting apart.
+ * to answer it with the same six lines each. The rule is subtle enough
+ * (removing one of two parallel edges severs nothing; deleting the last pinned
+ * node orphans everything at once) that it deserves one tested home rather than
+ * two copies drifting apart.
  */
 interface SeveredComponent {
 	/**
@@ -20,10 +20,15 @@ interface SeveredComponent {
 	 */
 	survivorNodeId: string | null;
 	/**
-	 * True only when the mutation left the candidates on both sides of the cut:
-	 * one still reachable, at least one no longer. With every candidate reachable
-	 * nothing was severed; with none reachable there is nowhere to play the wave
-	 * from.
+	 * True when the mutation left at least one candidate with no route to any
+	 * pinned node: the case that creates a pinless component, and so the case
+	 * worth hinting a beacon about.
+	 *
+	 * Deliberately not conditioned on a survivor. Deleting the only pinned node
+	 * orphans every candidate at once — there is nobody left to play a reveal
+	 * wave from, but the beacon election still has to be told where the reader
+	 * was looking, or the component elects an anchor somewhere off screen and the
+	 * canvas reads as empty.
 	 */
 	severed: boolean;
 }
@@ -33,9 +38,8 @@ export function severedComponentAfterMutation(
 	candidateNodeIds: readonly string[]
 ): SeveredComponent {
 	const hops = hopsFromPinned(graphAfterMutation);
-	const survivorNodeId = candidateNodeIds.find((id) => Number.isFinite(hops[id])) ?? null;
 	return {
-		survivorNodeId,
-		severed: survivorNodeId !== null && candidateNodeIds.some((id) => !Number.isFinite(hops[id]))
+		survivorNodeId: candidateNodeIds.find((id) => Number.isFinite(hops[id])) ?? null,
+		severed: candidateNodeIds.some((id) => !Number.isFinite(hops[id]))
 	};
 }
