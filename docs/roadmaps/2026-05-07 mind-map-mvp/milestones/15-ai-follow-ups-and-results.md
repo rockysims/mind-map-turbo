@@ -1,6 +1,6 @@
 # Milestone 15: AI follow-ups and results
 
-**Status:** proposed
+**Status:** complete
 **Depends on:** milestone 14 (the `!ai` add-on, the run loop, the workbench),
 milestone 09 (quantity inference and derived edges), milestone 11 (the unified
 hop model those edges live in), milestone 06b/06d (the focus stack and the
@@ -460,3 +460,36 @@ with an edit-intent label; the add-on registry in `nodeAddons.ts` stays closed.
     calling it malformed.
 15. Every gate in `AGENTS.md` passes, the offline shell still builds to one file,
     and its size delta is recorded in the plan's notes.
+
+## As built (2026-09-07)
+
+Complete. All nine plan tasks landed, in ten commits (`7625bf2`…`c57e0a2`), and
+the shell grew 722,843 → 736,494 bytes (+13,651, +1.9%) — criterion 15's
+measurement, recorded in full in the plan's Notes along with the smoke test.
+
+Three things about the shipped code differ from how this document described
+them, and are worth knowing before reading it as a map of the source:
+
+- **The one adjacency rule lives in its own module.** `Multigraph/lib/aiAdjacency.ts`
+  (`feedingNeighborId`, `feedingNodeIds`) is what `collectAiInputs`,
+  `inheritedScript` and `collectAiAncestors` all call. The plan had it exported
+  from the input collector, which the collector's own dependence on run history
+  turned into an import cycle. The rule is unchanged; only where it lives is.
+- **The disambiguated filename is the input's name.** The pass is still the one
+  in `inputFileName.ts`, but it is applied inside `collectAiInputs`, so
+  `AiFileInput.name` is the runtime name and the workbench, the executor, the
+  digest map, the request and the run record cannot disagree. Scope 3 ("the name
+  a file takes inside the runtime is decided in one place") is met more literally
+  than written: the workbench shows that name too, so `bench/2026-09/sweep.csv`
+  reads as `sweep.csv` and the second `plot.png` reads as `plot-2.png`.
+- **The results cap counts distinct symbols**, after the last-wins dedupe, not
+  raw lines — so a loop printing one running figure thirty times cannot crowd out
+  the other quantities. Criterion 11 holds either way.
+
+Two criteria are **verified by spec and story but not yet by hand**: the real-key
+end-to-end chain, and criterion 14's Download-and-open in a fresh profile. Both
+need the owner (a key, and a browser that can download); nothing is known to
+block either. One compromise found and not fixed is filed as
+`docs/debt/2026-09-07-a-runs-result-can-only-be-confirmed-from-a-consumer.md` — a
+result has no confirmation chip on the node that reported it, so it can be
+designated only from a consumer's peek card.

@@ -3,7 +3,7 @@
 **Created:** 2026-09-07
 **Author:** Claude (Fable 5.1)
 **Milestone:** [milestones/15-ai-follow-ups-and-results.md](../milestones/15-ai-follow-ups-and-results.md)
-**Status:** draft
+**Status:** done
 **Total estimated effort:** M
 
 ## Summary
@@ -157,9 +157,10 @@ owner in the 2026-09-07 readiness review, so nothing below is still open.
 
 ## Tasks
 
-> **Nothing here starts before the owner says so.** The rulings of 2026-09-07
-> came with "No plan execution until I explicitly say"; the tasks below are
-> drafted and waiting (see Notes).
+> **All nine tasks are done.** They were drafted and held until the owner gave
+> the go-ahead on 2026-09-07 ("No plan execution until I explicitly say"), then
+> executed in wave order; the commits, the six deviations and the smoke test are
+> in Notes.
 >
 > One PR each. Every task runs the full gate set before it is claimed done:
 > `pnpm --filter mind-map-sv lint`, `pnpm --filter mind-map-sv check`,
@@ -890,7 +891,86 @@ merged.
   patched and holding.
 - 2026-09-07: `NAV_STACK_LIMIT` is 8. A chain of more than eight follow-ups
   silently loses the oldest crumb. Not addressed here; noted so a "Back stopped
-  going far enough" report has an answer.
+  going far enough" report has an answer. Carried into the README's follow-up
+  section as a parenthetical rather than left only here.
+- 2026-09-07: **executed.** All nine tasks landed on the session branch in wave
+  order, one commit each (`7625bf2` results parser, `b18d074` follow-up
+  mutation, `aafe243` outputs as inputs, `5ae6cb9` the shared adjacency rule,
+  `f791b4d` the extractor's third source, `5ae2ace` ancestor context, `6b65311`
+  the workbench, `b044098` the wiring, `b68365b` the stories), plus `c57e0a2`
+  regenerating the offline shell.
+- 2026-09-07: **offline shell size.** 722,843 bytes before (`440f5f3`) →
+  736,494 bytes after (`c57e0a2`): **+13,651 bytes, +1.9%**. Acceptance
+  criterion 15's measurement.
+- 2026-09-07: **six deviations from this plan, all deliberate.**
+  1. The adjacency predicate lives in a **new module**,
+     `Multigraph/lib/aiAdjacency.ts` (`feedingNeighborId`, `feedingNodeIds`),
+     rather than being exported from `aiInputs.ts` as T04 said. The collector now
+     imports the run history, and the run history would have had to import the
+     predicate back — an import cycle. `collectAiInputs`, `inheritedScript` and
+     `collectAiAncestors` all call the new module, so the one-rule promise holds
+     exactly as intended; only its address moved.
+  2. **Filename disambiguation runs inside `collectAiInputs`**, not in the
+     controller as T03 said: `AiFileInput.name` _is_ the runtime name everywhere,
+     so the workbench, the executor, the digest → asset-id map, the request and
+     the run record agree by construction rather than by four callers being
+     passed the same list. The visible consequence is that the workbench shows
+     the runtime name — `plot-2.png` for the second of two, and `sweep.csv` for a
+     stored `bench/2026-09/sweep.csv` — which is what the script will open and
+     what the amber changed-since line reads back.
+  3. `parseResultLines`'s cap **counts distinct symbols after the last-wins
+     dedupe**, not raw lines. T01 said "at most `maxResults` are kept, first
+     wins"; thirty prints of one running value would then have crowded out the
+     twenty-ninth quantity.
+  4. `INHERITED_REFINE_INSTRUCTION` needed a seam that was not in T04's list:
+     `AiRefineRequestBuild` gained an optional `instruction?`, and the controller
+     passes the inherited sentence when the script came from `inheritedScript`.
+  5. **The context disclosure is not drawn in Run mode.** A rerun builds no
+     request, so a preview there would show something that is not about to be
+     sent — the one thing milestone 14's promise does not allow.
+  6. T07 wrote four of T08's eight stories alongside the wiring it was proving;
+     T08 wrote the other four. The task boundary moved, the coverage did not.
+- 2026-09-07: **smoke test (Fable, in the in-app browser, no API key).** Seeded a
+  pinned `!ai` parent with a done run recording `R_{th} = 12.3 K/W`, and a
+  consumer node referencing `$R_{th}$`. Verified: the Results row renders as
+  display math; **Ask a follow-up** opens the composer with Ask `aria-disabled`
+  and the reason in the notice line; Escape closes the composer, leaves focus
+  where it was and commits nothing; typing a prompt and pressing Cmd+Enter
+  creates the child beside the parent on a directed untagged edge with the prompt
+  set, transfers the pin (parent unpinned, child pinned with the higher stamp),
+  makes one undo entry labelled `ask a follow-up`, lands focus on the child with
+  the parent as the crumb, selects Change, withholds Run with its reason, shows
+  **What Claude will see (1 step, 211 characters)** over the rendered section,
+  and opens the key sheet over the child because no key was stored — the child
+  survives the missing key, as T07 required. Back returned to the parent's
+  workbench; Undo removed the child and the edge and restored the parent's pin.
+  The result-driven edge: the consumer's `R_{th}` peek offered the recorded
+  `12.3 K/W` as the definition with **Label as output**; confirming it and
+  cycling the consumer's chip to input drew the dashed derived edge.
+  **Outstanding, not done:** the real-key two-step chain this plan's Definition
+  of Done names (the owner has to enter a key), and criterion 14's
+  download-and-reopen in a fresh profile (the sandboxed browser cannot download).
+  Both are for the owner to run; nothing in the code is known to block either.
+- 2026-09-07: **one debt entry filed** —
+  `docs/debt/2026-09-07-a-runs-result-can-only-be-confirmed-from-a-consumer.md`.
+  A quantity that exists only in a run's results has no confirmation chip on the
+  AI node itself: the workbench replaces the details view and draws no
+  designation chips, and the edit sheet builds its suggestions from title,
+  description and tags only. So a result can be confirmed only from a consumer's
+  peek card (**Label as output**), and not at all while no consumer exists. Two
+  possible payoffs are named there — auto-confirm result symbols as outputs when
+  a run records them (one write in the controller), or render output chips for
+  `derivedMath` in the workbench — and it is **awaiting the owner's ruling**.
+- 2026-09-07: **no new ui-decisions file.** T09 anticipated rulings at the smoke
+  test on the `Ask` label and on the composer owning Escape; both behaved as
+  shipped and the owner made no ruling, so nothing was written —
+  `docs/ui-decisions/` records the owner's rulings, not an agent's satisfaction.
+  The four rulings of 2026-09-07 were already logged before execution.
+- 2026-09-07: the README gained two subsections beside milestone 14's AI-node
+  section — outputs, follow-ups and context; and numbers a run reports — carrying
+  this plan's Risks line that **a wrong symbol makes a wrong arrow**, with the
+  per-node `#no-dataflow` opt-out named as the escape hatch and eviction-with-the-run
+  as the reason it is never permanent.
 
 ### Draft system prompt addition (T01, iterate during the smoke test)
 

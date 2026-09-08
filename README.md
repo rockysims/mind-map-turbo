@@ -125,6 +125,90 @@ An output can be promoted to a node of its own — the `⤴` button on its row. 
 later run that produces the same filename swaps the image on that node, and one
 that stops producing it leaves the last figure in place, marked stale.
 
+### Carrying on: outputs, follow-ups and context
+
+An AI node's outputs are data, so they flow like data. Whatever the **latest
+finished run** wrote to `outputs/` becomes an input to any AI node that already
+collects that node — the same one-hop rule the attachments use: an edge pointing
+at you, or an undirected one. There is no promote step in between. They are
+listed under their node as **From its last run**, with no Add, Replace or Remove
+on those rows, because there is nothing behind those buttons for a file the
+reader did not attach. If two of the files reaching one run share a name they are
+renamed apart before anything sees them — `plot.png`, then `plot-2.png` — and the
+same set of inputs always produces the same set of names.
+
+**Ask a follow-up**, beside the outputs, is available once the node has a
+finished run. It opens a composer in that node's own workbench, with the answer
+you are responding to still on screen above it, and commits nothing: Cancel and
+Escape both close it and leave the graph exactly as it was, and an empty draft
+cannot be submitted (the notice line says why). Enter and Shift+Enter insert a
+newline, like the prompt field beside it; Cmd/Ctrl+Enter submits.
+
+Submitting is the press that does everything, in one history entry called
+`ask a follow-up`: a new `!ai` node beside the parent carrying the prompt you
+just wrote, a directed untagged edge from the parent to it, and the **pin
+transfer** — a pinned parent hands its pin to the child and is left unpinned, so
+the visibility budget follows your attention instead of accumulating one pin per
+question; an unpinned parent makes an unpinned child. Then the app focuses the
+child, leaves a Back crumb naming the parent, and starts the child's first run.
+That run is in **Change** mode against the _parent's_ script, with a sentence
+telling Claude the script came from the step before — the child has none of its
+own, so Run is not offered until it has run once. A single Undo removes the
+child, its prompt and the edge together, and gives the parent its pin back. (The
+Back trail keeps eight steps; a chain longer than that quietly drops its oldest
+crumb.)
+
+A child's request also carries the **conversation so far**: up to three steps
+back, reached by that same adjacency rule, each contributing its title, its
+prompt and its latest summary, nearest first. The direct parent's `analysis.py`
+comes along only in Write mode — a Change request is already sending that script
+as the thing it is editing, and sending it twice would just be paying twice. The
+whole section is capped in characters: over the cap, summaries are trimmed first,
+then the farthest step is dropped whole and the section says how many were left
+out. Prose reaches three hops; **files still reach one**. What will be sent is
+shown verbatim under a **What Claude will see** disclosure in the run section —
+naming how many steps and how many characters survived the cap — for the mode you
+have selected. (There is nothing to preview in Run mode: it makes no request.)
+
+### Numbers a run reports
+
+Claude is asked to print any named number its analysis produced on a line of its
+own:
+
+```
+RESULT R_{th} = 12.3 K/W
+```
+
+The symbol is LaTeX, the unit is optional free text, and one line carries one
+result. They are read out of the full stdout of the run's final execution, and
+only when that execution succeeded — a number from a script Claude then rewrote
+is not the run's answer. A line whose value is not a number, or whose symbol
+contains anything outside a small allowlist, is ignored rather than repaired.
+
+What survives lands under **Results** on the node, rendered as display math like
+any other equation, and stored on the run — so it is evicted when that run is,
+and removing the `!ai` add-on takes it with it. Nothing is written into your
+description.
+
+Because the node now states `R_{th}`, the map's dataflow layer treats it as a
+definition: open a node whose description references `$R_{th}$`, and its peek
+card offers the recorded value as the definition with **Label as output**.
+Confirm that, mark the consumer's own chip as an input, and the derived arrow
+between them is drawn — by exactly the machinery that connects two nodes whose
+equations you typed by hand. A number measured from bench data and a number
+somebody typed land in the same notation, and the map does not care which is
+which.
+
+One consequence worth knowing: **a wrong symbol makes a wrong arrow.** If a
+script prints `R` where the map means something else, the edge it draws goes
+somewhere unrelated. Results are evicted with their run, so it is never
+permanent, and tagging a node `#no-dataflow` keeps it out of the layer entirely.
+
+**Values do not flow yet — only names.** A downstream script receives the
+upstream node's _files_, not `R_th = 12.3`. Making the numbers themselves
+available to a script is a later milestone; the structure is made visible and
+checkable first.
+
 ### What leaves your machine
 
 Only what a request needs, and it is built in one place so it can be checked:
@@ -132,7 +216,9 @@ Only what a request needs, and it is built in one place so it can be checked:
 - the prompt you wrote, and the title and description of connected nodes;
 - a **digest** of each attached file — its name, size, column names and
   types, row count, and the first few rows (zero, five or twenty, your
-  choice);
+  choice) — and, for a file that came from a neighbour's run, a line saying
+  so;
+- the "conversation so far" section above, when this node has AI ancestors;
 - while a run is working, the tail of what the script printed to stdout and
   stderr, and the plots it rendered, if "send plots" is on.
 
