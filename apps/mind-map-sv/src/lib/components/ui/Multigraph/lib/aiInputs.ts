@@ -40,6 +40,7 @@ import type { EdgeData } from '../../types/edge';
 import { disambiguateExecutorNames } from '$lib/ai/inputFileName';
 import type { GraphAssetMetadata, MultigraphData } from '../../types/multigraph';
 import type { NodeContentBlock, NodeData } from '../../types/node';
+import { feedingNeighborId } from './aiAdjacency';
 import { latestDoneRun } from './aiNode';
 
 interface AiTextInput {
@@ -281,24 +282,6 @@ function neighborRelations(graph: MultigraphData, nodeId: string): Map<string, N
 	}
 
 	return relations;
-}
-
-/**
- * The other end of `edge` when it feeds `nodeId`, or `undefined` when it does
- * not: a directed edge leaving the node is an output, and an edge that never
- * touches it is nothing to do with it.
- */
-function feedingNeighborId(edge: EdgeData, nodeId: string): string | undefined {
-	if (edge.directed === true) {
-		if (edge.targetNodeId !== nodeId) return undefined;
-		return edge.sourceNodeId === nodeId ? undefined : edge.sourceNodeId;
-	}
-
-	if (edge.sourceNodeId === nodeId) {
-		return edge.targetNodeId === nodeId ? undefined : edge.targetNodeId;
-	}
-	if (edge.targetNodeId === nodeId) return edge.sourceNodeId;
-	return undefined;
 }
 
 /**

@@ -20,6 +20,7 @@ import type {
 	NodeContentBlock,
 	NodeData
 } from '../../types/node';
+import { feedingNodeIds } from './aiAdjacency';
 import { addEdge, addNode, nextId, referencedAssetIds, setNodePinned } from './graph';
 import { withNodeAddon } from './nodeAddons';
 
@@ -526,33 +527,6 @@ export function inheritedScript(data: MultigraphData, nodeId: string): string | 
 		if (script !== undefined) return script;
 	}
 	return undefined;
-}
-
-/**
- * The ids of the nodes that feed `nodeId`, in `graph.nodes` order: an edge
- * pointing *at* it, or an undirected edge touching it. A self-loop is not a
- * neighbour.
- *
- * This is `collectAiInputs`'s adjacency rule, and it is written twice on
- * purpose for exactly one wave: `aiInputs.ts` keeps its predicate private
- * today, and T04 is the task that exports it and points both callers at the one
- * copy. Until then the spec pins this against `collectAiInputs` over all four
- * edge orientations, so the two cannot drift without a test saying so.
- */
-function feedingNodeIds(data: MultigraphData, nodeId: string): string[] {
-	const feeding = new Set<string>();
-
-	for (const edge of data.edges) {
-		if (edge.sourceNodeId === edge.targetNodeId) continue;
-		if (edge.directed === true) {
-			if (edge.targetNodeId === nodeId) feeding.add(edge.sourceNodeId);
-			continue;
-		}
-		if (edge.sourceNodeId === nodeId) feeding.add(edge.targetNodeId);
-		else if (edge.targetNodeId === nodeId) feeding.add(edge.sourceNodeId);
-	}
-
-	return data.nodes.filter((node) => feeding.has(node.id)).map((node) => node.id);
 }
 
 /**
