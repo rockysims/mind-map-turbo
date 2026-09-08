@@ -2617,15 +2617,17 @@
 			pinned: [0],
 			// Deleting n0 leaves nothing pinned anywhere, so every node is orphaned at
 			// once and there is no survivor to play a reveal wave from. The beacon
-			// election still has to be told where the reader was looking: n2 is the
-			// highest-degree node and would win the component on the fallback alone,
-			// off to the side of the node that was just deleted.
+			// election still has to land next to the deletion: n2 is both the
+			// highest-degree node and the one with pin history, so it would win the
+			// component outright on the ordinary rules — off to the side of the node
+			// the reader just deleted.
 			edges: [
 				[0, 1],
 				[1, 2],
 				[2, 3],
 				[2, 4]
 			],
+			pinHistory: { 2: 4 },
 			posByNodeId: {
 				n0: { x: -400, y: 0 },
 				n1: { x: -200, y: 0 },
@@ -2651,8 +2653,8 @@
 		expect(lastChangedGraph(args).nodes.map((node) => node.id)).toEqual(['n1', 'n2', 'n3', 'n4']);
 
 		// The component stays on screen as its beacon, and the beacon is the
-		// neighbour of the deletion — where the reader is already looking — rather
-		// than the node the degree fallback would have picked.
+		// neighbour of the deletion — one hop from where the reader is already
+		// looking — rather than the node pin recency and degree would have picked.
 		expect(canvasElement.querySelectorAll('.node-wrapper')).toHaveLength(1);
 		expect(getNodeWrapper(canvasElement, 'n1')).toBeInTheDocument();
 		expect(canvasElement.querySelector('[data-node-id="n1"] .node')).not.toHaveAttribute(
