@@ -20,6 +20,7 @@ import type {
 } from './components/ui/types/node';
 import { isRegisteredAddon, type NodeAddonName } from './components/ui/Multigraph/lib/nodeAddons';
 import { isAiRunStatus } from './components/ui/Multigraph/lib/aiNode';
+import type { AiResult } from './ai/aiResults';
 
 export const CURRENT_SCHEMA_VERSION = 8;
 
@@ -509,7 +510,22 @@ function isAiRun(value: unknown): value is AiRun {
 		value.outputs.every(isAiRunOutput) &&
 		(value.usage === undefined || isAiRunUsage(value.usage)) &&
 		isFiniteNumber(value.toolCalls) &&
-		(value.error === undefined || typeof value.error === 'string')
+		(value.error === undefined || typeof value.error === 'string') &&
+		// Optional, and the reason neither version number moves for it: a run
+		// recorded before results existed is still a valid run, and `isAiRun`
+		// ignores keys it does not know — so a milestone 14 build loads a document
+		// carrying this field rather than calling it malformed.
+		(value.results === undefined ||
+			(Array.isArray(value.results) && value.results.every(isAiResult)))
+	);
+}
+
+function isAiResult(value: unknown): value is AiResult {
+	return (
+		isRecord(value) &&
+		typeof value.symbol === 'string' &&
+		typeof value.value === 'string' &&
+		(value.unit === undefined || typeof value.unit === 'string')
 	);
 }
 

@@ -16,6 +16,8 @@ export const APP_CONFIG = {
 		maxImagesPerResult: 4, // rendered plots sent back per script execution
 		maxImageBytes: 1_000_000, // largest rendered plot sent back, per image
 		summaryMaxChars: 4000, // summary length a run record stores, truncated on the way in
+		maxResultsPerRun: 20, // distinct RESULT symbols one run may record
+		resultUnitMaxChars: 32, // characters a RESULT line's unit is truncated to
 		maxTokens: 32000, // output-token ceiling per Messages call
 		runtime: {
 			version: '0.27.7', // Pyodide version pinned so a run is reproducible

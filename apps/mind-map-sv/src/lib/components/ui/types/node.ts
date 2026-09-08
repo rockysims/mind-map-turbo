@@ -1,3 +1,5 @@
+import type { AiResult } from '../../../ai/aiResults';
+
 export interface NodeImageContent {
 	type: 'image';
 	assetId: string;
@@ -111,6 +113,23 @@ export interface AiRun {
 	toolCalls: number;
 	/** What went wrong, shown where the summary would be, when `status` is `error`. */
 	error?: string;
+	/**
+	 * Named numbers this run's script printed as `RESULT` lines, parsed by
+	 * `$lib/ai/aiResults`. Absent on a run that printed none, and on every run
+	 * recorded before the field existed.
+	 *
+	 * On the *run* rather than appended to `node.description`, which is where the
+	 * quantity extractor already looks and would have needed no plumbing at all.
+	 * Three reasons it lives here instead: a re-run would otherwise have to find
+	 * and replace a region of a field the reader also edits by hand, which is a
+	 * parsing problem and an undo problem at once; the block would outlive the run
+	 * that justified it, surviving both eviction and the add-on being removed,
+	 * with nothing left in the document able to say where the line came from; and
+	 * results that ride on a run are evicted with it, so the node never claims a
+	 * number whose script is gone. The accepted cost is that an older build opens
+	 * the file, keeps the field through a re-save, and draws no arrows from it.
+	 */
+	results?: AiResult[];
 }
 
 /**
