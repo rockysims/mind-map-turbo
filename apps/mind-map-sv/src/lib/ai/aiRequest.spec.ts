@@ -7,6 +7,7 @@ import {
 	buildRefineRequest,
 	buildSystemPrompt,
 	bytesToBase64,
+	INHERITED_REFINE_INSTRUCTION,
 	REFINE_INSTRUCTION,
 	RUN_ANALYSIS_TOOL,
 	type AiToolResult
@@ -410,6 +411,24 @@ describe('buildRefineRequest', () => {
 			'Previous analysis.py:\n```python\nimport pandas as pd\nprint("hi")\n```'
 		);
 		expect(text.indexOf('Add a log scale on y.')).toBeLessThan(text.indexOf(REFINE_INSTRUCTION));
+	});
+
+	it('says whose script it is carrying when the caller passes the inherited instruction', () => {
+		const request = buildRefineRequest({
+			prompt: 'Now fit the decay.',
+			inputs: [],
+			digests: [],
+			settings,
+			previousScript: 'print("parent")',
+			instruction: INHERITED_REFINE_INSTRUCTION
+		});
+
+		const text = userText(request);
+		expect(text).toContain(INHERITED_REFINE_INSTRUCTION);
+		expect(text).not.toContain(REFINE_INSTRUCTION);
+		expect(text.indexOf(INHERITED_REFINE_INSTRUCTION)).toBeLessThan(
+			text.indexOf('Previous analysis.py:')
+		);
 	});
 
 	it('carries the traceback of a failed re-run, after the instruction', () => {

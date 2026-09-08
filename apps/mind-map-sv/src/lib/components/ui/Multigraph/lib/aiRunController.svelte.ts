@@ -29,6 +29,16 @@
  * execution rather than the end of the run — the executor hands the next call a
  * fresh worker, and "that took too long" is something Claude can act on.
  *
+ * ## Results follow a stricter rule than outputs
+ *
+ * `RESULT` lines are read from the **final** execution's stdout, and only when
+ * that execution exited 0 — not from the last execution that exited 0, which is
+ * what the script and the outputs above come from. The two rules differ on
+ * purpose: a figure drawn before a later script crashed is still a figure, but a
+ * number printed by a script Claude then rewrote is not the run's answer. The
+ * parser sees the whole stream, never `tail()`'s cut of it: the tail is a
+ * rendering choice, and a result printed past it is still a result.
+ *
  * ## Cancel does not dispose
  *
  * Cancel aborts the run's signal, and `PyExecutor.run` answers an abort by
@@ -46,8 +56,10 @@ import {
 	appendToolResult,
 	buildAnalyseRequest,
 	buildRefineRequest,
+	INHERITED_REFINE_INSTRUCTION,
 	RUN_ANALYSIS_TOOL
 } from '$lib/ai/aiRequest';
+import { parseResultLines, type AiResult } from '$lib/ai/aiResults';
 import type { AiSettings } from '$lib/ai/aiSettings';
 import type { DigestUnavailableReason, FileDigest } from '$lib/ai/probeScript';
 import { PyExecutorError } from '$lib/ai/pyExecutor';
@@ -61,8 +73,15 @@ import type { GraphAssetStore } from '$lib/assets/assetStore';
 import { tombstoneAsset } from '$lib/assets/assetTrash';
 import type { GraphAssetMetadata, MultigraphData } from '../../types/multigraph';
 import type { AiRun, AiRunInput, AiRunMode, AiRunOutput, AiRunStatus } from '../../types/node';
+import { collectAiAncestors, renderAncestorContext } from './aiAncestry';
 import { collectAiInputs, type AiInput } from './aiInputs';
-import { recordAiRun, refreshPromotedOutputs, replaceAiRun, setAiScript } from './aiNode';
+import {
+	inheritedScript,
+	recordAiRun,
+	refreshPromotedOutputs,
+	replaceAiRun,
+	setAiScript
+} from './aiNode';
 import {
 	hasInputChanges,
 	inputChangesForAddon,
@@ -460,7 +479,18 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 			return 'error';
 		}
 
-		const storedScript = ai.script ?? '';
+		const ownScript = ai.script ?? '';
+		/**
+		 * The script a Change run edits: this node's own, or — for a follow-up
+		 * that has never run — the direct parent's, which is the script that
+		 * produced the thing the reader is following up on. `availableRunModes`
+		 * offers Change on exactly these terms, so a mode the switch allows is a
+		 * mode this can start. Run mode is not offered the fallback: it calls no
+		 * model, so it has nothing to turn a parent's script into this node's.
+		 */
+		const inherited =
+			mode === 'refine' && ownScript === '' ? inheritedScript(startGraph, nodeId) : undefined;
+		const storedScript = ownScript !== '' ? ownScript : (inherited ?? '');
 		if (mode !== 'analyse' && storedScript === '') {
 			putState(nodeId, {
 				...IDLE_RUN_STATE,
@@ -469,6 +499,25 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 			});
 			return 'error';
 		}
+
+		/**
+		 * What the earlier steps of this chain asked and reported, rendered once
+		 * here so the request and the workbench's preview say the same thing.
+		 *
+		 * `includeParentScript` is true only for a Write request, which has no
+		 * `Previous analysis.py:` block of its own — a Change request carries that
+		 * script separately, and repeating it here would send the largest thing in
+		 * the request twice under two labels. `ancestorContextPreview` splits it
+		 * the same way, on the same mode.
+		 */
+		const ancestorContext =
+			mode === 'rerun'
+				? ''
+				: renderAncestorContext(
+						collectAiAncestors(startGraph, nodeId),
+						{},
+						{ includeParentScript: mode === 'analyse' }
+					);
 
 		const settings = deps.settings();
 		const inputs = collectAiInputs(startGraph, nodeId);
@@ -535,6 +584,11 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 							settings,
 							prompt: ai.prompt,
 							previousScript: storedScript,
+							// The request has to say whose script it is carrying.
+							...(inherited !== undefined && ownScript === ''
+								? { refineInstruction: INHERITED_REFINE_INSTRUCTION }
+								: {}),
+							ancestorContext,
 							// Against the run whose script is stored, and computed here rather
 							// than at the press: the graph can move between the two.
 							inputChanges: inputChangesForAddon(ai, inputs),
@@ -551,6 +605,9 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 				summary: finished.summary,
 				outputs: runOutputs,
 				toolCalls: finished.toolCalls,
+				// Omitted entirely when the run reported none, so a document never
+				// carries an empty array saying nothing.
+				...(finished.results === undefined ? {} : { results: finished.results }),
 				...(finished.model === undefined ? {} : { model: finished.model }),
 				...(finished.usage === undefined ? {} : { usage: finished.usage }),
 				...(finished.error === undefined ? {} : { error: finished.error })
@@ -631,7 +688,10 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 				...(traceback === '' ? {} : { traceback })
 			};
 		}
-		return { summary: '', outputs: result.outputs, toolCalls: 0, script };
+		// One execution, and it exited 0, so it is the final one and the rule is
+		// satisfied. Off `result.stdout` rather than the tailed step above: the cut
+		// is what the workbench draws, not what the run recorded.
+		return { summary: '', outputs: result.outputs, toolCalls: 0, script, ...resultsOf(result) };
 	}
 
 	interface ModelLoopInput {
@@ -646,6 +706,14 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 		settings: AiSettings;
 		prompt: string;
 		previousScript: string;
+		/** The sentence above `previousScript`, when it is not the ordinary one. */
+		refineInstruction?: string;
+		/**
+		 * The chain so far as prose, already rendered for this mode. Empty for a
+		 * node with no `!ai` ancestors, which is every node until someone asks a
+		 * follow-up.
+		 */
+		ancestorContext: string;
 		/** What has changed about the files since the stored script was written. */
 		inputChanges: AiInputChanges;
 		signal: AbortSignal;
@@ -669,12 +737,24 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 				? cached
 				: await measure(nodeId, executor, inputs, files, previewRows, input.missing);
 
-		const build = { prompt: input.prompt, inputs, digests, settings, previewRows };
+		const build = {
+			prompt: input.prompt,
+			inputs,
+			digests,
+			settings,
+			previewRows,
+			// Only when there is one: an empty section would be a heading about
+			// nothing, in the prefix the whole loop is cached on.
+			...(input.ancestorContext === '' ? {} : { ancestorContext: input.ancestorContext })
+		};
 		let request: AiRequest =
 			input.mode === 'refine'
 				? buildRefineRequest({
 						...build,
 						previousScript: input.previousScript,
+						...(input.refineInstruction === undefined
+							? {}
+							: { instruction: input.refineInstruction }),
 						// Only when something actually moved: an empty list would be a
 						// sentence about nothing, in a prefix that is cached across the loop.
 						...(hasInputChanges(input.inputChanges) ? { inputChanges: input.inputChanges } : {}),
@@ -693,6 +773,13 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 		let model: string | undefined;
 		let script: string | undefined;
 		let outputs: ExecutionOutput[] = [];
+		/**
+		 * The run's *final* execution, whatever it did — tracked beside `script`
+		 * and `outputs` above rather than folded into them, because results follow
+		 * a stricter rule than either: they are read from this one and only when
+		 * it exited 0. `undefined` while nothing has run yet.
+		 */
+		let finalExecution: ExecutionResult | undefined;
 
 		for (;;) {
 			const turn = await client.send(request, {
@@ -716,6 +803,7 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 				model,
 				usage,
 				...(script === undefined ? {} : { script }),
+				...resultsOf(finalExecution),
 				...rest
 			});
 
@@ -769,6 +857,7 @@ export function createAiRunController(deps: AiRunControllerDeps): AiRunControlle
 			}
 			if (!timedOut && result.exitCode !== 0) failedExecutions += 1;
 			lastExecutionMessage = tail(result.stderr || result.stdout);
+			finalExecution = result;
 
 			progress.steps = [
 				...progress.steps.slice(0, -1),
@@ -818,12 +907,37 @@ interface FinishedRun {
 	usage?: { inputTokens: number; outputTokens: number };
 	/** The last script that exited 0. Absent when none did. */
 	script?: string;
+	/**
+	 * The named numbers the **final** execution printed, when it exited 0.
+	 *
+	 * Absent — never an empty array — when there were none, when the final
+	 * execution failed, or when the run never got as far as one. A stricter rule
+	 * than `script` and `outputs` above, deliberately: see the note at the top.
+	 */
+	results?: AiResult[];
 	/** Set when the run ended on something the reader has to be told about. */
 	error?: string;
 	/** `true` when `error` is Claude declining rather than something breaking. */
 	refusal?: boolean;
 	/** A failed re-run's stderr, which is what "Fix with AI" sends. */
 	traceback?: string;
+}
+
+/**
+ * The `results` field for a run whose final execution was `execution`, as a
+ * spreadable fragment — `{}` when there is nothing to record.
+ *
+ * Two refusals in one place, which is why it is a function rather than a call
+ * to `parseResultLines` at each site: an execution that did not exit 0 reports
+ * nothing at all, and an execution that exited 0 but printed no `RESULT` line
+ * leaves the field off entirely instead of storing an empty array. The whole
+ * `stdout` goes in — a result printed past `stdoutTailChars` is still a result,
+ * and the tail is only ever a rendering of it.
+ */
+function resultsOf(execution: ExecutionResult | undefined): { results?: AiResult[] } {
+	if (execution === undefined || execution.exitCode !== 0) return {};
+	const results = parseResultLines(execution.stdout);
+	return results.length === 0 ? {} : { results };
 }
 
 const EMPTY_DIGESTS: Record<string, FileDigest> = {};

@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import type Anthropic from '@anthropic-ai/sdk';
 import { APP_CONFIG } from '$lib/appConfig';
 import type { AiRequest, AiTurn } from '$lib/ai/aiClient';
+import { INHERITED_REFINE_INSTRUCTION, REFINE_INSTRUCTION } from '$lib/ai/aiRequest';
 import { createFakeAiClient } from '$lib/ai/fakeClient';
 import { createFakeExecutor } from '$lib/ai/fakeExecutor';
 import { PyExecutorError, type ExecutionResult } from '$lib/ai/pyExecutor';
@@ -21,6 +22,7 @@ import type { GraphAssetStore } from '$lib/assets/assetStore';
 import type { MultigraphData } from '../../types/multigraph';
 import type { AiAddon, AiRun } from '../../types/node';
 import { promoteAiOutput } from './aiNode';
+import { collectAiAncestors, renderAncestorContext } from './aiAncestry';
 import { collectAiInputs } from './aiInputs';
 import { inputChangesForAddon } from './aiWorkbenchView';
 import {
@@ -998,5 +1000,296 @@ describe('createAiRunController: two inputs of the same name', () => {
 			removed: [],
 			replaced: []
 		});
+	});
+});
+
+/**
+ * `RESULT` lines off a run, and the one rule that is not the outputs' rule.
+ *
+ * The script and the figures a run keeps come from the *last execution that
+ * exited 0*; the numbers come from the *final* execution, and only when that one
+ * exited 0. The difference is the whole of this block: a figure drawn before a
+ * later script crashed is still a figure, and a number printed by a script
+ * Claude then rewrote is not the run's answer.
+ */
+describe('createAiRunController: results recorded off a run', () => {
+	const RESULT_LINES = 'RESULT R_{th} = 12.3 K/W\nRESULT tau = 4.5 s\n';
+	const BOTH_RESULTS = [
+		{ symbol: 'R_{th}', value: '12.3', unit: 'K/W' },
+		{ symbol: 'tau', value: '4.5', unit: 's' }
+	];
+
+	function printed(stdout: string, exitCode = 0): ExecutionResult {
+		return {
+			exitCode,
+			stdout,
+			stderr: exitCode === 0 ? '' : "KeyError: 'ch2'\n",
+			durationMs: 3,
+			outputs: []
+		};
+	}
+
+	it('records the named numbers the final execution printed', async () => {
+		const h = await harness({
+			turns: [toolTurn('print("results")'), endTurn('Two numbers.')],
+			script: () => printed(RESULT_LINES)
+		});
+
+		expect(await h.controller.run('ai', 'analyse')).toBe('done');
+		expect(h.runs()[0].results).toEqual(BOTH_RESULTS);
+	});
+
+	it('leaves the field off entirely when the run reported nothing', async () => {
+		const h = await harness({
+			turns: [toolTurn('print("nothing")'), endTurn('No numbers here.')],
+			script: () => printed('shapes look fine\n')
+		});
+
+		await h.controller.run('ai', 'analyse');
+		// Absent, not `[]`: an empty array in the document would say a run reported
+		// results and they were none.
+		expect(h.runs()[0].results).toBeUndefined();
+		expect('results' in h.runs()[0]).toBe(false);
+	});
+
+	it('records none when an earlier execution printed them and the final one did not', async () => {
+		let execution = 0;
+		const h = await harness({
+			turns: [toolTurn('print(1)', 't1'), toolTurn('print(2)', 't2'), endTurn('Reworked it.')],
+			script: () => {
+				execution += 1;
+				return printed(execution === 1 ? RESULT_LINES : 'reworked, nothing to report\n');
+			}
+		});
+
+		expect(await h.controller.run('ai', 'analyse')).toBe('done');
+		expect(h.runs()[0].results).toBeUndefined();
+	});
+
+	it('records none when the final execution failed after an earlier one reported', async () => {
+		let execution = 0;
+		const h = await harness({
+			turns: [toolTurn('print(1)', 't1'), toolTurn('print(2)', 't2'), endTurn('It broke.')],
+			script: () => {
+				execution += 1;
+				// The same numbers both times: only the exit code differs, so this
+				// cannot pass by the parser never seeing them.
+				return printed(RESULT_LINES, execution === 1 ? 0 : 1);
+			}
+		});
+
+		expect(await h.controller.run('ai', 'analyse')).toBe('done');
+		expect(h.runs()[0].results).toBeUndefined();
+		// And the other rule is untouched: the last script that *worked* is still
+		// the one the node keeps.
+		expect(h.addon()?.script).toBe('print(1)');
+	});
+
+	it('records a result printed further back than the stdout tail the workbench draws', async () => {
+		const filler = 'x'.repeat(APP_CONFIG.ai.stdoutTailChars + 100);
+		const h = await harness({
+			turns: [toolTurn('print("lots")'), endTurn('Verbose, but it answered.')],
+			script: () => printed(`RESULT R_{th} = 12.3 K/W\n${filler}\n`)
+		});
+
+		expect(await h.controller.run('ai', 'analyse')).toBe('done');
+		expect(h.runs()[0].results).toEqual([{ symbol: 'R_{th}', value: '12.3', unit: 'K/W' }]);
+		// The cut is a rendering choice and nothing else: the step on screen is
+		// still only the tail.
+		expect(h.controller.stateFor('ai').steps[0].stdoutTail).toHaveLength(
+			APP_CONFIG.ai.stdoutTailChars
+		);
+	});
+
+	it('records none for a cancelled run, whatever it had printed before the cancel', async () => {
+		let execution = 0;
+		const h = await harness({
+			turns: [toolTurn('print(1)', 't1'), toolTurn('print(2)', 't2'), endTurn('never reached')],
+			script: () => {
+				execution += 1;
+				// The first execution answers with two numbers; the second never
+				// settles, so the cancel is what ends the run.
+				return execution === 1 ? printed(RESULT_LINES) : new Promise<ExecutionResult>(() => {});
+			}
+		});
+
+		const running = h.controller.run('ai', 'analyse');
+		await until(() => h.executor.runs.length === 2, 'the second script to start');
+		h.controller.cancel('ai');
+
+		expect(await running).toBe('cancelled');
+		expect(h.runs()[0].status).toBe('cancelled');
+		expect(h.runs()[0].results).toBeUndefined();
+	});
+
+	it('records the stored script’s results in Run mode, and none when it fails', async () => {
+		const done = await harness({
+			graph: baseGraph({ script: 'print("stored")' }),
+			script: () => printed(RESULT_LINES)
+		});
+		expect(await done.controller.run('ai', 'rerun')).toBe('done');
+		expect(done.runs()[0].results).toEqual(BOTH_RESULTS);
+
+		const failed = await harness({
+			graph: baseGraph({ script: 'print("stored")' }),
+			script: () => printed(RESULT_LINES, 1)
+		});
+		expect(await failed.controller.run('ai', 'rerun')).toBe('error');
+		expect(failed.runs()[0].results).toBeUndefined();
+	});
+});
+
+/**
+ * What a follow-up's first run sends: the conversation behind it, and the script
+ * it is editing even though it has none of its own.
+ *
+ * The child is the node in the middle of the chain — `parent` made it, and the
+ * request it builds has to carry both what `parent` was asked and what `parent`
+ * wrote, without carrying the script twice.
+ */
+describe('createAiRunController: a follow-up child’s request', () => {
+	const PARENT_SCRIPT = 'import pandas as pd\nprint("cleaned")\n';
+	const PARENT_SUMMARY = 'Dropped the settling region and wrote clean.csv.';
+
+	const PARENT_RUN: AiRun = {
+		id: 'parent-run',
+		startedAt: 1,
+		finishedAt: 2,
+		status: 'done',
+		mode: 'analyse',
+		prompt: 'Drop the first 200 samples.',
+		runtime: APP_CONFIG.ai.runtime.version,
+		inputs: [],
+		summary: PARENT_SUMMARY,
+		outputs: [],
+		toolCalls: 1
+	};
+
+	/** `parent` has run and has a script; `ai` is the follow-up and has neither. */
+	function chainGraph(): MultigraphData {
+		return makeGraph({
+			nodes: [
+				{
+					id: 'parent',
+					title: 'Sweep A cleanup',
+					description: '',
+					addons: {
+						ai: {
+							prompt: 'Drop the first 200 samples.',
+							script: PARENT_SCRIPT,
+							runs: [PARENT_RUN],
+							promoted: {}
+						}
+					}
+				},
+				{
+					id: 'ai',
+					title: '!ai Follow-up',
+					description: '',
+					addons: { ai: { prompt: 'Now fit the decay.', runs: [], promoted: {} } }
+				}
+			],
+			edges: [{ source: 'parent', target: 'ai', directed: true, tags: [] }]
+		});
+	}
+
+	/** The section the workbench previews for this mode, rendered the one way. */
+	function contextFor(graph: MultigraphData, includeParentScript: boolean): string {
+		return renderAncestorContext(collectAiAncestors(graph, 'ai'), {}, { includeParentScript });
+	}
+
+	it('changes the parent’s script when the child has none of its own', async () => {
+		const h = await harness({
+			graph: chainGraph(),
+			turns: [endTurn('Fitted the decay.')],
+			store: new MemoryGraphAssetStore()
+		});
+
+		expect(await h.controller.run('ai', 'refine')).toBe('done');
+
+		const text = userText(h.client.requests[0]);
+		// The script the child is editing is the one hop above it, under the label
+		// `buildRefineRequest` gives it.
+		expect(text).toContain(`Previous analysis.py:\n\`\`\`python\n${PARENT_SCRIPT}`);
+		// Exactly once. The context section leaves it out for a Change request
+		// because the refine block already carries it, and sending the largest
+		// block in the request twice under two labels is what that split prevents.
+		expect(text.split(PARENT_SCRIPT)).toHaveLength(2);
+		// And the request says whose script it is: the ordinary refine sentence
+		// would call the parent's work this node's own previous attempt.
+		expect(text).toContain(INHERITED_REFINE_INSTRUCTION);
+		expect(text).not.toContain(REFINE_INSTRUCTION);
+		expect(h.runs()[0].mode).toBe('refine');
+	});
+
+	it('keeps the ordinary instruction once the child has a script of its own', async () => {
+		const graph = chainGraph();
+		const own = 'print("mine")\n';
+		const h = await harness({
+			graph: {
+				...graph,
+				nodes: graph.nodes.map((node) =>
+					node.id === 'ai' && node.addons?.ai
+						? { ...node, addons: { ai: { ...node.addons.ai, script: own } } }
+						: node
+				)
+			},
+			turns: [endTurn('Refitted.')],
+			store: new MemoryGraphAssetStore()
+		});
+
+		expect(await h.controller.run('ai', 'refine')).toBe('done');
+
+		const text = userText(h.client.requests[0]);
+		expect(text).toContain(`Previous analysis.py:\n\`\`\`python\n${own}`);
+		expect(text).toContain(REFINE_INSTRUCTION);
+		expect(text).not.toContain(INHERITED_REFINE_INSTRUCTION);
+	});
+
+	it('carries the conversation so far, inside its budget and as the preview renders it', async () => {
+		const graph = chainGraph();
+		const h = await harness({
+			graph,
+			turns: [endTurn('Fitted the decay.')],
+			store: new MemoryGraphAssetStore()
+		});
+
+		await h.controller.run('ai', 'refine');
+
+		const section = contextFor(graph, false);
+		expect(section).toContain('Conversation so far (nearest first):');
+		expect(section).toContain('1 step back — Sweep A cleanup');
+		expect(section).toContain('Asked: Drop the first 200 samples.');
+		expect(section).toContain(`Result: ${PARENT_SUMMARY}`);
+		expect(section.length).toBeLessThanOrEqual(APP_CONFIG.ai.ancestorContext.maxChars);
+		// Byte-for-byte what the workbench's "What Claude will see" disclosure
+		// shows for this mode: the promise is that the preview *is* the request.
+		expect(userText(h.client.requests[0])).toContain(section);
+	});
+
+	it('puts the parent’s script in the context section for a Write request instead', async () => {
+		const graph = chainGraph();
+		const h = await harness({
+			graph,
+			turns: [endTurn('Started over.')],
+			store: new MemoryGraphAssetStore()
+		});
+
+		await h.controller.run('ai', 'analyse');
+
+		const text = userText(h.client.requests[0]);
+		// A Write request has no `Previous analysis.py:` block of its own, so the
+		// context is the only place the script can come from — and it is there once.
+		expect(text).not.toContain('Previous analysis.py:');
+		expect(text).toContain(contextFor(graph, true));
+		expect(text.split(PARENT_SCRIPT)).toHaveLength(2);
+	});
+
+	it('sends no context section for a node with no ai ancestors', async () => {
+		const h = await harness({ turns: [endTurn('Nothing behind this one.')] });
+
+		await h.controller.run('ai', 'analyse');
+
+		expect(userText(h.client.requests[0])).not.toContain('Conversation so far');
 	});
 });

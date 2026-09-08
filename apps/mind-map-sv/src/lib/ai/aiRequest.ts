@@ -95,6 +95,17 @@ export const REFINE_INSTRUCTION =
 	'A previous analysis.py is attached. Modify it to satisfy the request above; ' +
 	'do not start over, and keep its output filenames.';
 
+/**
+ * The refine instruction for a follow-up that has never run: the script it is
+ * editing is its parent's, not its own. Saying so is the one sentence in the
+ * request that would otherwise be untrue — and the model reading "a previous
+ * analysis.py" as this node's own attempt would keep output filenames that were
+ * never this node's to keep.
+ */
+export const INHERITED_REFINE_INSTRUCTION =
+	'The previous analysis.py is from the step before this one. ' +
+	'Modify it to satisfy the request above.';
+
 /** The only tool. One required string argument: the whole script. */
 export const RUN_ANALYSIS_TOOL: Anthropic.Tool = {
 	name: 'run_analysis',
@@ -150,6 +161,13 @@ interface AiRefineRequestBuild extends AiRequestBuild {
 	/** `analysis.py` as the last completed run left it. */
 	previousScript: string;
 	/**
+	 * The sentence above the script. `REFINE_INSTRUCTION` unless the caller says
+	 * otherwise — a follow-up editing its parent's script passes
+	 * `INHERITED_REFINE_INSTRUCTION`, because the request has to say whose script
+	 * it is carrying.
+	 */
+	instruction?: string;
+	/**
 	 * What the stored script printed to stderr when it last failed, for the "Fix
 	 * with AI" path. Absent for an ordinary refine, where nothing broke and a
 	 * traceback would be describing a failure that did not happen.
@@ -193,9 +211,10 @@ export function buildRefineRequest(build: AiRefineRequestBuild): AiRequest {
 	const { effort = APP_CONFIG.ai.effort.refine } = build;
 	const traceback = build.traceback?.trim() ?? '';
 	const changes = inputChangesSentence(build.inputChanges);
+	const instruction = build.instruction ?? REFINE_INSTRUCTION;
 	const text = [
 		userMessageText(build),
-		changes === '' ? REFINE_INSTRUCTION : `${REFINE_INSTRUCTION} ${changes}`,
+		changes === '' ? instruction : `${instruction} ${changes}`,
 		...(traceback === '' ? [] : [`${FIX_INSTRUCTION}\n\n\`\`\`\n${traceback}\n\`\`\``]),
 		`Previous analysis.py:\n\`\`\`python\n${build.previousScript}\n\`\`\``
 	].join('\n\n');

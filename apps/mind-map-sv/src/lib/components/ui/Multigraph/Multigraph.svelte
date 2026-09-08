@@ -37,8 +37,10 @@
 	import type { GraphAssetStore } from '$lib/assets/assetStore';
 	import { tombstoneAsset } from '$lib/assets/assetTrash';
 	import { prefersReducedMotion } from '$lib/reducedMotion';
+	import { collectAiAncestors } from './lib/aiAncestry';
 	import { collectAiInputs } from './lib/aiInputs';
-	import { promoteAiOutput, setAiPrompt } from './lib/aiNode';
+	import { createFollowUpNode, inheritedScript, promoteAiOutput, setAiPrompt } from './lib/aiNode';
+	import { defaultRunMode } from './lib/aiWorkbenchView';
 	import { createAiRunController, type AiRunOutcome } from './lib/aiRunController.svelte';
 	import type { AiRunMode, NodeContentBlock, NodeData } from '../types/node';
 	import type { EdgeData } from '../types/edge';
@@ -593,13 +595,31 @@
 	}
 
 	/**
+	 * Where a node created *from* another one goes, by the same 2.5 radii in
+	 * every case — the reader never dropped it anywhere, so there is nothing to
+	 * honour and the layout takes it from there.
+	 *
+	 * The direction is the caller's, and it says what kind of act this was.
+	 * `below` is for a node made *out of* this one and left behind: a promoted
+	 * figure, a definition the reader is about to write. `beside` is for a node
+	 * the reader is moving *to* — a follow-up — and it is a different spot so a
+	 * follow-up and a promoted figure asked for in either order never land on
+	 * top of each other.
+	 */
+	function placementNear(originNodeId: string, direction: 'below' | 'beside'): Point {
+		const origin = graphLayout.posByNodeId[originNodeId] ?? CENTERED_POSITION;
+		const offset = NODE_RADIUS * 2.5;
+		return direction === 'below'
+			? { x: origin.x, y: origin.y + offset }
+			: { x: origin.x + offset, y: origin.y };
+	}
+
+	/**
 	 * Give one of an AI node's outputs a node of its own.
 	 *
 	 * Placed exactly where `createDefiningNode` places the node it makes — below
-	 * the node that asked for it, by the same 2.5 radii — because both are the
-	 * same act: a node created *from* another one, with no pointer to say where.
-	 * The layout takes it from there; the reader never dropped it anywhere, so
-	 * there is nothing to honour.
+	 * the node that asked for it — because both are the same act: a node created
+	 * *from* another one, with no pointer to say where.
 	 *
 	 * The reader stays in the workbench they pressed from. A promote is a filing
 	 * action, not a journey: they are looking at the figure and saying where it
@@ -613,12 +633,66 @@
 	 * identity check is what keeps a double-tap out of the undo list.
 	 */
 	function promoteAiOutputToNode(aiNodeId: string, outputName: string): void {
-		const origin = graphLayout.posByNodeId[aiNodeId] ?? CENTERED_POSITION;
 		const next = promoteAiOutput(graph, aiNodeId, outputName, {
-			position: { x: origin.x, y: origin.y + NODE_RADIUS * 2.5 }
+			position: placementNear(aiNodeId, 'below')
 		});
 		if (next === graph) return;
 		commitUserGraph(layoutRuntime.relaxAfterMutation(next), editIntent('promote AI output'));
+	}
+
+	/**
+	 * Turn a composed follow-up into a node the reader is now working in.
+	 *
+	 * `createDefiningNode`'s shape with the ending swapped: read the departure,
+	 * commit once, record the way back, fly there — and then, instead of handing
+	 * over the caret, start the run. There is nothing to type: the prompt arrived
+	 * from the composer, so by the time this runs the reader has already decided
+	 * and the only thing left is the answer
+	 * (`docs/ui-decisions/2026-09-07--editing--submitting-a-follow-up-also-starts-its-run.md`).
+	 * Nothing here takes DOM focus, which keeps the deep-zoom focus-scroll hazard
+	 * `AiNodeContent` documents out of this path entirely.
+	 *
+	 * One commit for the node, the add-on, the prompt, the edge and both pin
+	 * changes, so one Undo takes the whole thing — including giving the parent
+	 * its pin back — per
+	 * `docs/ui-decisions/2026-08-30--destructive--ship-new-destructive-actions-without-a-confirm.md`.
+	 *
+	 * The run goes last on purpose. `startAiRun` opens the key sheet when a run
+	 * comes back `needs-key`, so a reader with no key lands on the new node with
+	 * the sheet over it — which is right, because the run is what they asked for
+	 * and the key is what it needs, but only if the node is already made and
+	 * focused by then. A missing key must never cost the node.
+	 */
+	function askAiFollowUp(aiNodeId: string, prompt: string): void {
+		// First, before anything moves: `focusRootNodeId` is null once focus is
+		// gone, and the camera has to be the one the reader is actually looking at.
+		const departure = readDepartureState(focusRootNodeId);
+
+		const created = createFollowUpNode(graph, aiNodeId, {
+			prompt,
+			position: placementNear(aiNodeId, 'beside')
+		});
+		// The same object back is the mutation declining — an empty prompt, an
+		// unknown parent, a parent without the add-on. Nothing is committed for it.
+		if (created.graph === graph || created.nodeId === undefined) return;
+		const childId = created.nodeId;
+		commitUserGraph(layoutRuntime.relaxAfterMutation(created.graph), editIntent('ask a follow-up'));
+
+		// Nothing was revealed to get here: the child hangs off an authored edge,
+		// so it is on screen on its own account and the entry reveals nothing.
+		travelToNode(childId, departure, null);
+
+		// `graph` is the committed one and the derived layout has caught up, so the
+		// mode is decided against the child as it now exists: no run and no script
+		// of its own, but its parent's within reach, which is Change.
+		const ai = nodeById[childId]?.addons?.ai;
+		if (ai === undefined) return;
+		runAiNode(
+			childId,
+			defaultRunMode(ai, collectAiInputs(graph, childId), {
+				inheritedScript: inheritedScript(graph, childId)
+			})
+		);
 	}
 
 	/** Internal enter animations for nodes added by the user (scale 0 → target). */
@@ -1736,26 +1810,74 @@
 		// whether the reader could already see the target — a node that was
 		// already on screen must not be taken away again when this entry pops.
 		const alreadyVisible = visibleNodeIds.has(targetNodeId);
-		const originFocused = focus.isFocused;
-		closeOverlays();
-		// `stageViewState` is Stage's live pan/zoom, reported on every change — so
-		// the snapshot is the exact camera the reader is looking at, not a
-		// reconstruction of one.
-		transientReveal.push({
+		travelToNode(
+			targetNodeId,
+			readDepartureState(originNodeId),
+			alreadyVisible ? null : targetNodeId
+		);
+	}
+
+	/** Where the reader was when they asked to go somewhere else. */
+	interface DepartureState {
+		/** The node whose details were on screen, or null when none were. */
+		originNodeId: string | null;
+		originFocused: boolean;
+		viewState: ViewState;
+	}
+
+	/**
+	 * The camera and the overlay as they stand *now*, for the entry that will
+	 * bring the reader back to them.
+	 *
+	 * Every caller reads this before it changes anything, and the two reasons are
+	 * different: `focusRootNodeId` is null once focus is gone, so a caller that
+	 * closes first has nothing to name; and `stageViewState` is Stage's live
+	 * pan/zoom, reported on every change, so reading it first is what makes the
+	 * snapshot the exact camera the reader is looking at rather than a
+	 * reconstruction of one.
+	 */
+	function readDepartureState(originNodeId: string | null): DepartureState {
+		return {
 			originNodeId,
+			originFocused: focus.isFocused,
 			viewState: {
 				panX: stageViewState.panX,
 				panY: stageViewState.panY,
 				scale: stageViewState.scale
-			},
-			revealedNodeId: alreadyVisible ? null : targetNodeId,
-			originFocused
-		});
-		// Seed, settle and camera all before the overlay opens: the target may have
-		// been off-view, and the details view morphs back down onto the node's
-		// on-screen frame when it closes. Nothing here waits on a frame — the
-		// layout is derived synchronously from the seeded hop map, and an explicit
-		// focus entry commits at once rather than tracking a zoom gesture.
+			}
+		};
+	}
+
+	/**
+	 * Land the reader on another node, with the way back recorded.
+	 *
+	 * Shared by the two journeys that end inside a node's details — following a
+	 * reference (`jumpToNode`) and asking a follow-up (`askAiFollowUp`) — so a
+	 * third one cannot become a third slightly different version of it.
+	 * `revealedNodeId` is what this entry is holding on screen and has to take
+	 * away again when it pops: the target for a jump that revealed it, and null
+	 * for a node that is visible on its own account.
+	 *
+	 * Seed, settle and camera all before the overlay opens: the target may have
+	 * been off-view, and the details view morphs back down onto the node's
+	 * on-screen frame when it closes. Nothing here waits on a frame — the layout
+	 * is derived synchronously from the seeded hop map, and an explicit focus
+	 * entry commits at once rather than tracking a zoom gesture.
+	 */
+	function travelToNode(
+		targetNodeId: string,
+		departure: DepartureState,
+		revealedNodeId: string | null
+	) {
+		closeOverlays();
+		if (departure.originNodeId !== null) {
+			transientReveal.push({
+				originNodeId: departure.originNodeId,
+				viewState: departure.viewState,
+				revealedNodeId,
+				originFocused: departure.originFocused
+			});
+		}
 		relaxAfterTransientRevealChange();
 		const bounds = boundsForNodeIds([targetNodeId]);
 		if (bounds) fitViewRequest = { id: (fitViewRequestId += 1), bounds };
@@ -1884,19 +2006,10 @@
 		// The origin is where the *reader* was, not whose input this is: the
 		// consumer can be a definer three peek levels down, and Back has to return
 		// to the node whose details are actually on screen.
-		const originNodeId = focusRootNodeId;
-		const originFocused = focus.isFocused;
-		// Stage's live pan/zoom, so the snapshot is the exact camera the reader is
-		// looking at rather than a reconstruction of one.
-		const departureViewState = {
-			panX: stageViewState.panX,
-			panY: stageViewState.panY,
-			scale: stageViewState.scale
-		};
+		const departure = readDepartureState(focusRootNodeId);
 
 		leaveFocusForCanvasAction();
 
-		const origin = graphLayout.posByNodeId[consumerNodeId] ?? CENTERED_POSITION;
 		// Asking for this node IS the confirmation that it defines the quantity.
 		// Without the designation the repair flow would end in a node whose edge
 		// never appears, and a second trip through the edit sheet to say what the
@@ -1906,23 +2019,23 @@
 		const nextGraph = addNode(graph, {
 			title,
 			description: '',
-			position: { x: origin.x, y: origin.y + NODE_RADIUS * 2.5 },
+			position: placementNear(consumerNodeId, 'below'),
 			outputs: symbol ? [{ base: symbol.base, subscript: symbol.subscript }] : undefined
 		});
 		const newNode = nextGraph.nodes[nextGraph.nodes.length - 1] ?? null;
 		commitUserGraph(layoutRuntime.relaxAfterMutation(nextGraph, null, 1), editIntent('add node'));
 		if (!newNode) return;
 
-		if (originNodeId) {
+		if (departure.originNodeId !== null) {
 			// Nothing was revealed to get here: an edge-less node is its own
 			// component, so it is its own beacon and is on screen regardless. The
 			// entry survives the author deleting the new node, because pruning only
 			// checks the origin and the revealed id.
 			transientReveal.push({
-				originNodeId,
-				viewState: departureViewState,
+				originNodeId: departure.originNodeId,
+				viewState: departure.viewState,
 				revealedNodeId: null,
-				originFocused
+				originFocused: departure.originFocused
 			});
 		}
 
@@ -3222,6 +3335,8 @@
 							runState={aiRun.stateFor(detailsNode.id)}
 							hasKey={aiClient !== null}
 							model={aiSettings.model}
+							ancestors={collectAiAncestors(graph, detailsNode.id)}
+							inheritedScript={inheritedScript(graph, detailsNode.id)}
 							{titleForNodeId}
 							nodeExists={(nodeId) => nodeById[nodeId] !== undefined}
 							onPromptChange={(prompt) =>
@@ -3232,6 +3347,7 @@
 							onRun={(mode) => runAiNode(detailsNode.id, mode)}
 							onCancel={() => aiRun.cancel(detailsNode.id)}
 							onPromote={(outputName) => promoteAiOutputToNode(detailsNode.id, outputName)}
+							onAskFollowUp={(prompt) => askAiFollowUp(detailsNode.id, prompt)}
 							onFix={() => fixAiNode(detailsNode.id)}
 							onOpenSettings={() => onOpenAiSettings?.()}
 							onJumpToNode={(nodeId) => jumpToNode(detailsNode.id, nodeId)}
