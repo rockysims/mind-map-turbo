@@ -11,6 +11,22 @@ import { applyParallelEdgeOffset, type ParallelEdgeOffset } from './parallelEdge
 
 const CENTERED_POSITION: Point = { x: 0, y: 0 };
 const PERCENT_PRECISION_FACTOR = 10_000;
+/**
+ * Shortest a boundary half-edge may be drawn, as a multiple of the visible
+ * node's radius. `boundaryEdgeBackground` paints one radius of solid colour —
+ * the length that merely clears the circle the edge leaves — and fades over the
+ * next, so a stub under two radii fades where nobody can see it happen, or is
+ * swallowed whole.
+ *
+ * A floor is needed because the far end of a boundary edge is a node the layout
+ * is not running. A hidden node keeps whatever position it last settled at, and
+ * on the settle a graph gets when it is read from storage it is sized at
+ * `minScale`, which parks it barely outside its visible neighbour — the same
+ * graph the reader had just pinned their way around draws its stubs far longer.
+ * Which way a hidden node lies is a real hint and stays the direction drawn;
+ * how far away it happens to sit is not something to size a hint by.
+ */
+const BOUNDARY_MIN_LENGTH_RADIUS_FACTOR = 2;
 
 export type RenderableEdgeVisibility = Exclude<EdgeVisibility, { kind: 'hidden' }>;
 
@@ -35,7 +51,8 @@ export function edgeRenderPoints(
 	visibility: RenderableEdgeVisibility,
 	layout: Pick<GraphLayout, 'posByNodeId' | 'radiusByNodeId'>,
 	posByNodeId: Record<string, Point>,
-	parallelOffset?: Pick<ParallelEdgeOffset, 'offsetVector'>
+	parallelOffset?: Pick<ParallelEdgeOffset, 'offsetVector'>,
+	boundaryMinLengthRadiusFactor = BOUNDARY_MIN_LENGTH_RADIUS_FACTOR
 ): {
 	source: Point;
 	target: Point;
@@ -58,11 +75,29 @@ export function edgeRenderPoints(
 
 	const visiblePos = layout.posByNodeId[visibility.visibleNodeId] ?? CENTERED_POSITION;
 	const hiddenPos = posByNodeId[visibility.hiddenNodeId] ?? visiblePos;
+	const dx = hiddenPos.x - visiblePos.x;
+	const dy = hiddenPos.y - visiblePos.y;
+	const distance = Math.hypot(dx, dy);
+	const fadeLength = distance * visibility.fadeRatio;
+	const minLength =
+		(layout.radiusByNodeId[visibility.visibleNodeId] ?? 0) * boundaryMinLengthRadiusFactor;
+	// The two sit on the same point, so there is no direction to leave in — and
+	// nothing to lengthen. Drawn zero-length, exactly as it was before the floor.
+	if (fadeLength >= minLength || distance === 0) {
+		return {
+			source: visiblePos,
+			target: {
+				x: visiblePos.x + dx * visibility.fadeRatio,
+				y: visiblePos.y + dy * visibility.fadeRatio
+			}
+		};
+	}
+
 	return {
 		source: visiblePos,
 		target: {
-			x: visiblePos.x + (hiddenPos.x - visiblePos.x) * visibility.fadeRatio,
-			y: visiblePos.y + (hiddenPos.y - visiblePos.y) * visibility.fadeRatio
+			x: visiblePos.x + (dx / distance) * minLength,
+			y: visiblePos.y + (dy / distance) * minLength
 		}
 	};
 }

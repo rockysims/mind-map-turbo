@@ -96,6 +96,69 @@ describe('edgeRenderPoints', () => {
 			target: { x: 25, y: 50 }
 		});
 	});
+
+	it('lengthens a boundary edge whose fade point would land inside its own node', () => {
+		const visibility = {
+			kind: 'boundary',
+			edge: undirectedEdge,
+			visibleNodeId: 'source',
+			hiddenNodeId: 'hidden',
+			visibleEndpoint: 'source',
+			hiddenEndpoint: 'target',
+			fadeRatio: 0.5
+		} satisfies EdgeVisibility;
+
+		// Halfway to a hidden node 30px out is 15px: inside the 10px-radius node it
+		// leaves, and gone before the fade the reader is supposed to see. Drawn out
+		// to two radii along the same bearing instead.
+		expect(edgeRenderPoints(visibility, layout, { hidden: { x: 30, y: 0 } })).toEqual({
+			source: { x: 0, y: 0 },
+			target: { x: 20, y: 0 }
+		});
+	});
+
+	it('measures the boundary floor in the radii it is given', () => {
+		const visibility = {
+			kind: 'boundary',
+			edge: undirectedEdge,
+			visibleNodeId: 'source',
+			hiddenNodeId: 'hidden',
+			visibleEndpoint: 'source',
+			hiddenEndpoint: 'target',
+			fadeRatio: 0.5
+		} satisfies EdgeVisibility;
+
+		expect(edgeRenderPoints(visibility, layout, { hidden: { x: 0, y: 30 } }, undefined, 4)).toEqual(
+			{
+				source: { x: 0, y: 0 },
+				target: { x: 0, y: 40 }
+			}
+		);
+		expect(edgeRenderPoints(visibility, layout, { hidden: { x: 0, y: 30 } }, undefined, 0)).toEqual(
+			{
+				source: { x: 0, y: 0 },
+				target: { x: 0, y: 15 }
+			}
+		);
+	});
+
+	it('draws nothing for a boundary edge whose hidden node sits on the visible one', () => {
+		const visibility = {
+			kind: 'boundary',
+			edge: undirectedEdge,
+			visibleNodeId: 'source',
+			hiddenNodeId: 'hidden',
+			visibleEndpoint: 'source',
+			hiddenEndpoint: 'target',
+			fadeRatio: 0.5
+		} satisfies EdgeVisibility;
+
+		// No bearing to lengthen along, so the floor cannot invent one.
+		expect(edgeRenderPoints(visibility, layout, { hidden: { x: 0, y: 0 } })).toEqual({
+			source: { x: 0, y: 0 },
+			target: { x: 0, y: 0 }
+		});
+	});
 });
 
 describe('edgeBackground', () => {
