@@ -31,24 +31,42 @@
 	 * box competes for the same gesture. Pointer presses need no handling
 	 * either: `ZoomWorld` already declines to start a pan on a press that lands
 	 * on a control (see `startsOnInteractiveContent`), which is what makes the
-	 * textarea's caret and every button here work. Escape belongs to the focus
-	 * layer, so nothing here listens for it.
+	 * textarea's caret and every button here work.
+	 *
+	 * Escape belongs to the focus layer, with one exception: while the follow-up
+	 * composer is open it is the composer's, because Escape's job everywhere else
+	 * in this app is to close the topmost thing and the composer is that thing.
+	 * It closes on the composer's own textarea and calls `stopPropagation`, so the
+	 * layer above never sees it and the reader does not lose the whole surface
+	 * when they meant to drop a draft. That is the only key this file takes, and
+	 * it is taken on an element rather than at the window, so
+	 * `docs/ui-decisions/2026-08-30--keyboard--guard-every-shortcut-while-typing.md`
+	 * is satisfied by construction.
 	 */
 	import { untrack } from 'svelte';
 	import { APP_CONFIG } from '$lib/appConfig';
 	import type { GraphAssetStore } from '$lib/assets/assetStore';
 	import { renderDigest, type DigestUnavailableReason, type FileDigest } from '$lib/ai/probeScript';
 	import { prefersReducedMotion } from '$lib/reducedMotion';
+	import MathText from '../MathText/MathText.svelte';
 	import type { GraphAssetMetadata } from '../types/multigraph';
 	import type { AiAddon, AiRunMode, AiRunOutput, NodeData } from '../types/node';
 	import { groupAiInputs, type AiFileInput, type AiInput, type AiInputGroup } from './lib/aiInputs';
+	import type { AiAncestor } from './lib/aiAncestry';
+	import { isSubmittableFollowUpPrompt } from './lib/aiNode';
 	import {
+		ancestorContextPreview,
+		availableRunModes,
 		defaultRunMode,
 		digestDisclosureLabel,
+		followUpDisabledReason,
+		followUpSubmitDisabledReason,
 		inputChangesForAddon,
 		inputChangesNote,
 		latestDoneRun,
+		modeNoticeLine,
 		prosePreviewLine,
+		resultRows,
 		stepStatusText,
 		stepsPreviewLine,
 		runMetadataLine,
@@ -64,9 +82,8 @@
 
 	const NO_INPUTS: AiInput[] = [];
 	const NO_DIGESTS: Record<string, FileDigest> = {};
-
-	/** Why Change and Run are out of reach, said once and shown twice. */
-	const NO_SCRIPT_REASON = 'No stored script yet — write one first.';
+	/** No conversation behind this node, which is every node that is not a follow-up. */
+	const NO_ANCESTORS: readonly AiAncestor[] = [];
 
 	/**
 	 * What Replace is for, in the terms that make it worth having: the block keeps
@@ -132,6 +149,8 @@
 		runState = IDLE_RUN_STATE,
 		hasKey = false,
 		model = APP_CONFIG.ai.defaultModel,
+		ancestors = NO_ANCESTORS,
+		inheritedScript = undefined,
 		titleForNodeId = (nodeId: string) => nodeId,
 		nodeExists = () => true,
 		confirmAttachment = (message: string) => window.confirm(message),
@@ -145,7 +164,8 @@
 		onJumpToNode,
 		onAddFile,
 		onReplaceFile,
-		onRemoveFile
+		onRemoveFile,
+		onAskFollowUp
 	}: {
 		/** The focused node. Its `addons.ai` is what this whole surface draws. */
 		node: NodeData;
@@ -178,6 +198,25 @@
 		 * with no settings in hand.
 		 */
 		model?: string;
+		/**
+		 * The `!ai` steps behind this node, from `collectAiAncestors` — what the
+		 * context disclosure previews and what a request will carry as prose.
+		 *
+		 * The ancestors rather than the rendered string, because the section
+		 * depends on the selected mode and the mode lives in this component: a
+		 * Change request carries the parent's script separately, so the preview has
+		 * to leave it out or it would promise something other than what is sent.
+		 * Empty for a caller that has not walked the graph, which draws no
+		 * disclosure at all.
+		 */
+		ancestors?: readonly AiAncestor[];
+		/**
+		 * The direct AI parent's `analysis.py`, from `inheritedScript` — the script
+		 * a node with none of its own can still Change. It is what puts a fresh
+		 * follow-up on Change against the script that produced the thing it is
+		 * following up on. Absent for every node that is not a follow-up.
+		 */
+		inheritedScript?: string;
 		/** Names the node a promoted output lives in. Identity for a caller with no graph. */
 		titleForNodeId?: (nodeId: string) => string;
 		/**
@@ -226,6 +265,13 @@
 		/** Take one attachment off its node. Undo is the safety net, so no confirm. */
 		onRemoveFile?: (nodeId: string, assetId: string) => void;
 		/**
+		 * Commit the composed follow-up: make the child node, move there, start its
+		 * run. Called once, from the composer's submit and from nowhere else —
+		 * opening the composer and typing in it create nothing, per
+		 * `docs/ui-decisions/2026-09-07--editing--compose-a-follow-up-where-you-are-and-commit-on-submit.md`.
+		 */
+		onAskFollowUp?: (prompt: string) => void;
+		/**
 		 * Asks before attaching a file over the per-file size threshold — the same
 		 * question the edit sheet asks, because it is the same cost. Injectable so
 		 * a story can answer it.
@@ -253,6 +299,8 @@
 	 * Replace or a Remove on that group acts on.
 	 */
 	const groups = $derived(groupAiInputs(inputs, node.id));
+	/** What the latest completed run measured, as display-math rows. */
+	const results = $derived(resultRows(ai));
 	/** What the last Add, Replace or Remove did, for a reader who cannot see a file dialog. */
 	let attachmentStatus = $state('');
 
@@ -276,21 +324,67 @@
 	/** One object URL per output blob, revoked when the run or the node changes. */
 	let assetUrls = $state<Record<string, string>>({});
 
-	const fallbackMode = $derived(defaultRunMode(ai, inputs));
 	/**
-	 * The reader's pick, or what the node calls for. A pick that needs the stored
-	 * script falls back once the script goes — an undo can take it away while the
-	 * switch is sitting on Change, and running a Write in Change's clothing
-	 * would be worse than moving the highlight.
+	 * The follow-up composer, which is three states and no graph state at all
+	 * until the last of them commits.
+	 *
+	 * `closed` is the button alone; `composing` is the field and its two
+	 * controls, with the draft living here and dropped on close — a discarded
+	 * draft is not worth persisting, and persisting it would mean deciding when
+	 * it expires; `submitting` is the moment between the press and focus landing
+	 * on the child, during which both controls are `aria-disabled` so a double-tap
+	 * cannot commit twice. Submitting also starts the child's run, per
+	 * `docs/ui-decisions/2026-09-07--editing--submitting-a-follow-up-also-starts-its-run.md`,
+	 * which is why a second press is worth spending state to prevent.
+	 */
+	let composerOpen = $state(false);
+	let followUpDraft = $state('');
+	let followUpSubmitting = $state(false);
+	let followUpField = $state<HTMLTextAreaElement | null>(null);
+
+	/** Why the opener cannot be pressed yet, and why `Ask` cannot. Never both. */
+	const askDisabledReason = $derived(followUpDisabledReason(ai));
+	const submitDisabledReason = $derived(
+		followUpSubmitting ? undefined : followUpSubmitDisabledReason(followUpDraft)
+	);
+	/**
+	 * The composer's own notice line, carrying whichever reason is live. The two
+	 * cannot both apply: the composer only opens on a node that has run.
+	 */
+	const followUpNote = $derived((composerOpen ? submitDisabledReason : askDisabledReason) ?? '');
+
+	const fallbackMode = $derived(defaultRunMode(ai, inputs, { inheritedScript }));
+	/**
+	 * Which modes the switch may offer and why not, by mode — a node's own script,
+	 * a parent's, or neither. A follow-up with an inherited script can Change but
+	 * not Run, and the reason says exactly that rather than claiming there is no
+	 * script anywhere when the reader can see there is.
+	 */
+	const modeAvailability = $derived(availableRunModes(ai, { inheritedScript }));
+	const availabilityByMode = $derived(
+		new Map(modeAvailability.map((entry) => [entry.mode, entry] as const))
+	);
+	const modeNote = $derived(modeNoticeLine(modeAvailability));
+	/**
+	 * The reader's pick, or what the node calls for. A pick that stops being
+	 * available falls back — an undo can take the stored script away while the
+	 * switch is sitting on Run, and running a Write in Run's clothing would be
+	 * worse than moving the highlight.
 	 */
 	const mode = $derived<AiRunMode>(
-		modeOverride === null || (modeOverride !== 'analyse' && !hasScript)
+		modeOverride === null || availabilityByMode.get(modeOverride)?.available !== true
 			? fallbackMode
 			: modeOverride
 	);
 
 	/** The selected row of `MODES`; `analyse` is the one every node always has. */
 	const selectedMode = $derived(MODES.find((option) => option.mode === mode) ?? MODES[0]);
+
+	/**
+	 * The conversation the next request will carry, for the mode that is selected
+	 * — which is what makes the disclosure a preview rather than an illustration.
+	 */
+	const contextPreview = $derived(ancestorContextPreview(ancestors, mode));
 
 	/**
 	 * The status line is about a press the reader made on *this* node. Focus can
@@ -300,7 +394,16 @@
 	 */
 	$effect(() => {
 		void node.id;
-		untrack(() => (attachmentStatus = ''));
+		untrack(() => {
+			attachmentStatus = '';
+			// A draft is about the node it was composed on, and submitting one is
+			// exactly what moves focus to another node — so the composer closes with
+			// the surface it belonged to rather than following the reader onto a node
+			// that never had a question asked about it.
+			composerOpen = false;
+			followUpDraft = '';
+			followUpSubmitting = false;
+		});
 	});
 
 	$effect(() => {
@@ -321,6 +424,15 @@
 		// Read so the effect re-runs on every keystroke; the write below is what
 		// the measurement is for.
 		void promptDraft;
+		field.style.height = 'auto';
+		field.style.height = `${field.scrollHeight}px`;
+	});
+
+	/** The same growth for the composer, for the same reason: no second scroller. */
+	$effect(() => {
+		const field = followUpField;
+		if (field === null) return;
+		void followUpDraft;
 		field.style.height = 'auto';
 		field.style.height = `${field.scrollHeight}px`;
 	});
@@ -379,6 +491,60 @@
 		if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey)) return;
 		event.preventDefault();
 		commitPrompt();
+	}
+
+	/**
+	 * Open the composer on the node the reader is already looking at.
+	 *
+	 * `aria-disabled` rather than `disabled`, so the press still lands and the
+	 * notice line under it is what says why nothing happened — the reason has to
+	 * reach a reader who cannot hover
+	 * (`docs/ui-decisions/2026-08-30--a11y--say-why-a-control-is-disabled-in-the-notice-line.md`).
+	 */
+	function openComposer(): void {
+		if (askDisabledReason !== undefined) return;
+		followUpDraft = '';
+		followUpSubmitting = false;
+		composerOpen = true;
+	}
+
+	/** Cancel and Escape both land here: nothing was created, so nothing is undone. */
+	function closeComposer(): void {
+		if (followUpSubmitting) return;
+		composerOpen = false;
+		followUpDraft = '';
+	}
+
+	/**
+	 * The one press that turns a draft into a node. Guarded by the same predicate
+	 * `createFollowUpNode` refuses on, so the button and the mutation can never
+	 * disagree about what an empty prompt is.
+	 */
+	function submitFollowUp(): void {
+		if (followUpSubmitting || !isSubmittableFollowUpPrompt(followUpDraft)) return;
+		followUpSubmitting = true;
+		onAskFollowUp?.(followUpDraft);
+	}
+
+	/**
+	 * The composer's two keys, mirroring `handlePromptKeydown` beside it.
+	 *
+	 * Cmd/Ctrl+Enter submits. A bare Enter and a Shift+Enter both insert a
+	 * newline: a follow-up is prose and often more than one line, and the prompt
+	 * field a few centimetres above already reads Enter that way, so making this
+	 * one differ would be the surprise. Escape closes the composer and stops
+	 * there — see the note at the top of this file for why this one key is not
+	 * the focus layer's.
+	 */
+	function handleFollowUpKeydown(event: KeyboardEvent): void {
+		if (event.key === 'Escape') {
+			event.stopPropagation();
+			closeComposer();
+			return;
+		}
+		if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey)) return;
+		event.preventDefault();
+		submitFollowUp();
 	}
 
 	/** A stable key per file row: the same asset can be attached twice over. */
@@ -566,6 +732,43 @@
 	</div>
 {/snippet}
 
+{#snippet fileHead(input: AiFileInput)}
+	{@const digest = digests[input.assetId]}
+	<div class="input-head" data-ai-digest-summary>
+		<strong data-ai-input-name>{input.name}</strong>
+		<span class="input-size" data-ai-input-size>{formatByteSize(input.size)}</span>
+		{#if digest && digestShape(digest) !== ''}
+			<span class="input-shape" data-ai-input-shape>{digestShape(digest)}</span>
+		{/if}
+	</div>
+{/snippet}
+
+{#snippet fileDigest(input: AiFileInput)}
+	{@const digest = digests[input.assetId]}
+	{#if digest}
+		{#if digest.kind === 'table'}
+			<!-- Exactly what the request will carry about this file, rendered
+			     through the same function that builds it, so the promise the
+			     settings sheet makes is checkable on screen — by a reader who
+			     asks for it, rather than at everyone all the time. -->
+			<details class="digest-panel">
+				<summary>{digestDisclosureLabel(previewRows, digest)}</summary>
+				<pre class="digest" data-ai-digest>{renderDigest(digest, previewRows)}</pre>
+			</details>
+		{:else if digest.kind === 'unavailable'}
+			<!-- Nothing was measured and nothing is coming: the name and the
+			     size above are the whole of what is known, and this says why
+			     there is no disclosure under them. Not an error block — the
+			     other files are fine, and this one is a fact about this row. -->
+			<p class="unavailable" data-ai-digest-unavailable={digest.reason}>
+				{digestUnavailableText(digest.reason)}
+			</p>
+		{/if}
+	{:else}
+		<p class="pending" data-ai-digest-pending>digesting…</p>
+	{/if}
+{/snippet}
+
 <!--
 	`data-zoom-scroll` is the whole of the arrangement with `ZoomWorld`: it yields
 	the wheel to this box while the box can still move, and takes it back at
@@ -611,16 +814,19 @@
 			<span class="section-label" id="ai-mode-label-{node.id}">Mode</span>
 			<div class="modes" role="group" aria-labelledby="ai-mode-label-{node.id}">
 				{#each MODES as option (option.mode)}
-					<!-- Both of the other modes work *from* the stored script, so both are
-					     out of reach until a run has written one. -->
-					{@const disabled = option.mode !== 'analyse' && !hasScript}
+					<!-- Both of the other modes work *from* a script — the node's own, or
+					     the parent's for a follow-up — so `availableRunModes` decides,
+					     and the reason it gives is the one on the tooltip and in the
+					     note below. -->
+					{@const availability = availabilityByMode.get(option.mode)}
+					{@const disabled = availability?.available !== true}
 					<button
 						type="button"
 						class="mode"
 						data-ai-mode={option.mode}
 						aria-pressed={mode === option.mode}
 						{disabled}
-						title={disabled ? NO_SCRIPT_REASON : option.hint}
+						title={disabled ? (availability?.reason ?? '') : option.hint}
 						onclick={() => (modeOverride = option.mode)}
 					>
 						{option.label}
@@ -631,11 +837,11 @@
 			<p class="mode-hint" data-ai-mode-hint>{selectedMode.hint}</p>
 		</div>
 
-		{#if !hasScript}
+		{#if modeNote !== ''}
 			<!-- The disabled buttons carry the reason as a tooltip, and a disabled
 			     button does not reliably show one — so the reason is also on the
 			     screen, where a reader who cannot hover will find it. -->
-			<p class="mode-note" data-ai-mode-note>{NO_SCRIPT_REASON}</p>
+			<p class="mode-note" data-ai-mode-note>{modeNote}</p>
 		{/if}
 
 		<div class="run-actions">
@@ -684,6 +890,26 @@
 			<span class="status-dot" class:on={hasKey} aria-hidden="true"></span>
 			{hasKey ? `Connected · ${model}` : 'Not connected'}
 		</p>
+
+		{#if contextPreview.text !== ''}
+			<!--
+				The conversation this request will carry, in the same disclosure shape
+				the per-file digest uses and with the same promise: what is behind the
+				fold is exactly the text that leaves the machine, not a description of
+				it. Closed by default — three steps of prose is a page, and the reader
+				came here to press Run.
+
+				Rendered for the mode the switch is on, because the two modes send
+				different sections: a Change request appends the parent's script under
+				`Previous analysis.py:`, so the context leaves it out, and a Write
+				request has nowhere else to carry it. A preview that ignored the mode
+				would be a promise about a request nobody is going to send.
+			-->
+			<details class="context-panel" data-ai-context>
+				<summary data-ai-context-summary>{contextPreview.label}</summary>
+				<pre class="context" data-ai-context-body>{contextPreview.text}</pre>
+			</details>
+		{/if}
 	</section>
 
 	{#if showProse}
@@ -893,6 +1119,27 @@
 		</section>
 	{/if}
 
+	{#if results.length > 0}
+		<!--
+			The numbers the run reported, under the plots that show them.
+			A `RESULT R_{th} = 12.3 K/W` line is what makes this node a definer of
+			that quantity everywhere else on the map, so it is rendered as the same
+			display math the rest of the app draws equations in — the reader should
+			recognise the thing an arrow is about to be drawn from. Only the latest
+			completed run's, and they go when it does.
+		-->
+		<section class="results-section" data-ai-results>
+			<h3 class="section-label">Results</h3>
+			<ul class="results">
+				{#each results as result (result.symbol)}
+					<li data-ai-result={result.symbol}>
+						<MathText text={`$$${result.tex}$$`} />
+					</li>
+				{/each}
+			</ul>
+		</section>
+	{/if}
+
 	{#if staleNames.length > 0}
 		<!-- A promoted figure the latest run stopped drawing keeps its image on the
 		     node and says so here. It is not in the grid above by construction —
@@ -922,6 +1169,82 @@
 			</ul>
 		</section>
 	{/if}
+
+	<!--
+		The next question, asked from here.
+
+		Beside the answer rather than beside the prompt, because a follow-up is
+		something a reader decides *after* reading what came back. Pressing the
+		button creates nothing: it opens a composer on the node the reader is
+		already on, and only submit makes the child, moves them there and starts
+		its run — the shape the owner asked for in
+		`docs/ui-decisions/2026-09-07--editing--compose-a-follow-up-where-you-are-and-commit-on-submit.md`.
+
+		Nothing here takes DOM focus. Opening the composer leaves the caret where
+		the reader put it, because focusing an element inside the deep-zoom frame
+		makes the browser scroll that frame to reveal it, and the sums come out far
+		off inside a transform-scaled layer — the same hazard that turned Add and
+		Replace from labels into buttons (see `.file-picker`).
+	-->
+	<section class="follow-up-section" data-ai-follow-up-section>
+		{#if composerOpen}
+			<div class="follow-up" data-ai-follow-up>
+				<label class="section-label" for="ai-follow-up-{node.id}">Follow-up</label>
+				<textarea
+					id="ai-follow-up-{node.id}"
+					class="prompt"
+					data-ai-follow-up-prompt
+					rows="2"
+					bind:this={followUpField}
+					bind:value={followUpDraft}
+					placeholder="Now fit the decay and report the time constant."
+					onkeydown={handleFollowUpKeydown}
+				></textarea>
+				<div class="follow-up-actions">
+					<!--
+						`Ask`, and it says so while it works: the press starts a run as well
+						as making a node, so the control that started it has to name what is
+						in flight
+						(`docs/ui-decisions/2026-09-06--status--name-the-run-action-per-mode.md`).
+						`aria-disabled` on both while that is happening, so a double-tap
+						cannot commit twice — and on Ask alone while the draft is empty,
+						with the reason in the notice line under them.
+					-->
+					<button
+						type="button"
+						class="primary"
+						data-ai-follow-up-submit
+						aria-disabled={followUpSubmitting || submitDisabledReason !== undefined}
+						onclick={submitFollowUp}
+					>
+						{followUpSubmitting ? 'Asking…' : 'Ask'}
+					</button>
+					<button
+						type="button"
+						class="follow-up-cancel"
+						data-ai-follow-up-cancel
+						aria-disabled={followUpSubmitting}
+						onclick={closeComposer}
+					>
+						Cancel
+					</button>
+				</div>
+			</div>
+		{:else}
+			<button
+				type="button"
+				class="ask-follow-up"
+				data-ai-ask-follow-up
+				aria-disabled={askDisabledReason !== undefined}
+				onclick={openComposer}
+			>
+				Ask a follow-up
+			</button>
+		{/if}
+		{#if followUpNote !== ''}
+			<p class="follow-up-note" data-ai-follow-up-note>{followUpNote}</p>
+		{/if}
+	</section>
 
 	<!--
 		Below the controls and the answer, because it is the part a reader checks
@@ -1028,7 +1351,6 @@
 				{#if group.files.length > 0}
 					<ul class="group-files">
 						{#each group.files as input, index (fileKey(input, index))}
-							{@const digest = digests[input.assetId]}
 							<li
 								data-ai-input
 								data-ai-input-kind="file"
@@ -1036,13 +1358,7 @@
 								data-ai-input-asset-id={input.assetId}
 							>
 								<div class="input-top">
-									<div class="input-head" data-ai-digest-summary>
-										<strong data-ai-input-name>{input.name}</strong>
-										<span class="input-size" data-ai-input-size>{formatByteSize(input.size)}</span>
-										{#if digest && digestShape(digest) !== ''}
-											<span class="input-shape" data-ai-input-shape>{digestShape(digest)}</span>
-										{/if}
-									</div>
+									{@render fileHead(input)}
 									<!--
 										Two icons, and the meaning lives in the accessible name rather
 										than the tooltip: `title` is hover-only, which is the standing
@@ -1081,28 +1397,37 @@
 										</button>
 									</div>
 								</div>
-								{#if digest}
-									{#if digest.kind === 'table'}
-										<!-- Exactly what the request will carry about this file, rendered
-										     through the same function that builds it, so the promise the
-										     settings sheet makes is checkable on screen — by a reader who
-										     asks for it, rather than at everyone all the time. -->
-										<details class="digest-panel">
-											<summary>{digestDisclosureLabel(previewRows, digest)}</summary>
-											<pre class="digest" data-ai-digest>{renderDigest(digest, previewRows)}</pre>
-										</details>
-									{:else if digest.kind === 'unavailable'}
-										<!-- Nothing was measured and nothing is coming: the name and the
-										     size above are the whole of what is known, and this says why
-										     there is no disclosure under them. Not an error block — the
-										     other files are fine, and this one is a fact about this row. -->
-										<p class="unavailable" data-ai-digest-unavailable={digest.reason}>
-											{digestUnavailableText(digest.reason)}
-										</p>
-									{/if}
-								{:else}
-									<p class="pending" data-ai-digest-pending>digesting…</p>
-								{/if}
+								{@render fileDigest(input)}
+							</li>
+						{/each}
+					</ul>
+				{/if}
+
+				{#if group.outputs.length > 0}
+					<!--
+						What this neighbour's last run produced, reaching this node as
+						ordinary files — which is what makes a chain of two steps work
+						without anyone promoting a CSV to join them up.
+
+						A sub-list of their own under the attachments, with no Add, Replace
+						or Remove: those three act on what the reader attached, and there is
+						nothing behind them here. Not drawn rather than drawn disabled — a
+						control that can never be enabled is a worse answer than no control,
+						and there is no explanation to give for one that was never an
+						action. The caption names where they came from in the words the
+						outputs section above already uses.
+					-->
+					<p class="outputs-caption" data-ai-input-outputs-caption>From its last run</p>
+					<ul class="group-files group-outputs">
+						{#each group.outputs as input, index (fileKey(input, index))}
+							<li
+								data-ai-input
+								data-ai-input-kind="output"
+								data-ai-input-node={input.nodeId}
+								data-ai-input-asset-id={input.assetId}
+							>
+								{@render fileHead(input)}
+								{@render fileDigest(input)}
 							</li>
 						{/each}
 					</ul>
@@ -1186,9 +1511,80 @@
 	.run-section,
 	.live-section,
 	.outputs-section,
-	.stale-section {
+	.results-section,
+	.stale-section,
+	.follow-up-section {
 		display: grid;
 		gap: 0.5rem;
+	}
+
+	/* Justified to the start so the button is its own width rather than the
+	   surface's — the section is a grid like every other one here. */
+	.follow-up-section {
+		justify-items: start;
+	}
+
+	.follow-up {
+		display: grid;
+		gap: 0.5rem;
+		justify-self: stretch;
+	}
+
+	.follow-up-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	/*
+	 * The results, as display math. `MathText` renders a display segment as a
+	 * block, so each row is one equation on its own line — the same way an
+	 * equation reads everywhere else in the app, which is the point: the reader
+	 * should recognise the thing the map is about to draw an arrow from.
+	 */
+	.results {
+		display: grid;
+		gap: 0.35rem;
+	}
+
+	.results li {
+		padding: 0.35rem 0;
+	}
+
+	.outputs-caption {
+		margin-left: 0.75rem;
+		color: #64748b;
+		font-size: 0.875rem;
+	}
+
+	/* Nothing acts on these rows, so they carry no action column — and a paler
+	   rule down the left says they are the node's doing rather than the
+	   reader's. */
+	.group-outputs {
+		border-left-style: dashed;
+	}
+
+	/* The same press height the run button has: both are things a thumb aims at
+	   after reading, rather than icons in a row. */
+	.ask-follow-up,
+	.follow-up-cancel {
+		min-height: 2.5rem;
+		padding-inline: 1rem;
+	}
+
+	.follow-up-note {
+		color: #64748b;
+		font-size: 0.875rem;
+	}
+
+	/*
+	 * `aria-disabled` rather than `disabled`, so the press still lands and the
+	 * notice line can answer it — but it has to *look* out of reach, or the
+	 * reason arrives after a press that felt like it should have worked.
+	 */
+	[aria-disabled='true'] {
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 
 	/*
@@ -1370,7 +1766,8 @@
 	 */
 	.digest,
 	.stdout,
-	.script {
+	.script,
+	.context {
 		margin: 0;
 		border-radius: 0.35rem;
 		padding: 0.5rem 0.6rem;
@@ -1423,14 +1820,22 @@
 		border-left: 1px solid #cbd5e1;
 	}
 
-	.digest-panel summary {
+	.digest-panel summary,
+	.context-panel summary {
 		color: #475569;
 		font-size: 0.8125rem;
 		cursor: pointer;
 	}
 
-	.digest-panel .digest {
+	.digest-panel .digest,
+	.context-panel .context {
 		margin-top: 0.35rem;
+	}
+
+	/* The same pale block the digest uses: this is text being quoted, not code. */
+	.context {
+		background: #eef2f7;
+		color: #334155;
 	}
 
 	button {

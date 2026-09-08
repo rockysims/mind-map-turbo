@@ -152,6 +152,49 @@
 		};
 	}
 
+	/**
+	 * The same run, having also printed two `RESULT` lines. A number on stdout is
+	 * what makes this node a definer of that quantity everywhere else on the map,
+	 * so the workbench draws it as the display math the rest of the app uses.
+	 */
+	const MEASURED_RUN: AiRun = {
+		...DONE_RUN,
+		results: [
+			{ symbol: 'R_{th}', value: '12.3', unit: 'K/W' },
+			{ symbol: '\\tau', value: '0.8', unit: 's' }
+		]
+	};
+
+	/** What the reader types into the composer, and nothing commits until they do. */
+	const FOLLOW_UP = 'Now fit the decay and report the time constant.';
+
+	/**
+	 * A finished node and the follow-up hanging off it, joined the way
+	 * `createFollowUpNode` joins them: directed parent → child, untagged.
+	 *
+	 * The child is what the four new pieces are about — it reads its parent's run
+	 * outputs as inputs, carries the parent as its one ancestor, and can Change
+	 * the parent's script without having written one of its own.
+	 */
+	function followUpGraph(): MultigraphData {
+		const graph = aiGraph({ script: SCRIPT, runs: [DONE_RUN] }, [
+			{
+				id: 'child',
+				title: 'Follow-up !ai',
+				description: '',
+				tags: [],
+				addons: { ai: { prompt: FOLLOW_UP, runs: [], promoted: {} } }
+			}
+		]);
+		return {
+			...graph,
+			edges: [
+				...graph.edges,
+				{ id: 'e-follow-up', sourceNodeId: 'ai', targetNodeId: 'child', directed: true, tags: [] }
+			]
+		};
+	}
+
 	/** A file attached to the AI node itself, so its own group has a row. */
 	const OWN_ASSET: GraphAssetMetadata = {
 		id: 'asset-own',
@@ -567,6 +610,12 @@
 		);
 		expect(content.querySelectorAll('[data-ai-promote]')).toHaveLength(3);
 		expect(content.querySelector('[data-ai-stale-outputs]')).toBeNull();
+
+		// This run printed no `RESULT` line and this node has no `!ai` node behind
+		// it, so neither section exists — an empty "Results" heading is a promise
+		// about a thing that did not happen.
+		expect(content.querySelector('[data-ai-results]')).toBeNull();
+		expect(content.querySelector('[data-ai-context]')).toBeNull();
 	}}
 >
 	{#snippet template()}
@@ -1177,6 +1226,13 @@
 	play={async ({ canvasElement }) => {
 		const content = workbench(canvasElement);
 
+		// Opened first, so everything below covers the composer too: its field is
+		// the newest thing on the surface that could have become a second scroller,
+		// and its controls are the newest presses that could have been eaten by a
+		// world pan.
+		await userEvent.click(required(canvasElement, '[data-ai-ask-follow-up]'));
+		await waitFor(() => required(canvasElement, '[data-ai-follow-up]'));
+
 		// One scroller, and it is the root: the surface is taller than the frame,
 		// so it scrolls rather than stranding its controls below the pan clamp.
 		expect(content).toHaveAttribute('data-zoom-scroll');
@@ -1236,7 +1292,12 @@
 			'[data-ai-add-file]',
 			'[data-ai-replace-file]',
 			'[data-ai-input-kind="file"] details summary',
-			'[data-ai-script] summary'
+			'[data-ai-script] summary',
+			// The composer, which a captured press would leave uneditable and
+			// unsubmittable inside deep zoom.
+			'[data-ai-follow-up-prompt]',
+			'[data-ai-follow-up-submit]',
+			'[data-ai-follow-up-cancel]'
 		]) {
 			required(canvasElement, selector).dispatchEvent(
 				new PointerEvent('pointerdown', { bubbles: true, pointerId: 1 })
@@ -1585,3 +1646,406 @@
 		).toBe('What Claude will see (all 2 rows)');
 	}}
 />
+
+<!--
+	A number the script printed on its own line is the thing that makes this node
+	a definer of that quantity everywhere else on the map, so it is drawn as the
+	display math the rest of the app draws equations in — the reader should
+	recognise what the arrow is about to be drawn from.
+-->
+<Story
+	name="ADoneRunsResultsAreShownAsDisplayMath"
+	play={async ({ canvasElement }) => {
+		const results = required(canvasElement, '[data-ai-results]');
+		const rows = results.querySelectorAll('[data-ai-result]');
+		expect([...rows].map((row) => row.getAttribute('data-ai-result'))).toEqual(['R_{th}', '\\tau']);
+
+		// Display math, through the same MathText path a description uses — and it
+		// rendered, rather than falling back to the source text.
+		const rendered = required(rows[0] as HTMLElement, '[data-segment="display-math"]');
+		expect(rendered).toHaveAttribute('data-math-error', 'false');
+		expect(results.textContent).toContain('12.3');
+		expect(results.textContent).toContain('K/W');
+
+		// Under the outputs, because it is the answer rather than the controls.
+		expect(
+			required(canvasElement, '[data-ai-outputs]').compareDocumentPosition(results) &
+				Node.DOCUMENT_POSITION_FOLLOWING
+		).toBeTruthy();
+	}}
+>
+	{#snippet template()}
+		<AiNodeHarness
+			baseGraph={aiGraph({ script: SCRIPT, runs: [MEASURED_RUN] })}
+			nodeId="ai"
+			digests={DIGESTS}
+			assetStore={outputStore()}
+			assetScope="story"
+		/>
+	{/snippet}
+</Story>
+
+<!--
+	The chain, from the child's side: a parent's run outputs reach it as ordinary
+	files, which is what makes two steps work without anyone promoting a CSV to
+	join them. They sit in a sub-list of their own with no Add, Replace or Remove
+	— not drawn rather than drawn disabled, because there is no action behind
+	them to explain.
+-->
+<Story
+	name="AParentsRunOutputsAreListedUnderItWithNoFileActions"
+	play={async ({ canvasElement }) => {
+		const parent = required(canvasElement, '[data-ai-input-group="ai"]');
+		expect(parent).toHaveAttribute('data-ai-input-group-kind', 'neighbour');
+		expect(text(parent, '[data-ai-input-outputs-caption]')).toBe('From its last run');
+
+		const outputs = parent.querySelectorAll('[data-ai-input-kind="output"]');
+		expect([...outputs].map((row) => text(row, '[data-ai-input-name]'))).toEqual([
+			'channel2.png',
+			'residuals.png',
+			'cleaned.csv'
+		]);
+		// Its own attachments would be a separate list; it has none.
+		expect(parent.querySelector('[data-ai-input-kind="file"]')).toBeNull();
+
+		// Nothing acts on them, so nothing offers to.
+		for (const output of outputs) {
+			expect(output.querySelector('[data-ai-replace-file]')).toBeNull();
+			expect(output.querySelector('[data-ai-remove-file]')).toBeNull();
+		}
+		expect(parent.querySelector('[data-ai-add-file]')).toBeNull();
+
+		// And Add file is still on this node's own group, where it always was.
+		expect(
+			required(canvasElement, '[data-ai-input-group="child"]').querySelector('[data-ai-add-file]')
+		).not.toBeNull();
+	}}
+>
+	{#snippet template()}
+		<AiNodeHarness baseGraph={followUpGraph()} nodeId="child" />
+	{/snippet}
+</Story>
+
+<!--
+	Milestone 14's promise, extended to the prose: what is behind the fold is
+	exactly what leaves the machine. Which means it has to follow the mode — a
+	Change request carries the parent's script separately, and showing it twice
+	here would be a promise about a request nobody is going to send.
+-->
+<Story
+	name="TheAncestorContextShowsWhatTheSelectedModeWillSend"
+	play={async ({ canvasElement }) => {
+		const panel = required(canvasElement, '[data-ai-context]');
+		expect(panel).toBeInstanceOf(HTMLDetailsElement);
+		expect((panel as HTMLDetailsElement).open).toBe(false);
+		expect(text(panel, '[data-ai-context-summary]')).toMatch(
+			/^What Claude will see \(1 step, \d+ characters\)$/
+		);
+
+		// A real press, and the world declines to pan on it — a captured press
+		// would swallow the click and leave this unopenable inside deep zoom, which
+		// is the failure `startsOnInteractiveContent` exists for.
+		await userEvent.click(required(panel, 'summary'));
+		await waitFor(() => expect((panel as HTMLDetailsElement).open).toBe(true));
+		expect(harnessState(canvasElement)).toHaveAttribute('data-stage-pan-starts', '0');
+
+		const body = text(panel, '[data-ai-context-body]');
+		expect(body).toContain('Conversation so far (nearest first):');
+		expect(body).toContain('1 step back — Channel plots !ai');
+		expect(body).toContain(`Asked: ${PROMPT}`);
+		expect(body).toContain('Result: Both files plotted on shared axes');
+		// Change is the mode a fresh follow-up starts on, and a Change request
+		// appends the parent's script under `Previous analysis.py:` on its own.
+		expect(body).not.toContain('Its analysis.py:');
+
+		await userEvent.click(required(canvasElement, '[data-ai-mode="analyse"]'));
+		await waitFor(() =>
+			expect(text(panel, '[data-ai-context-body]')).toContain('Its analysis.py:')
+		);
+		expect(text(panel, '[data-ai-context-body]')).toContain('pd.read_csv');
+		// The closed line counts the same section it is now showing.
+		expect(text(panel, '[data-ai-context-summary]')).toContain(
+			`${text(panel, '[data-ai-context-body]').length} characters`
+		);
+	}}
+>
+	{#snippet template()}
+		<AiNodeHarness baseGraph={followUpGraph()} nodeId="child" />
+	{/snippet}
+</Story>
+
+<!--
+	A follow-up is an edit to what was just done, so it starts on Change against
+	the script that produced it — a script it can reach but does not own. Run is
+	the one mode that needs a script of this node's own, because it calls no model
+	and so has nothing to turn the parent's into one.
+-->
+<Story
+	name="AFreshFollowUpStartsOnChangeAgainstItsParentsScript"
+	play={async ({ canvasElement }) => {
+		expect(required(canvasElement, '[data-ai-mode="refine"]')).toHaveAttribute(
+			'aria-pressed',
+			'true'
+		);
+		expect(required(canvasElement, '[data-ai-mode="refine"]')).toBeEnabled();
+		expect(required(canvasElement, '[data-ai-mode="analyse"]')).toBeEnabled();
+		expect(text(canvasElement, '[data-ai-run]')).toBe('Change & run');
+
+		// And the one mode that is out of reach says why in terms of this node,
+		// rather than claiming there is no script anywhere when the reader can see
+		// the parent's in the disclosure above.
+		const rerun = required(canvasElement, '[data-ai-mode="rerun"]');
+		expect(rerun).toBeDisabled();
+		expect(rerun).toHaveAttribute(
+			'title',
+			"No stored script on this node yet — Change adapts the parent's and stores it here."
+		);
+		expect(text(canvasElement, '[data-ai-mode-note]')).toBe(
+			"No stored script on this node yet — Change adapts the parent's and stores it here."
+		);
+	}}
+>
+	{#snippet template()}
+		<AiNodeHarness baseGraph={followUpGraph()} nodeId="child" />
+	{/snippet}
+</Story>
+
+<!--
+	A follow-up asks about an answer, and a node that has never run has not given
+	one. `aria-disabled` rather than `disabled` so the press still lands and the
+	notice line under it can say why nothing happened — the one channel a reader
+	who cannot hover has.
+-->
+<Story
+	name="AskAFollowUpWaitsForARunToFollowUpOn"
+	play={async ({ canvasElement }) => {
+		const ask = required(canvasElement, '[data-ai-ask-follow-up]');
+		expect(ask.textContent?.trim()).toBe('Ask a follow-up');
+		expect(ask).toHaveAttribute('aria-disabled', 'true');
+		expect(text(canvasElement, '[data-ai-follow-up-note]')).toBe(
+			'Nothing to follow up on yet — run this node first.'
+		);
+
+		await userEvent.click(ask);
+		expect(workbench(canvasElement).querySelector('[data-ai-follow-up]')).toBeNull();
+		expect(harnessState(canvasElement)).toHaveAttribute('data-follow-ups', '0');
+	}}
+>
+	{#snippet template()}
+		<AiNodeHarness baseGraph={aiGraph()} nodeId="ai" digests={DIGESTS} />
+	{/snippet}
+</Story>
+
+<!--
+	The shape the owner asked for: compose where you are, and commit on submit.
+	Opening the composer and typing in it create nothing at all, so Cancel and
+	Escape have nothing to undo — and the press that does commit also starts the
+	child's run, which is why it names itself while it works and why a second
+	press cannot land.
+-->
+<Story
+	name="ComposingAFollowUpCommitsNothingUntilAskIsPressed"
+	play={async ({ canvasElement }) => {
+		const state = harnessState(canvasElement);
+		const ask = required(canvasElement, '[data-ai-ask-follow-up]');
+		expect(ask).toHaveAttribute('aria-disabled', 'false');
+		expect(workbench(canvasElement).querySelector('[data-ai-follow-up-note]')).toBeNull();
+
+		await userEvent.click(ask);
+		const composer = await waitFor(() => required(canvasElement, '[data-ai-follow-up]'));
+		expect(workbench(canvasElement).querySelector('[data-ai-ask-follow-up]')).toBeNull();
+		// Opening it is not asking anything.
+		expect(state).toHaveAttribute('data-follow-ups', '0');
+
+		const field = required(composer, '[data-ai-follow-up-prompt]') as HTMLTextAreaElement;
+		await userEvent.type(field, FOLLOW_UP);
+		expect(state).toHaveAttribute('data-follow-ups', '0');
+
+		const submit = required(composer, '[data-ai-follow-up-submit]');
+		expect(submit.textContent?.trim()).toBe('Ask');
+		expect(submit).toHaveAttribute('aria-disabled', 'false');
+
+		await userEvent.click(submit);
+		await waitFor(() => expect(state).toHaveAttribute('data-follow-ups', '1'));
+		expect(state).toHaveAttribute('data-last-follow-up-prompt', FOLLOW_UP);
+
+		// Submitting starts a run as well as making a node, so the control says so
+		// and both controls stop taking presses until focus has moved.
+		await waitFor(() => expect(text(canvasElement, '[data-ai-follow-up-submit]')).toBe('Asking…'));
+		expect(required(canvasElement, '[data-ai-follow-up-submit]')).toHaveAttribute(
+			'aria-disabled',
+			'true'
+		);
+		expect(required(canvasElement, '[data-ai-follow-up-cancel]')).toHaveAttribute(
+			'aria-disabled',
+			'true'
+		);
+
+		await userEvent.click(required(canvasElement, '[data-ai-follow-up-submit]'));
+		await userEvent.click(required(canvasElement, '[data-ai-follow-up-cancel]'));
+		expect(state).toHaveAttribute('data-follow-ups', '1');
+	}}
+>
+	{#snippet template()}
+		<AiNodeHarness
+			baseGraph={aiGraph({ script: SCRIPT, runs: [DONE_RUN] })}
+			nodeId="ai"
+			digests={DIGESTS}
+		/>
+	{/snippet}
+</Story>
+
+<Story
+	name="CancelAndEscapeDiscardTheFollowUpDraft"
+	play={async ({ canvasElement }) => {
+		const state = harnessState(canvasElement);
+
+		// Escape belongs to the focus layer everywhere else on this surface, and
+		// the count proves it: pressed in the prompt field it reaches the layer.
+		await userEvent.click(required(canvasElement, '[data-ai-prompt]'));
+		await userEvent.keyboard('{Escape}');
+		await waitFor(() => expect(state).toHaveAttribute('data-stage-escapes', '1'));
+
+		await userEvent.click(required(canvasElement, '[data-ai-ask-follow-up]'));
+		let field = (await waitFor(() =>
+			required(canvasElement, '[data-ai-follow-up-prompt]')
+		)) as HTMLTextAreaElement;
+		await userEvent.type(field, 'a thought I changed my mind about');
+		await userEvent.click(required(canvasElement, '[data-ai-follow-up-cancel]'));
+
+		await waitFor(() =>
+			expect(workbench(canvasElement).querySelector('[data-ai-follow-up]')).toBeNull()
+		);
+		expect(state).toHaveAttribute('data-follow-ups', '0');
+
+		// Re-opening starts empty: a discarded draft is not worth keeping, and
+		// keeping it would mean deciding when it expires.
+		await userEvent.click(required(canvasElement, '[data-ai-ask-follow-up]'));
+		field = (await waitFor(() =>
+			required(canvasElement, '[data-ai-follow-up-prompt]')
+		)) as HTMLTextAreaElement;
+		expect(field.value).toBe('');
+
+		await userEvent.type(field, 'another one');
+		await userEvent.keyboard('{Escape}');
+		await waitFor(() =>
+			expect(workbench(canvasElement).querySelector('[data-ai-follow-up]')).toBeNull()
+		);
+		expect(state).toHaveAttribute('data-follow-ups', '0');
+		// And the layer above never saw it, so the reader did not lose the whole
+		// surface when they meant to drop a draft.
+		expect(state).toHaveAttribute('data-stage-escapes', '1');
+	}}
+>
+	{#snippet template()}
+		<AiNodeHarness
+			baseGraph={aiGraph({ script: SCRIPT, runs: [DONE_RUN] })}
+			nodeId="ai"
+			digests={DIGESTS}
+		/>
+	{/snippet}
+</Story>
+
+<!--
+	The mis-press this composer is shaped against costs tokens rather than an
+	undo, so an empty question cannot be asked at all — guarded by the same
+	predicate `createFollowUpNode` refuses on, not a second `trim()` beside it.
+-->
+<Story
+	name="AnEmptyFollowUpCannotBeAsked"
+	play={async ({ canvasElement }) => {
+		const state = harnessState(canvasElement);
+		await userEvent.click(required(canvasElement, '[data-ai-ask-follow-up]'));
+		const field = (await waitFor(() =>
+			required(canvasElement, '[data-ai-follow-up-prompt]')
+		)) as HTMLTextAreaElement;
+
+		const submit = required(canvasElement, '[data-ai-follow-up-submit]');
+		expect(submit).toHaveAttribute('aria-disabled', 'true');
+		expect(text(canvasElement, '[data-ai-follow-up-note]')).toBe(
+			'Nothing to ask yet — type the follow-up first.'
+		);
+		await userEvent.click(submit);
+		expect(state).toHaveAttribute('data-follow-ups', '0');
+
+		// Whitespace and newlines are not a question either.
+		await userEvent.type(field, '  {Enter}  {Enter}');
+		expect(field.value.trim()).toBe('');
+		expect(submit).toHaveAttribute('aria-disabled', 'true');
+		await userEvent.click(submit);
+		expect(state).toHaveAttribute('data-follow-ups', '0');
+
+		await userEvent.type(field, 'and now a real one');
+		await waitFor(() => expect(submit).toHaveAttribute('aria-disabled', 'false'));
+		expect(workbench(canvasElement).querySelector('[data-ai-follow-up-note]')).toBeNull();
+	}}
+>
+	{#snippet template()}
+		<AiNodeHarness
+			baseGraph={aiGraph({ script: SCRIPT, runs: [DONE_RUN] })}
+			nodeId="ai"
+			digests={DIGESTS}
+		/>
+	{/snippet}
+</Story>
+
+<!--
+	A follow-up is prose and often more than one line, and the prompt field a few
+	centimetres above already reads Enter as a newline — so making this one differ
+	would be the surprise. Cmd+Enter is the commit, exactly as it is up there.
+-->
+<Story
+	name="EnterMakesANewlineAndCmdEnterAsks"
+	play={async ({ canvasElement }) => {
+		const state = harnessState(canvasElement);
+		await userEvent.click(required(canvasElement, '[data-ai-ask-follow-up]'));
+		const field = (await waitFor(() =>
+			required(canvasElement, '[data-ai-follow-up-prompt]')
+		)) as HTMLTextAreaElement;
+
+		await userEvent.type(field, 'first line{Enter}second line');
+		await userEvent.type(field, '{Shift>}{Enter}{/Shift}third line');
+		expect(field.value).toBe('first line\nsecond line\nthird line');
+		expect(state).toHaveAttribute('data-follow-ups', '0');
+
+		await userEvent.keyboard('{Meta>}{Enter}{/Meta}');
+		await waitFor(() => expect(state).toHaveAttribute('data-follow-ups', '1'));
+		expect(state).toHaveAttribute(
+			'data-last-follow-up-prompt',
+			'first line\nsecond line\nthird line'
+		);
+	}}
+>
+	{#snippet template()}
+		<AiNodeHarness
+			baseGraph={aiGraph({ script: SCRIPT, runs: [DONE_RUN] })}
+			nodeId="ai"
+			digests={DIGESTS}
+		/>
+	{/snippet}
+</Story>
+
+<!-- The same keystroke on the other platform, as the prompt field beside it. -->
+<Story
+	name="CtrlEnterAsksTheFollowUpToo"
+	play={async ({ canvasElement }) => {
+		const state = harnessState(canvasElement);
+		await userEvent.click(required(canvasElement, '[data-ai-ask-follow-up]'));
+		const field = (await waitFor(() =>
+			required(canvasElement, '[data-ai-follow-up-prompt]')
+		)) as HTMLTextAreaElement;
+
+		await userEvent.type(field, FOLLOW_UP);
+		await userEvent.keyboard('{Control>}{Enter}{/Control}');
+		await waitFor(() => expect(state).toHaveAttribute('data-follow-ups', '1'));
+		expect(state).toHaveAttribute('data-last-follow-up-prompt', FOLLOW_UP);
+	}}
+>
+	{#snippet template()}
+		<AiNodeHarness
+			baseGraph={aiGraph({ script: SCRIPT, runs: [DONE_RUN] })}
+			nodeId="ai"
+			digests={DIGESTS}
+		/>
+	{/snippet}
+</Story>

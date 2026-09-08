@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+	ancestorContextPreview,
 	availableRunModes,
 	defaultRunMode,
 	digestDisclosureLabel,
+	followUpDisabledReason,
+	followUpSubmitDisabledReason,
 	inputChangesNote,
+	modeNoticeLine,
 	prosePreviewLine,
+	resultRows,
 	stepStatusText,
 	stepsPreviewLine,
 	inputsChangedSince,
@@ -16,6 +21,8 @@ import {
 	type RunModeAvailability,
 	type RunModeOptions
 } from './aiWorkbenchView';
+import { APP_CONFIG } from '$lib/appConfig';
+import type { AiAncestor } from './aiAncestry';
 import type { AiInput } from './aiInputs';
 import type { FileDigest } from '$lib/ai/probeScript';
 import type { AiAddon, AiRun, AiRunInput, AiRunMode, AiRunOutput } from '../../types/node';
@@ -797,5 +804,139 @@ describe('stepsPreviewLine', () => {
 		expect(stepStatusText(null)).toBe('running');
 		expect(stepStatusText(0)).toBe('finished');
 		expect(stepStatusText(2)).toBe('failed, exit 2');
+	});
+});
+
+describe('the notice line under the mode switch', () => {
+	it('says nothing when every mode is available', () => {
+		expect(modeNoticeLine(availableRunModes(makeAddon({ script: 'print(1)' })))).toBe('');
+	});
+
+	it('says the shared reason once when two modes are out for the same reason', () => {
+		expect(modeNoticeLine(availableRunModes(makeAddon()))).toBe(
+			'No stored script yet — write one first.'
+		);
+	});
+
+	it('carries the reason a follow-up gets, which is about this node and not the map', () => {
+		expect(modeNoticeLine(availableRunModes(makeAddon(), { inheritedScript: 'print(2)' }))).toBe(
+			"No stored script on this node yet — Change adapts the parent's and stores it here."
+		);
+	});
+});
+
+describe('the results a run reported, as rows', () => {
+	const measured = makeRun({
+		id: 'r1',
+		results: [
+			{ symbol: 'R_{th}', value: '12.3', unit: 'K/W' },
+			{ symbol: '\\tau', value: '0.8' }
+		]
+	});
+
+	it('renders each result through the renderer the extractor also reads', () => {
+		expect(resultRows(makeAddon({ runs: [measured] }))).toEqual([
+			{ symbol: 'R_{th}', tex: 'R_{th} = 12.3\\ \\text{K/W}' },
+			{ symbol: '\\tau', tex: '\\tau = 0.8' }
+		]);
+	});
+
+	it('has nothing to show for a node that has never run, or ran and measured nothing', () => {
+		expect(resultRows(makeAddon())).toEqual([]);
+		expect(resultRows(makeAddon({ runs: [makeRun({ id: 'r1' })] }))).toEqual([]);
+	});
+
+	it('keeps the last completed run when a later attempt failed', () => {
+		// A re-run that timed out measured nothing; letting it blank the section
+		// would take the answer off the screen for a reason that is not about it.
+		const failed = makeRun({ id: 'r2', status: 'error' });
+		expect(resultRows(makeAddon({ runs: [measured, failed] }))).toHaveLength(2);
+	});
+});
+
+describe('the ancestor context preview', () => {
+	function ancestor(patch: Partial<AiAncestor> = {}): AiAncestor {
+		return {
+			nodeId: 'parent',
+			hops: 1,
+			title: 'Sweep A cleanup',
+			prompt: 'drop the first 200 samples',
+			summary: 'Wrote clean.csv.',
+			...patch
+		};
+	}
+
+	const withScript = ancestor({ script: 'print("clean")' });
+
+	it('has nothing to preview without ancestors', () => {
+		expect(ancestorContextPreview([], 'refine')).toEqual({ text: '', steps: 0, label: '' });
+	});
+
+	it('leaves the script out in Change, because the request carries it separately', () => {
+		const preview = ancestorContextPreview([withScript], 'refine');
+		expect(preview.text).toContain('Asked: drop the first 200 samples');
+		expect(preview.text).not.toContain('Its analysis.py:');
+	});
+
+	it('carries the script in Write, which has no other place to put it', () => {
+		const preview = ancestorContextPreview([withScript], 'analyse');
+		expect(preview.text).toContain('Its analysis.py:');
+		expect(preview.text).toContain('print("clean")');
+	});
+
+	it('previews nothing for a Run, which calls no model and sends no prose', () => {
+		expect(ancestorContextPreview([withScript], 'rerun').text).toBe('');
+	});
+
+	it('names the steps and the characters that are actually in the section', () => {
+		const one = ancestorContextPreview([ancestor()], 'refine');
+		expect(one.steps).toBe(1);
+		expect(one.label).toBe(`What Claude will see (1 step, ${one.text.length} characters)`);
+
+		const two = ancestorContextPreview(
+			[ancestor(), ancestor({ nodeId: 'grandparent', hops: 2, title: 'Raw import' })],
+			'refine'
+		);
+		expect(two.steps).toBe(2);
+		expect(two.label).toContain('(2 steps,');
+	});
+
+	it('counts what survived the cap rather than what was handed in', () => {
+		// The number on the closed line is a claim about what leaves the machine,
+		// so a step the renderer dropped must not be counted as sent. Wide rather
+		// than deep, because the hop cap is three and the character cap is what
+		// this is about: a dozen parents each reporting a page.
+		const many = Array.from({ length: 12 }, (unused, index) =>
+			ancestor({ nodeId: `p${index}`, summary: 'x'.repeat(2000) })
+		);
+		const preview = ancestorContextPreview(many, 'refine');
+		expect(preview.text.length).toBeLessThanOrEqual(APP_CONFIG.ai.ancestorContext.maxChars);
+		expect(preview.steps).toBeLessThan(12);
+		expect(preview.steps).toBeGreaterThan(0);
+		expect(preview.label).toContain(`${preview.steps} steps`);
+		expect(preview.text).toContain('earlier steps omitted.');
+	});
+});
+
+describe('why the follow-up controls are out of reach', () => {
+	it('waits for an answer to follow up on', () => {
+		expect(followUpDisabledReason(makeAddon())).toBe(
+			'Nothing to follow up on yet — run this node first.'
+		);
+		expect(
+			followUpDisabledReason(makeAddon({ runs: [makeRun({ id: 'r1', status: 'error' })] }))
+		).toBe('Nothing to follow up on yet — run this node first.');
+	});
+
+	it('says nothing once the node has a completed run', () => {
+		expect(followUpDisabledReason(makeAddon({ runs: [makeRun({ id: 'r1' })] }))).toBeUndefined();
+	});
+
+	it('refuses an empty draft on the same terms the mutation refuses it', () => {
+		expect(followUpSubmitDisabledReason('')).toBe('Nothing to ask yet — type the follow-up first.');
+		expect(followUpSubmitDisabledReason('  \n\t ')).toBe(
+			'Nothing to ask yet — type the follow-up first.'
+		);
+		expect(followUpSubmitDisabledReason('now fit a line')).toBeUndefined();
 	});
 });

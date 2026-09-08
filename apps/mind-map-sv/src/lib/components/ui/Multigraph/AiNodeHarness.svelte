@@ -15,8 +15,9 @@
 	 */
 	import { untrack } from 'svelte';
 	import AiNodeContent from './AiNodeContent.svelte';
+	import { collectAiAncestors } from './lib/aiAncestry';
 	import { collectAiInputs } from './lib/aiInputs';
-	import { promoteAiOutput, setAiPrompt } from './lib/aiNode';
+	import { inheritedScript, promoteAiOutput, setAiPrompt } from './lib/aiNode';
 	import {
 		addNodeContentBlock,
 		removeNodeContentBlock,
@@ -85,11 +86,27 @@
 	let stageSwallows = $state(0);
 	/** Presses the world would have turned into a pan, which a control's must not. */
 	let stagePanStarts = $state(0);
+	/**
+	 * Escapes that reached the layer above the surface. The focus layer owns
+	 * Escape everywhere but inside the follow-up composer, so this is what makes
+	 * "the composer stopped it" assertable rather than merely claimed.
+	 */
+	let stageEscapes = $state(0);
+	/** The composed follow-up the surface submitted, and how many times it did. */
+	let lastFollowUpPrompt = $state('');
+	let followUps = $state(0);
 	/** The world's root, for the walk from a wheel's target up to it. */
 	let stage = $state<HTMLElement | null>(null);
 
 	const node = $derived(graph.nodes.find((candidate) => candidate.id === nodeId));
 	const inputs = $derived(collectAiInputs(graph, nodeId));
+	/**
+	 * The two graph walks the workbench cannot do for itself, exactly as
+	 * `Multigraph.svelte` will do them (T07): the conversation behind this node,
+	 * and the script a follow-up can Change without having written one.
+	 */
+	const ancestors = $derived(collectAiAncestors(graph, nodeId));
+	const inherited = $derived(inheritedScript(graph, nodeId));
 
 	/**
 	 * `ZoomWorld`'s rule: a press that starts on a control — or on a disclosure —
@@ -192,6 +209,9 @@
 		data-stage-wheels={stageWheels}
 		data-stage-swallows={stageSwallows}
 		data-stage-pan-starts={stagePanStarts}
+		data-stage-escapes={stageEscapes}
+		data-last-follow-up-prompt={lastFollowUpPrompt}
+		data-follow-ups={followUps}
 	></div>
 	<!-- The zoom world's stand-in. `role="presentation"` for the same reason the
 	     real one carries it: it is an input surface, not a control. -->
@@ -205,10 +225,15 @@
 		onpointerdown={(event) => {
 			if (wouldStartPan(event)) stagePanStarts += 1;
 		}}
+		onkeydown={(event) => {
+			if (event.key === 'Escape') stageEscapes += 1;
+		}}
 	>
 		<AiNodeContent
 			{node}
 			{inputs}
+			{ancestors}
+			inheritedScript={inherited}
 			{digests}
 			{assetStore}
 			{assetScope}
@@ -236,6 +261,13 @@
 			onAddFile={addFile}
 			onReplaceFile={replaceFile}
 			onRemoveFile={removeFile}
+			onAskFollowUp={(prompt) => {
+				// Reported rather than applied: creating the child, moving there and
+				// starting its run is `Multigraph.svelte`'s job (T07), and a harness
+				// that invented it would be asserting a flow nothing ships.
+				lastFollowUpPrompt = prompt;
+				followUps += 1;
+			}}
 			onFix={() => (fixes += 1)}
 			onOpenSettings={() => (settingsOpens += 1)}
 			onJumpToNode={(target) => (lastJump = target)}

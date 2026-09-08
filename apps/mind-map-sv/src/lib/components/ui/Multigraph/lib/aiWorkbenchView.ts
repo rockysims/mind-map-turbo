@@ -1,14 +1,18 @@
 /**
  * What the workbench shows about an `!ai` node, decided without a component.
  *
- * Four questions the surface cannot answer by looking at one field: which run
+ * The questions the surface cannot answer by looking at one field: which run
  * modes to offer and which of them to start on, which promoted outputs the
- * latest run stopped producing, and how to say in one line what a run cost. All
- * of them read the add-on and what the caller has already collected — never the
- * graph — so a story can pin them and the component can stay markup.
+ * latest run stopped producing, how to say in one line what a run cost, what
+ * the latest run measured, what prose the next request will carry, and why a
+ * control the reader can see is not one they can use. All of them read the
+ * add-on and what the caller has already collected — never the graph — so a
+ * story can pin them and the component can stay markup.
  */
 
-import { latestDoneRun } from './aiNode';
+import { isSubmittableFollowUpPrompt, latestDoneRun } from './aiNode';
+import { renderAncestorContext, type AiAncestor } from './aiAncestry';
+import { renderResultTex } from '$lib/ai/aiResults';
 import type { AiInput } from './aiInputs';
 import type { FileDigest } from '$lib/ai/probeScript';
 import type { AiAddon, AiRun, AiRunMode } from '../../types/node';
@@ -272,6 +276,140 @@ export function availableRunModes(ai: AiAddon, options?: RunModeOptions): RunMod
 						: NO_SCRIPT_REASON
 				}
 	];
+}
+
+/**
+ * The one line under the mode switch: why the modes that cannot be picked
+ * cannot be, or `''` when every mode is available.
+ *
+ * The reasons come from `availableRunModes`, deduped and joined — Change and
+ * Run are out of reach for the same reason on a node that has never run, and
+ * saying it twice reads as two problems. The line exists because a disabled
+ * control does not reliably show a `title`, which is the standing debt in
+ * `docs/debt/2026-08-30-tooltips-are-hover-only.md`; this is the channel a
+ * touch reader has, per
+ * `docs/ui-decisions/2026-08-30--a11y--say-why-a-control-is-disabled-in-the-notice-line.md`.
+ */
+export function modeNoticeLine(modes: readonly RunModeAvailability[]): string {
+	const reasons: string[] = [];
+	for (const entry of modes) {
+		if (entry.reason === undefined || reasons.includes(entry.reason)) continue;
+		reasons.push(entry.reason);
+	}
+	return reasons.join(' ');
+}
+
+/** One `RESULT` line of the latest run, as the workbench draws it. */
+interface AiResultRow {
+	/** The symbol the script named, which is also the row's identity. */
+	symbol: string;
+	/** `R_{th} = 12.3\ \text{K/W}` — the LaTeX the row renders as display math. */
+	tex: string;
+}
+
+/** Every node with nothing measured shares one array, so a redraw allocates none. */
+const NO_RESULT_ROWS: AiResultRow[] = [];
+
+/**
+ * What the latest completed run reported, as rows.
+ *
+ * The same `renderResultTex` the quantity extractor reads (`aiResultMath`), so
+ * the equation on screen and the definition the map draws an arrow from cannot
+ * be two different strings. The symbol comes along beside it because the row
+ * carries `data-ai-result={symbol}` — a story names a result by what it is
+ * called rather than by its position in a list.
+ *
+ * Latest *done* run, matching every other reading of this add-on: a cancelled
+ * or errored attempt after a good one measured nothing, and letting it blank
+ * the section would take the answer off the screen because a re-run timed out.
+ */
+export function resultRows(ai: AiAddon): AiResultRow[] {
+	const results = latestDoneRun(ai)?.results;
+	if (results === undefined || results.length === 0) return NO_RESULT_ROWS;
+	return results.map((result) => ({ symbol: result.symbol, tex: renderResultTex(result) }));
+}
+
+/** The ancestor context as the workbench previews it, for one selected mode. */
+interface AncestorContextPreview {
+	/** The rendered section, byte for byte what the request will carry. `''` for none. */
+	text: string;
+	/** How many steps survived the cap and are actually in `text`. */
+	steps: number;
+	/** The disclosure's summary line. Empty when there is nothing to disclose. */
+	label: string;
+}
+
+const NO_ANCESTOR_CONTEXT: AncestorContextPreview = { text: '', steps: 0, label: '' };
+
+/** `1 step back — …` opens each entry, which is also how they are counted back. */
+const STEP_HEADING = /^\d+ steps? back\b/gmu;
+
+/**
+ * What the ancestor context will be for the mode the switch is on.
+ *
+ * The mode is not decoration here. A Change request already appends the
+ * parent's `analysis.py` under `Previous analysis.py:`, so the context section
+ * leaves it out; a Write request has no such block, so the context is the only
+ * place the script can come from. A preview that ignored the mode would show
+ * the reader something other than what is about to be sent, which is the one
+ * thing milestone 14's "What Claude will see" promise does not allow.
+ *
+ * A **Run** builds no request at all — it calls no model — so there is nothing
+ * to preview and the disclosure is not drawn rather than drawn empty.
+ *
+ * `steps` counts the entries that survived the character cap rather than the
+ * ancestors handed in, for the same reason: the number on the closed line is a
+ * claim about what leaves the machine.
+ */
+export function ancestorContextPreview(
+	ancestors: readonly AiAncestor[],
+	mode: AiRunMode
+): AncestorContextPreview {
+	if (mode === 'rerun' || ancestors.length === 0) return NO_ANCESTOR_CONTEXT;
+
+	const text = renderAncestorContext(ancestors, {}, { includeParentScript: mode === 'analyse' });
+	if (text === '') return NO_ANCESTOR_CONTEXT;
+
+	const steps = text.match(STEP_HEADING)?.length ?? 0;
+	return { text, steps, label: contextDisclosureLabel(steps, text.length) };
+}
+
+/**
+ * The closed line of the context disclosure, in the shape the per-file digest
+ * disclosure already uses: the same promise, and the two numbers that say how
+ * much of it this one is.
+ */
+function contextDisclosureLabel(steps: number, chars: number): string {
+	return `What Claude will see (${steps} ${steps === 1 ? 'step' : 'steps'}, ${chars} characters)`;
+}
+
+/**
+ * Why "Ask a follow-up" is not pressable yet, or `undefined` once it is.
+ *
+ * A follow-up asks about an answer, and a node with no completed run has not
+ * given one — its outputs, its summary and its script are all the things the
+ * child would be reading. The control stays reachable and says so in the notice
+ * line rather than going `disabled`, per
+ * `docs/ui-decisions/2026-08-30--a11y--say-why-a-control-is-disabled-in-the-notice-line.md`.
+ */
+export function followUpDisabledReason(ai: AiAddon): string | undefined {
+	return latestDoneRun(ai) === undefined
+		? 'Nothing to follow up on yet — run this node first.'
+		: undefined;
+}
+
+/**
+ * Why the composer's `Ask` is not pressable, or `undefined` when it is.
+ *
+ * The question is asked through `isSubmittableFollowUpPrompt` — the same
+ * predicate `createFollowUpNode` refuses on — rather than a second `trim()`
+ * written at the button, so the button can never offer a press the mutation
+ * would then decline.
+ */
+export function followUpSubmitDisabledReason(prompt: string): string | undefined {
+	return isSubmittableFollowUpPrompt(prompt)
+		? undefined
+		: 'Nothing to ask yet — type the follow-up first.';
 }
 
 /**
