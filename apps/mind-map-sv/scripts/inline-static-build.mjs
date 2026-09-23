@@ -1,7 +1,8 @@
-import { readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveBuildStamp, withBuildStamp } from './build-stamp.mjs';
+import { AI_EXAMPLE_FILENAME, createAiExampleHtml } from './example-save-file.mjs';
 import {
 	offlineShellSourceFingerprint,
 	withOfflineShellFingerprint
@@ -12,6 +13,8 @@ const repoRoot = resolve(appRoot, '../..');
 const buildDir = join(appRoot, 'build');
 const indexPath = join(buildDir, 'index.html');
 const staticOfflineShellPath = join(appRoot, 'static', 'offline-app-shell.html');
+const examplesDir = join(appRoot, 'examples');
+const aiExamplePath = join(examplesDir, AI_EXAMPLE_FILENAME);
 const exportHtmlShellWindowKey = '__MIND_MAP_EXPORT_HTML_SHELL__';
 
 let html = await readFile(indexPath, 'utf8');
@@ -27,6 +30,8 @@ html = withBuildStamp(html, resolveBuildStamp({ repoRoot }));
 
 await writeFile(indexPath, html);
 await writeFile(staticOfflineShellPath, html);
+await mkdir(examplesDir, { recursive: true });
+await writeFile(aiExamplePath, createAiExampleHtml(html));
 await removeSiblingArtifacts();
 
 async function inlineStylesheets(input) {

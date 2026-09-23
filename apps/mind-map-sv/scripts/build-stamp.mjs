@@ -9,12 +9,15 @@ const defaultAppRoot = resolve(scriptDir, '..');
 const defaultRepoRoot = resolve(defaultAppRoot, '../..');
 
 /**
- * A build output, never a build input — `offline-shell-fingerprint.mjs` skips
- * it for the same reason. Without this, regenerating the shell dirties the tree
- * with its own product, so the very next build would stamp `-dirty` and claim
- * uncommitted source that does not exist.
+ * Build outputs, never build inputs. Without these exclusions, regenerating
+ * either tracked HTML product dirties the tree with the build's own output, so
+ * the next build would stamp `-dirty` and claim uncommitted source that does
+ * not exist.
  */
-const offlineShellRepoPath = 'apps/mind-map-sv/static/offline-app-shell.html';
+const generatedHtmlRepoPaths = new Set([
+	'apps/mind-map-sv/static/offline-app-shell.html',
+	'apps/mind-map-sv/examples/ai-mind-map.html'
+]);
 
 /**
  * Identify the app build going into the offline shell, as
@@ -76,7 +79,7 @@ function buildStampMetaPattern() {
 }
 
 /**
- * Whether `git status --porcelain` output names anything but the shell itself.
+ * Whether `git status --porcelain` output names anything but generated HTML.
  *
  * Exported for its spec: this is the difference between `-dirty` meaning
  * "built from uncommitted source" and meaning nothing at all.
@@ -89,7 +92,7 @@ export function hasSourceChanges(status) {
 		.split('\n')
 		.map((line) => line.trim())
 		.filter((line) => line !== '')
-		.some((line) => statusPath(line) !== offlineShellRepoPath);
+		.some((line) => !generatedHtmlRepoPaths.has(statusPath(line)));
 }
 
 /**

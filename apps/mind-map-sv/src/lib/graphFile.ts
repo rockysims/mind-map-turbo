@@ -7,7 +7,7 @@ import {
 	type ViewState
 } from './migrations';
 
-const GRAPH_HTML_DOCUMENT_VERSION = 1;
+export const GRAPH_HTML_DOCUMENT_VERSION = 1;
 /**
  * The lowest reader that understands what this app writes. Bumped with every
  * schema version an older app cannot make sense of, so that app routes the file

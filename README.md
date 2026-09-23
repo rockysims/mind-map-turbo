@@ -59,6 +59,20 @@ already there rather than replacing it — the sheet's own tag list and add-on
 toggles stay the way to remove one. It leaves `@` and a leading `>` or `<`
 alone, because an existing node has no newly created edge to apply them to.
 
+## Starting a map with an AI agent
+
+Give the agent
+[`apps/mind-map-sv/examples/ai-mind-map.html`](apps/mind-map-sv/examples/ai-mind-map.html).
+It is a complete self-contained save file whose embedded graph is also a guide
+to the file format and to how the graph appears to a reader. The instructions
+beside its JSON payload tell an agent how to preserve the offline app shell and
+replace only the graph; the visible nodes explain pins, positions, tags and tag
+colours, directed and undirected edges, add-ons, assets, and the opening camera.
+
+The example is generated from the same `static/offline-app-shell.html` used by
+Download. `pnpm --filter mind-map-sv build` refreshes both files, and
+`pnpm check:offline-shell` fails if either committed artifact is stale.
+
 ## AI nodes
 
 `!ai Channel drift` gives a node the AI add-on. Open it and you get a

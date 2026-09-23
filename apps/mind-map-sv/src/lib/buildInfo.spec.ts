@@ -199,6 +199,7 @@ describe('newerAppNotice', () => {
 
 describe('the build script dirty check', () => {
 	const SHELL = 'apps/mind-map-sv/static/offline-app-shell.html';
+	const AI_EXAMPLE = 'apps/mind-map-sv/examples/ai-mind-map.html';
 
 	it('ignores the regenerated shell, which every build rewrites', () => {
 		// Building writes the shell, so the next build would otherwise see a dirty
@@ -211,6 +212,10 @@ describe('the build script dirty check', () => {
 		// this runs. Reading the path at a fixed offset ate the first character
 		// of it and made every build after the first one claim -dirty.
 		expect(hasSourceChanges(`M ${SHELL}`)).toBe(false);
+	});
+
+	it('ignores the generated AI example beside the shell', () => {
+		expect(hasSourceChanges(` M ${SHELL}\n M ${AI_EXAMPLE}\n`)).toBe(false);
 	});
 
 	it('reports a clean tree', () => {
