@@ -128,3 +128,8 @@ big findings became milestone 11 and two standalone bug-fix tasks):
 - Group diagnostics references by node id at compute time (`referencesForNode` is a linear scan per rendered node).
 
 TODO: look into vector embedding search (using transform) so users can search title, description, images (later videos), etc.
+
+TODO: show first image as node background (high value, low lift probably)
+TODO: global AI chat that can edit the graph for the user (and, ideally, scrap data from a url or uploaded file)
+TODO: try to figure out how to make deep zoom properly sticky so I don't accidently keep overshooting one way or the other
+TODO: make sure AI output nodes / promoted nodes in general have meaningful names
