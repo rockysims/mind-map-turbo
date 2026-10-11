@@ -44,6 +44,33 @@ describe('serializeGraphFile', () => {
 		expect(JSON.parse(json)).toMatchObject({ schemaVersion: CURRENT_SCHEMA_VERSION });
 	});
 
+	it('records the app version that wrote the document', () => {
+		const json = serializeGraphFile(makeDoc({ appVersion: '2026-08-30 21:41 · efa2bbc' }));
+		expect(JSON.parse(json)).toMatchObject({ appVersion: '2026-08-30 21:41 · efa2bbc' });
+	});
+
+	it('round-trips the app version through JSON and HTML', () => {
+		const doc = makeDoc({ appVersion: '2026-08-30 21:41 · efa2bbc', documentId: 'doc-1' });
+
+		expect(parseGraphFile(serializeGraphFile(doc)).appVersion).toBe('2026-08-30 21:41 · efa2bbc');
+		expect(parseGraphFileText(serializeGraphHtmlFile(doc)).appVersion).toBe(
+			'2026-08-30 21:41 · efa2bbc'
+		);
+	});
+
+	it('reads back no app version from a document written before the stamp existed', () => {
+		expect(parseGraphFile(serializeGraphFile(makeDoc())).appVersion).toBeUndefined();
+	});
+
+	it('ignores unknown top-level keys, which is why appVersion needs no schema bump', () => {
+		const payload = {
+			...JSON.parse(serializeGraphFile(makeDoc())),
+			somethingAddedLater: { by: 'a newer app' }
+		};
+
+		expect(parseGraphFile(JSON.stringify(payload)).data.nodes).toHaveLength(2);
+	});
+
 	it('round-trips quantity designations through JSON and HTML', () => {
 		const base = makeGraph({ nodeCount: 2, edges: [[0, 1]], pinned: [0] });
 		const doc = makeDoc({
@@ -424,6 +451,30 @@ describe('readSettingsFromGraphFileText', () => {
 	it('applies settings from an HTML graph file', () => {
 		const doc = makeDoc({ settings: SETTINGS });
 		expect(readSettingsFromGraphFileText(serializeGraphHtmlFile(doc))).toEqual({
+			kind: 'applied',
+			overrides: SETTINGS,
+			warnings: []
+		});
+	});
+
+	it('still reads settings out of a file this build refuses to open', () => {
+		// The two features meet here: a document written by a newer app is refused
+		// by the graph parser, while the settings reader deliberately skips both
+		// the reader-version gate and graph validation. Tuning survives a file
+		// whose graph does not, and neither feature knows about the other — so
+		// this pins the seam rather than either side of it.
+		const html = serializeGraphHtmlFile(makeDoc({ settings: SETTINGS })).replace(
+			`"minReaderVersion": ${GRAPH_HTML_READER_VERSION}`,
+			'"minReaderVersion": 999'
+		);
+
+		expect(() => parseGraphFileText(html)).toThrow(
+			new PersistedGraphError(
+				'Unsupported graph HTML reader version: 999',
+				'unsupported-app-version'
+			)
+		);
+		expect(readSettingsFromGraphFileText(html)).toEqual({
 			kind: 'applied',
 			overrides: SETTINGS,
 			warnings: []

@@ -23,6 +23,8 @@
 		confirmResponse = true,
 		/** Text to import when the "Import text" harness button is clicked. */
 		simulateImportText = '',
+		/** Raw build stamp the harness app claims to be, for version-skew stories. */
+		appVersion = undefined,
 		/** Mirrors the root route's fresh-default inline edit behavior for stories. */
 		editFreshDefaultRoot = false
 	}: {
@@ -31,6 +33,7 @@
 		layoutSettings?: Partial<LayoutSettings>;
 		confirmResponse?: boolean;
 		simulateImportText?: string;
+		appVersion?: string;
 		editFreshDefaultRoot?: boolean;
 	} = $props();
 
@@ -51,6 +54,7 @@
 	let lastImportIntoCurrent = $state('');
 	let initialTitleEditNodeId = $state<string | null>(null);
 	const persisted = usePersistedGraph({
+		appVersion: appVersionAtMount(),
 		persistence,
 		createScheduler: (onStatus) =>
 			new SaveScheduler({
@@ -116,6 +120,10 @@
 		return graphs;
 	}
 
+	function appVersionAtMount(): string | undefined {
+		return appVersion;
+	}
+
 	async function loadRoutedGraph(graphId: string): Promise<void> {
 		const loadResult = await persisted.load(graphId);
 		initialTitleEditNodeId =
@@ -177,6 +185,7 @@
 	data-loaded-graph-id={persisted.loadedGraphId}
 	data-routed-graph-id={routedGraphId}
 	data-notice={persisted.notice}
+	data-notice-severity={persisted.noticeSeverity}
 	data-graph-ids={graphIds}
 	data-node-count={persisted.graph.nodes.length}
 	data-primary-title={primaryTitle}
