@@ -5,7 +5,7 @@
  */
 
 /** Decimals kept when rendering a value into a text box. */
-export const SETTING_VALUE_PRECISION = 6;
+const SETTING_VALUE_PRECISION = 6;
 
 /**
  * Render a number for a text input. Rounds away binary-float noise

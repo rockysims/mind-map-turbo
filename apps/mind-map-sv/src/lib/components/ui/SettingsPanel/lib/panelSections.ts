@@ -19,7 +19,7 @@ import { CONFIG_SCHEMA } from '$lib/config/configSchema';
 import type { FieldSpec, Preview, Tier } from '$lib/config/configSchema';
 
 /** A `FieldSpec` the panel can actually render — everything but `hidden`. */
-export type VisibleFieldSpec = Exclude<FieldSpec, { control: 'hidden' }>;
+type VisibleFieldSpec = Exclude<FieldSpec, { control: 'hidden' }>;
 
 /** One rendered row: the path it edits and the spec that describes it. */
 export type PanelField = {
@@ -41,7 +41,7 @@ export type PanelSection = {
 };
 
 /** The panel's two groups: `basic` is always shown, `advanced` is collapsed. */
-export type PanelSections = {
+type PanelSections = {
 	basic: PanelSection[];
 	advanced: PanelSection[];
 };

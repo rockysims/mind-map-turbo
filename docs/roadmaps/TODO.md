@@ -60,6 +60,16 @@ BUGS:
 
 - Edit dialog background (click to close) has very rounded edges and padding so it doesn't cover the full Stage.
 - Pinned node doesn't show description.
+- e2e `app.test.ts` "deep zoom nests a node image as a second level and pops back
+  to the node" fails at the `data-zoom-world-scale` assertion (line ~784): a wheel
+  event over the nested image leaves the world scale at 1. Reproduces on `temp`
+  alone in a clean detached worktree, so it predates the settings panel and is not
+  a merge artifact. Unknown whether the zoom-world behaviour or the test's
+  expectation is the wrong one.
+- e2e `app.test.ts` is intermittently flaky around `waitForStoredTitle`: a
+  different test times out waiting on localStorage on different runs (seen under
+  both 2 workers and `--workers=1`), and each passes in isolation. Smells like
+  cross-test storage or webServer contention rather than a product bug.
 
 MAYBE:
 
