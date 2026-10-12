@@ -49,6 +49,13 @@ Paths below are relative to `apps/mind-map-sv/src/lib/components/ui/Multigraph/`
   grammar's own escalation — show it, emphasise it, hide it, forget it — so one
   button reaches every mode with no second control.
 
+  > **Superseded 2026-10-11 (owner request, same day):** the cycle skips plain
+  > focus — none → `+#tag` → `-#tag` → none — and a tag with no token appends
+  > the spotlight token. A hand-typed `#tag` still counts as in the query and
+  > steps on to `+#tag`. The hover/focus preview resolution below is superseded
+  > with it. See the Notes addendum and
+  > `docs/ui-decisions/2026-10-11--pointer--a-tag-button-cycles-spotlight-and-exclude-and-hover-previews-the-next-click.md`.
+
 - **How the query is edited.** **Surgically, by source range.**
   `GraphQueryToken` gains `start` and `end`: a half-open index range into the
   input covering the `+`/`-` prefix when present, the marker or opening quote,
@@ -153,6 +160,12 @@ null`. Reading the effective mode keeps the button and the graph in
   (`lib/graphQuery.ts:298-302`). Showing nothing is the honest preview once the
   user has chosen a state.
 
+  > **Superseded 2026-10-11 (owner request, same day):** hover and keyboard
+  > focus now preview exactly what the next click would do — the whole query
+  > `cycleTagToken` would produce — including an exclusion, whose nodes leave
+  > the layout while hovered. The owner accepted that reflow ("show how it will
+  > look if clicked"). See the Notes addendum.
+
 - **What happens to the preview after a click.** **Nothing new — it is already
   cleared.** `Multigraph.svelte` sets `graphQueryPreviewText = null` on every
   committed query change (`:3797-3800`), and `activeGraphQueryText` falls back
@@ -160,6 +173,12 @@ null`. Reading the effective mode keeps the button and the graph in
   over a button whose tag now has no token, but no preview appears until the
   pointer leaves and re-enters. Accepted: the click just removed the tag, and
   re-spotlighting it under the pointer would contradict that.
+
+  > **Still holds after the 2026-10-11 revision**, and matters more: the click
+  > commits the previewed text verbatim, so the canvas does not move on the
+  > click, and not re-previewing afterwards keeps a spotlight → exclude click
+  > from immediately previewing the removal and bringing the nodes straight
+  > back under the pointer.
 
 - **No hint line explaining the cycle.** **None.** The label changes on every
   click (`#lab` → `+#lab` → `-#lab` → `#lab`), which teaches the cycle in the
@@ -441,3 +460,37 @@ agent can carry them as two commits in one session.
   - The offline shell was **not** regenerated in T04: it will be rebuilt once,
     after all four 2026-10-11 plans land, so `check:offline-shell` is still
     owed for this plan's `src/**` changes.
+- 2026-10-11 (later the same day): the owner revised two resolutions, and this
+  addendum supersedes them; the text above is left as it was decided.
+  - **The cycle skips plain focus.** A button now walks none → `+#tag`
+    (spotlight) → `-#tag` (exclude) → none, and a tag with no token appends
+    `+#tag`. A hand-typed `#tag` still counts as in the query (`aria-pressed`
+    true, `data-mode="focus"`, "in focus") and its next click gives `+#tag`.
+    `NEXT_MODE` in `lib/queryTokenCycle.ts` keeps focus → spotlight → exclude
+    → null; only the no-token branch changed. `tagTokenMode` is unchanged.
+    Labels are unchanged: the resting label is the bare `#tag`, the pressed
+    ones `+#tag` / `-#tag`.
+  - **Hover and keyboard focus preview exactly what the next click would do.**
+    `previewTag` previews `cycleTagToken(query, target, tag)`: a tag with no
+    token previews `+#tag` as before, a spotlit tag previews its exclusion, an
+    excluded tag previews the query without it. The panel's `previewToken`
+    (which appended) became `previewQuery`, which passes a whole query. The
+    owner accepted that a previewed exclusion takes nodes out of the layout on
+    hover. `Multigraph.svelte`'s exclusion effect already keys on
+    `activeGraphQueryText` (preview, else committed), so a preview exclusion
+    fades the leavers and settles the rest, and leaving the button grows them
+    back the same way; a click commits the previewed text verbatim, so it
+    changes nothing further. No debounce: the owner will ask for one if hover
+    flicker bites.
+  - Specs and stories follow the new order.
+    `HoverPreviewsSpotlightOnlyForATagNotInTheQuery` became
+    `HoverPreviewsWhatTheNextClickWouldDo`; new
+    `UserCyclesATypedFocusTagOnToSpotlight` (panel) and
+    `UserHoversAnExcludedTagAndPreviewsItsRemoval` (canvas);
+    `UserCyclesNodeTagButtonIntoQuery` now walks spotlight → exclude (the
+    nodes leave) → none (they return).
+  - Ruling:
+    `docs/ui-decisions/2026-10-11--pointer--a-tag-button-cycles-spotlight-and-exclude-and-hover-previews-the-next-click.md`,
+    which supersedes
+    `docs/ui-decisions/2026-10-11--pointer--a-tag-button-cycles-its-token-and-hover-never-excludes.md`.
+  - The offline shell is owed again for these `src/**` changes.

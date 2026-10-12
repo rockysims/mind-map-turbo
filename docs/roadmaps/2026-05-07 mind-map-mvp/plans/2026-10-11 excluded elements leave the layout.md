@@ -160,6 +160,13 @@ needed any.
   effect does not fire. T01 pins this with a spec and T04 with a story, so a
   future exclude-preview cannot quietly start reflowing on hover.
 
+  > **Revised 2026-10-11 (owner request, same day):** a tag button's hover now
+  > previews its next click, so hovering a spotlit or excluded tag previews its
+  > exclusion or removal and reflows on purpose; the settle effect handles it as
+  > any query edit. Hovering a tag not in the query still previews only a `+`
+  > token and still reflows nothing — the spec and story above pin that case.
+  > See the query tag buttons plan's Notes.
+
 - **Jumping to an excluded node.** **The jump wins: a node held on screen by
   `transientReveal` is exempt from exclusion for as long as its nav entry holds
   it.** `jumpToNode` (`Multigraph.svelte:2040`) is offered from node details for

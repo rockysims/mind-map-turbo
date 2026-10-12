@@ -97,8 +97,9 @@ Planned and executed 2026-10-11 as four standalone plans (all `done`) in
 disjoint and may run in parallel):
 
 - `2026-10-11 query tag buttons cycle modes.md` — a Find / Filter tag button
-  cycles its token none → `#tag` → `+#tag` → `-#tag` → none, editing the typed
-  query in place.
+  cycles its token none → `+#tag` → `-#tag` → none (plain `#tag` dropped from
+  the cycle the same day), editing the typed query in place; hover previews
+  the next click.
 - `2026-10-11 excluded elements leave the layout.md` — `-#tag` / `-@tag`
   removes the matches from physics, hops, beacons, occlusion, focus and fit,
   not just from the paint (reverses milestone 05's mask-only ruling).

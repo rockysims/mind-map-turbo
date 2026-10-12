@@ -5563,7 +5563,7 @@
 			}
 		}),
 		defaultPrimaryNodeId: 'n0',
-		layoutSettings: { relaxIterations: 0 }
+		layoutSettings: EXCLUSION_STORY_LAYOUT
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
@@ -5574,23 +5574,34 @@
 		const topicButton = () => canvas.getByRole('button', { name: /^Node tag topic,/ });
 		const input = canvas.getByLabelText('Graph query') as HTMLInputElement;
 
-		// One click puts the tag into the query, and the canvas focuses on it.
-		topicButton().click();
-		await sleep();
-		expect(input).toHaveValue('#topic');
-		expect(topicButton()).toHaveAttribute('data-mode', 'focus');
-		expect(getNodeWrapper(canvasElement, 'n0')).toHaveAttribute('data-query-role', 'focus');
-		expect(getNodeWrapper(canvasElement, 'n1')).toHaveAttribute('data-query-role', 'focus');
-		expect(getNodeWrapper(canvasElement, 'n2')).toHaveAttribute('data-query-role', 'background');
-
-		// A second click on the same button escalates the token to a spotlight.
-		// The story stops here: what exclude does to the layout is another plan's.
+		// One click puts the tag into the query as a spotlight: plain focus is not
+		// a stop on the cycle.
 		topicButton().click();
 		await sleep();
 		expect(input).toHaveValue('+#topic');
 		expect(topicButton()).toHaveAttribute('data-mode', 'spotlight');
 		expect(getNodeWrapper(canvasElement, 'n0')).toHaveAttribute('data-query-role', 'spotlight');
 		expect(getNodeWrapper(canvasElement, 'n1')).toHaveAttribute('data-query-role', 'spotlight');
+		expect(nodeIsDrawn(canvasElement, 'n2')).toBe(true);
+
+		// A second click excludes the tag, and its nodes leave the canvas.
+		topicButton().click();
+		await sleep();
+		expect(input).toHaveValue('-#topic');
+		expect(topicButton()).toHaveAttribute('data-mode', 'exclude');
+		await waitForLayout();
+		expect(nodeIsDrawn(canvasElement, 'n0')).toBe(false);
+		expect(nodeIsDrawn(canvasElement, 'n1')).toBe(false);
+		expect(nodeIsDrawn(canvasElement, 'n2')).toBe(true);
+
+		// A third click forgets the tag, and they come back.
+		topicButton().click();
+		await sleep();
+		expect(input).toHaveValue('');
+		expect(topicButton()).toHaveAttribute('data-mode', 'none');
+		await waitForLayout();
+		expect(nodeIsDrawn(canvasElement, 'n0')).toBe(true);
+		expect(nodeIsDrawn(canvasElement, 'n1')).toBe(true);
 	}}
 />
 
@@ -5908,6 +5919,8 @@
 		);
 		const restingPositions = nodePositions(canvasElement, ['n0', 'n2']);
 
+		// `keep` is not in the query, so hovering it previews `+#keep`: a spotlight
+		// cannot un-exclude anything, so the excluded set and the layout stay put.
 		const keepButton = within(canvasElement).getByRole('button', { name: /^Node tag keep,/ });
 		keepButton.dispatchEvent(new MouseEvent('mouseenter'));
 		await tick();
@@ -5925,6 +5938,55 @@
 		await waitForFrames(3);
 		expect(canvasElement.querySelector('.graph')).not.toHaveAttribute('data-settling');
 		expect(nodePositions(canvasElement, ['n0', 'n2'])).toEqual(restingPositions);
+	}}
+/>
+
+<Story
+	name="UserHoversAnExcludedTagAndPreviewsItsRemoval"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'n0', title: 'Keep', description: '', tags: ['keep'] },
+				{ id: 'n1', title: 'Hide', description: '', tags: ['hide'] },
+				{ id: 'n2', title: 'Other', description: '', tags: [] }
+			],
+			pinned: ['n0', 'n1'],
+			edges: [
+				{ source: 'n0', target: 'n1', tags: ['rel'] },
+				{ source: 'n1', target: 'n2', tags: ['rel'] },
+				{ source: 'n0', target: 'n2', tags: ['rel'] }
+			],
+			posByNodeId: { n0: { x: -800, y: 0 }, n1: { x: 800, y: 0 }, n2: { x: 0, y: 0 } },
+			tagColorConfig: {
+				nodeTags: { hide: '#ff0000', keep: '#00ff00' },
+				edgeTags: { rel: '#0000ff' }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { ...EXCLUSION_STORY_LAYOUT, postDragSettleMaxFrames: 30 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		await typeGraphQuery(canvasElement, '-#hide');
+		await waitForLayout();
+		expect(nodeIsDrawn(canvasElement, 'n1')).toBe(false);
+
+		const canvas = within(canvasElement);
+		const hideButton = canvas.getByRole('button', { name: /^Node tag hide,/ });
+		expect(hideButton).toHaveAttribute('data-mode', 'exclude');
+
+		// Hovering previews what the click would do — drop `-#hide` — so the
+		// hidden node comes back while the pointer is there...
+		hideButton.dispatchEvent(new MouseEvent('mouseenter'));
+		await waitFor(() => expect(nodeIsDrawn(canvasElement, 'n1')).toBe(true));
+		// ...without committing anything.
+		expect(canvas.getByLabelText('Graph query')).toHaveValue('-#hide');
+		expect(hideButton).toHaveAttribute('data-mode', 'exclude');
+
+		// Leaving drops the preview, and the node leaves again.
+		hideButton.dispatchEvent(new MouseEvent('mouseleave'));
+		await waitFor(() => expect(nodeIsDrawn(canvasElement, 'n1')).toBe(false));
+		expect(canvas.getByLabelText('Graph query')).toHaveValue('-#hide');
 	}}
 />
 
