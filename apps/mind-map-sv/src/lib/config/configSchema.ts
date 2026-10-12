@@ -26,15 +26,16 @@ export type FieldSpec =
 	| {
 			/**
 			 * A string leaf that takes one of a fixed set of values. `value` is what
-			 * is stored; `label` is the reader's word for it. Like a toggle, a change
-			 * commits at once and never previews.
+			 * is stored; `label` is the reader's word for it; an option's `help`
+			 * follows the field's own help while that option is chosen. Like a
+			 * toggle, a change commits at once and never previews.
 			 */
 			control: 'select';
 			label: string;
 			help?: string;
 			tier: Tier;
 			preview: Preview;
-			options: readonly { value: string; label: string }[];
+			options: readonly { value: string; label: string; help?: string }[];
 	  }
 	| {
 			control: 'range';
@@ -252,19 +253,36 @@ export const CONFIG_SCHEMA: { [K in ConfigPath]: FieldSpec } = {
 		// A select commits on change and never previews; `instant` says the
 		// canvas redraws the moment it commits.
 		preview: 'instant',
+		// Each label names its scale. A node's `sizeBytes` is not offered: it
+		// describes the thing the node stands for, and stays a details line only.
 		options: [
-			{ value: 'none', label: 'Nothing' },
-			{ value: 'size', label: 'Size' },
-			{ value: 'weight', label: 'Node weight' },
-			{ value: 'degree', label: 'Edge count' },
-			{ value: 'attachments', label: 'Attachments' },
-			{ value: 'descriptionLength', label: 'Description length' }
+			{ value: 'none', label: 'Nothing', help: 'Every node draws the normal border.' },
+			{
+				value: 'weight',
+				label: 'Node weight (linear)',
+				help: 'The number the graph’s importer ranked each node by; a weight of 0 draws the thinnest border and no weight the normal one. Linear: twice the reference draws twice the border.'
+			},
+			{
+				value: 'degree',
+				label: 'Edge count (linear)',
+				help: 'Edges drawn to and from the node; a node with none draws the thinnest border. Linear: twice the reference draws twice the border.'
+			},
+			{
+				value: 'attachmentBytes',
+				label: 'Attachment size (logarithmic)',
+				help: 'Total size of the node’s attachments; no attachments draws the thinnest border. Logarithmic: each doubling adds the width below.'
+			},
+			{
+				value: 'descriptionLength',
+				label: 'Description length (logarithmic)',
+				help: 'Characters in the node’s description; no description draws the thinnest border. Logarithmic: each doubling adds the width below.'
+			}
 		]
 	},
 	'multigraph.borderWeight.widthPerDoubling': {
 		control: 'range',
-		label: 'Width per doubling',
-		help: 'How much thicker the border gets each time the value doubles.',
+		label: 'Width per doubling (logarithmic sources)',
+		help: 'How much thicker the border gets each time the value doubles. Only attachment size and description length use it.',
 		tier: 'basic',
 		preview: 'instant',
 		min: 0,
@@ -293,17 +311,6 @@ export const CONFIG_SCHEMA: { [K in ConfigPath]: FieldSpec } = {
 		step: 0.1,
 		unit: '×'
 	},
-	'multigraph.borderReference.size': {
-		control: 'number',
-		label: 'Reference size',
-		help: BORDER_REFERENCE_HELP,
-		tier: 'basic',
-		preview: 'instant',
-		min: 1,
-		step: 1024,
-		integer: true,
-		unit: 'B'
-	},
 	// No `min`: weights can be fractional and of any scale, `number` bounds clamp
 	// hard, and there is no honest smallest positive weight. A reference ≤ 0
 	// already draws the normal border.
@@ -324,15 +331,16 @@ export const CONFIG_SCHEMA: { [K in ConfigPath]: FieldSpec } = {
 		step: 1,
 		integer: true
 	},
-	'multigraph.borderReference.attachments': {
+	'multigraph.borderReference.attachmentBytes': {
 		control: 'number',
-		label: 'Reference attachment count',
+		label: 'Reference attachment size',
 		help: BORDER_REFERENCE_HELP,
 		tier: 'basic',
 		preview: 'instant',
 		min: 1,
-		step: 1,
-		integer: true
+		step: 1024,
+		integer: true,
+		unit: 'B'
 	},
 	'multigraph.borderReference.descriptionLength': {
 		control: 'number',

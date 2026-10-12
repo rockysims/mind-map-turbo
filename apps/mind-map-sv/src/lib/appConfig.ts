@@ -79,22 +79,23 @@ export const APP_CONFIG = {
 		nodeTextFontSizePx: 38, // default title and description font size
 		nodeBorderWidthPx: 8, // default node border width
 		minNodeHitRadiusPx: 32, // minimum tap/hit target radius
-		// Border width can show one number per node on a bounded log scale:
-		// `clamp(1 + widthPerDoubling * log2(value / reference), minFactor, maxFactor)`
-		// multiplies the border width above. `source` picks the number; a node with
-		// no value for it draws the widths as-is.
+		// Border width can show one number per node, on the scale its source names,
+		// as a multiple of the border width above clamped to [minFactor, maxFactor]:
+		// linear `value / reference` (weight, degree) or logarithmic
+		// `1 + widthPerDoubling * log2(value / reference)` (attachmentBytes,
+		// descriptionLength). A value of 0 draws the thinnest border; a node with no
+		// value for the source draws the widths as-is.
 		borderWeight: {
-			source: 'size', // none | size | weight | degree | attachments | descriptionLength
-			widthPerDoubling: 0.15, // factor added each time the value doubles
+			source: 'none', // none | weight | degree | attachmentBytes | descriptionLength
+			widthPerDoubling: 0.15, // factor added each time the value doubles (logarithmic sources)
 			minFactor: 0.5, // thinnest border, as a multiple of the configured width
 			maxFactor: 3 // thickest border, as a multiple of the configured width
 		},
 		// The value that draws exactly the configured border, per source.
 		borderReference: {
-			size: 1048576, // bytes (1 MiB)
 			weight: 1,
 			degree: 3, // edges
-			attachments: 1,
+			attachmentBytes: 1048576, // total bytes attached (1 MiB)
 			descriptionLength: 200 // characters
 		},
 		edgeArrow: {

@@ -189,18 +189,19 @@ export interface NodeData {
 	/**
 	 * Size in bytes of the external thing this node stands for — the web page,
 	 * the PDF on Canvas, the file on disk — written by the importer or scraper
-	 * that built the graph. Not the node's own attachments. Drawn as border width
-	 * on a bounded log scale. Absent means unknown; so does `0`, which is what a
-	 * scraper writes when it could not measure. Load drops any value that is not
-	 * a finite number ≥ 0.
+	 * that built the graph. Not the node's own attachments. Shown as a line in the
+	 * node's details; it does not drive the border (the "Attachment size" border
+	 * source sums the attachments instead). Absent means unknown; so does `0`,
+	 * which is what a scraper writes when it could not measure. Load drops any
+	 * value that is not a finite number ≥ 0.
 	 */
 	sizeBytes?: number;
 	/**
 	 * Whatever number the importer or scraper that built the graph chose to rank
 	 * nodes by — word count, importance, citations. The graph's `weightConfig`
-	 * names it for the details view. Unlike `sizeBytes`, `0` is a real value
-	 * ("weighs nothing") and draws the thinnest border when border width shows
-	 * weight; absent means unknown. Must be a finite number ≥ 0: load drops
+	 * names it for the details view. `0` is a real value ("weighs nothing") and
+	 * draws the thinnest border when border width shows weight; absent means
+	 * unknown. Must be a finite number ≥ 0: load drops
 	 * anything else.
 	 */
 	weight?: number;

@@ -384,7 +384,7 @@
 
 <!--
 	The border source is the panel's first select. It leads its own "Border
-	weight" section, and the five per-source references sit directly under it in
+	weight" section, and the four per-source references sit directly under it in
 	a sibling "Border reference" section (a nested `reference` group would be
 	headed just "Reference").
 -->
@@ -402,16 +402,17 @@
 
 		const select = within(weight).getByRole('combobox', { name: 'Border shows' });
 		if (!(select instanceof HTMLSelectElement)) throw new Error('Border shows is not a select');
+		// Each source names its scale (owner ruling, 2026-10-12), and borders show
+		// nothing until a reader picks one.
 		expect([...select.options].map((option) => option.textContent?.trim())).toEqual([
 			'Nothing',
-			'Size',
-			'Node weight',
-			'Edge count',
-			'Attachments',
-			'Description length'
+			'Node weight (linear)',
+			'Edge count (linear)',
+			'Attachment size (logarithmic)',
+			'Description length (logarithmic)'
 		]);
-		expect(select.value).toBe('size');
-		expect(select.selectedOptions[0]?.textContent?.trim()).toBe('Size');
+		expect(select.value).toBe('none');
+		expect(select.selectedOptions[0]?.textContent?.trim()).toBe('Nothing');
 
 		const reference = sectionEl(canvasElement, 'basic:multigraph.borderReference');
 		expect(weight.nextElementSibling).toBe(reference);
@@ -420,10 +421,9 @@
 		);
 		const boxes = within(reference).getAllByRole('spinbutton');
 		expect(boxes.map((box) => box.getAttribute('aria-label'))).toEqual([
-			'Reference size',
 			'Reference node weight',
 			'Reference edge count',
-			'Reference attachment count',
+			'Reference attachment size',
 			'Reference description length'
 		]);
 	}}

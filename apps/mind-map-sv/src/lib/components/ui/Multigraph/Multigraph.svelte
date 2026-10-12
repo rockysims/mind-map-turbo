@@ -258,7 +258,7 @@
 		type NodeFrameLayout
 	} from './lib/frameGeometry.js';
 	import { borderFactorForNode } from './lib/borderWeight.js';
-	import { authoredDegrees } from './lib/nodeWeight.js';
+	import { authoredDegrees, type BorderInputs } from './lib/nodeWeight.js';
 	import { interpolateMorph } from './lib/morphGeometry.js';
 	import { importRevealTargetNodeId } from './lib/importRevealTarget.js';
 	import {
@@ -560,7 +560,7 @@
 	function nodeChromeFor(node: NodeData): typeof nodeChromeTunables {
 		const factor = borderFactorForNode(
 			node,
-			degreeByNodeId,
+			borderInputs,
 			cfg.multigraph.borderWeight,
 			cfg.multigraph.borderReference
 		);
@@ -597,6 +597,19 @@
 	const degreeByNodeId = $derived(
 		borderSource === 'degree' ? authoredDegrees(authoredEdges) : EMPTY_DEGREES
 	);
+	const EMPTY_ASSETS: Readonly<Record<string, GraphAssetMetadata>> = Object.freeze({});
+	/**
+	 * The graph's asset map, for the "Attachment size" border source. Its own
+	 * derived for the same reason as `authoredEdges`: `mergeVisiblePositions`
+	 * carries `assets` across a relax frame by reference, so this keeps its
+	 * identity on position-only frames.
+	 */
+	const graphAssets = $derived(graph.assets ?? EMPTY_ASSETS);
+	/**
+	 * What the computed border sources read besides the node. Built from two
+	 * identity-stable maps, so it is not rebuilt per frame.
+	 */
+	const borderInputs = $derived<BorderInputs>({ degrees: degreeByNodeId, assets: graphAssets });
 	let primaryNodeId = $state('');
 	let activeDragNodeId = $state<string | null>(null);
 	let editNodeId = $state<string | null>(null);

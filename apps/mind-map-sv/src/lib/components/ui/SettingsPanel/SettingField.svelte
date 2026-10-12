@@ -68,6 +68,20 @@
 				return typeof value === 'number' ? { kind: 'number', spec, value } : null;
 		}
 	});
+
+	/**
+	 * The field's help, followed by the chosen option's own help for a select,
+	 * so the line under "Border shows" says what the chosen source measures.
+	 */
+	const helpText = $derived.by<string | undefined>(() => {
+		if (view === null) return undefined;
+		const optionHelp =
+			view.kind === 'select'
+				? view.spec.options.find((option) => option.value === view.value)?.help
+				: undefined;
+		const parts = [view.spec.help, optionHelp].filter((part) => part !== undefined && part !== '');
+		return parts.length > 0 ? parts.join(' ') : undefined;
+	});
 </script>
 
 {#if view}
@@ -87,8 +101,8 @@
 			{/if}
 		</div>
 
-		{#if view.spec.help}
-			<p class="help">{view.spec.help}</p>
+		{#if helpText}
+			<p class="help">{helpText}</p>
 		{/if}
 
 		{#if view.kind === 'toggle'}
@@ -103,7 +117,7 @@
 		{:else if view.kind === 'select'}
 			<SettingSelect
 				label={view.spec.label}
-				help={view.spec.help}
+				help={helpText}
 				options={view.spec.options}
 				value={view.value}
 				{isModified}

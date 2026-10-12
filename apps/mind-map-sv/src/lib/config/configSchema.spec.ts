@@ -75,9 +75,9 @@ describe('CONFIG_SCHEMA', () => {
 		expect(unknown).toEqual([]);
 	});
 
-	it('covers exactly the 114 shipped leaves', () => {
-		expect(runtimeLeafPaths).toHaveLength(114);
-		expect(schemaPaths).toHaveLength(114);
+	it('covers exactly the 113 shipped leaves', () => {
+		expect(runtimeLeafPaths).toHaveLength(113);
+		expect(schemaPaths).toHaveLength(113);
 	});
 
 	it('keeps every range default inside its own slider bounds', () => {
@@ -195,6 +195,32 @@ describe('CONFIG_SCHEMA', () => {
 			})
 			.map(([path]) => path);
 		expect(malformed).toEqual([]);
+	});
+
+	// Owner ruling 2026-10-12: four sources plus "Nothing", each naming its scale,
+	// and no size or attachment-count source.
+	it('offers the four border sources, each labelled with its scale', () => {
+		const spec = CONFIG_SCHEMA['multigraph.borderWeight.source'];
+		if (spec.control !== 'select') throw new Error('Border shows is not a select');
+		expect(spec.options.map(({ value, label }) => [value, label])).toEqual([
+			['none', 'Nothing'],
+			['weight', 'Node weight (linear)'],
+			['degree', 'Edge count (linear)'],
+			['attachmentBytes', 'Attachment size (logarithmic)'],
+			['descriptionLength', 'Description length (logarithmic)']
+		]);
+		for (const option of spec.options) expect(option.help).toBeTruthy();
+		expect(readAtPath('multigraph.borderWeight.source')).toBe('none');
+	});
+
+	it('gives every valued border source a reference, and nothing else', () => {
+		const spec = CONFIG_SCHEMA['multigraph.borderWeight.source'];
+		if (spec.control !== 'select') throw new Error('Border shows is not a select');
+		const valued = spec.options.map((option) => option.value).filter((value) => value !== 'none');
+		const references = schemaPaths
+			.filter((path) => path.startsWith('multigraph.borderReference.'))
+			.map((path) => path.slice('multigraph.borderReference.'.length));
+		expect(references.sort()).toEqual(valued.sort());
 	});
 });
 

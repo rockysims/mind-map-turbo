@@ -58,6 +58,18 @@
 		options: SELECT_OPTIONS
 	};
 
+	const NONE_HELP = 'Every node draws the normal border.';
+	const DEGREE_HELP = 'Edges drawn to and from the node. Linear.';
+	/** The same select, with a help line per option for the help-follows-choice story. */
+	const SELECT_SPEC_WITH_OPTION_HELP: FieldSpec = {
+		...SELECT_SPEC,
+		options: [
+			{ value: 'none', label: 'Nothing', help: NONE_HELP },
+			{ value: 'size', label: 'Size' },
+			{ value: 'degree', label: 'Edge count', help: DEGREE_HELP }
+		]
+	};
+
 	function getHarness(canvasElement: HTMLElement): HTMLElement {
 		const harness = canvasElement.querySelector('.harness');
 		if (!(harness instanceof HTMLElement)) throw new Error('Harness not found');
@@ -388,6 +400,36 @@
 		expect(getHarness(canvasElement).querySelector('[data-control="select"]')).not.toBeNull();
 		// The box is the whole hit area, so it holds the 44px touch floor.
 		expect(select.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+	}}
+/>
+
+<!--
+	An option's own help follows the field's help while that option is chosen,
+	both in the visible help line and in the select's tooltip; an option with no
+	help leaves the field's help alone.
+-->
+<Story
+	name="TheHelpLineFollowsTheChosenOption"
+	args={{
+		path: SELECT_PATH,
+		spec: SELECT_SPEC_WITH_OPTION_HELP,
+		defaultValue: 'none'
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const helpLine = () => canvasElement.querySelector('.help');
+		const select = getSelect(canvasElement, SELECT_LABEL);
+
+		expect(helpLine()).toHaveTextContent(`${SELECT_HELP} ${NONE_HELP}`);
+		expect(select.title).toBe(`${SELECT_HELP} ${NONE_HELP}`);
+
+		await userEvent.selectOptions(select, 'degree');
+		await expectHarnessData(canvasElement, 'value', 'degree');
+		await waitFor(() => expect(helpLine()).toHaveTextContent(`${SELECT_HELP} ${DEGREE_HELP}`));
+		expect(getSelect(canvasElement, SELECT_LABEL).title).toBe(`${SELECT_HELP} ${DEGREE_HELP}`);
+
+		await userEvent.selectOptions(getSelect(canvasElement, SELECT_LABEL), 'size');
+		await expectHarnessData(canvasElement, 'value', 'size');
+		await waitFor(() => expect(helpLine()?.textContent?.trim()).toBe(SELECT_HELP));
 	}}
 />
 

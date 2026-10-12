@@ -2,14 +2,14 @@
  * The number about a node that its border width can show, per source, and how
  * a node's generic weight reads in its details.
  *
- * Pure: the canvas picks the source from settings and feeds the value through
- * the bounded log curve. A source returns `undefined` for "no value", which
- * draws the configured border as-is; a returned `0` is a real value and lands
- * on the curve's floor.
+ * Pure: the canvas picks the source from settings and `borderWeight.ts` maps
+ * the value onto that source's scale. A source returns `undefined` for "no
+ * value", which draws the configured border as-is; a returned `0` is a real
+ * value and draws the thinnest border.
  */
 
 import type { EdgeData } from '../../types/edge';
-import type { WeightConfig } from '../../types/multigraph';
+import type { GraphAssetMetadata, WeightConfig } from '../../types/multigraph';
 import type { NodeData } from '../../types/node';
 import { isDerivedEdgeId } from './derivedEdges';
 
@@ -17,23 +17,44 @@ import { isDerivedEdgeId } from './derivedEdges';
  * What border width can show. Settings hand the source over as a plain
  * `string` (config leaves widen their literals), so the public functions take
  * `string` and anything outside this union means "no value".
+ *
+ * `NodeData.sizeBytes` is deliberately not a source: it stays as data with its
+ * details line, but the border no longer draws it (owner ruling, 2026-10-12).
  */
-type BorderSource = 'none' | 'size' | 'weight' | 'degree' | 'attachments' | 'descriptionLength';
+type BorderSource = 'none' | 'weight' | 'degree' | 'attachmentBytes' | 'descriptionLength';
 
 type ValuedSource = Exclude<BorderSource, 'none'>;
 
+/**
+ * What the computed sources read besides the node itself. Both are built once
+ * per graph change, never per node or per frame: `degrees` from
+ * `authoredDegrees`, and `assets` is the graph's own asset map carried by
+ * reference.
+ */
+export type BorderInputs = {
+	readonly degrees: ReadonlyMap<string, number>;
+	readonly assets: Readonly<Record<string, GraphAssetMetadata>>;
+};
+
+/** Byte size an asset adds to its node's total; missing or bad metadata adds nothing. */
+function assetBytes(assets: BorderInputs['assets'], assetId: string): number {
+	// Own keys only, so an asset id of `'toString'` reads nothing.
+	if (!Object.prototype.hasOwnProperty.call(assets, assetId)) return 0;
+	const size = assets[assetId]?.size;
+	return typeof size === 'number' && Number.isFinite(size) && size > 0 ? size : 0;
+}
+
 const VALUE_BY_SOURCE: Readonly<
-	Record<ValuedSource, (node: NodeData, degrees: ReadonlyMap<string, number>) => number | undefined>
+	Record<ValuedSource, (node: NodeData, inputs: BorderInputs) => number | undefined>
 > = {
-	// A stored 0 is what a scraper writes when it could not measure, so it reads
-	// as unknown rather than as the thinnest border.
-	size: (node) => (node.sizeBytes === 0 ? undefined : node.sizeBytes),
-	// Unlike size, a weight of 0 is real: the node weighs nothing.
+	// A weight of 0 is real: the node weighs nothing. No weight is "unknown".
 	weight: (node) => node.weight,
-	// 0 is a real count for the three computed sources, never "unknown".
-	degree: (node, degrees) => degrees.get(node.id) ?? 0,
-	// Every content block is an image or a file, so every block is an attachment.
-	attachments: (node) => node.content?.length ?? 0,
+	// 0 is a real value for the three computed sources, never "unknown".
+	degree: (node, { degrees }) => degrees.get(node.id) ?? 0,
+	// Every content block is an image or a file, and each names one asset; the
+	// total is what the reader would download to see the node in full.
+	attachmentBytes: (node, { assets }) =>
+		(node.content ?? []).reduce((total, block) => total + assetBytes(assets, block.assetId), 0),
 	// Raw stored text in UTF-16 code units: on a log scale, code points or
 	// trimming would not make a visible difference.
 	descriptionLength: (node) => node.description.length
@@ -73,16 +94,17 @@ export function authoredDegrees(edges: readonly EdgeData[]): ReadonlyMap<string,
 /**
  * The value `source` reads off `node`, or `undefined` when the node has none.
  *
- * `degrees` comes from `authoredDegrees` and is only read under `'degree'`.
- * `'none'` and any unknown source give `undefined`.
+ * `inputs.degrees` is only read under `'degree'` and `inputs.assets` only under
+ * `'attachmentBytes'`, so a caller may pass empty ones under every other
+ * source. `'none'` and any unknown source give `undefined`.
  */
 export function nodeBorderValue(
 	node: NodeData,
 	source: string,
-	degrees: ReadonlyMap<string, number>
+	inputs: BorderInputs
 ): number | undefined {
 	if (!isValuedSource(source)) return undefined;
-	return VALUE_BY_SOURCE[source](node, degrees);
+	return VALUE_BY_SOURCE[source](node, inputs);
 }
 
 /** Fixed locale: the UI is English, and stories need a deterministic "4,200". */

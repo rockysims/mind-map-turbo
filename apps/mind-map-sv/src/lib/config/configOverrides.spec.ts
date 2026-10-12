@@ -28,7 +28,7 @@ describe('setOverride', () => {
 	it('drops a select back to its default too', () => {
 		const degree = setOverride({}, 'multigraph.borderWeight.source', 'degree');
 		expect(degree).toEqual({ 'multigraph.borderWeight.source': 'degree' });
-		expect(setOverride(degree, 'multigraph.borderWeight.source', 'size')).toEqual({});
+		expect(setOverride(degree, 'multigraph.borderWeight.source', 'none')).toEqual({});
 	});
 
 	it('drops a boolean back to its default too', () => {
@@ -178,6 +178,16 @@ describe('clampToSchema', () => {
 		expect(clampToSchema('multigraph.borderWeight.source', null)).toBeUndefined();
 	});
 
+	// `size` and `attachments` were sources until the 2026-10-12 ruling replaced
+	// them with attachment size; a saved choice of either is not one of the options.
+	it('drops a retired border source rather than mapping it', () => {
+		expect(clampToSchema('multigraph.borderWeight.source', 'size')).toBeUndefined();
+		expect(clampToSchema('multigraph.borderWeight.source', 'attachments')).toBeUndefined();
+		expect(clampToSchema('multigraph.borderWeight.source', 'attachmentBytes')).toBe(
+			'attachmentBytes'
+		);
+	});
+
 	it('drops hidden fields, which no panel can edit', () => {
 		expect(clampToSchema('persistence.saveDebounceMs', 1000)).toBeUndefined();
 		expect(clampToSchema('multigraph.tagSyntax.nodeTagMarker', '%')).toBeUndefined();
@@ -211,7 +221,22 @@ describe('sanitizeOverrides', () => {
 		});
 		expect(overrides).toEqual({});
 		expect(warnings).toEqual([
-			'Setting "multigraph.borderWeight.source" was dropped: expected one of: none, size, weight, degree, attachments, descriptionLength.'
+			'Setting "multigraph.borderWeight.source" was dropped: expected one of: none, weight, degree, attachmentBytes, descriptionLength.'
+		]);
+	});
+
+	it('drops overrides of the retired size and attachment-count border settings', () => {
+		const { overrides, warnings } = sanitizeOverrides({
+			'multigraph.borderWeight.source': 'size',
+			'multigraph.borderReference.size': 2048,
+			'multigraph.borderReference.attachments': 4,
+			'multigraph.borderReference.attachmentBytes': 2048
+		});
+		expect(overrides).toEqual({ 'multigraph.borderReference.attachmentBytes': 2048 });
+		expect(warnings).toEqual([
+			'Setting "multigraph.borderWeight.source" was dropped: expected one of: none, weight, degree, attachmentBytes, descriptionLength.',
+			'Unknown setting "multigraph.borderReference.size" was dropped.',
+			'Unknown setting "multigraph.borderReference.attachments" was dropped.'
 		]);
 	});
 

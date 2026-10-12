@@ -2,15 +2,21 @@ import { describe, expect, it } from 'vitest';
 import {
 	authoredDegrees,
 	formatNodeWeight,
+	type BorderInputs,
 	nodeBorderValue,
 	weightFromDraft,
 	weightName
 } from './nodeWeight';
 import { derivedEdgeId } from './derivedEdges';
 import { makeGraph } from './testFixtures';
+import type { GraphAssetMetadata } from '../../types/multigraph';
 import type { NodeContentBlock, NodeData } from '../../types/node';
 
-const NO_DEGREES: ReadonlyMap<string, number> = new Map();
+const NO_INPUTS: BorderInputs = { degrees: new Map(), assets: {} };
+
+function asset(id: string, size: number, kind: 'image' | 'file' = 'file'): GraphAssetMetadata {
+	return { id, kind, mimeType: kind === 'image' ? 'image/png' : 'text/plain', size, createdAt: 0 };
+}
 
 function node(overrides: Partial<NodeData> = {}): NodeData {
 	return { id: 'n', title: 'Node', description: '', tags: [], ...overrides };
@@ -89,71 +95,92 @@ describe('authoredDegrees', () => {
 });
 
 describe('nodeBorderValue', () => {
-	describe('size', () => {
-		it('reads sizeBytes', () => {
-			expect(nodeBorderValue(node({ sizeBytes: 2048 }), 'size', NO_DEGREES)).toBe(2048);
-		});
-
-		it('reads a stored 0 as unknown', () => {
-			expect(nodeBorderValue(node({ sizeBytes: 0 }), 'size', NO_DEGREES)).toBeUndefined();
-		});
-
-		it('has no value when the size is absent', () => {
-			expect(nodeBorderValue(node(), 'size', NO_DEGREES)).toBeUndefined();
-		});
-	});
-
 	describe('weight', () => {
 		it('reads weight', () => {
-			expect(nodeBorderValue(node({ weight: 12.5 }), 'weight', NO_DEGREES)).toBe(12.5);
+			expect(nodeBorderValue(node({ weight: 12.5 }), 'weight', NO_INPUTS)).toBe(12.5);
 		});
 
 		it('keeps a stored 0 as a real value', () => {
-			expect(nodeBorderValue(node({ weight: 0 }), 'weight', NO_DEGREES)).toBe(0);
+			expect(nodeBorderValue(node({ weight: 0 }), 'weight', NO_INPUTS)).toBe(0);
 		});
 
 		it('has no value when the weight is absent', () => {
-			expect(nodeBorderValue(node(), 'weight', NO_DEGREES)).toBeUndefined();
+			expect(nodeBorderValue(node(), 'weight', NO_INPUTS)).toBeUndefined();
 		});
 	});
 
 	describe('degree', () => {
 		it('reads the node’s count from the degree map', () => {
-			const degrees = new Map([['n', 4]]);
-			expect(nodeBorderValue(node(), 'degree', degrees)).toBe(4);
+			const inputs = { ...NO_INPUTS, degrees: new Map([['n', 4]]) };
+			expect(nodeBorderValue(node(), 'degree', inputs)).toBe(4);
 		});
 
 		it('reads a node missing from the map as 0', () => {
-			expect(nodeBorderValue(node(), 'degree', new Map([['other', 9]]))).toBe(0);
+			const inputs = { ...NO_INPUTS, degrees: new Map([['other', 9]]) };
+			expect(nodeBorderValue(node(), 'degree', inputs)).toBe(0);
 		});
 	});
 
-	describe('attachments', () => {
-		it('counts content blocks', () => {
+	describe('attachmentBytes', () => {
+		it('sums the sizes of every attached asset, images and files alike', () => {
 			const withFiles = node({
-				content: [FILE_BLOCK, { type: 'image', assetId: 'a2', alt: 'A chart' }, FILE_BLOCK]
+				content: [FILE_BLOCK, { type: 'image', assetId: 'a2', alt: 'A chart' }]
 			});
-			expect(nodeBorderValue(withFiles, 'attachments', NO_DEGREES)).toBe(3);
+			const assets = {
+				a1: asset('a1', 1000),
+				a2: asset('a2', 24, 'image'),
+				other: asset('other', 7)
+			};
+			expect(nodeBorderValue(withFiles, 'attachmentBytes', { ...NO_INPUTS, assets })).toBe(1024);
+		});
+
+		it('counts an asset twice when two blocks show it', () => {
+			const twice = node({ content: [FILE_BLOCK, FILE_BLOCK] });
+			const assets = { a1: asset('a1', 512) };
+			expect(nodeBorderValue(twice, 'attachmentBytes', { ...NO_INPUTS, assets })).toBe(1024);
 		});
 
 		it('reads a node with no content as 0', () => {
-			expect(nodeBorderValue(node(), 'attachments', NO_DEGREES)).toBe(0);
-			expect(nodeBorderValue(node({ content: [] }), 'attachments', NO_DEGREES)).toBe(0);
+			expect(nodeBorderValue(node(), 'attachmentBytes', NO_INPUTS)).toBe(0);
+			expect(nodeBorderValue(node({ content: [] }), 'attachmentBytes', NO_INPUTS)).toBe(0);
+		});
+
+		it('adds nothing for a block whose asset has no metadata, or bad metadata', () => {
+			const subject = node({
+				content: [
+					FILE_BLOCK,
+					{ type: 'file', assetId: 'missing', name: 'gone.pdf' },
+					{ type: 'file', assetId: 'toString', name: 'proto.pdf' },
+					{ type: 'file', assetId: 'nan', name: 'nan.pdf' },
+					{ type: 'file', assetId: 'negative', name: 'negative.pdf' }
+				]
+			});
+			const assets = {
+				a1: asset('a1', 300),
+				nan: asset('nan', Number.NaN),
+				negative: asset('negative', -50)
+			};
+			expect(nodeBorderValue(subject, 'attachmentBytes', { ...NO_INPUTS, assets })).toBe(300);
+		});
+
+		it('ignores sizeBytes, which describes the thing the node stands for', () => {
+			expect(nodeBorderValue(node({ sizeBytes: 2048 }), 'attachmentBytes', NO_INPUTS)).toBe(0);
 		});
 	});
 
 	describe('descriptionLength', () => {
 		it('counts the raw stored text, untrimmed', () => {
 			const described = node({ description: '  $x^2$ ' });
-			expect(nodeBorderValue(described, 'descriptionLength', NO_DEGREES)).toBe(8);
+			expect(nodeBorderValue(described, 'descriptionLength', NO_INPUTS)).toBe(8);
 		});
 
 		it('reads an empty description as 0', () => {
-			expect(nodeBorderValue(node(), 'descriptionLength', NO_DEGREES)).toBe(0);
+			expect(nodeBorderValue(node(), 'descriptionLength', NO_INPUTS)).toBe(0);
 		});
 	});
 
-	it.each([['none'], ['bogus'], ['toString'], ['']])(
+	// `size` and `attachments` were sources until 2026-10-12; they read nothing now.
+	it.each([['none'], ['size'], ['attachments'], ['bogus'], ['toString'], ['']])(
 		'has no value under %j, whatever the node carries',
 		(source) => {
 			const loaded = node({
@@ -162,7 +189,8 @@ describe('nodeBorderValue', () => {
 				content: [FILE_BLOCK],
 				description: 'text'
 			});
-			expect(nodeBorderValue(loaded, source, new Map([['n', 2]]))).toBeUndefined();
+			const inputs = { degrees: new Map([['n', 2]]), assets: { a1: asset('a1', 4096) } };
+			expect(nodeBorderValue(loaded, source, inputs)).toBeUndefined();
 		}
 	);
 });
