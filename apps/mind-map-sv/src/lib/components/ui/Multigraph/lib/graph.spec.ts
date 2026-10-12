@@ -534,13 +534,13 @@ describe('graph mutations', () => {
 		it('keeps the other namespace and the other tags when setting one', () => {
 			const graph = makeGraph({
 				nodeCount: 1,
-				tagPhysicsConfig: { nodeTags: { topic: 0.5 }, edgeTags: { rel: 2 } }
+				tagPhysicsConfig: { nodeTags: { topic: 1.5 }, edgeTags: { rel: 2 } }
 			});
 
 			const next = setTagPhysicsFactor(graph, 'edgeTags', 'cites', 3);
 
 			expect(next.tagPhysicsConfig).toEqual({
-				nodeTags: { topic: 0.5 },
+				nodeTags: { topic: 1.5 },
 				edgeTags: { rel: 2, cites: 3 }
 			});
 			expect(graph.tagPhysicsConfig?.edgeTags).toEqual({ rel: 2 });
@@ -549,12 +549,12 @@ describe('graph mutations', () => {
 		it('removes the key when set back to 1, leaving other keys in place', () => {
 			const graph = makeGraph({
 				nodeCount: 1,
-				tagPhysicsConfig: { nodeTags: { topic: 0.5 }, edgeTags: { rel: 2 } }
+				tagPhysicsConfig: { nodeTags: { topic: 1.5 }, edgeTags: { rel: 2 } }
 			});
 
 			const next = setTagPhysicsFactor(graph, 'edgeTags', 'rel', 1);
 
-			expect(next.tagPhysicsConfig).toEqual({ nodeTags: { topic: 0.5 }, edgeTags: {} });
+			expect(next.tagPhysicsConfig).toEqual({ nodeTags: { topic: 1.5 }, edgeTags: {} });
 		});
 
 		it('removes the whole field when the last factor goes back to 1', () => {
@@ -568,18 +568,32 @@ describe('graph mutations', () => {
 			expect('tagPhysicsConfig' in next).toBe(false);
 		});
 
-		it('clamps an out-of-range factor into [0.125, 8]', () => {
+		it('clamps a factor above the range to 8', () => {
 			const graph = makeGraph({ nodeCount: 1 });
 
 			expect(setTagPhysicsFactor(graph, 'nodeTags', 'topic', 9).tagPhysicsConfig?.nodeTags).toEqual(
 				{ topic: 8 }
 			);
-			expect(
-				setTagPhysicsFactor(graph, 'nodeTags', 'topic', 0.01).tagPhysicsConfig?.nodeTags
-			).toEqual({ topic: 0.125 });
-			expect(
-				setTagPhysicsFactor(graph, 'nodeTags', 'topic', -3).tagPhysicsConfig?.nodeTags
-			).toEqual({ topic: 0.125 });
+		});
+
+		// The floor is ×1, the default, so a factor below it clamps to 1 and
+		// removes the key exactly as setting 1 does.
+		it('removes the key for a factor below the ×1 floor', () => {
+			const tuned = makeGraph({
+				nodeCount: 1,
+				tagPhysicsConfig: { nodeTags: { topic: 2 }, edgeTags: { rel: 2 } }
+			});
+			const untuned = makeGraph({ nodeCount: 1 });
+
+			expect(setTagPhysicsFactor(tuned, 'nodeTags', 'topic', 0.5).tagPhysicsConfig).toEqual({
+				nodeTags: {},
+				edgeTags: { rel: 2 }
+			});
+			expect(setTagPhysicsFactor(tuned, 'nodeTags', 'topic', -3).tagPhysicsConfig).toEqual({
+				nodeTags: {},
+				edgeTags: { rel: 2 }
+			});
+			expect(setTagPhysicsFactor(untuned, 'nodeTags', 'topic', 0.01)).toBe(untuned);
 		});
 
 		it('returns the same object for a non-finite factor', () => {
@@ -615,14 +629,14 @@ describe('graph mutations', () => {
 		it('deleteTagEverywhere drops the factor and leaves the other namespace alone', () => {
 			const graph = makeGraph({
 				nodes: [{ id: 'n0', title: 'Node 0', description: '', tags: ['topic'] }],
-				tagPhysicsConfig: { nodeTags: { topic: 2, keep: 3 }, edgeTags: { topic: 0.5 } }
+				tagPhysicsConfig: { nodeTags: { topic: 2, keep: 3 }, edgeTags: { topic: 1.5 } }
 			});
 
 			const next = deleteTagEverywhere(graph, 'nodeTags', 'topic');
 
 			expect(next.tagPhysicsConfig).toEqual({
 				nodeTags: { keep: 3 },
-				edgeTags: { topic: 0.5 }
+				edgeTags: { topic: 1.5 }
 			});
 			expect(graph.tagPhysicsConfig?.nodeTags).toEqual({ topic: 2, keep: 3 });
 		});

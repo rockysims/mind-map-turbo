@@ -315,7 +315,7 @@ describe('importGraphData', () => {
 		it('keeps the host factor when both graphs tune the same tag name', () => {
 			const host = makeGraph({
 				nodeCount: 1,
-				tagPhysicsConfig: { nodeTags: { topic: 2 }, edgeTags: { supports: 0.5 } }
+				tagPhysicsConfig: { nodeTags: { topic: 2 }, edgeTags: { supports: 1.5 } }
 			});
 			const incoming = makeGraph({
 				nodeCount: 1,
@@ -326,7 +326,7 @@ describe('importGraphData', () => {
 
 			expect(next.tagPhysicsConfig).toEqual({
 				nodeTags: { topic: 2 },
-				edgeTags: { supports: 0.5 }
+				edgeTags: { supports: 1.5 }
 			});
 		});
 
@@ -337,14 +337,14 @@ describe('importGraphData', () => {
 			});
 			const incoming = makeGraph({
 				nodeCount: 1,
-				tagPhysicsConfig: { nodeTags: { idea: 1.5 }, edgeTags: { blocks: 0.75 } }
+				tagPhysicsConfig: { nodeTags: { idea: 1.5 }, edgeTags: { blocks: 3 } }
 			});
 
 			const { next } = importGraphData(host, incoming);
 
 			expect(next.tagPhysicsConfig).toEqual({
 				nodeTags: { topic: 2, idea: 1.5 },
-				edgeTags: { blocks: 0.75 }
+				edgeTags: { blocks: 3 }
 			});
 		});
 

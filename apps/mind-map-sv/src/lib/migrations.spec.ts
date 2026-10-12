@@ -206,7 +206,7 @@ describe('persisted graph migrations', () => {
 			const graph = makeGraph({
 				nodeCount: 1,
 				pinned: [0],
-				tagPhysicsConfig: { nodeTags: { topic: 0.25 }, edgeTags: { rel: 2, cites: 1.414 } }
+				tagPhysicsConfig: { nodeTags: { topic: 4 }, edgeTags: { rel: 2, cites: 1.414 } }
 			});
 
 			const loaded = unwrapPersistedGraph(JSON.parse(JSON.stringify(wrapPersistedGraph(graph))));
@@ -231,19 +231,42 @@ describe('persisted graph migrations', () => {
 				data: {
 					...graph,
 					tagPhysicsConfig: {
-						edgeTags: { a: 9, b: -1, c: 'x', d: 1, e: 0.5, f: 0.1, g: 8, h: 0.125 }
+						edgeTags: { a: 9, b: -1, c: 'x', d: 1, e: 1.5, f: 0.1, g: 8, h: 0.125 }
 					}
 				}
 			});
 
-			// The range is [0.125, 8]: both ends load as they are, past them clamps.
+			// The range is [1, 8]: 8 loads as it is and past it clamps; 1 is the
+			// default, so anything at or below it clamps to 1 and is dropped.
 			expect(loaded.tagPhysicsConfig).toEqual({
-				edgeTags: { a: 8, e: 0.5, f: 0.125, g: 8, h: 0.125 },
+				edgeTags: { a: 8, e: 1.5, g: 8 },
 				nodeTags: {}
 			});
 		});
 
-		it('drops non-finite and zero entries, clamps a tiny one, and empties a non-record map', () => {
+		it('drops a factor stored below the ×1 floor rather than keeping a clamped 1', () => {
+			const graph = makeGraph({ nodeCount: 1, pinned: [0] });
+
+			const loaded = unwrapPersistedGraph({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data: { ...graph, tagPhysicsConfig: { nodeTags: { b: 2 }, edgeTags: { a: 0.5 } } }
+			});
+
+			expect(loaded.tagPhysicsConfig).toEqual({ nodeTags: { b: 2 }, edgeTags: {} });
+		});
+
+		it('drops the whole field when its only factor is below the ×1 floor', () => {
+			const graph = makeGraph({ nodeCount: 1, pinned: [0] });
+
+			const loaded = unwrapPersistedGraph({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data: { ...graph, tagPhysicsConfig: { nodeTags: {}, edgeTags: { a: 0.5 } } }
+			});
+
+			expect(loaded).not.toHaveProperty('tagPhysicsConfig');
+		});
+
+		it('drops non-finite, zero and tiny entries, and empties a non-record map', () => {
 			const graph = makeGraph({ nodeCount: 1, pinned: [0] });
 
 			const loaded = unwrapPersistedGraph({
@@ -251,13 +274,19 @@ describe('persisted graph migrations', () => {
 				data: {
 					...graph,
 					tagPhysicsConfig: {
-						nodeTags: { zero: 0, tiny: 0.01, nan: Number.NaN, big: Number.POSITIVE_INFINITY },
+						nodeTags: {
+							zero: 0,
+							tiny: 0.01,
+							nan: Number.NaN,
+							big: Number.POSITIVE_INFINITY,
+							tuned: 2
+						},
 						edgeTags: 'not a record'
 					}
 				}
 			});
 
-			expect(loaded.tagPhysicsConfig).toEqual({ nodeTags: { tiny: 0.125 }, edgeTags: {} });
+			expect(loaded.tagPhysicsConfig).toEqual({ nodeTags: { tuned: 2 }, edgeTags: {} });
 		});
 
 		it('drops a field that sanitises to nothing', () => {

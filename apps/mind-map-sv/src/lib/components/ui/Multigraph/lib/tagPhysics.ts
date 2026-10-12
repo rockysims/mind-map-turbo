@@ -6,8 +6,12 @@ import type { NodeData } from '../../types/node';
  * The range a stored per-tag factor may take. Module constants rather than
  * `APP_CONFIG` entries: the range is part of what a saved value means, so a
  * setting that moved it would silently re-interpret every saved graph.
+ *
+ * The floor is ×1, the default: below it an edge length is contested by hop-1
+ * repulsion and a node spacing cannot pull at all (repulsion only pushes), so a
+ * factor under 1 did little but confuse. A tag can only be pushed further out.
  */
-export const TAG_PHYSICS_MIN_FACTOR = 0.125;
+export const TAG_PHYSICS_MIN_FACTOR = 1;
 export const TAG_PHYSICS_MAX_FACTOR = 8;
 
 /**
@@ -126,9 +130,10 @@ function roundTo(value: number, decimals: number): number {
 
 /**
  * Where a factor sits on the logarithmic slider: `log2(factor)`, snapped to the
- * slider step and clamped to the range's ends, so ×1 sits at the centre and
- * ×0.5 and ×2 sit equally far either side of it. A factor that is not finite
- * and positive reads as the centre — physics treats it as ×1 too.
+ * slider step and clamped to the range's ends, so ×1 sits at the left end and
+ * each doubling is the same distance along the track. A factor below the floor,
+ * or one that is not finite and positive, reads as the left end — physics
+ * treats it as ×1 too.
  */
 export function sliderPositionForFactor(
 	factor: number,

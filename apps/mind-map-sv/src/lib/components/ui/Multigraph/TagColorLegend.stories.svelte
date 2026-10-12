@@ -201,12 +201,12 @@
 		nodeSlider.dispatchEvent(new Event('change', { bubbles: true }));
 		expect(physicsSpy.mock.calls.at(-1)).toEqual(['nodeTags', 'topic', 2, 'commit']);
 
-		// Two notches down is ×0.25, not a quarter of the track; the ends are
-		// ×0.125 and ×8.
-		scrubSlider(nodeSlider, -2);
-		expect(physicsSpy.mock.calls.at(-1)).toEqual(['nodeTags', 'topic', 0.25, 'scrub']);
-		scrubSlider(nodeSlider, -3);
-		expect(physicsSpy.mock.calls.at(-1)).toEqual(['nodeTags', 'topic', 0.125, 'scrub']);
+		// The ends are ×1 (the default, at the left) and ×8; each notch between is
+		// a doubling, not a third of the track.
+		scrubSlider(nodeSlider, 0);
+		expect(physicsSpy.mock.calls.at(-1)).toEqual(['nodeTags', 'topic', 1, 'scrub']);
+		scrubSlider(nodeSlider, 1);
+		expect(physicsSpy.mock.calls.at(-1)).toEqual(['nodeTags', 'topic', 2, 'scrub']);
 		scrubSlider(nodeSlider, 3);
 		expect(physicsSpy.mock.calls.at(-1)).toEqual(['nodeTags', 'topic', 8, 'scrub']);
 	}}
@@ -232,7 +232,7 @@
 		expect(rowOf(edgeSlider)).toHaveTextContent('length ×1.4');
 		expect(rowOf(nodeSlider)).toHaveTextContent('spacing ×1.4');
 
-		// An untuned tag sits at the centre detent and reads ×1.0.
+		// An untuned tag sits at the left end, ×1, and reads ×1.0.
 		const untuned = sliderNamed(canvasElement, 'Node spacing for node tag fallback');
 		expect(untuned.value).toBe('0');
 		expect(rowOf(untuned)).toHaveTextContent('spacing ×1.0');
