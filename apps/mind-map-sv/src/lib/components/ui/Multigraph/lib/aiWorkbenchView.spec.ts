@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+	ancestorContextPreview,
+	availableRunModes,
 	defaultRunMode,
 	digestDisclosureLabel,
+	followUpDisabledReason,
+	followUpSubmitDisabledReason,
 	inputChangesNote,
+	modeNoticeLine,
 	prosePreviewLine,
+	resultRows,
 	stepStatusText,
 	stepsPreviewLine,
 	inputsChangedSince,
@@ -11,11 +17,15 @@ import {
 	runMetadataLine,
 	staleOutputNames,
 	IDLE_RUN_STATE,
-	type AiRunState
+	type AiRunState,
+	type RunModeAvailability,
+	type RunModeOptions
 } from './aiWorkbenchView';
+import { APP_CONFIG } from '$lib/appConfig';
+import type { AiAncestor } from './aiAncestry';
 import type { AiInput } from './aiInputs';
 import type { FileDigest } from '$lib/ai/probeScript';
-import type { AiAddon, AiRun, AiRunInput, AiRunOutput } from '../../types/node';
+import type { AiAddon, AiRun, AiRunInput, AiRunMode, AiRunOutput } from '../../types/node';
 
 const RUNTIME = '0.27.7';
 const STARTED = 1_700_000_000_000;
@@ -44,7 +54,15 @@ function output(name: string, assetId = `asset-${name}`): AiRunOutput {
 
 /** One attached file, as the workbench collects it. */
 function file(name: string, assetId = `asset-${name}`): AiInput {
-	return { kind: 'file', nodeId: 'bench', assetId, name, mimeType: 'text/csv', size: 2048 };
+	return {
+		kind: 'file',
+		nodeId: 'bench',
+		assetId,
+		name,
+		mimeType: 'text/csv',
+		size: 2048,
+		origin: 'attachment'
+	};
 }
 
 /** The same file, as a finished run recorded it. */
@@ -520,6 +538,102 @@ describe('defaultRunMode', () => {
 	});
 });
 
+/*
+ * The four states a node can be in once a follow-up can inherit a script, in
+ * one table, because the default and the availability have to agree: a mode the
+ * switch starts on and then refuses to offer is the one combination that cannot
+ * be right.
+ */
+describe('the mode rules across the four script states', () => {
+	const INHERITED = { inheritedScript: 'print(2)' };
+
+	/** A follow-up before its first run: a prompt and nothing else. */
+	const fresh = makeAddon({ prompt: 'now fit a line' });
+	/** A node that has run and kept the script that run wrote. */
+	const ranAndStored = makeAddon({
+		prompt: 'plot channel 2',
+		script: 'print(1)',
+		runs: [makeRun({ id: 'r1', prompt: 'plot channel 2' })]
+	});
+
+	/** The modes the switch may offer, in the order it draws them. */
+	function offered(ai: AiAddon, options?: RunModeOptions): AiRunMode[] {
+		return availableRunModes(ai, options)
+			.filter((entry) => entry.available)
+			.map((entry) => entry.mode);
+	}
+
+	/** One mode's entry — every mode has one, available or not, and this says so. */
+	function entryFor(ai: AiAddon, mode: AiRunMode, options?: RunModeOptions): RunModeAvailability {
+		const entry = availableRunModes(ai, options).find((candidate) => candidate.mode === mode);
+		if (entry === undefined) throw new Error(`expected the switch to list ${mode}`);
+		return entry;
+	}
+
+	function reasonFor(ai: AiAddon, mode: AiRunMode, options?: RunModeOptions): string | undefined {
+		return entryFor(ai, mode, options).reason;
+	}
+
+	it('no run and nothing to inherit: writes, and offers Write alone', () => {
+		expect(defaultRunMode(fresh)).toBe('analyse');
+		expect(offered(fresh)).toEqual(['analyse']);
+	});
+
+	it('an inherited script only: changes it, and offers Write and Change but not Run', () => {
+		expect(defaultRunMode(fresh, undefined, INHERITED)).toBe('refine');
+		expect(offered(fresh, INHERITED)).toEqual(['analyse', 'refine']);
+	});
+
+	it('a script of its own: keeps the rules it had, and offers all three', () => {
+		expect(defaultRunMode(ranAndStored)).toBe('rerun');
+		expect(offered(ranAndStored)).toEqual(['analyse', 'refine', 'rerun']);
+	});
+
+	it('both scripts: its own decides, and all three stay on offer', () => {
+		expect(defaultRunMode(ranAndStored, undefined, INHERITED)).toBe('rerun');
+		expect(offered(ranAndStored, INHERITED)).toEqual(['analyse', 'refine', 'rerun']);
+	});
+
+	it('lists every mode, available or not, in the order the switch draws them', () => {
+		expect(availableRunModes(fresh).map((entry) => entry.mode)).toEqual([
+			'analyse',
+			'refine',
+			'rerun'
+		]);
+	});
+
+	it('says Change needs a script when there is none to reach', () => {
+		expect(reasonFor(fresh, 'refine')).toBe('No stored script yet — write one first.');
+	});
+
+	it('says Run needs a script when there is none to reach', () => {
+		expect(reasonFor(fresh, 'rerun')).toBe('No stored script yet — write one first.');
+	});
+
+	it('tells a node with only an inherited script that Run needs one of its own', () => {
+		// A different sentence from the one above on purpose: telling a reader
+		// there is no script, on a node whose parent's script they can see, is a
+		// lie about the state they are looking at.
+		expect(reasonFor(fresh, 'rerun', INHERITED)).toBe(
+			"No stored script on this node yet — Change adapts the parent's and stores it here."
+		);
+	});
+
+	it('gives an available mode no reason to show', () => {
+		expect(reasonFor(fresh, 'analyse')).toBeUndefined();
+		expect(reasonFor(ranAndStored, 'rerun')).toBeUndefined();
+	});
+
+	it('leaves a node that has a script but no completed run on Write, inherited or not', () => {
+		// The existing rule, pinned against the new option: an inherited script
+		// only speaks for a node that has none of its own.
+		const scriptWithoutRun = makeAddon({ prompt: 'plot channel 2', script: 'print(1)' });
+
+		expect(defaultRunMode(scriptWithoutRun)).toBe('analyse');
+		expect(defaultRunMode(scriptWithoutRun, undefined, INHERITED)).toBe('analyse');
+	});
+});
+
 describe('staleOutputNames', () => {
 	it('reports nothing when nothing is promoted', () => {
 		const ai = makeAddon({ runs: [makeRun({ id: 'r1', outputs: [output('fig.png')] })] });
@@ -690,5 +804,139 @@ describe('stepsPreviewLine', () => {
 		expect(stepStatusText(null)).toBe('running');
 		expect(stepStatusText(0)).toBe('finished');
 		expect(stepStatusText(2)).toBe('failed, exit 2');
+	});
+});
+
+describe('the notice line under the mode switch', () => {
+	it('says nothing when every mode is available', () => {
+		expect(modeNoticeLine(availableRunModes(makeAddon({ script: 'print(1)' })))).toBe('');
+	});
+
+	it('says the shared reason once when two modes are out for the same reason', () => {
+		expect(modeNoticeLine(availableRunModes(makeAddon()))).toBe(
+			'No stored script yet — write one first.'
+		);
+	});
+
+	it('carries the reason a follow-up gets, which is about this node and not the map', () => {
+		expect(modeNoticeLine(availableRunModes(makeAddon(), { inheritedScript: 'print(2)' }))).toBe(
+			"No stored script on this node yet — Change adapts the parent's and stores it here."
+		);
+	});
+});
+
+describe('the results a run reported, as rows', () => {
+	const measured = makeRun({
+		id: 'r1',
+		results: [
+			{ symbol: 'R_{th}', value: '12.3', unit: 'K/W' },
+			{ symbol: '\\tau', value: '0.8' }
+		]
+	});
+
+	it('renders each result through the renderer the extractor also reads', () => {
+		expect(resultRows(makeAddon({ runs: [measured] }))).toEqual([
+			{ symbol: 'R_{th}', tex: 'R_{th} = 12.3\\ \\text{K/W}' },
+			{ symbol: '\\tau', tex: '\\tau = 0.8' }
+		]);
+	});
+
+	it('has nothing to show for a node that has never run, or ran and measured nothing', () => {
+		expect(resultRows(makeAddon())).toEqual([]);
+		expect(resultRows(makeAddon({ runs: [makeRun({ id: 'r1' })] }))).toEqual([]);
+	});
+
+	it('keeps the last completed run when a later attempt failed', () => {
+		// A re-run that timed out measured nothing; letting it blank the section
+		// would take the answer off the screen for a reason that is not about it.
+		const failed = makeRun({ id: 'r2', status: 'error' });
+		expect(resultRows(makeAddon({ runs: [measured, failed] }))).toHaveLength(2);
+	});
+});
+
+describe('the ancestor context preview', () => {
+	function ancestor(patch: Partial<AiAncestor> = {}): AiAncestor {
+		return {
+			nodeId: 'parent',
+			hops: 1,
+			title: 'Sweep A cleanup',
+			prompt: 'drop the first 200 samples',
+			summary: 'Wrote clean.csv.',
+			...patch
+		};
+	}
+
+	const withScript = ancestor({ script: 'print("clean")' });
+
+	it('has nothing to preview without ancestors', () => {
+		expect(ancestorContextPreview([], 'refine')).toEqual({ text: '', steps: 0, label: '' });
+	});
+
+	it('leaves the script out in Change, because the request carries it separately', () => {
+		const preview = ancestorContextPreview([withScript], 'refine');
+		expect(preview.text).toContain('Asked: drop the first 200 samples');
+		expect(preview.text).not.toContain('Its analysis.py:');
+	});
+
+	it('carries the script in Write, which has no other place to put it', () => {
+		const preview = ancestorContextPreview([withScript], 'analyse');
+		expect(preview.text).toContain('Its analysis.py:');
+		expect(preview.text).toContain('print("clean")');
+	});
+
+	it('previews nothing for a Run, which calls no model and sends no prose', () => {
+		expect(ancestorContextPreview([withScript], 'rerun').text).toBe('');
+	});
+
+	it('names the steps and the characters that are actually in the section', () => {
+		const one = ancestorContextPreview([ancestor()], 'refine');
+		expect(one.steps).toBe(1);
+		expect(one.label).toBe(`What Claude will see (1 step, ${one.text.length} characters)`);
+
+		const two = ancestorContextPreview(
+			[ancestor(), ancestor({ nodeId: 'grandparent', hops: 2, title: 'Raw import' })],
+			'refine'
+		);
+		expect(two.steps).toBe(2);
+		expect(two.label).toContain('(2 steps,');
+	});
+
+	it('counts what survived the cap rather than what was handed in', () => {
+		// The number on the closed line is a claim about what leaves the machine,
+		// so a step the renderer dropped must not be counted as sent. Wide rather
+		// than deep, because the hop cap is three and the character cap is what
+		// this is about: a dozen parents each reporting a page.
+		const many = Array.from({ length: 12 }, (unused, index) =>
+			ancestor({ nodeId: `p${index}`, summary: 'x'.repeat(2000) })
+		);
+		const preview = ancestorContextPreview(many, 'refine');
+		expect(preview.text.length).toBeLessThanOrEqual(APP_CONFIG.ai.ancestorContext.maxChars);
+		expect(preview.steps).toBeLessThan(12);
+		expect(preview.steps).toBeGreaterThan(0);
+		expect(preview.label).toContain(`${preview.steps} steps`);
+		expect(preview.text).toContain('earlier steps omitted.');
+	});
+});
+
+describe('why the follow-up controls are out of reach', () => {
+	it('waits for an answer to follow up on', () => {
+		expect(followUpDisabledReason(makeAddon())).toBe(
+			'Nothing to follow up on yet — run this node first.'
+		);
+		expect(
+			followUpDisabledReason(makeAddon({ runs: [makeRun({ id: 'r1', status: 'error' })] }))
+		).toBe('Nothing to follow up on yet — run this node first.');
+	});
+
+	it('says nothing once the node has a completed run', () => {
+		expect(followUpDisabledReason(makeAddon({ runs: [makeRun({ id: 'r1' })] }))).toBeUndefined();
+	});
+
+	it('refuses an empty draft on the same terms the mutation refuses it', () => {
+		expect(followUpSubmitDisabledReason('')).toBe('Nothing to ask yet — type the follow-up first.');
+		expect(followUpSubmitDisabledReason('  \n\t ')).toBe(
+			'Nothing to ask yet — type the follow-up first.'
+		);
+		expect(followUpSubmitDisabledReason('now fit a line')).toBeUndefined();
 	});
 });

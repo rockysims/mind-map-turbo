@@ -1,6 +1,7 @@
 /**
  * Pure mutations for the `!ai` add-on: the prompt, the stored script, the
- * bounded run history, and the promoted-output bindings.
+ * bounded run history, the promoted-output bindings, and the follow-up node a
+ * reader's next question becomes.
  *
  * Everything here is a graph-in, graph-out function that returns the *same*
  * object when nothing changed, so an edit that is not an edit neither
@@ -9,6 +10,7 @@
  * the caller tombstones them, exactly as `assetTrash.ts` describes.
  */
 
+import { renderResultTex } from '$lib/ai/aiResults';
 import { APP_CONFIG } from '$lib/appConfig';
 import type { GraphAssetMetadata, MultigraphData, Point } from '../../types/multigraph';
 import type {
@@ -19,7 +21,9 @@ import type {
 	NodeContentBlock,
 	NodeData
 } from '../../types/node';
-import { addEdge, addNode, nextId, referencedAssetIds } from './graph';
+import { feedingNodeIds } from './aiAdjacency';
+import { addEdge, addNode, nextId, referencedAssetIds, setNodePinned } from './graph';
+import { withNodeAddon } from './nodeAddons';
 
 /**
  * The statuses a stored run may carry. All four are terminal: a run in flight
@@ -249,6 +253,44 @@ export function latestDoneRun(ai: AiAddon): AiRun | undefined {
 	return undefined;
 }
 
+/**
+ * The one array every node with nothing to report shares.
+ *
+ * Identity, not just emptiness: the dataflow layer maps every node in the graph
+ * on every frame, and the overwhelming majority carry no add-on at all. A shared
+ * array lets that mapping skip allocating a wrapper object for them, which is
+ * what keeps a drag from rebuilding a graph's worth of objects sixty times a
+ * second. `readonly` so a caller cannot make one node's answer everyone's.
+ */
+const NO_RESULT_MATH: readonly string[] = [];
+
+/**
+ * What this node's latest run says it measured, as the LaTeX the quantity
+ * extractor reads.
+ *
+ * The bridge between the `!ai` add-on and milestone 09's dataflow: a run that
+ * printed `RESULT R_{th} = 12.3 K/W` makes its node a definer of `R_{th}`, and
+ * this is the only place that knows those two things belong together. The
+ * strings come from `renderResultTex`, the same renderer the workbench draws
+ * from, so the number on the node and the number the index parses cannot be two
+ * different strings.
+ *
+ * The *latest done* run, matching `refreshPromotedOutputs`: an errored or
+ * cancelled attempt after a good one reported nothing, and letting it clear the
+ * node's quantities would make an arrow vanish because a re-run timed out.
+ * Results ride on their run, so eviction and an `!ai` removal both take them
+ * with them — nothing here has to clean anything up.
+ */
+export function aiResultMath(node: NodeData): readonly string[] {
+	const ai = node.addons?.ai;
+	if (ai === undefined) return NO_RESULT_MATH;
+
+	const results = latestDoneRun(ai)?.results;
+	if (results === undefined || results.length === 0) return NO_RESULT_MATH;
+
+	return results.map(renderResultTex);
+}
+
 export function refreshPromotedOutputs(
 	data: MultigraphData,
 	nodeId: string
@@ -378,6 +420,152 @@ export function promoteAiOutput(
 		...ai,
 		promoted: { ...ai.promoted, [outputName]: newNodeId }
 	});
+}
+
+/**
+ * The title a follow-up node is created with.
+ *
+ * The `!ai` marker is part of the title rather than implied by the add-on,
+ * because the marker is what a later title edit has to keep for the node to go
+ * on being a workbench — a node whose capability is invisible in its own title
+ * loses it the first time someone renames it. The word beside the marker is for
+ * the canvas, which draws titles and would otherwise draw a node with nothing
+ * on it.
+ */
+const FOLLOW_UP_NODE_TITLE = '!ai Follow-up';
+
+/**
+ * Whether a composed follow-up prompt is one that can be submitted at all.
+ *
+ * Exported because the composer's submit button asks the same question, and a
+ * second `trim()` written at the button is a rule that can drift from the rule
+ * that actually decides: this one is the guard `createFollowUpNode` runs, so a
+ * button that agrees with it can never offer a press that does nothing.
+ */
+export function isSubmittableFollowUpPrompt(prompt: string): boolean {
+	return prompt.trim() !== '';
+}
+
+/** What the follow-up carries, and where the caller wants it drawn. */
+interface CreateFollowUpOptions {
+	/** The prompt the reader composed. Stored trimmed; empty is refused. */
+	prompt: string;
+	/** The canvas position for the child, chosen by the caller that has a layout. */
+	position: Point;
+	/**
+	 * The id the child takes, for a caller that wants to name it. Ignored when
+	 * the graph already holds that id, for the reason `promoteAiOutput` gives.
+	 */
+	nodeId?: string;
+}
+
+/** What `createFollowUpNode` hands back. */
+interface CreateFollowUpResult {
+	graph: MultigraphData;
+	/**
+	 * The child's id, or `undefined` when nothing was created — which is the
+	 * same case as `graph` coming back as the object that went in.
+	 */
+	nodeId: string | undefined;
+}
+
+/**
+ * Ask the next question as a node of its own.
+ *
+ * One call produces the whole of what "ask a follow-up" means to the graph: a
+ * second `!ai` node carrying the composed prompt, a directed edge from the node
+ * that spawned it, and the parent's pin moved onto it. One graph out means one
+ * undo entry, which is the point — the reader who takes back a follow-up gets
+ * their pin back in the same press.
+ *
+ * The edge is **directed, parent → child, and untagged**. Directed because the
+ * direction is what makes the parent an input of the child and keeps the child
+ * out of the parent's own run (`collectAiInputs` skips an outgoing neighbour).
+ * Untagged because an edge tag *is* the input's label in the request, and a
+ * `@follow-up` on every one of these edges would put a meaningless role on every
+ * input a child collects and colour the edge by it.
+ *
+ * The pin transfer, and why the order of the two calls is the whole subtlety:
+ * both `setNodePinned` and `addNode`'s `pinned` stamp `lastPinnedSeq` from the
+ * same counter, and the beacon rule reads the highest stamp. Unpinning the
+ * parent *first* leaves the child holding it; doing it the other way round
+ * would leave the node that is no longer pinned as the most recently touched.
+ * An unpinned parent makes neither call, so `pinSequence` is untouched and a map
+ * with no pins in it does not acquire a counter by being asked a question.
+ *
+ * The same graph object comes back — and no id with it — for an unknown node, a
+ * node without the add-on, and a prompt that is empty or only whitespace, so
+ * "cannot submit an empty prompt" holds at the mutation and not only at the
+ * button.
+ *
+ * A follow-up is deliberately **not** idempotent: two questions are two nodes,
+ * unlike `promoteAiOutput`, where a second press names a figure that is already
+ * on the canvas.
+ */
+export function createFollowUpNode(
+	data: MultigraphData,
+	aiNodeId: string,
+	options: CreateFollowUpOptions
+): CreateFollowUpResult {
+	const parent = data.nodes.find((node) => node.id === aiNodeId);
+	if (parent?.addons?.ai === undefined) return { graph: data, nodeId: undefined };
+	if (!isSubmittableFollowUpPrompt(options.prompt)) return { graph: data, nodeId: undefined };
+
+	const nodeIds = data.nodes.map((node) => node.id);
+	const requested = options.nodeId;
+	const newNodeId =
+		requested !== undefined && !nodeIds.includes(requested) ? requested : nextId('n', nodeIds);
+
+	const pinned = parent.pinned === true;
+	const unpinned = pinned ? setNodePinned(data, aiNodeId, false) : data;
+
+	const withNode = addNode(unpinned, {
+		id: newNodeId,
+		title: FOLLOW_UP_NODE_TITLE,
+		description: '',
+		position: options.position,
+		...(pinned ? { pinned: true } : {})
+	});
+
+	// `AddNodeInput` carries no add-ons and does not gain any for this: the node
+	// is added first and given the capability second, the way `promoteAiOutput`
+	// works with what `addNode` handed it. The add-on itself comes from the
+	// registry default rather than a literal, so a registry change cannot drift
+	// from what a follow-up is created with.
+	const withAddon: MultigraphData = {
+		...withNode,
+		nodes: withNode.nodes.map((node) =>
+			node.id === newNodeId ? { ...node, addons: withNodeAddon(node.addons, 'ai') } : node
+		)
+	};
+	const withPrompt = setAiPrompt(withAddon, newNodeId, options.prompt.trim());
+
+	return {
+		graph: addEdge(withPrompt, aiNodeId, newNodeId, { directed: true, tags: [] }),
+		nodeId: newNodeId
+	};
+}
+
+/**
+ * The `analysis.py` a node can start from without having written one: its direct
+ * AI parent's.
+ *
+ * This is what makes a fresh follow-up's default mode Change rather than Write —
+ * a follow-up is an edit to what was just done, and the script that did it is
+ * one hop away. Direct parents only: a grandparent's script is not what this
+ * node is about, and the ancestor context (T04) is where the earlier steps get
+ * their say.
+ *
+ * Among several parents it is the first, in `graph.nodes` order, that has a
+ * script — stable regardless of the order the edges were drawn in, and a parent
+ * with none does not veto a sibling that has one.
+ */
+export function inheritedScript(data: MultigraphData, nodeId: string): string | undefined {
+	for (const parentId of feedingNodeIds(data, nodeId)) {
+		const script = aiAddonOf(data, parentId)?.script;
+		if (script !== undefined) return script;
+	}
+	return undefined;
 }
 
 /**

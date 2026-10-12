@@ -54,6 +54,11 @@ const HIDDEN_PATHS: ConfigPath[] = [
 	'ai.maxImageBytes',
 	'ai.summaryMaxChars',
 	'ai.maxTokens',
+	'ai.maxResultsPerRun',
+	'ai.resultUnitMaxChars',
+	'ai.ancestorContext.maxHops',
+	'ai.ancestorContext.maxChars',
+	'ai.ancestorContext.ancestorSummaryMaxChars',
 	'ai.runtime.version',
 	'ai.runtime.indexUrl',
 	'ai.runtime.packages'
@@ -70,9 +75,9 @@ describe('CONFIG_SCHEMA', () => {
 		expect(unknown).toEqual([]);
 	});
 
-	it('covers exactly the 101 shipped leaves', () => {
-		expect(runtimeLeafPaths).toHaveLength(101);
-		expect(schemaPaths).toHaveLength(101);
+	it('covers exactly the 106 shipped leaves', () => {
+		expect(runtimeLeafPaths).toHaveLength(106);
+		expect(schemaPaths).toHaveLength(106);
 	});
 
 	it('keeps every range default inside its own slider bounds', () => {

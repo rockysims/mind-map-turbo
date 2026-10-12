@@ -85,6 +85,18 @@ export interface QuantityBearingNode {
 	title?: string;
 	description: string;
 	tags: string[];
+	/**
+	 * LaTeX this node states that is in neither its title nor its description —
+	 * today, the numbers an `!ai` run reported, rendered by the add-on that owns
+	 * them.
+	 *
+	 * Bare expressions, already rendered: no `$` delimiters, because there is no
+	 * prose around them to delimit. Each is read as one display-mode segment on
+	 * exactly the terms a written equation gets, which is what makes a reported
+	 * `R_{th} = 12.3` a definition without this module knowing an add-on exists.
+	 * Producers hand over strings; nothing here asks where they came from.
+	 */
+	derivedMath?: readonly string[];
 }
 
 const EMPTY: NodeQuantities = { defines: [], references: [] };
@@ -165,8 +177,45 @@ function definitionOf(
 	};
 }
 
+/** One expression to read, and how it was set. */
+interface MathExpression {
+	/** The LaTeX between the delimiters, or a `derivedMath` entry verbatim. */
+	content: string;
+	displayMode: boolean;
+}
+
 /**
- * Quantities defined and referenced by one node's description.
+ * Every expression this node states, in the order a reader meets them.
+ *
+ * Title first, so a node that defines a quantity in its title and elaborates in
+ * its description reports them in the order they are read; `derivedMath` last,
+ * because it is what the node turned out to say rather than what the author
+ * wrote — a written definition should be the one whose spelling gets rendered
+ * when the two agree.
+ *
+ * `derivedMath` entries skip the delimiter scan entirely: they are already
+ * expressions, so wrapping them in `$$` only to split them back out would make
+ * a `$` inside a rendered unit change what the whole entry means.
+ */
+function mathExpressionsOf(node: QuantityBearingNode): MathExpression[] {
+	const texts = node.title ? [node.title, node.description] : [node.description];
+	const written = texts
+		.flatMap(splitMathSegments)
+		.flatMap((segment) =>
+			segment.kind === 'text'
+				? []
+				: [{ content: segment.content, displayMode: segment.kind === 'display-math' }]
+		);
+
+	return [
+		...written,
+		...(node.derivedMath ?? []).map((content) => ({ content, displayMode: true }))
+	];
+}
+
+/**
+ * Quantities defined and referenced by one node — its title, its description,
+ * and whatever `derivedMath` an add-on produced for it, all on the same terms.
  *
  * A node never references what it defines: a definition that mentions its own
  * symbol on the right, as in `v = v + 1`, is a statement about that quantity
@@ -185,17 +234,9 @@ export function nodeQuantities(
 	const defines: QuantityDefinition[] = [];
 	const references: QuantitySymbol[] = [];
 
-	// Title first, so a node that defines a quantity in its title and elaborates
-	// in its description reports them in the order they are read.
-	const sources = node.title ? [node.title, node.description] : [node.description];
-
-	for (const segment of sources.flatMap(splitMathSegments)) {
-		if (segment.kind === 'text') {
-			continue;
-		}
-
-		const displayMode = segment.kind === 'display-math';
-		const rendered = renderMath(segment.content, { displayMode });
+	for (const expression of mathExpressionsOf(node)) {
+		const { content, displayMode } = expression;
+		const rendered = renderMath(content, { displayMode });
 		// Invalid math contributes nothing rather than guessing at the author's
 		// intent; the edit sheet preview is where they find out it did not parse.
 		if (!rendered.ok) {
@@ -209,7 +250,7 @@ export function nodeQuantities(
 			defines.push({
 				symbol: definition.defined,
 				bodyKey: definition.bodyKey,
-				sourceTex: segment.content,
+				sourceTex: content,
 				displayMode
 			});
 			references.push(...definition.consumed);

@@ -68,7 +68,7 @@ individual PR-sized tasks.
 | 12  | Undo and redo                                      | complete    | [milestone](milestones/12-undo-and-redo.md), [plan](plans/2026-08-30%2012-undo-and-redo.md)                                                           |
 | 13  | Node add-ons and file attachments                  | complete    | [milestone](milestones/13-node-addons-and-file-attachments.md), [plan](plans/2026-09-04%2013-node-addons-and-file-attachments.md)                     |
 | 14  | AI nodes                                           | complete    | [milestone](milestones/14-ai-nodes.md), [plan](plans/2026-09-04%2014-ai-nodes.md)                                                                     |
-| 15  | AI follow-ups and results                          | proposed    | [milestone](milestones/15-ai-follow-ups-and-results.md), [plan](plans/2026-09-07%2015-ai-follow-ups-and-results.md)                                   |
+| 15  | AI follow-ups and results                          | complete    | [milestone](milestones/15-ai-follow-ups-and-results.md), [plan](plans/2026-09-07%2015-ai-follow-ups-and-results.md)                                   |
 
 Milestones 04a-04m deepen the local-first graph experience before multiplayer.
 Milestone 04b intentionally supersedes 04a's Fibonacci reveal and dimming
@@ -151,8 +151,10 @@ server.
 Milestone 15 answers what the first weeks of real use found: an AI node's
 outputs feed the AI nodes downstream of it by the proximity rule that already
 collects its inputs, so chaining a step needs no promote; "Ask a follow-up"
-makes the next node in one press and focuses it with the caret in an empty
-prompt, reusing the deep-zoom define-and-come-back mechanism; and a run that
+opens a composer on the node you are reading, and the press that submits it
+makes the next node — prompt already in it, run already starting, holding the
+pin the parent had — and focuses it with a Back crumb, reusing the deep-zoom
+define-and-come-back mechanism; and a run that
 prints a named number records it as a quantity, so milestone 09's inference
 makes the node a definer and milestone 11 draws the arrow. Numeric values still
 do not flow into downstream scripts — the structure is made visible first, the

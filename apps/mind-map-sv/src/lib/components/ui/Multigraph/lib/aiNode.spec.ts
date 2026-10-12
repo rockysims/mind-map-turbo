@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
 	AI_RUN_STATUSES,
+	aiResultMath,
+	createFollowUpNode,
+	inheritedScript,
 	isAiRunStatus,
+	isSubmittableFollowUpPrompt,
 	markInterruptedRuns,
 	promoteAiOutput,
 	recordAiRun,
@@ -10,9 +14,10 @@ import {
 	setAiPrompt,
 	setAiScript
 } from './aiNode';
-import { removeNode } from './graph';
+import { collectAiInputs } from './aiInputs';
+import { removeNode, setNodePinned } from './graph';
 import { makeGraph } from './testFixtures';
-import type { GraphAssetMetadata, MultigraphData } from '../../types/multigraph';
+import type { GraphAssetMetadata, MultigraphData, Point } from '../../types/multigraph';
 import type { AiAddon, AiRun, AiRunOutput, NodeContentBlock, NodeData } from '../../types/node';
 
 const RUNTIME = '0.27.7';
@@ -861,5 +866,437 @@ describe('refreshPromotedOutputs', () => {
 		expect(contentOf(before, 'promoted')).toEqual([
 			{ type: 'image', assetId: 'a1', alt: 'plot.png' }
 		]);
+	});
+});
+
+describe('isSubmittableFollowUpPrompt', () => {
+	it('accepts a prompt with a question in it', () => {
+		expect(isSubmittableFollowUpPrompt('now fit a line')).toBe(true);
+	});
+
+	it('refuses an empty prompt', () => {
+		expect(isSubmittableFollowUpPrompt('')).toBe(false);
+	});
+
+	it('refuses a prompt of nothing but whitespace, which is the one a stray press sends', () => {
+		expect(isSubmittableFollowUpPrompt('  \n\t ')).toBe(false);
+	});
+});
+
+describe('createFollowUpNode', () => {
+	const POSITION: Point = { x: 120, y: -40 };
+	const PROMPT = 'now fit a line to the cleaned data';
+
+	/** A lone `!ai` parent, at whatever the case needs it to be. */
+	function parentGraph(addon: Partial<AiAddon> = {}): MultigraphData {
+		return makeGraph({
+			nodes: [
+				{
+					id: 'ai',
+					title: '!ai Analysis',
+					description: '',
+					addons: { ai: { prompt: 'clean the sweeps', runs: [], promoted: {}, ...addon } }
+				}
+			]
+		});
+	}
+
+	function nodeOf(graph: MultigraphData, nodeId: string): NodeData {
+		const node = graph.nodes.find((candidate) => candidate.id === nodeId);
+		if (node === undefined) throw new Error(`expected the graph to hold a node ${nodeId}`);
+		return node;
+	}
+
+	/** The one call, for the cases that expect a child, with the child resolved. */
+	function followUp(
+		data: MultigraphData,
+		options: { prompt?: string; position?: Point; nodeId?: string } = {}
+	): { graph: MultigraphData; child: NodeData } {
+		const result = createFollowUpNode(data, 'ai', {
+			prompt: options.prompt ?? PROMPT,
+			position: options.position ?? POSITION,
+			...(options.nodeId === undefined ? {} : { nodeId: options.nodeId })
+		});
+		if (result.nodeId === undefined) throw new Error('expected a follow-up node to be created');
+		return { graph: result.graph, child: nodeOf(result.graph, result.nodeId) };
+	}
+
+	it('gives the child the add-on at its registry default, with the composed prompt in it', () => {
+		expect(followUp(parentGraph()).child.addons?.ai).toEqual({
+			prompt: PROMPT,
+			runs: [],
+			promoted: {}
+		});
+	});
+
+	it('titles the child so the marker survives a rename and the canvas has a word to draw', () => {
+		const { child } = followUp(parentGraph());
+
+		expect(child.title).toBe('!ai Follow-up');
+		expect(child.description).toBe('');
+	});
+
+	it('stores the prompt trimmed', () => {
+		expect(followUp(parentGraph(), { prompt: `\n  ${PROMPT}  \n` }).child.addons?.ai?.prompt).toBe(
+			PROMPT
+		);
+	});
+
+	it('places the child where the caller said, because placement is the caller’s', () => {
+		const { graph, child } = followUp(parentGraph());
+
+		expect(graph.posByNodeId[child.id]).toEqual(POSITION);
+	});
+
+	it('joins the two with one directed, untagged edge from the parent', () => {
+		const { graph, child } = followUp(parentGraph());
+
+		expect(graph.edges).toEqual([
+			{
+				id: expect.any(String),
+				sourceNodeId: 'ai',
+				targetNodeId: child.id,
+				tags: [],
+				directed: true
+			}
+		]);
+	});
+
+	it('takes the id the caller named', () => {
+		expect(followUp(parentGraph(), { nodeId: 'child' }).child.id).toBe('child');
+	});
+
+	it('generates an id rather than colliding when the named one is taken', () => {
+		expect(followUp(parentGraph(), { nodeId: 'ai' }).child.id).not.toBe('ai');
+	});
+
+	it('leaves the parent’s own add-on data untouched', () => {
+		const before = parentGraph({ script: 'print(1)' });
+
+		expect(nodeOf(followUp(before).graph, 'ai').addons?.ai).toEqual(
+			nodeOf(before, 'ai').addons?.ai
+		);
+	});
+
+	it('makes a second child on a second call — two questions are two nodes', () => {
+		const first = followUp(parentGraph());
+		const second = followUp(first.graph);
+
+		expect(second.child.id).not.toBe(first.child.id);
+		expect(second.graph.nodes).toHaveLength(3);
+		expect(second.graph.edges).toHaveLength(2);
+	});
+
+	it('returns the same graph object for an unknown parent', () => {
+		const before = parentGraph();
+		const result = createFollowUpNode(before, 'nope', { prompt: PROMPT, position: POSITION });
+
+		expect(result.graph).toBe(before);
+		expect(result.nodeId).toBeUndefined();
+	});
+
+	it('returns the same graph object for a parent without the add-on', () => {
+		const before = makeGraph({ nodeCount: 1 });
+		const result = createFollowUpNode(before, 'n0', { prompt: PROMPT, position: POSITION });
+
+		expect(result.graph).toBe(before);
+		expect(result.nodeId).toBeUndefined();
+	});
+
+	it('returns the same graph object for an empty prompt, so the rule holds at the mutation', () => {
+		const before = parentGraph();
+		const result = createFollowUpNode(before, 'ai', { prompt: '', position: POSITION });
+
+		expect(result.graph).toBe(before);
+		expect(result.nodeId).toBeUndefined();
+	});
+
+	it('returns the same graph object for a prompt of nothing but whitespace', () => {
+		const before = parentGraph();
+		const result = createFollowUpNode(before, 'ai', { prompt: ' \n\t ', position: POSITION });
+
+		expect(result.graph).toBe(before);
+		expect(result.nodeId).toBeUndefined();
+	});
+
+	it('does not mutate the graph it was handed', () => {
+		const before = parentGraph();
+		followUp(before);
+
+		expect(before.nodes).toHaveLength(1);
+		expect(before.edges).toEqual([]);
+	});
+
+	describe('the pin transfer', () => {
+		it('moves the pin off the parent and onto the child, in the one returned graph', () => {
+			const { graph, child } = followUp(setNodePinned(parentGraph(), 'ai', true));
+
+			expect(nodeOf(graph, 'ai').pinned).toBe(false);
+			expect(child.pinned).toBe(true);
+		});
+
+		it('stamps the child last, so the beacon follows the reader rather than the unpinned parent', () => {
+			const { graph, child } = followUp(setNodePinned(parentGraph(), 'ai', true));
+			const parentSeq = nodeOf(graph, 'ai').lastPinnedSeq ?? 0;
+
+			expect(child.lastPinnedSeq ?? 0).toBeGreaterThan(parentSeq);
+			expect(graph.pinSequence).toBe(child.lastPinnedSeq);
+		});
+
+		it('leaves the child unpinned and the pin counter untouched when the parent was not pinned', () => {
+			const before = parentGraph();
+			const { graph, child } = followUp(before);
+
+			expect(child.pinned).toBeUndefined();
+			expect(child.lastPinnedSeq).toBeUndefined();
+			expect(nodeOf(graph, 'ai').lastPinnedSeq).toBe(nodeOf(before, 'ai').lastPinnedSeq);
+			expect(graph.pinSequence).toBe(before.pinSequence);
+		});
+
+		it('transfers exactly one pin from a parent pinned, unpinned and pinned again', () => {
+			const pinnedTwiceOver = setNodePinned(
+				setNodePinned(setNodePinned(parentGraph(), 'ai', true), 'ai', false),
+				'ai',
+				true
+			);
+			const { graph, child } = followUp(pinnedTwiceOver);
+
+			expect(graph.nodes.filter((node) => node.pinned === true).map((node) => node.id)).toEqual([
+				child.id
+			]);
+			expect(child.lastPinnedSeq ?? 0).toBeGreaterThan(nodeOf(graph, 'ai').lastPinnedSeq ?? 0);
+		});
+	});
+
+	it('makes the child an outgoing neighbour, so it never feeds the run that spawned it', () => {
+		const { graph, child } = followUp(parentGraph());
+
+		expect(collectAiInputs(graph, 'ai')).toEqual([]);
+		expect(collectAiInputs(graph, child.id).map((input) => input.nodeId)).toEqual(['ai']);
+	});
+});
+
+describe('inheritedScript', () => {
+	/** How a case joins its parents to the child, when the default will not do. */
+	type ChainEdge = { source: string; target: string; directed: boolean };
+
+	/** A `child` node, its parents, and whatever edges the case is about. */
+	function chain(
+		parents: Array<{ id: string; script?: string; ai?: boolean }>,
+		edges?: ChainEdge[]
+	): MultigraphData {
+		return makeGraph({
+			nodes: [
+				...parents.map((parent) => ({
+					id: parent.id,
+					title: parent.id,
+					description: '',
+					...(parent.ai === false
+						? {}
+						: {
+								addons: {
+									ai: {
+										prompt: '',
+										runs: [],
+										promoted: {},
+										...(parent.script === undefined ? {} : { script: parent.script })
+									}
+								}
+							})
+				})),
+				{
+					id: 'child',
+					title: '!ai Follow-up',
+					description: '',
+					addons: { ai: { prompt: 'and now?', runs: [], promoted: {} } }
+				}
+			],
+			edges:
+				edges ?? parents.map((parent) => ({ source: parent.id, target: 'child', directed: true }))
+		});
+	}
+
+	it('has nothing to inherit for a node with no parent at all', () => {
+		expect(inheritedScript(chain([]), 'child')).toBeUndefined();
+	});
+
+	it('has nothing to inherit from a parent that is not an ai node', () => {
+		expect(inheritedScript(chain([{ id: 'notes', ai: false }]), 'child')).toBeUndefined();
+	});
+
+	it('has nothing to inherit from an ai parent that has not written a script yet', () => {
+		expect(inheritedScript(chain([{ id: 'parent' }]), 'child')).toBeUndefined();
+	});
+
+	it('inherits the direct parent’s stored analysis.py', () => {
+		expect(inheritedScript(chain([{ id: 'parent', script: 'print(1)' }]), 'child')).toBe(
+			'print(1)'
+		);
+	});
+
+	it('resolves two ai parents in graph.nodes order, not edge order', () => {
+		const parents = [
+			{ id: 'first', script: 'print(1)' },
+			{ id: 'second', script: 'print(2)' }
+		];
+
+		expect(inheritedScript(chain(parents), 'child')).toBe('print(1)');
+		expect(inheritedScript(chain([...parents].reverse()), 'child')).toBe('print(2)');
+	});
+
+	it('passes over a parent with no script for one that has it', () => {
+		const graph = chain([{ id: 'first' }, { id: 'second', script: 'print(2)' }]);
+
+		expect(inheritedScript(graph, 'child')).toBe('print(2)');
+	});
+
+	it('does not reach past the direct parent to a grandparent’s script', () => {
+		const graph = makeGraph({
+			nodes: [
+				{
+					id: 'grandparent',
+					title: 'g',
+					description: '',
+					addons: { ai: { prompt: '', runs: [], promoted: {}, script: 'print(1)' } }
+				},
+				{
+					id: 'parent',
+					title: 'p',
+					description: '',
+					addons: { ai: { prompt: '', runs: [], promoted: {} } }
+				},
+				{
+					id: 'child',
+					title: 'c',
+					description: '',
+					addons: { ai: { prompt: '', runs: [], promoted: {} } }
+				}
+			],
+			edges: [
+				{ source: 'grandparent', target: 'parent', directed: true },
+				{ source: 'parent', target: 'child', directed: true }
+			]
+		});
+
+		expect(inheritedScript(graph, 'child')).toBeUndefined();
+	});
+
+	/*
+	 * `aiInputs.ts` keeps its adjacency predicate private, so `inheritedScript`
+	 * restates the rule until T04 exports the one copy. This is the guard against
+	 * the two drifting in the meantime: a neighbour that contributes files is
+	 * exactly a neighbour that contributes a script.
+	 */
+	describe('is the rule collectAiInputs uses, over all four edge orientations', () => {
+		const ORIENTATIONS = [
+			{ name: 'an edge pointing at the node', source: 'parent', directed: true, feeds: true },
+			{ name: 'an edge pointing away from it', source: 'child', directed: true, feeds: false },
+			{ name: 'an undirected edge', source: 'parent', directed: false, feeds: true },
+			{
+				name: 'an undirected edge drawn the other way round',
+				source: 'child',
+				directed: false,
+				feeds: true
+			}
+		];
+
+		for (const orientation of ORIENTATIONS) {
+			it(`${orientation.name} ${orientation.feeds ? 'contributes' : 'contributes nothing'}`, () => {
+				const graph = chain(
+					[{ id: 'parent', script: 'print(1)' }],
+					[
+						{
+							source: orientation.source,
+							target: orientation.source === 'parent' ? 'child' : 'parent',
+							directed: orientation.directed
+						}
+					]
+				);
+				const feedsInputs = collectAiInputs(graph, 'child').some(
+					(input) => input.nodeId === 'parent'
+				);
+
+				expect(feedsInputs).toBe(orientation.feeds);
+				expect(inheritedScript(graph, 'child') !== undefined).toBe(orientation.feeds);
+			});
+		}
+	});
+});
+
+// The bridge to the dataflow layer: a run that printed a `RESULT` line makes its
+// node a definer of that quantity. The strings are `renderResultTex`'s, so what
+// the workbench draws and what the quantity index parses are one string.
+describe('aiResultMath', () => {
+	function nodeWithRuns(runs: AiRun[]): NodeData {
+		return {
+			id: 'ai',
+			title: 'Analysis',
+			description: '',
+			tags: [],
+			addons: { ai: { prompt: '', runs, promoted: {} } }
+		};
+	}
+
+	it('reports nothing for a node with no add-on', () => {
+		expect(aiResultMath({ id: 'plain', title: 'Notes', description: '', tags: [] })).toEqual([]);
+	});
+
+	it('reports nothing for an ai node that has never run', () => {
+		expect(aiResultMath(nodeWithRuns([]))).toEqual([]);
+	});
+
+	it('reports nothing when the latest run errored', () => {
+		expect(
+			aiResultMath(nodeWithRuns([makeRun({ id: 'r1', status: 'error', results: [] })]))
+		).toEqual([]);
+	});
+
+	it('reports nothing for a done run that printed no RESULT line', () => {
+		expect(aiResultMath(nodeWithRuns([makeRun({ id: 'r1' })]))).toEqual([]);
+	});
+
+	it('renders every result of the latest done run, in order', () => {
+		const run = makeRun({
+			id: 'r1',
+			results: [
+				{ symbol: 'R_{th}', value: '12.3', unit: 'K/W' },
+				{ symbol: '\\tau', value: '0.8' }
+			]
+		});
+		expect(aiResultMath(nodeWithRuns([run]))).toEqual([
+			'R_{th} = 12.3\\ \\text{K/W}',
+			'\\tau = 0.8'
+		]);
+	});
+
+	// The latest *done* run, matching `refreshPromotedOutputs`: a re-run that
+	// timed out reported nothing, and must not take the last good answer's
+	// arrows off the canvas with it.
+	it('reaches past a later errored run to the last done one', () => {
+		const graph = [
+			makeRun({ id: 'r1', results: [{ symbol: 'g', value: '9.8' }] }),
+			makeRun({ id: 'r2', status: 'error' })
+		];
+		expect(aiResultMath(nodeWithRuns(graph))).toEqual(['g = 9.8']);
+	});
+
+	it('prefers the newer done run when both reported', () => {
+		expect(
+			aiResultMath(
+				nodeWithRuns([
+					makeRun({ id: 'r1', results: [{ symbol: 'g', value: '9.8' }] }),
+					makeRun({ id: 'r2', results: [{ symbol: 'g', value: '9.81' }] })
+				])
+			)
+		).toEqual(['g = 9.81']);
+	});
+
+	// Identity, not just emptiness: the dataflow layer skips wrapping a node whose
+	// answer is this array, and that skip is what keeps a drag from allocating a
+	// graph's worth of objects per frame.
+	it('hands every empty answer the same array', () => {
+		expect(aiResultMath(nodeWithRuns([]))).toBe(
+			aiResultMath({ id: 'plain', title: 'Notes', description: '', tags: [] })
+		);
 	});
 });

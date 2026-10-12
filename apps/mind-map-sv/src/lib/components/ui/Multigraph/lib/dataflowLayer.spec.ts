@@ -1,8 +1,10 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { composeEdgesForRender, createDataflowModel, hasDerivedEdges } from './dataflowLayer';
 import { nodeQuantities } from './nodeQuantities';
 import type { MultigraphData } from '../../types/multigraph';
 import type { NodeData, QuantityDesignation } from '../../types/node';
+import { renderResultTex, type AiResult } from '$lib/ai/aiResults';
 import type { QuantitySymbol } from '../../MathText/lib/mathSymbols';
 
 function designationOf(symbol: QuantitySymbol): QuantityDesignation {
@@ -232,5 +234,123 @@ describe('hasDerivedEdges', () => {
 				graphOf(chain.nodes, [{ id: 'e1', sourceNodeId: 'a', targetNodeId: 'b', tags: [] }])
 			)
 		).toBe(false);
+	});
+});
+
+/**
+ * The end of the wire milestone 15 adds: a run prints `RESULT R_{th} = 12.3`,
+ * the run record carries it, and an arrow appears to whoever uses that quantity
+ * without anyone having drawn one.
+ *
+ * These go through `createDataflowModel` rather than the index directly, because
+ * this module is the only place that knows an `!ai` node states anything — the
+ * math layer below it is add-on-blind on purpose, and the last case here is what
+ * keeps it that way.
+ */
+describe('results as definitions', () => {
+	/**
+	 * An `!ai` node whose one done run reported `results`, with the chips those
+	 * results offer already confirmed — the same "author confirmed everything"
+	 * stance `node` above takes, since edges follow designations either way.
+	 */
+	function aiNode(id: string, results: AiResult[]): NodeData {
+		const parsed = nodeQuantities({
+			description: '',
+			tags: [],
+			derivedMath: results.map(renderResultTex)
+		});
+		return {
+			id,
+			title: id,
+			description: '',
+			tags: [],
+			addons: {
+				ai: {
+					prompt: 'measure it',
+					promoted: {},
+					runs: [
+						{
+							id: `${id}-run`,
+							startedAt: 1,
+							status: 'done',
+							mode: 'analyse',
+							runtime: '0.27.7',
+							inputs: [],
+							summary: '',
+							outputs: [],
+							toolCalls: 0,
+							results
+						}
+					]
+				}
+			},
+			outputs: parsed.defines.map((definition) => designationOf(definition.symbol))
+		};
+	}
+
+	const consumer = node('use', '$$T = R_{th} P$$');
+	const measured = graphOf([
+		aiNode('ai', [{ symbol: 'R_{th}', value: '12.3', unit: 'K/W' }]),
+		consumer
+	]);
+
+	it('draws a derived edge from the node whose run reported the quantity', () => {
+		const model = createDataflowModel()(measured);
+		expect(model.edges.map((edge) => `${edge.sourceNodeId}->${edge.targetNodeId}`)).toEqual([
+			'ai->use'
+		]);
+	});
+
+	it('shows the reported value as the definition a reader is offered', () => {
+		const index = createDataflowModel()(measured).index;
+		const entry = [...index.entries.values()].find(
+			(candidate) => candidate.symbol.label === 'R_th'
+		);
+		expect(entry?.definitions.map((record) => record.sourceTex)).toEqual([
+			'R_{th} = 12.3\\ \\text{K/W}'
+		]);
+	});
+
+	it('draws nothing from a run that reported no results', () => {
+		expect(createDataflowModel()(graphOf([aiNode('ai', []), consumer])).edges).toEqual([]);
+	});
+
+	// The risk this task was written around: the mapping that adds a node's
+	// results must not hand the index a fresh object per node per frame, or the
+	// index rebuilds on every frame of a drag and milestone 11's whole point goes.
+	it('returns the identical model when an ai node is dragged', () => {
+		const model = createDataflowModel();
+		const first = model(measured);
+		expect(model(nextFrame(measured, 1))).toBe(first);
+	});
+
+	it('keeps the derived edge objects identical while an ai node is dragged', () => {
+		const model = createDataflowModel();
+		const first = model(measured);
+		const later = model(nextFrame(nextFrame(measured, 1), 2));
+		expect(later.edges[0]).toBe(first.edges[0]);
+	});
+
+	it('returns a fresh model once a new run reports a different value', () => {
+		const model = createDataflowModel();
+		const first = model(measured);
+		const rerun = graphOf([
+			aiNode('ai', [{ symbol: 'R_{th}', value: '14.1', unit: 'K/W' }]),
+			consumer
+		]);
+		expect(model(rerun)).not.toBe(first);
+	});
+
+	// A grep gate, not a style note. The index and the extractor read strings and
+	// know nothing about add-ons; an import here would put a capability's name
+	// inside the math layer and risk an import cycle within `Multigraph/lib`.
+	it('leaves the quantity index blind to the add-on that produced the math', () => {
+		const source = readFileSync(new URL('./quantityIndex.ts', import.meta.url), 'utf8');
+		expect(source).not.toContain('aiNode');
+	});
+
+	it('leaves the extractor blind to it too', () => {
+		const source = readFileSync(new URL('./nodeQuantities.ts', import.meta.url), 'utf8');
+		expect(source).not.toContain('aiNode');
 	});
 });

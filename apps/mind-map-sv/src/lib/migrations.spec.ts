@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
 	CURRENT_SCHEMA_VERSION,
+	NEUTRAL_VIEW_STATE,
 	PersistedGraphError,
 	parsePersistedGraph,
 	unwrapPersistedGraph,
 	unwrapPersistedHistory,
 	wrapPersistedGraph
 } from './migrations';
+import { GRAPH_HTML_READER_VERSION, parseGraphFile, serializeGraphFile } from './graphFile';
 import { makeGraph } from './components/ui/Multigraph/lib/testFixtures';
 import type { GraphAssetMetadata, MultigraphData } from './components/ui/types/multigraph';
 import type { ConfigOverrides } from './config/configOverrides';
@@ -773,5 +775,133 @@ describe('schema 8: the ai add-on', () => {
 		expect(() => unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toThrow(
 			new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload')
 		);
+	});
+
+	// `results` is a new optional field on an existing record, which is the whole
+	// reason neither CURRENT_SCHEMA_VERSION nor GRAPH_HTML_READER_VERSION moves
+	// for milestone 15: a milestone 14 build reads a document carrying it.
+	describe('a run’s recorded results', () => {
+		const RESULTS = [
+			{ symbol: 'R_{th}', value: '12.3', unit: 'K/W' },
+			{ symbol: 'n', value: '41000' }
+		];
+
+		it('loads a v8 payload whose runs carry no results at all', () => {
+			const data = graphWithAddons(
+				{ ai: { prompt: 'plot it', runs: [FULL_RUN], promoted: {} } },
+				{ p1: PLOT_ASSET }
+			);
+
+			expect(unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toEqual(data);
+		});
+
+		it('loads a run carrying results, with and without units', () => {
+			const data = graphWithAddons(
+				{
+					ai: {
+						prompt: 'plot it',
+						runs: [{ ...FULL_RUN, results: RESULTS }],
+						promoted: {}
+					}
+				},
+				{ p1: PLOT_ASSET }
+			);
+
+			expect(unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toEqual(data);
+		});
+
+		it('loads a run whose results list is empty', () => {
+			const data = graphWithAddons(
+				{ ai: { prompt: '', runs: [{ ...FULL_RUN, results: [] }], promoted: {} } },
+				{ p1: PLOT_ASSET }
+			);
+
+			expect(unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toEqual(data);
+		});
+
+		it('round trips through the graph file byte for byte', () => {
+			const data = graphWithAddons(
+				{
+					ai: {
+						prompt: 'plot it',
+						runs: [{ ...FULL_RUN, results: RESULTS }],
+						promoted: {}
+					}
+				},
+				{ p1: PLOT_ASSET }
+				// `graphWithAddons` is typed `unknown` so the malformed cases above can
+				// hand it nonsense; this one is well-formed and the file writer needs
+				// the real type.
+			) as MultigraphData;
+			const doc = { data, viewState: NEUTRAL_VIEW_STATE };
+
+			const written = serializeGraphFile(doc);
+			const read = parseGraphFile(written);
+
+			expect(read.data).toEqual(data);
+			expect(serializeGraphFile({ ...doc, data: read.data })).toBe(written);
+		});
+
+		it('refuses a run whose results is not an array', () => {
+			const data = graphWithAddons({
+				ai: { prompt: '', runs: [{ ...FULL_RUN, results: {} }], promoted: {} }
+			});
+
+			expect(() => unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toThrow(
+				new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload')
+			);
+		});
+
+		it('refuses a result whose value is a number rather than the printed string', () => {
+			const data = graphWithAddons({
+				ai: {
+					prompt: '',
+					runs: [{ ...FULL_RUN, results: [{ symbol: 'R', value: 12.3 }] }],
+					promoted: {}
+				}
+			});
+
+			expect(() => unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toThrow(
+				new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload')
+			);
+		});
+
+		it('refuses a result with no symbol', () => {
+			const data = graphWithAddons({
+				ai: {
+					prompt: '',
+					runs: [{ ...FULL_RUN, results: [{ value: '1' }] }],
+					promoted: {}
+				}
+			});
+
+			expect(() => unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toThrow(
+				new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload')
+			);
+		});
+
+		it('refuses a result whose unit is not a string', () => {
+			const data = graphWithAddons({
+				ai: {
+					prompt: '',
+					runs: [{ ...FULL_RUN, results: [{ symbol: 'R', value: '1', unit: 7 }] }],
+					promoted: {}
+				}
+			});
+
+			expect(() => unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data })).toThrow(
+				new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload')
+			);
+		});
+	});
+});
+
+// The versions milestone 15 leaves alone. A new optional field on an existing
+// record is loadable by a milestone 14 build, so bumping either number would
+// route those readers to their own embedded shell for no reason.
+describe('schema and reader versions after milestone 15', () => {
+	it('stays at schema 8 and reader 4', () => {
+		expect(CURRENT_SCHEMA_VERSION).toBe(8);
+		expect(GRAPH_HTML_READER_VERSION).toBe(4);
 	});
 });

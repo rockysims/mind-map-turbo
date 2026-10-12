@@ -1226,12 +1226,20 @@
 		});
 	}
 
-	/** One quantity chip in the details view, once the overlay has drawn it. */
+	/**
+	 * One quantity chip in the details view, once the overlay has drawn it.
+	 *
+	 * Found by reading `data-designation-key` rather than by selector, for the
+	 * reason `drillIntoPeek` gives below: a subscripted key embeds a NUL, and a
+	 * selector cannot carry one.
+	 */
 	async function viewChip(canvasElement: HTMLElement, quantityKey: string): Promise<HTMLElement> {
 		return await waitFor(() => {
-			const found = canvasElement.querySelector(
-				`[data-designation-chips="view"] [data-designation-key="${quantityKey}"]`
-			);
+			const found =
+				Array.from(
+					canvasElement.querySelectorAll('[data-designation-chips="view"] [data-designation-key]')
+				).find((candidate) => candidate.getAttribute('data-designation-key') === quantityKey) ??
+				null;
 			expect(found).toBeInTheDocument();
 			return found as HTMLElement;
 		});
@@ -1510,6 +1518,308 @@
 		hopRepulsionStrength: 0,
 		edgeSpringStrength: 0
 	};
+	/* ---------------------------------------------------------------------- *
+	 * Follow-ups: composing one on the node the reader is reading, and the
+	 * node the submit makes.
+	 * ---------------------------------------------------------------------- */
+
+	/**
+	 * The finished analysis with nothing pinned on it.
+	 *
+	 * The pin transfer has nothing to move here, which is what earns it a story
+	 * of its own: an unpinned parent must make an unpinned child rather than the
+	 * follow-up inventing a pin nobody asked for.
+	 */
+	const AI_UNPINNED_PARENT_GRAPH: MultigraphData = {
+		...AI_PROMOTE_GRAPH,
+		nodes: AI_PROMOTE_GRAPH.nodes.map((node) => {
+			const unpinned = { ...node };
+			delete unpinned.pinned;
+			return unpinned;
+		})
+	};
+
+	/** The intent every commit carries, which is the label an Undo would name. */
+	type IntentSpy = {
+		mock: { calls: Array<[MultigraphData, number, GraphCommitIntent]> };
+	};
+
+	/** Every graph committed under one undo label, oldest first. */
+	function commitsLabelled(args: PlayContext['args'], label: string): MultigraphData[] {
+		const spy = args.onMultigraphChange as unknown as IntentSpy | undefined;
+		return (spy?.mock.calls ?? [])
+			.filter((call) => call[2]?.label === label)
+			.map((call) => call[0]);
+	}
+
+	/** The `!ai` workbench, once the focus surface has drawn it. */
+	async function aiWorkbench(canvasElement: HTMLElement): Promise<HTMLElement> {
+		return await waitFor(() => {
+			const found = canvasElement.querySelector('[data-ai-workbench]');
+			expect(found).toBeInTheDocument();
+			return found as HTMLElement;
+		});
+	}
+
+	/** Press "Ask a follow-up" and get the composer's field back. */
+	async function openFollowUpComposer(canvasElement: HTMLElement): Promise<HTMLTextAreaElement> {
+		const workbench = await aiWorkbench(canvasElement);
+		(workbench.querySelector('[data-ai-ask-follow-up]') as HTMLElement).click();
+		return await waitFor(() => {
+			const found = canvasElement.querySelector('[data-ai-follow-up-prompt]');
+			expect(found).toBeInTheDocument();
+			return found as HTMLTextAreaElement;
+		});
+	}
+
+	/** Type into the composer the way a reader does: a value and the `input`. */
+	async function typeFollowUp(field: HTMLTextAreaElement, prompt: string): Promise<void> {
+		field.value = prompt;
+		field.dispatchEvent(new Event('input', { bubbles: true }));
+		await tick();
+	}
+
+	/** Open the composer, write a prompt, and press Ask. */
+	async function askFollowUp(canvasElement: HTMLElement, prompt: string): Promise<void> {
+		const field = await openFollowUpComposer(canvasElement);
+		await typeFollowUp(field, prompt);
+		(canvasElement.querySelector('[data-ai-follow-up-submit]') as HTMLElement).click();
+	}
+
+	/** The node the follow-up made: the only one the fixture did not start with. */
+	function newNodeId(graph: MultigraphData, existingIds: string[]): string {
+		const created = graph.nodes.find((node) => !existingIds.includes(node.id));
+		if (!created) throw new Error('Expected a follow-up node in the committed graph');
+		return created.id;
+	}
+
+	/* ---------------------------------------------------------------------- *
+	 * The chain: a parent whose finished run wrote a table, and the follow-up
+	 * that reads it.
+	 *
+	 * Nobody promoted anything and nobody attached anything. The child's inputs
+	 * are its parent's *latest done run's* outputs, reaching it by the same
+	 * proximity rule an attachment would — which is the whole of "two steps
+	 * work" in one fixture.
+	 * ---------------------------------------------------------------------- */
+
+	const AI_CLEAN_NAME = 'clean.csv';
+	const AI_CLEAN_ASSET_ID = 'ai-clean-asset';
+	/** The same file after the parent ran again: one name, new bytes, new id. */
+	const AI_CLEAN_RERUN_ASSET_ID = 'ai-clean-asset-2';
+	const AI_CLEAN_TEXT = 't,ch2\n0,1.0\n1,1.4\n2,1.9\n';
+	const AI_PARENT_PROMPT = 'Drop the dropouts and write a clean table.';
+	const AI_CHILD_PROMPT = 'Fit the decay in the clean table.';
+	const AI_CHILD_SCRIPT = 'pd.read_csv("clean.csv")\n';
+
+	/** The parent's finished run, writing `clean.csv` under whichever id it got. */
+	function cleanedRun(assetId: string): AiRun {
+		return {
+			id: `parent-run-${assetId}`,
+			startedAt: 1_700_000_000_000,
+			finishedAt: 1_700_000_020_000,
+			status: 'done',
+			mode: 'analyse',
+			prompt: AI_PARENT_PROMPT,
+			model: 'claude-opus-5',
+			runtime: APP_CONFIG.ai.runtime.version,
+			inputs: [],
+			summary: 'Dropped four dropout rows and wrote the clean table.',
+			outputs: [{ name: AI_CLEAN_NAME, assetId, mimeType: 'text/csv' }],
+			toolCalls: 1
+		};
+	}
+
+	/**
+	 * The child's own finished run, recorded against the *first* `clean.csv`.
+	 *
+	 * `prompt` matches the node's, so nothing but the file can move the mode off
+	 * Run — which is what makes the re-run story about the file.
+	 */
+	const AI_CHILD_RUN: AiRun = {
+		id: 'child-run-1',
+		startedAt: 1_700_000_030_000,
+		finishedAt: 1_700_000_040_000,
+		status: 'done',
+		mode: 'refine',
+		prompt: AI_CHILD_PROMPT,
+		model: 'claude-opus-5',
+		runtime: APP_CONFIG.ai.runtime.version,
+		inputs: [{ nodeId: 'ai', assetId: AI_CLEAN_ASSET_ID, name: AI_CLEAN_NAME }],
+		summary: 'A single exponential fits the decay.',
+		outputs: [],
+		toolCalls: 1
+	};
+
+	/**
+	 * Parent and follow-up on a directed edge, with the parent's run output the
+	 * only file anywhere in the graph.
+	 */
+	function aiChainGraph(
+		outputAssetId: string,
+		child: { runs: AiRun[]; script?: string }
+	): MultigraphData {
+		return {
+			...makeGraph({
+				nodes: [
+					{
+						id: 'ai',
+						title: 'Clean the sweep',
+						description: '',
+						addons: {
+							ai: {
+								prompt: AI_PARENT_PROMPT,
+								script: AI_SCRIPT,
+								runs: [cleanedRun(outputAssetId)],
+								promoted: {}
+							}
+						}
+					},
+					{
+						id: 'child',
+						title: 'Decay fit',
+						description: '',
+						addons: {
+							ai: {
+								prompt: AI_CHILD_PROMPT,
+								...(child.script === undefined ? {} : { script: child.script }),
+								runs: child.runs,
+								promoted: {}
+							}
+						}
+					}
+				],
+				edges: [{ source: 'ai', target: 'child', directed: true }],
+				pinned: ['ai', 'child'],
+				posByNodeId: { ai: { x: 0, y: 0 }, child: { x: 320, y: 0 } }
+			}),
+			assets: {
+				[outputAssetId]: {
+					id: outputAssetId,
+					kind: 'file',
+					mimeType: 'text/csv',
+					name: AI_CLEAN_NAME,
+					size: AI_CLEAN_TEXT.length,
+					createdAt: 2
+				}
+			}
+		};
+	}
+
+	/** Before the parent ran again: the child has read nothing yet. */
+	const AI_CHAIN_GRAPH = aiChainGraph(AI_CLEAN_ASSET_ID, { runs: [] });
+
+	/**
+	 * After it: the parent's latest run wrote `clean.csv` under a new id, the old
+	 * one went with the run it belonged to, and the child's stored script was
+	 * written against the id that is gone.
+	 */
+	const AI_RERUN_CHAIN_GRAPH = aiChainGraph(AI_CLEAN_RERUN_ASSET_ID, {
+		runs: [AI_CHILD_RUN],
+		script: AI_CHILD_SCRIPT
+	});
+
+	/** The bytes behind whichever `clean.csv` the graph is holding. */
+	function aiCleanStore(assetId: string): GraphAssetStore {
+		const store = new MemoryGraphAssetStore();
+		void store.put({
+			scope: AI_SCOPE,
+			assetId,
+			blob: new Blob([AI_CLEAN_TEXT], { type: 'text/csv' }),
+			mimeType: 'text/csv',
+			name: AI_CLEAN_NAME,
+			size: AI_CLEAN_TEXT.length,
+			updatedAt: 2
+		});
+		return store;
+	}
+
+	/* ---------------------------------------------------------------------- *
+	 * Results as quantities: a run that printed a named number, and the node
+	 * whose equation uses it.
+	 * ---------------------------------------------------------------------- */
+
+	/**
+	 * `R_{th}`'s canonical key. It embeds a NUL, which no attribute selector can
+	 * carry — hence `viewChip` finding chips by reading the attribute.
+	 */
+	const R_TH_KEY = 'R\u0000th';
+	const R_TH_LABEL = 'R_th';
+
+	/** One done run, one `RESULT` line: `RESULT R_{th} = 12.3 K/W`. */
+	const AI_MEASURED_RUN: AiRun = {
+		id: 'measure-1',
+		startedAt: 1_700_000_050_000,
+		finishedAt: 1_700_000_060_000,
+		status: 'done',
+		mode: 'analyse',
+		prompt: 'Fit the thermal step and report the resistance.',
+		model: 'claude-opus-5',
+		runtime: APP_CONFIG.ai.runtime.version,
+		inputs: [],
+		summary: 'The step settles at 12.3 K/W.',
+		outputs: [],
+		toolCalls: 1,
+		results: [{ symbol: 'R_{th}', value: '12.3', unit: 'K/W' }]
+	};
+
+	/**
+	 * The measuring node and the node that uses what it measured, with the
+	 * designations confirmed on both — only designations draw dataflow, so a
+	 * fixture that left them off would be testing nothing.
+	 *
+	 * `aiDescription` is the one thing the two stories differ by: empty, the run
+	 * is the node's only claim about `R_{th}`; carrying an equation of its own, it
+	 * is a node saying two different things.
+	 */
+	function aiMeasuredGraph(aiDescription: string): MultigraphData {
+		return makeGraph({
+			nodes: [
+				{
+					id: 'ai',
+					title: 'Thermal step',
+					description: aiDescription,
+					addons: {
+						ai: {
+							prompt: AI_MEASURED_RUN.prompt ?? '',
+							script: AI_SCRIPT,
+							runs: [AI_MEASURED_RUN],
+							promoted: {}
+						}
+					},
+					outputs: designations(R_TH_LABEL)
+				},
+				{
+					id: 'consumer',
+					title: 'Junction rise',
+					description: '$$T = R_{th} P$$',
+					inputs: designations(R_TH_LABEL)
+				}
+			],
+			pinned: ['ai', 'consumer'],
+			posByNodeId: { ai: { x: 0, y: 0 }, consumer: { x: 400, y: 0 } }
+		});
+	}
+
+	/** The one derived edge a pair should have, or nothing. */
+	function derivedEdgeBetween(
+		canvasElement: HTMLElement,
+		sourceNodeId: string,
+		targetNodeId: string
+	): HTMLElement | null {
+		return canvasElement.querySelector(
+			`[data-edge-derived="true"][data-source-node-id="${sourceNodeId}"][data-target-node-id="${targetNodeId}"]`
+		);
+	}
+
+	/** Long-press a node and take Delete from its menu. */
+	async function deleteNode(canvasElement: HTMLElement, nodeId: string): Promise<void> {
+		const circle = getCircle(canvasElement, nodeId);
+		const center = getCenter(circle);
+		await dispatchLongPress(circle, center.x, center.y);
+		within(canvasElement).getByRole('menuitem', { name: 'Delete' }).click();
+		await sleep();
+	}
 </script>
 
 <Story
@@ -7349,3 +7659,502 @@
 		/>
 	{/snippet}
 </Story>
+<!--
+	Composing is not committing. The composer opens inside the workbench the
+	reader is already in, and nothing about the graph moves until they press Ask
+	— so Cancel and Escape both leave the map exactly as they found it
+	(`docs/ui-decisions/2026-09-07--editing--compose-a-follow-up-where-you-are-and-commit-on-submit.md`).
+-->
+<Story
+	name="ComposingAFollowUpCommitsNothingUntilItIsSubmitted"
+	args={{
+		multigraphData: AI_PROMOTE_GRAPH,
+		defaultPrimaryNodeId: 'ai',
+		layoutSettings: { relaxIterations: 0 },
+		assetStore: aiPlotStore(),
+		assetScope: AI_SCOPE,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		await enterFocusOn(canvasElement, 'ai');
+
+		const cancelled = await openFollowUpComposer(canvasElement);
+		await typeFollowUp(cancelled, 'Now fit the decay and report the time constant.');
+		(canvasElement.querySelector('[data-ai-follow-up-cancel]') as HTMLElement).click();
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-ai-follow-up]')).not.toBeInTheDocument();
+		});
+
+		// A discarded draft is not persisted, so the second visit starts empty.
+		const escaped = await openFollowUpComposer(canvasElement);
+		expect(escaped.value).toBe('');
+		await typeFollowUp(escaped, 'And now the residuals.');
+		escaped.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-ai-follow-up]')).not.toBeInTheDocument();
+		});
+
+		// Escape closed the composer and stopped there: the surface under it is
+		// still the reader's, which is the whole reason that handler calls
+		// `stopPropagation`.
+		await expectFocusOn(canvasElement, 'ai');
+
+		// Nothing was created, nothing was joined, and there is nothing to undo:
+		// the component never called back at all.
+		const changeSpy = args.onMultigraphChange as unknown as ChangeSpy;
+		expect(changeSpy.mock.calls).toHaveLength(0);
+		// By id rather than by element count: the deep-zoom stack draws the focused
+		// node's frame as well as its circle, so one node is two elements.
+		const nodeIds = new Set(
+			Array.from(canvasElement.querySelectorAll('[data-node-id]')).map(
+				(element) => (element as HTMLElement).dataset.nodeId
+			)
+		);
+		expect([...nodeIds]).toEqual(['ai']);
+	}}
+/>
+
+<!--
+	The submit, end to end. One press makes the node, joins it, moves the reader
+	into it and starts its run — the shape the owner ruled for on 2026-09-07
+	(`docs/ui-decisions/2026-09-07--editing--submitting-a-follow-up-also-starts-its-run.md`).
+-->
+<Story
+	name="SubmittingAFollowUpFocusesTheNewNodeWithItsPromptAlreadyRunning"
+	args={{
+		multigraphData: AI_PROMOTE_GRAPH,
+		defaultPrimaryNodeId: 'ai',
+		layoutSettings: { relaxIterations: 0 },
+		assetStore: aiPlotStore(),
+		assetScope: AI_SCOPE,
+		aiClient: aiStoryClient(),
+		aiExecutor: aiStoryExecutor(),
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		await enterFocusOn(canvasElement, 'ai');
+
+		const prompt = 'Now fit the decay and report the time constant.';
+		await askFollowUp(canvasElement, prompt);
+
+		// Exactly one graph change under this label — node, add-on, prompt and edge
+		// together — so one Undo takes the whole follow-up back.
+		const asked = commitsLabelled(args, 'ask a follow-up');
+		expect(asked).toHaveLength(1);
+		const committed = asked[0];
+		const childId = newNodeId(committed, ['ai']);
+		expect(committed.nodes.find((node) => node.id === childId)?.addons?.ai?.prompt).toBe(prompt);
+		expect(committed.edges).toEqual([
+			expect.objectContaining({
+				sourceNodeId: 'ai',
+				targetNodeId: childId,
+				directed: true,
+				tags: []
+			})
+		]);
+
+		// The run started on the press, not on a second one the reader has to find:
+		// the placeholder record is committed before the loop's first `await`.
+		const child = committed.nodes.find((node) => node.id === childId);
+		expect(child?.addons?.ai?.runs).toHaveLength(0);
+		await waitFor(() => {
+			const live = lastChangedGraph(args).nodes.find((node) => node.id === childId);
+			expect(live?.addons?.ai?.runs.length).toBeGreaterThan(0);
+		});
+
+		// And the reader is in the child's workbench, with the prompt they wrote
+		// already in it — there is nothing left to type, so nothing takes the caret.
+		await expectFocusOn(canvasElement, childId);
+		const workbench = await aiWorkbench(canvasElement);
+		expect(workbench.querySelector('[data-ai-prompt]')).toHaveValue(prompt);
+
+		// The way back names the node they came from. Inside the details that is
+		// the trail; the floating button is the canvas's version of the same entry.
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-nav-crumb-node="ai"]')).toBeInTheDocument();
+		});
+		within(canvasElement).getByRole('button', { name: 'Close node focus' }).click();
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-nav-back="ai"]')).toBeInTheDocument();
+		});
+	}}
+/>
+
+<!--
+	The round trip, modelled on `BackAfterDefineReturnsToTheConsumersDetails`: a
+	follow-up takes the reader somewhere, so the entry it pushes has to bring
+	them back to the workbench and the camera they left.
+-->
+<Story
+	name="BackFromAFollowUpReturnsToTheParentsWorkbench"
+	args={{
+		multigraphData: AI_PROMOTE_GRAPH,
+		defaultPrimaryNodeId: 'ai',
+		initialViewState: { panX: 0, panY: 0, scale: APP_CONFIG.multigraph.zoom.maxScale },
+		layoutSettings: { relaxIterations: 0 },
+		assetStore: aiPlotStore(),
+		assetScope: AI_SCOPE,
+		aiClient: aiStoryClient(),
+		aiExecutor: aiStoryExecutor(),
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		await enterFocusOn(canvasElement, 'ai');
+		const atParent = getStageTransform(canvasElement);
+
+		await askFollowUp(canvasElement, 'And now the residuals.');
+
+		const childId = newNodeId(commitsLabelled(args, 'ask a follow-up')[0], ['ai']);
+		await expectFocusOn(canvasElement, childId);
+		await waitForLayout();
+		expect(getStageTransform(canvasElement)).not.toEqual(atParent);
+
+		await clickCrumb(canvasElement, 'ai');
+		await waitForLayout();
+
+		// The camera recorded at the departure, and the workbench they were in.
+		expect(getStageTransform(canvasElement)).toEqual(atParent);
+		await expectFocusOn(canvasElement, 'ai');
+		expect(await aiWorkbench(canvasElement)).toBeInTheDocument();
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-nav-breadcrumbs]')).not.toBeInTheDocument();
+		});
+	}}
+/>
+
+<!--
+	The pin transfer, from the map
+	(`docs/ui-decisions/2026-09-07--layout--a-follow-up-takes-the-pin-from-its-parent.md`).
+	A pin is the visibility budget the reader spent on where they were working,
+	and a follow-up moves where they are working — so it moves with them rather
+	than accumulating one pin per question.
+-->
+<Story
+	name="AFollowUpTakesThePinFromItsParent"
+	args={{
+		multigraphData: AI_PROMOTE_GRAPH,
+		defaultPrimaryNodeId: 'ai',
+		layoutSettings: { relaxIterations: 0 },
+		assetStore: aiPlotStore(),
+		assetScope: AI_SCOPE,
+		aiClient: aiStoryClient(),
+		aiExecutor: aiStoryExecutor(),
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		await enterFocusOn(canvasElement, 'ai');
+		// What an Undo would put back: the parent pinned, and no second node.
+		expect(AI_PROMOTE_GRAPH.nodes.find((node) => node.id === 'ai')?.pinned).toBe(true);
+
+		await askFollowUp(canvasElement, 'Now fit the decay.');
+
+		// Both pin changes and the node and the edge are in the one entry, so the
+		// Undo that removes the child is the same one that gives the pin back.
+		const asked = commitsLabelled(args, 'ask a follow-up');
+		expect(asked).toHaveLength(1);
+		const committed = asked[0];
+		const childId = newNodeId(committed, ['ai']);
+		const parent = committed.nodes.find((node) => node.id === 'ai');
+		const child = committed.nodes.find((node) => node.id === childId);
+
+		expect(parent?.pinned).toBe(false);
+		expect(child?.pinned).toBe(true);
+		// The beacon rule reads the highest stamp, so the node that still holds the
+		// pin has to be the more recently touched of the two.
+		expect(child?.lastPinnedSeq ?? 0).toBeGreaterThan(parent?.lastPinnedSeq ?? 0);
+	}}
+/>
+
+<!--
+	And the other half of the same rule: nothing to transfer means nothing is
+	pinned. A follow-up must not invent a beacon the reader never asked for.
+-->
+<Story
+	name="AFollowUpFromAnUnpinnedParentPinsNothing"
+	args={{
+		multigraphData: AI_UNPINNED_PARENT_GRAPH,
+		defaultPrimaryNodeId: 'ai',
+		layoutSettings: { relaxIterations: 0 },
+		assetStore: aiPlotStore(),
+		assetScope: AI_SCOPE,
+		aiClient: aiStoryClient(),
+		aiExecutor: aiStoryExecutor(),
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		await enterFocusOn(canvasElement, 'ai');
+
+		await askFollowUp(canvasElement, 'Now fit the decay.');
+
+		const asked = commitsLabelled(args, 'ask a follow-up');
+		expect(asked).toHaveLength(1);
+		const committed = asked[0];
+		const childId = newNodeId(committed, ['ai']);
+
+		// One entry again — child and edge together, so one Undo removes both —
+		// and the pin counter is untouched, because a map with no pins in it does
+		// not acquire one by being asked a question.
+		expect(committed.nodes.find((node) => node.id === 'ai')?.pinned).toBeUndefined();
+		expect(committed.nodes.find((node) => node.id === childId)?.pinned).toBeUndefined();
+		expect(committed.nodes.every((node) => node.lastPinnedSeq === undefined)).toBe(true);
+		expect(committed.pinSequence).toBeUndefined();
+		expect(committed.edges).toHaveLength(1);
+	}}
+/>
+
+<!--
+	The missing key, which is the one way this flow can end somewhere the reader
+	did not picture. `startAiRun` opens the settings sheet when a run comes back
+	`needs-key`, so a reader with no key lands on a brand-new node with the sheet
+	over it. That is the right outcome — the run is what they asked for and the
+	key is what it needs — but only if the node is theirs regardless.
+-->
+<Story
+	name="AFollowUpWithNoKeyStillLandsTheReaderOnTheChild"
+	args={{
+		multigraphData: AI_PROMOTE_GRAPH,
+		defaultPrimaryNodeId: 'ai',
+		layoutSettings: { relaxIterations: 0 },
+		assetStore: aiPlotStore(),
+		assetScope: AI_SCOPE,
+		aiExecutor: aiStoryExecutor(),
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		await enterFocusOn(canvasElement, 'ai');
+
+		await askFollowUp(canvasElement, 'Now fit the decay.');
+
+		const asked = commitsLabelled(args, 'ask a follow-up');
+		expect(asked).toHaveLength(1);
+		const childId = newNodeId(asked[0], ['ai']);
+
+		// The node was made and the reader is in it. A run that cannot start
+		// commits nothing at all, so the follow-up is still the only entry.
+		await expectFocusOn(canvasElement, childId);
+		expect(await aiWorkbench(canvasElement)).toBeInTheDocument();
+		expect(asked[0].nodes.find((node) => node.id === childId)?.addons?.ai?.runs).toEqual([]);
+		expect(commitsLabelled(args, 'run AI node')).toHaveLength(0);
+	}}
+/>
+
+<!--
+	The chain, from the map: the child reads what the parent's run wrote, with
+	nobody having promoted a file or drawn anything but the one edge that was
+	already there. `clean.csv` is the parent's output, so it reaches the child as
+	an ordinary input — and the three file actions are absent from its row,
+	because there is nothing behind them to act on.
+-->
+<Story
+	name="AFollowUpNodeReadsItsParentsOutputs"
+	args={{
+		multigraphData: AI_CHAIN_GRAPH,
+		defaultPrimaryNodeId: 'child',
+		layoutSettings: { relaxIterations: 0 },
+		assetStore: aiCleanStore(AI_CLEAN_ASSET_ID),
+		assetScope: AI_SCOPE,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		await enterFocusOn(canvasElement, 'child');
+		const workbench = await aiWorkbench(canvasElement);
+
+		const parentGroup = await waitFor(() => {
+			const found = workbench.querySelector('[data-ai-input-group="ai"]');
+			expect(found).toBeInTheDocument();
+			return found as HTMLElement;
+		});
+		expect(parentGroup).toHaveAttribute('data-ai-input-group-kind', 'neighbour');
+		expect(parentGroup.querySelector('[data-ai-input-outputs-caption]')).toHaveTextContent(
+			'From its last run'
+		);
+
+		// One row, under the parent, at the asset id the parent's run wrote — which
+		// is what says it came from the run rather than from anyone's attachment.
+		const outputs = parentGroup.querySelectorAll('[data-ai-input-kind="output"]');
+		expect(outputs).toHaveLength(1);
+		const row = outputs[0] as HTMLElement;
+		expect(row).toHaveAttribute('data-ai-input-asset-id', AI_CLEAN_ASSET_ID);
+		expect(row.querySelector('[data-ai-input-name]')).toHaveTextContent(AI_CLEAN_NAME);
+
+		// Nothing acts on a produced file, so nothing offers to. The parent has no
+		// attachments of its own, so this list is the only one it has.
+		expect(row.querySelector('[data-ai-replace-file]')).toBeNull();
+		expect(row.querySelector('[data-ai-remove-file]')).toBeNull();
+		expect(parentGroup.querySelector('[data-ai-input-kind="file"]')).toBeNull();
+		expect(parentGroup.querySelector('[data-ai-add-file]')).toBeNull();
+
+		// And Add file is still on this node's own group, where it always was.
+		expect(
+			workbench.querySelector('[data-ai-input-group="child"] [data-ai-add-file]')
+		).not.toBeNull();
+	}}
+/>
+
+<!--
+	A file input can now change without anyone touching a file: the parent ran
+	again, and the bytes behind the child's input moved under it. The graph is
+	built in the state that re-run leaves — the same filename over a new asset id,
+	the old one gone with the run it belonged to — because what this story is
+	about is what the child says next, not how the parent got there.
+
+	Same name, new bytes is a *replacement*, and the wording has to survive being
+	read by someone who did not press Replace: it names the file and says what
+	each mode would do with it. The default stays Run, because the stored script
+	opens `clean.csv` and `clean.csv` is still what it will find.
+-->
+<Story
+	name="RerunningTheParentMarksTheChildsInputsChanged"
+	args={{
+		multigraphData: AI_RERUN_CHAIN_GRAPH,
+		defaultPrimaryNodeId: 'child',
+		layoutSettings: { relaxIterations: 0 },
+		assetStore: aiCleanStore(AI_CLEAN_RERUN_ASSET_ID),
+		assetScope: AI_SCOPE,
+		aiClient: aiStoryClient(),
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		await enterFocusOn(canvasElement, 'child');
+		const workbench = await aiWorkbench(canvasElement);
+
+		// The amber line, naming the file and both ways out of it.
+		await waitFor(() => {
+			expect(workbench.querySelector('[data-ai-inputs-changed]')?.textContent?.trim()).toBe(
+				'clean.csv was replaced since the last run. ' +
+					'Run re-runs the script on the new data; Change lets Claude adjust it.'
+			);
+		});
+
+		// The row it is about: the parent's output, at the id the re-run gave it.
+		expect(
+			workbench.querySelector('[data-ai-input-group="ai"] [data-ai-input-kind="output"]')
+		).toHaveAttribute('data-ai-input-asset-id', AI_CLEAN_RERUN_ASSET_ID);
+
+		// New bytes under a name the script already opens is not a new question, so
+		// the switch stays on the mode that costs nothing.
+		expect(workbench.querySelector('[data-ai-mode="rerun"]')).toHaveAttribute(
+			'aria-pressed',
+			'true'
+		);
+		expect(workbench.querySelector('[data-ai-mode="refine"]')).toHaveAttribute(
+			'aria-pressed',
+			'false'
+		);
+		// ...and the button beside the switch agrees about what a press would do.
+		expect(workbench.querySelector('[data-ai-run]')).toHaveTextContent('Run');
+	}}
+/>
+
+<!--
+	The end of the wire: a run printed `RESULT R_{th} = 12.3 K/W`, so the node
+	that printed it defines `R_{th}` and milestone 09 draws the arrow to whoever's
+	equation uses it. Nobody drew that edge and nobody can move it — deleting the
+	node that measured the number takes it away again.
+
+	Where the definition is *read* is the consumer's card, not the AI node's own
+	surface: an `!ai` node's focus surface is the workbench, which draws the run's
+	results and no quantity chips. So the definer reads from the two places a
+	reader meets it — the arrow on the map, and the card that asks what defines
+	this.
+-->
+<Story
+	name="ARecordedResultMakesTheNodeADefiner"
+	args={{
+		multigraphData: aiMeasuredGraph(''),
+		defaultPrimaryNodeId: 'consumer',
+		layoutSettings: { ...NO_REVEALS, enterExitDurationMs: 0 },
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+
+		// The number, on the node that reported it.
+		await enterFocusOn(canvasElement, 'ai');
+		const workbench = await aiWorkbench(canvasElement);
+		expect(workbench.querySelector('[data-ai-results] [data-ai-result="R_{th}"]')).toBeVisible();
+		within(canvasElement).getByRole('button', { name: 'Close node focus' }).click();
+		await waitForLayout();
+
+		// The arrow nobody drew.
+		await waitFor(() => {
+			expect(derivedEdgeBetween(canvasElement, 'ai', 'consumer')).toBeInTheDocument();
+		});
+
+		// And the answer the consumer gets when it asks what defines its input: the
+		// AI node, quoting the number its run measured.
+		await enterFocusOn(canvasElement, 'consumer');
+		expect(await viewChip(canvasElement, R_TH_KEY)).toHaveAttribute(
+			'data-designation-role',
+			'input'
+		);
+		const card = await openPeekCard(canvasElement, R_TH_KEY);
+		const definer = card.querySelector('[data-peek-definer="ai"]') as HTMLElement;
+		expect(definer).toHaveAttribute('data-peek-definer-state', 'confirmed');
+		expect(definer).toHaveTextContent('12.3');
+		expect(definer).toHaveTextContent('K/W');
+
+		within(canvasElement).getByRole('button', { name: 'Close node focus' }).click();
+		await waitForLayout();
+
+		// Results ride on their run and the run rides on its node, so removing the
+		// node removes the claim and the arrow with it.
+		await deleteNode(canvasElement, 'ai');
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-edge-derived="true"]')).not.toBeInTheDocument();
+		});
+	}}
+/>
+
+<!--
+	The reader wrote one number and the machine measured another, and being told
+	so is the point: one node now defines `R_{th}` two different ways, which is
+	milestone 09's within-node conflict reached by a second route. Nothing about
+	it is new — the diagnostic is the one milestone 09 shipped, and both claims
+	stay real, so the arrow stays drawn until the author resolves them.
+
+	Read from the consumer, because that is where this graph draws a diagnostics
+	panel at all: the AI node's own surface is the workbench.
+-->
+<Story
+	name="AResultThatContradictsTheNodesOwnEquationReadsAsAConflict"
+	args={{
+		multigraphData: aiMeasuredGraph('The datasheet says $R_{th} = 15$.'),
+		defaultPrimaryNodeId: 'consumer',
+		layoutSettings: NO_REVEALS,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		await enterFocusOn(canvasElement, 'consumer');
+
+		const item = await waitFor(() => {
+			const found = canvasElement.querySelector(`[data-diagnostic-quantity="${R_TH_LABEL}"]`);
+			expect(found).toBeInTheDocument();
+			return found as HTMLElement;
+		});
+		expect(item).toHaveAttribute('data-diagnostic-state', 'conflict');
+		expect(item).toHaveTextContent('is defined differently by');
+		expect(item.querySelector('[data-reveal-node="ai"]')).toHaveTextContent('Thermal step');
+
+		// The contradiction itself, in one row: one node, two statements — the
+		// number the reader wrote down and the number its run measured.
+		const card = await openPeekCard(canvasElement, R_TH_KEY);
+		const definer = card.querySelector('[data-peek-definer="ai"]') as HTMLElement;
+		expect(definer).toHaveTextContent('15');
+		expect(definer).toHaveTextContent('12.3');
+		expect(card.querySelectorAll('[data-peek-definer]')).toHaveLength(1);
+
+		// Both claims are real until the author picks one, so the edge is still
+		// there — hiding it would misrepresent the graph.
+		expect(derivedEdgeBetween(canvasElement, 'ai', 'consumer')).toBeInTheDocument();
+	}}
+/>
