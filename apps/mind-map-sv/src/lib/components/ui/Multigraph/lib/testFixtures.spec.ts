@@ -99,6 +99,14 @@ describe('makeGraph', () => {
 		expect(g.nodes.map((node) => node.pinned)).toEqual([true, undefined]);
 	});
 
+	it('puts sizes on nodes by generated index or id, and on no other node', () => {
+		const g = makeGraph({ nodeCount: 4, sizeBytes: { 0: 10, n2: 20 } });
+
+		expect(g.nodes.map((n) => n.sizeBytes)).toEqual([10, undefined, 20, undefined]);
+		expect(g.nodes[1]).not.toHaveProperty('sizeBytes');
+		expect(g.nodes[3]).not.toHaveProperty('sizeBytes');
+	});
+
 	it('marks generated nodes pinned by id', () => {
 		const g = makeGraph({ nodeCount: 2, pinned: ['n1'] });
 		expect(g.nodes.map((node) => node.pinned)).toEqual([undefined, true]);

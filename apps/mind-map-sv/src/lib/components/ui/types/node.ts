@@ -186,4 +186,13 @@ export interface NodeData {
 	inputs?: QuantityDesignation[];
 	/** Quantities the user confirmed this node defines. Absent means none. */
 	outputs?: QuantityDesignation[];
+	/**
+	 * Size in bytes of the external thing this node stands for — the web page,
+	 * the PDF on Canvas, the file on disk — written by the importer or scraper
+	 * that built the graph. Not the node's own attachments. Drawn as border width
+	 * on a bounded log scale. Absent means unknown; so does `0`, which is what a
+	 * scraper writes when it could not measure. Load drops any value that is not
+	 * a finite number ≥ 0.
+	 */
+	sizeBytes?: number;
 }

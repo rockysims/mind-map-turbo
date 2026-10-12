@@ -210,6 +210,38 @@ describe('planNodeMerge', () => {
 			expect(nodeById(next, 'n0')?.pinned).toBe(true);
 			expect(nodeById(next, 'n0')?.lastPinnedSeq).toBe(7);
 		});
+
+		it("keeps the survivor's size over the absorbed node's", () => {
+			const graph = makeGraph({ nodeCount: 2, sizeBytes: { 0: 1000, 1: 5000 } });
+
+			const { next } = planNodeMerge(graph, 'n1', 'n0');
+
+			expect(nodeById(next, 'n0')?.sizeBytes).toBe(1000);
+		});
+
+		it("keeps a survivor's size of 0 rather than taking the absorbed one", () => {
+			const graph = makeGraph({ nodeCount: 2, sizeBytes: { 0: 0, 1: 5000 } });
+
+			const { next } = planNodeMerge(graph, 'n1', 'n0');
+
+			expect(nodeById(next, 'n0')?.sizeBytes).toBe(0);
+		});
+
+		it("fills a sizeless survivor with the absorbed node's size", () => {
+			const graph = makeGraph({ nodeCount: 2, sizeBytes: { 1: 5000 } });
+
+			const { next } = planNodeMerge(graph, 'n1', 'n0');
+
+			expect(nodeById(next, 'n0')?.sizeBytes).toBe(5000);
+		});
+
+		it('leaves the size undefined when neither node has one', () => {
+			const graph = makeGraph({ nodeCount: 2 });
+
+			const { next } = planNodeMerge(graph, 'n1', 'n0');
+
+			expect(nodeById(next, 'n0')?.sizeBytes).toBeUndefined();
+		});
 	});
 
 	describe('edges', () => {

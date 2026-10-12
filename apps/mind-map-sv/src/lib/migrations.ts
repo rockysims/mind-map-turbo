@@ -161,7 +161,41 @@ function readHistoryState(value: unknown): PersistedHistoryState | null {
 }
 
 export function unwrapPersistedGraph(payload: unknown): MultigraphData {
-	return withSeededComponentPins(withSanitizedTagPhysicsConfig(unwrapPersistedGraphData(payload)));
+	return withSeededComponentPins(
+		withValidNodeSizes(withSanitizedTagPhysicsConfig(unwrapPersistedGraphData(payload)))
+	);
+}
+
+/**
+ * Drops any `sizeBytes` that is not a finite number ≥ 0 rather than rejecting
+ * the node.
+ *
+ * Deliberately not part of `isNodeData`, which is all-or-nothing: one bad
+ * number from a scraper must not make an otherwise good graph unreadable. The
+ * key is removed, not set to `undefined`, so a re-save writes nothing for it.
+ * Returns `data` by identity when no node needs cleaning, and otherwise
+ * rebuilds only the offending nodes. The field is optional and additive, so no
+ * schema bump: an older v8 build passes it through untouched.
+ */
+function withValidNodeSizes(data: MultigraphData): MultigraphData {
+	if (!data.nodes.some(hasInvalidSize)) return data;
+
+	return {
+		...data,
+		nodes: data.nodes.map((node) => {
+			if (!hasInvalidSize(node)) return node;
+			const cleaned = { ...node };
+			delete cleaned.sizeBytes;
+			return cleaned;
+		})
+	};
+}
+
+function hasInvalidSize(node: NodeData): boolean {
+	if (!Object.prototype.hasOwnProperty.call(node, 'sizeBytes')) return false;
+	// Read as `unknown`: the stored value has not been validated yet.
+	const value: unknown = node.sizeBytes;
+	return !isFiniteNumber(value) || value < 0;
 }
 
 /**

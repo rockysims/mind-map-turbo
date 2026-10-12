@@ -36,6 +36,8 @@ interface MakeGraphInput {
 	pinned?: Array<number | string>;
 	/** Pin-recency stamps (NodeData.lastPinnedSeq), keyed by generated index or explicit id. */
 	pinHistory?: Record<number | string, number>;
+	/** Node sizes (NodeData.sizeBytes), keyed by generated index or explicit id. */
+	sizeBytes?: Record<number | string, number>;
 	/** Optional explicit positions, keyed by node id. Defaults to (0, 0). */
 	posByNodeId?: Record<string, Point>;
 	/** Optional graph-level tag colors. Defaults to empty node/edge maps. */
@@ -56,15 +58,20 @@ export function makeGraph(input: MakeGraphInput = {}): MultigraphData {
 	const idAt = (idx: number | string): string =>
 		typeof idx === 'number' ? (baseNodes[idx]?.id ?? `n${idx}`) : idx;
 	const pinnedIds = new Set((input.pinned ?? []).map(idAt));
-	const pinHistoryEntries = Object.entries(input.pinHistory ?? {}).map(
-		([key, seq]) => [idAt(/^\d+$/.test(key) ? Number(key) : key), seq] as const
-	);
-	const pinHistoryById = new Map(pinHistoryEntries);
+	const byNodeId = (record: Record<number | string, number> | undefined) =>
+		new Map(
+			Object.entries(record ?? {}).map(
+				([key, value]) => [idAt(/^\d+$/.test(key) ? Number(key) : key), value] as const
+			)
+		);
+	const pinHistoryById = byNodeId(input.pinHistory);
+	const sizeBytesById = byNodeId(input.sizeBytes);
 	const nodes = baseNodes.map((node) => ({
 		...node,
 		tags: node.tags ?? [],
 		...(pinnedIds.has(node.id) ? { pinned: true } : {}),
-		...(pinHistoryById.has(node.id) ? { lastPinnedSeq: pinHistoryById.get(node.id) } : {})
+		...(pinHistoryById.has(node.id) ? { lastPinnedSeq: pinHistoryById.get(node.id) } : {}),
+		...(sizeBytesById.has(node.id) ? { sizeBytes: sizeBytesById.get(node.id) } : {})
 	}));
 
 	const edges: EdgeData[] = (input.edges ?? []).map((edge, i) => {
