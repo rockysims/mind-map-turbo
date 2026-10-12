@@ -18,7 +18,6 @@ export const MIN_NODE_HIT_RADIUS = APP_CONFIG.multigraph.minNodeHitRadiusPx;
 export const NODE_RADIUS = APP_CONFIG.multigraph.nodeRadiusPx;
 export const NODE_TEXT_FONT_SIZE = APP_CONFIG.multigraph.nodeTextFontSizePx;
 export const NODE_BORDER_WIDTH = APP_CONFIG.multigraph.nodeBorderWidthPx;
-export const PINNED_NODE_BORDER_WIDTH = APP_CONFIG.multigraph.pinnedNodeBorderWidthPx;
 export const EDGE_ARROW_HALF_HEIGHT = APP_CONFIG.multigraph.edgeArrow.halfHeightPx;
 export const EDGE_ARROW_REFERENCE_NODE_SCALE = APP_CONFIG.multigraph.edgeArrow.referenceNodeScale;
 export const EDGE_STROKE_REFERENCE_NODE_SCALE = APP_CONFIG.multigraph.edgeStroke.referenceNodeScale;

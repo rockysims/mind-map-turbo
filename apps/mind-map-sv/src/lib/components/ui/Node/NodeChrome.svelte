@@ -6,7 +6,6 @@
 		diameterPx,
 		borderRadiusPx,
 		borderWidthPx,
-		pinnedBorderWidthPx,
 		pinned = false,
 		hasTagBorder = false,
 		tagBorderBackground = 'transparent',
@@ -19,7 +18,6 @@
 		diameterPx: number;
 		borderRadiusPx: number;
 		borderWidthPx: number;
-		pinnedBorderWidthPx: number;
 		pinned?: boolean;
 		hasTagBorder?: boolean;
 		tagBorderBackground?: string;
@@ -47,7 +45,7 @@
 	data-tag-border={hasTagBorder ? 'true' : undefined}
 	data-details-mode={detailsMode ? 'true' : undefined}
 	data-spotlight={spotlight ? 'true' : undefined}
-	style="--node-diameter: {diameterPx}px; --node-border-radius: {borderRadiusPx}px; --node-border-width: {borderWidthPx}px; --pinned-node-border-width: {pinnedBorderWidthPx}px; --node-tag-border: {tagBorderBackground}; --node-spotlight-color: {spotlightColor};{surfaceBackground
+	style="--node-diameter: {diameterPx}px; --node-border-radius: {borderRadiusPx}px; --node-border-width: {borderWidthPx}px; --node-tag-border: {tagBorderBackground}; --node-spotlight-color: {spotlightColor};{surfaceBackground
 		? ` --node-surface-background: ${surfaceBackground};`
 		: ''}"
 >
@@ -69,8 +67,8 @@
 		overflow-anchor: none;
 	}
 
+	/* Pinning changes the colour and adds a halo; the width stays the node's own. */
 	.circle[data-pinned='true'] {
-		border-width: var(--pinned-node-border-width);
 		border-color: #555555;
 		box-shadow: 0 0 0 2px #ffffff;
 	}

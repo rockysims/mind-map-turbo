@@ -109,17 +109,13 @@ describe('frameGeometry', () => {
 		expect(geometry.borderWidthPx).toBeCloseTo((NODE_BORDER_WIDTH * 0.5 + DETAILS_BORDER) / 2);
 	});
 
-	it('uses the pinned border width for the source end when pinned', () => {
+	it('scales the passed node border width for the source end', () => {
 		const view: FrameViewState = { pan: { x: 0, y: 0 }, scale: 1, stageRect };
-		const base = { center: { x: 0, y: 0 }, radius: 100, nodeScale: 0.5 } as const;
-		// Constants are equal by default, so pin the source constants explicitly to
-		// prove the branch selects the pinned value.
-		const options = { nodeBorderWidthPx: 6, pinnedNodeBorderWidthPx: 12 };
+		const layout: NodeFrameLayout = { center: { x: 0, y: 0 }, radius: 100, nodeScale: 0.5 };
+		// Pinned and unpinned nodes share one width, so the passed width is the
+		// only border input; pin it away from the default to prove it is read.
+		const geometry = frameGeometry(layout, view, fillRect, 0, { nodeBorderWidthPx: 12 });
 
-		const unpinned = frameGeometry({ ...base, pinned: false }, view, fillRect, 0, options);
-		const pinned = frameGeometry({ ...base, pinned: true }, view, fillRect, 0, options);
-
-		expect(unpinned.borderWidthPx).toBeCloseTo(6 * 0.5);
-		expect(pinned.borderWidthPx).toBeCloseTo(12 * 0.5);
+		expect(geometry.borderWidthPx).toBeCloseTo(12 * 0.5);
 	});
 });

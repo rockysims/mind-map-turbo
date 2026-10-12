@@ -1579,17 +1579,14 @@
 	});
 
 	/**
-	 * What a node's `.circle` was told to draw and what it draws: both widths as
-	 * set inline by `NodeChrome`, and the computed border it actually renders.
+	 * What a node's `.circle` was told to draw and what it draws: the width set
+	 * inline by `NodeChrome` (pinned or not, there is only one), and the computed
+	 * border it actually renders.
 	 */
-	function nodeBorderWidths(
-		el: HTMLElement,
-		nodeId: string
-	): { normal: number; pinned: number; rendered: number } {
+	function nodeBorderWidths(el: HTMLElement, nodeId: string): { asked: number; rendered: number } {
 		const circle = getCircle(el, nodeId);
 		return {
-			normal: parseFloat(circle.style.getPropertyValue('--node-border-width')),
-			pinned: parseFloat(circle.style.getPropertyValue('--pinned-node-border-width')),
+			asked: parseFloat(circle.style.getPropertyValue('--node-border-width')),
 			rendered: parseFloat(getComputedStyle(circle).borderTopWidth)
 		};
 	}
@@ -1723,7 +1720,7 @@
 	 * Scrub into focus on `nodeId` and back to progress 0, then commit and flick
 	 * out to progress 0, and at both handoffs check that the morph surface starts
 	 * from the border the node itself draws. `aboveDefaultPx` is how far, in
-	 * on-screen pixels, that border must clear the default pinned border, so a
+	 * on-screen pixels, that border must clear the default node border, so a
 	 * story cannot pass by the morph ignoring the weighting altogether.
 	 */
 	async function expectMorphStartsFromTheNodesBorder(
@@ -1743,7 +1740,7 @@
 			const visualScale = nodeRect.width / inStage.offsetWidth;
 			// Against the width the node was told to draw, so the comparison is
 			// exact rather than at the mercy of the browser's border snapping...
-			const asked = nodeBorderWidths(canvasElement, nodeId).pinned;
+			const asked = nodeBorderWidths(canvasElement, nodeId).asked;
 			expect(asked * visualScale).toBeCloseTo(morph.borderWidth, 1);
 			// ...and against what it draws, the existing story's check, within the
 			// device pixel the browser's snapping takes off a fractional border.
@@ -1751,7 +1748,7 @@
 			expectDrawnBorder(localBorder * visualScale, morph.borderWidth);
 			// Not the unweighted default: the story would pass vacuously otherwise.
 			expect(morph.borderWidth).toBeGreaterThan(
-				APP_CONFIG.multigraph.pinnedNodeBorderWidthPx * visualScale + aboveDefaultPx
+				APP_CONFIG.multigraph.nodeBorderWidthPx * visualScale + aboveDefaultPx
 			);
 		};
 
@@ -8662,17 +8659,17 @@
 		const large = nodeBorderWidths(canvasElement, 'n3');
 		const sizeless = nodeBorderWidths(canvasElement, 'n4');
 
-		expect(small.normal).toBeCloseTo(4, 5);
-		expect(reference.normal).toBeCloseTo(8, 5);
-		expect(large.normal).toBeCloseTo(15.97, 1);
-		expect(sizeless.normal).toBeCloseTo(8, 5);
+		expect(small.asked).toBeCloseTo(4, 5);
+		expect(reference.asked).toBeCloseTo(8, 5);
+		expect(large.asked).toBeCloseTo(15.97, 1);
+		expect(sizeless.asked).toBeCloseTo(8, 5);
 
 		// What the reader sees, not just what was asked for.
 		expect(small.rendered).toBeLessThan(reference.rendered);
 		expect(reference.rendered).toBeLessThan(large.rendered);
 		expectDrawnBorder(small.rendered, 4);
 		expectDrawnBorder(reference.rendered, 8);
-		expectDrawnBorder(large.rendered, large.normal);
+		expectDrawnBorder(large.rendered, large.asked);
 		expectDrawnBorder(sizeless.rendered, 8);
 
 		// Size is border only: every spoke is one hop out and drawn at one scale.
@@ -8682,7 +8679,7 @@
 />
 
 <Story
-	name="APinnedSizedNodeScalesItsPinnedBorder"
+	name="APinnedSizedNodeScalesItsBorderLikeAnyOther"
 	args={{
 		multigraphData: makeGraph({ nodeCount: 1, pinned: [0], sizeBytes: { 0: 100 * MIB } }),
 		defaultPrimaryNodeId: 'n0',
@@ -8693,12 +8690,14 @@
 		const circle = getCircle(canvasElement, 'n0');
 		expect(circle).toHaveAttribute('data-pinned', 'true');
 
+		// Pinned nodes share the node border width (no separate pinned width), so
+		// the size factor lands on `--node-border-width` and the drawn border.
 		const widths = nodeBorderWidths(canvasElement, 'n0');
-		expect(widths.pinned).toBeCloseTo(15.97, 1);
-		expect(widths.normal).toBeCloseTo(15.97, 1);
-		expectDrawnBorder(widths.rendered, widths.pinned);
+		expect(widths.asked).toBeCloseTo(15.97, 1);
+		expectDrawnBorder(widths.rendered, widths.asked);
 		// The pin still reads as a pin: darker border, white halo.
 		expect(getComputedStyle(circle).borderTopColor).toBe('rgb(85, 85, 85)');
+		expect(getComputedStyle(circle).boxShadow).toContain('rgb(255, 255, 255)');
 	}}
 />
 
@@ -8726,8 +8725,8 @@
 		expect(circle.style.getPropertyValue('--node-tag-border')).toContain('#ff0000');
 
 		const widths = nodeBorderWidths(canvasElement, 'big');
-		expect(widths.normal).toBeCloseTo(15.97, 1);
-		expectDrawnBorder(widths.rendered, widths.normal);
+		expect(widths.asked).toBeCloseTo(15.97, 1);
+		expectDrawnBorder(widths.rendered, widths.asked);
 		// The colour is painted into the border box, so a wider border is a wider
 		// ring: the border itself stays transparent over the gradient.
 		expect(getComputedStyle(circle).borderTopColor).toBe('rgba(0, 0, 0, 0)');
@@ -8744,17 +8743,17 @@
 	play={async ({ canvasElement }: HarnessPlayContext) => {
 		await waitForLayout();
 		const harness = getSettingsHarness(canvasElement);
-		expect(nodeBorderWidths(canvasElement, 'n3').normal).toBeCloseTo(15.97, 1);
+		expect(nodeBorderWidths(canvasElement, 'n3').asked).toBeCloseTo(15.97, 1);
 
 		const slider = settingsSlider(canvasElement, 'Width per doubling');
 		dragSettingsSlider(slider, [0.2, 0.25], false);
 
-		await waitFor(() => expect(nodeBorderWidths(canvasElement, 'n3').normal).toBeCloseTo(21.3, 1));
+		await waitFor(() => expect(nodeBorderWidths(canvasElement, 'n3').asked).toBeCloseTo(21.3, 1));
 		const live = nodeBorderWidths(canvasElement, 'n3');
-		expectDrawnBorder(live.rendered, live.normal);
+		expectDrawnBorder(live.rendered, live.asked);
 		// The reference-sized and sizeless nodes do not move with the slope.
-		expect(nodeBorderWidths(canvasElement, 'n2').normal).toBeCloseTo(8, 5);
-		expect(nodeBorderWidths(canvasElement, 'n4').normal).toBeCloseTo(8, 5);
+		expect(nodeBorderWidths(canvasElement, 'n2').asked).toBeCloseTo(8, 5);
+		expect(nodeBorderWidths(canvasElement, 'n4').asked).toBeCloseTo(8, 5);
 		expect(harness.dataset.settingsChangeCount).toBe('0');
 		expect(harnessSettings(canvasElement)).toEqual({});
 
@@ -8763,7 +8762,7 @@
 		expect(harnessSettings(canvasElement)).toEqual({
 			'multigraph.borderWeight.widthPerDoubling': 0.25
 		});
-		expect(nodeBorderWidths(canvasElement, 'n3').normal).toBeCloseTo(21.3, 1);
+		expect(nodeBorderWidths(canvasElement, 'n3').asked).toBeCloseTo(21.3, 1);
 	}}
 >
 	{#snippet template()}
@@ -8796,14 +8795,14 @@
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
-		expect(nodeBorderWidths(canvasElement, 'n0').pinned).toBeCloseTo(15.97, 1);
+		expect(nodeBorderWidths(canvasElement, 'n0').asked).toBeCloseTo(15.97, 1);
 		await expectMorphStartsFromTheNodesBorder(canvasElement, 'n0', 4);
 	}}
 />
 
 <!--
 	The morph reads the same per-node border as the canvas whatever the source:
-	under "Edge count" the five-edge hub's pinned border is
+	under "Edge count" the five-edge (pinned) hub's border is
 	8 × (1 + 0.15 × log2(5/3)) ≈ 8.88 px, and the surface starts from that rather
 	than from the default 8 px.
 -->
@@ -8818,7 +8817,7 @@
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
-		expect(nodeBorderWidths(canvasElement, 'hub').pinned).toBeCloseTo(curveWidth(5, 3), 5);
+		expect(nodeBorderWidths(canvasElement, 'hub').asked).toBeCloseTo(curveWidth(5, 3), 5);
 		// 0.88 px above the default before scaling; half a pixel clears it at any
 		// visual scale this story reaches, and still fails on the unweighted 8 px.
 		await expectMorphStartsFromTheNodesBorder(canvasElement, 'hub', 0.5);
@@ -8842,23 +8841,21 @@
 		await waitForLayout();
 		// Five edges against a reference of three: 8 × (1 + 0.15 × log2(5/3)) ≈ 8.88 px.
 		const hub = nodeBorderWidths(canvasElement, 'hub');
-		expect(hub.pinned).toBeCloseTo(curveWidth(5, 3), 5);
-		expect(hub.normal).toBeCloseTo(curveWidth(5, 3), 5);
-		expectDrawnBorder(hub.rendered, hub.pinned);
+		expect(hub.asked).toBeCloseTo(curveWidth(5, 3), 5);
+		expectDrawnBorder(hub.rendered, hub.asked);
 
 		// One edge each: 8 × (1 + 0.15 × log2(1/3)) ≈ 6.10 px.
 		for (const id of ['a', 'b', 'c', 'd', 'e']) {
 			const leaf = nodeBorderWidths(canvasElement, id);
-			expect(leaf.normal).toBeCloseTo(curveWidth(1, 3), 5);
-			expectDrawnBorder(leaf.rendered, leaf.normal);
+			expect(leaf.asked).toBeCloseTo(curveWidth(1, 3), 5);
+			expectDrawnBorder(leaf.rendered, leaf.asked);
 			expect(leaf.rendered).toBeLessThan(hub.rendered);
 		}
 
 		// No edges is a real count of 0, so the loner sits on the ×0.5 floor rather
 		// than drawing the configured border a node with no value would.
 		const loner = nodeBorderWidths(canvasElement, 'loner');
-		expect(loner.pinned).toBeCloseTo(4, 5);
-		expect(loner.normal).toBeCloseTo(4, 5);
+		expect(loner.asked).toBeCloseTo(4, 5);
 		expectDrawnBorder(loner.rendered, 4);
 	}}
 />
@@ -8878,16 +8875,16 @@
 		const four = nodeBorderWidths(canvasElement, 'four');
 
 		// 0 → the floor, 1 → the reference, 4 → 8 × (1 + 0.15 × 2) = 10.4 px.
-		expect(none.normal).toBeCloseTo(4, 5);
-		expect(one.normal).toBeCloseTo(8, 5);
-		expect(four.normal).toBeCloseTo(10.4, 5);
+		expect(none.asked).toBeCloseTo(4, 5);
+		expect(one.asked).toBeCloseTo(8, 5);
+		expect(four.asked).toBeCloseTo(10.4, 5);
 		expectDrawnBorder(none.rendered, 4);
 		expectDrawnBorder(one.rendered, 8);
 		expectDrawnBorder(four.rendered, 10.4);
 		expect(none.rendered).toBeLessThan(one.rendered);
 		expect(one.rendered).toBeLessThan(four.rendered);
 		// The hub has nothing attached either.
-		expect(nodeBorderWidths(canvasElement, 'hub').pinned).toBeCloseTo(4, 5);
+		expect(nodeBorderWidths(canvasElement, 'hub').asked).toBeCloseTo(4, 5);
 	}}
 />
 
@@ -8911,7 +8908,7 @@
 		let previous = 0;
 		for (const [id, width] of expected) {
 			const widths = nodeBorderWidths(canvasElement, id);
-			expect(widths.normal).toBeCloseTo(width, 5);
+			expect(widths.asked).toBeCloseTo(width, 5);
 			expectDrawnBorder(widths.rendered, width);
 			expect(widths.rendered).toBeGreaterThan(previous);
 			previous = widths.rendered;
@@ -8939,11 +8936,11 @@
 		];
 		for (const [id, width] of expected) {
 			const widths = nodeBorderWidths(canvasElement, id);
-			expect(widths.normal).toBeCloseTo(width, 5);
+			expect(widths.asked).toBeCloseTo(width, 5);
 			expectDrawnBorder(widths.rendered, width);
 		}
-		// The hub has no weight, so it draws the configured pinned border.
-		expect(nodeBorderWidths(canvasElement, 'hub').pinned).toBeCloseTo(8, 5);
+		// The hub has no weight, so it draws the configured border.
+		expect(nodeBorderWidths(canvasElement, 'hub').asked).toBeCloseTo(8, 5);
 	}}
 />
 
@@ -8960,10 +8957,10 @@
 		// The same spokes that draw 4 / 8 / 15.97 / 8 px under "Size".
 		for (const id of ['n1', 'n2', 'n3', 'n4']) {
 			const widths = nodeBorderWidths(canvasElement, id);
-			expect(widths.normal).toBeCloseTo(8, 5);
+			expect(widths.asked).toBeCloseTo(8, 5);
 			expectDrawnBorder(widths.rendered, 8);
 		}
-		expect(nodeBorderWidths(canvasElement, 'n0').pinned).toBeCloseTo(8, 5);
+		expect(nodeBorderWidths(canvasElement, 'n0').asked).toBeCloseTo(8, 5);
 	}}
 />
 
@@ -8982,37 +8979,37 @@
 		const sizeWidth = curveWidth(100 * MIB, MIB);
 		const select = borderSourceSelect(canvasElement);
 		expect(select.value).toBe('size');
-		expect(nodeBorderWidths(canvasElement, 'n3').normal).toBeCloseTo(sizeWidth, 5);
-		expect(nodeBorderWidths(canvasElement, 'n0').pinned).toBeCloseTo(8, 5);
+		expect(nodeBorderWidths(canvasElement, 'n3').asked).toBeCloseTo(sizeWidth, 5);
+		expect(nodeBorderWidths(canvasElement, 'n0').asked).toBeCloseTo(8, 5);
 
 		chooseOption(select, 'degree');
 		await waitFor(() => expect(harness.dataset.settingsChangeCount).toBe('1'));
 		expect(harnessSettings(canvasElement)).toEqual({ [BORDER_SOURCE]: 'degree' });
 		await waitFor(() =>
-			expect(nodeBorderWidths(canvasElement, 'n3').normal).toBeCloseTo(curveWidth(1, 3), 5)
+			expect(nodeBorderWidths(canvasElement, 'n3').asked).toBeCloseTo(curveWidth(1, 3), 5)
 		);
 		const leaf = nodeBorderWidths(canvasElement, 'n3');
-		expectDrawnBorder(leaf.rendered, leaf.normal);
+		expectDrawnBorder(leaf.rendered, leaf.asked);
 		const hub = nodeBorderWidths(canvasElement, 'n0');
-		expect(hub.pinned).toBeCloseTo(curveWidth(4, 3), 5);
-		expectDrawnBorder(hub.rendered, hub.pinned);
+		expect(hub.asked).toBeCloseTo(curveWidth(4, 3), 5);
+		expectDrawnBorder(hub.rendered, hub.asked);
 
 		chooseOption(borderSourceSelect(canvasElement), 'none');
 		await waitFor(() => expect(harness.dataset.settingsChangeCount).toBe('2'));
 		expect(harnessSettings(canvasElement)).toEqual({ [BORDER_SOURCE]: 'none' });
-		await waitFor(() => expect(nodeBorderWidths(canvasElement, 'n3').normal).toBeCloseTo(8, 5));
+		await waitFor(() => expect(nodeBorderWidths(canvasElement, 'n3').asked).toBeCloseTo(8, 5));
 		expectDrawnBorder(nodeBorderWidths(canvasElement, 'n3').rendered, 8);
-		expect(nodeBorderWidths(canvasElement, 'n0').pinned).toBeCloseTo(8, 5);
+		expect(nodeBorderWidths(canvasElement, 'n0').asked).toBeCloseTo(8, 5);
 
 		// Back to the shipped source: the override is dropped, not stored as "size".
 		chooseOption(borderSourceSelect(canvasElement), 'size');
 		await waitFor(() => expect(harness.dataset.settingsChangeCount).toBe('3'));
 		expect(harnessSettings(canvasElement)).toEqual({});
 		await waitFor(() =>
-			expect(nodeBorderWidths(canvasElement, 'n3').normal).toBeCloseTo(sizeWidth, 5)
+			expect(nodeBorderWidths(canvasElement, 'n3').asked).toBeCloseTo(sizeWidth, 5)
 		);
 		const sized = nodeBorderWidths(canvasElement, 'n3');
-		expectDrawnBorder(sized.rendered, sized.normal);
+		expectDrawnBorder(sized.rendered, sized.asked);
 	}}
 >
 	{#snippet template()}

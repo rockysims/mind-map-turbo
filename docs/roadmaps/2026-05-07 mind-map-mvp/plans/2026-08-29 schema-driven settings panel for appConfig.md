@@ -649,3 +649,15 @@ no test surface of its own, T08 because it is where all five prior threads meet.
 - 2026-08-29: If the settle kick has to be damped in T08, record which fields
   ended up commit-only here so the schema's `preview` values can be corrected to
   match reality.
+- 2026-10-12: owner ruling — `multigraph.pinnedNodeBorderWidthPx` ("Pinned node
+  border width", Advanced, `instant`) is removed, so the schema now covers 114
+  leaves. Pinned nodes already read as pinned through the darker border colour
+  and the white halo, and the second width only meant the Basic "Node border
+  width" slider left pinned nodes alone (both shipped as 8 px, so nobody saw
+  the split until they dragged it). Every node now draws
+  `multigraph.nodeBorderWidthPx` times its border-weight factor; `NodeChrome`'s
+  pinned rule keeps only its colour and halo, and `frameGeometry` takes one
+  width. Saved overrides of the old key are dropped by `sanitizeOverrides` as
+  unknown settings, not migrated. The `instant` row in the preview table above
+  still lists the key as it shipped on 2026-08-29. Ruling:
+  `docs/ui-decisions/2026-10-12--display--pinned-nodes-share-the-node-border-width.md`.

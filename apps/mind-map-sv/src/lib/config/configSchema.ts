@@ -232,16 +232,6 @@ export const CONFIG_SCHEMA: { [K in ConfigPath]: FieldSpec } = {
 		step: 1,
 		unit: 'px'
 	},
-	'multigraph.pinnedNodeBorderWidthPx': {
-		control: 'range',
-		label: 'Pinned node border width',
-		tier: 'advanced',
-		preview: 'instant',
-		min: 0,
-		max: 40,
-		step: 1,
-		unit: 'px'
-	},
 	'multigraph.minNodeHitRadiusPx': {
 		control: 'range',
 		label: 'Minimum tap target',

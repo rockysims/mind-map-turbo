@@ -1,10 +1,5 @@
 <script lang="ts">
-	import {
-		NODE_BORDER_WIDTH,
-		NODE_RADIUS,
-		NODE_TEXT_FONT_SIZE,
-		PINNED_NODE_BORDER_WIDTH
-	} from '$lib/constants';
+	import { NODE_BORDER_WIDTH, NODE_RADIUS, NODE_TEXT_FONT_SIZE } from '$lib/constants';
 	import type { NodeData } from '$lib/components/ui/types/node';
 	import {
 		tagBorderBackground,
@@ -30,11 +25,10 @@
 		onTitleCommit,
 		// Chrome measurements default to the shipped constants so a story can mount
 		// a node with none of them. A parent that owns a live config (Multigraph)
-		// passes all four explicitly — a prop default is evaluated once, so it must
+		// passes all three explicitly — a prop default is evaluated once, so it must
 		// never be the path a changing value takes.
 		radiusPx = NODE_RADIUS,
 		borderWidthPx = NODE_BORDER_WIDTH,
-		pinnedBorderWidthPx = PINNED_NODE_BORDER_WIDTH,
 		fontSizePx = NODE_TEXT_FONT_SIZE
 	}: {
 		nodeData: NodeData;
@@ -49,10 +43,8 @@
 		onTitleCommit?: (title: string) => void;
 		/** Node radius in logical pixels; the circle is drawn at twice this. */
 		radiusPx?: number;
-		/** Border width of an unpinned node. */
+		/** Border width, pinned or not. */
 		borderWidthPx?: number;
-		/** Border width of a pinned node. */
-		pinnedBorderWidthPx?: number;
 		/** Title font size inside the compact circle. */
 		fontSizePx?: number;
 	} = $props();
@@ -81,7 +73,6 @@
 		diameterPx={radiusPx * 2}
 		borderRadiusPx={radiusPx}
 		{borderWidthPx}
-		{pinnedBorderWidthPx}
 		pinned={nodeData.pinned ?? false}
 		hasTagBorder={borderSegments.length > 0}
 		tagBorderBackground={borderBackground}

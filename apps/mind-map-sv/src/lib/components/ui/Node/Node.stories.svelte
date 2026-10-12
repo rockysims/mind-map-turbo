@@ -107,10 +107,8 @@
 		const width = parseFloat(circleStyles.width);
 		const radiusValue = parseFloat(borderRadius);
 		const radiusPercent = radiusValue / width;
-		const expectedBorderWidth = args.nodeData.pinned
-			? APP_CONFIG.multigraph.pinnedNodeBorderWidthPx
-			: APP_CONFIG.multigraph.nodeBorderWidthPx;
-		expect(parseFloat(circleStyles.borderWidth)).toBe(expectedBorderWidth);
+		// Pinned or not, a node draws the one configured border width.
+		expect(parseFloat(circleStyles.borderWidth)).toBe(APP_CONFIG.multigraph.nodeBorderWidthPx);
 		expect(radiusPercent).toBeGreaterThanOrEqual(0.5);
 	}
 
@@ -210,9 +208,27 @@
 		const circle = ctx.canvasElement.querySelector('.node .circle');
 		expect(circle).toBeInTheDocument();
 		const circleStyles = window.getComputedStyle(circle as HTMLElement);
-		expect(parseFloat(circleStyles.borderWidth)).toBe(
-			APP_CONFIG.multigraph.pinnedNodeBorderWidthPx
+		expect(parseFloat(circleStyles.borderWidth)).toBe(APP_CONFIG.multigraph.nodeBorderWidthPx);
+	}
+
+	/** The width a pinned node is handed, distinct from the shipped default. */
+	const PINNED_CUSTOM_BORDER_PX = 14;
+
+	/**
+	 * A pinned node reads the same `borderWidthPx` as any other — there is no
+	 * separate pinned width — while keeping its darker colour and white halo.
+	 */
+	async function pinnedFollowsBorderWidthPlayHandler({ canvasElement }: PlayArgs) {
+		const circle = canvasElement.querySelector('.node .circle');
+		if (!(circle instanceof HTMLElement)) throw new Error('Node circle not found');
+		expect(circle).toHaveAttribute('data-pinned', 'true');
+		expect(circle.style.getPropertyValue('--node-border-width')).toBe(
+			`${PINNED_CUSTOM_BORDER_PX}px`
 		);
+		const styles = window.getComputedStyle(circle);
+		expect(parseFloat(styles.borderTopWidth)).toBe(PINNED_CUSTOM_BORDER_PX);
+		expect(styles.borderTopColor).toBe('rgb(85, 85, 85)');
+		expect(styles.boxShadow).toContain('rgb(255, 255, 255)');
 	}
 </script>
 
@@ -255,8 +271,7 @@
 			description: '',
 			tags: []
 		},
-		borderWidthPx: THICKEST_BORDER_PX,
-		pinnedBorderWidthPx: THICKEST_BORDER_PX
+		borderWidthPx: THICKEST_BORDER_PX
 	}}
 	play={titleInsideThickestBorderPlayHandler}
 />
@@ -270,8 +285,7 @@
 			description: '',
 			tags: []
 		},
-		borderWidthPx: THICKEST_BORDER_PX,
-		pinnedBorderWidthPx: THICKEST_BORDER_PX
+		borderWidthPx: THICKEST_BORDER_PX
 	}}
 	play={titleInsideThickestBorderPlayHandler}
 />
@@ -288,6 +302,21 @@
 		}
 	}}
 	play={pinnedClosedPlayHandler}
+/>
+
+<Story
+	name="APinnedNodeDrawsTheNodeBorderWidth"
+	args={{
+		nodeData: {
+			id: 'node id pinned custom border',
+			title: 'Pinned node title',
+			description: '',
+			tags: [],
+			pinned: true
+		},
+		borderWidthPx: PINNED_CUSTOM_BORDER_PX
+	}}
+	play={pinnedFollowsBorderWidthPlayHandler}
 />
 
 <Story

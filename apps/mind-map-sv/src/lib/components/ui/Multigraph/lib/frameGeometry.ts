@@ -1,5 +1,5 @@
 import { APP_CONFIG } from '$lib/appConfig';
-import { NODE_BORDER_WIDTH, PINNED_NODE_BORDER_WIDTH } from '$lib/constants';
+import { NODE_BORDER_WIDTH } from '$lib/constants';
 import type { Point } from '../../types/multigraph';
 import { interpolateMorph } from './morphGeometry';
 import { graphPointToClientPoint, type StageRect } from './stageCoordinates';
@@ -9,13 +9,13 @@ import type { Rect } from './zoomBoundary';
  * The node's placement in graph space plus the on-screen scale of its content.
  * `radius` and `center` mirror what `nodeScreenCircle` consumes; `nodeScale`
  * is the node's logical-to-content scale (`radius / baseRadius`) used to size
- * the border, matching how the in-stage node renders its chrome.
+ * the border, matching how the in-stage node renders its chrome. Pinned and
+ * unpinned nodes draw the same border width, so pinning is not an input here.
  */
 export interface NodeFrameLayout {
 	center: Point;
 	radius: number;
 	nodeScale: number;
-	pinned?: boolean;
 }
 
 /**
@@ -43,7 +43,6 @@ interface FrameGeometryOptions {
 	targetRadiusPx?: number;
 	targetBorderWidthPx?: number;
 	nodeBorderWidthPx?: number;
-	pinnedNodeBorderWidthPx?: number;
 }
 
 /**
@@ -77,9 +76,7 @@ export function frameGeometry(
 		height: screenRadius * 2
 	};
 
-	const nodeBorderWidthPx = options.nodeBorderWidthPx ?? NODE_BORDER_WIDTH;
-	const pinnedNodeBorderWidthPx = options.pinnedNodeBorderWidthPx ?? PINNED_NODE_BORDER_WIDTH;
-	const baseBorderWidthPx = nodeLayout.pinned ? pinnedNodeBorderWidthPx : nodeBorderWidthPx;
+	const baseBorderWidthPx = options.nodeBorderWidthPx ?? NODE_BORDER_WIDTH;
 	// Source visual scale: how logical CSS pixels map to screen pixels for this
 	// node (stage scale × the node's content scale). Border width scales by it.
 	const sourceVisualScale = viewState.scale * nodeLayout.nodeScale;

@@ -497,7 +497,6 @@
 	const focusDetailsBorderWidthPx = $derived(cfg.multigraph.focus.detailsBorderWidthPx);
 	const nodeTextFontSizePx = $derived(cfg.multigraph.nodeTextFontSizePx);
 	const nodeBorderWidthPx = $derived(cfg.multigraph.nodeBorderWidthPx);
-	const pinnedNodeBorderWidthPx = $derived(cfg.multigraph.pinnedNodeBorderWidthPx);
 	const minNodeHitRadiusPx = $derived(cfg.multigraph.minNodeHitRadiusPx);
 	const arrowLengthPx = $derived(cfg.multigraph.edgeArrow.lengthPx);
 	const arrowHalfHeightPx = $derived(cfg.multigraph.edgeArrow.halfHeightPx);
@@ -545,11 +544,10 @@
 	const nodeChromeTunables = $derived({
 		radiusPx: nodeRadiusPx,
 		borderWidthPx: nodeBorderWidthPx,
-		pinnedBorderWidthPx: pinnedNodeBorderWidthPx,
 		fontSizePx: nodeTextFontSizePx
 	});
 	/**
-	 * `nodeChromeTunables` with both border widths scaled by the number the
+	 * `nodeChromeTunables` with the border width scaled by the number the
 	 * graph's border source reads off the node (`multigraph.borderWeight`).
 	 *
 	 * Every ring the canvas draws for a node — live, reveal-wave buffer, exiting
@@ -569,8 +567,7 @@
 		if (factor === 1) return nodeChromeTunables;
 		return {
 			...nodeChromeTunables,
-			borderWidthPx: nodeChromeTunables.borderWidthPx * factor,
-			pinnedBorderWidthPx: nodeChromeTunables.pinnedBorderWidthPx * factor
+			borderWidthPx: nodeChromeTunables.borderWidthPx * factor
 		};
 	}
 
@@ -2205,8 +2202,7 @@
 		return {
 			center,
 			radius,
-			nodeScale: graphLayout.scaleByNodeId[subjectId] ?? 1,
-			pinned: node.pinned ?? false
+			nodeScale: graphLayout.scaleByNodeId[subjectId] ?? 1
 		};
 	}
 
@@ -2261,15 +2257,14 @@
 			};
 		}
 		// Passed rather than left to `frameGeometry`'s own fallbacks, which read the
-		// constants module and so would be frozen at import. The source widths are
+		// constants module and so would be frozen at import. The source width is
 		// the subject's own sized chrome, so progress 0 matches the canvas node.
 		const subject = nodeById[level.subjectId];
 		const chrome = subject ? nodeChromeFor(subject) : nodeChromeTunables;
 		return frameGeometry(layout, view, fill, level.morphProgress, {
 			targetRadiusPx: focusDetailsCornerRadiusPx,
 			targetBorderWidthPx: focusDetailsBorderWidthPx,
-			nodeBorderWidthPx: chrome.borderWidthPx,
-			pinnedNodeBorderWidthPx: chrome.pinnedBorderWidthPx
+			nodeBorderWidthPx: chrome.borderWidthPx
 		});
 	}
 
@@ -3859,7 +3854,6 @@
 					diameterPx={nodeDiameterPx}
 					{borderRadiusPx}
 					{borderWidthPx}
-					pinnedBorderWidthPx={borderWidthPx}
 					pinned={frameNode.pinned ?? false}
 					hasTagBorder={segments.length > 0}
 					tagBorderBackground={tagBorderBackground(segments)}

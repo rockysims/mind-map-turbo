@@ -228,6 +228,17 @@ describe('sanitizeOverrides', () => {
 		]);
 	});
 
+	// Pinned nodes share `nodeBorderWidthPx` since 2026-10-12, so a saved
+	// pinned-width override is dropped rather than migrated onto it.
+	it('drops a retired multigraph.pinnedNodeBorderWidthPx override as an unknown setting', () => {
+		const { overrides, warnings } = sanitizeOverrides({
+			'multigraph.pinnedNodeBorderWidthPx': 12,
+			'multigraph.nodeBorderWidthPx': 10
+		});
+		expect(overrides).toEqual({ 'multigraph.nodeBorderWidthPx': 10 });
+		expect(warnings).toEqual(['Unknown setting "multigraph.pinnedNodeBorderWidthPx" was dropped.']);
+	});
+
 	it('drops wrong-typed values and names them', () => {
 		const { overrides, warnings } = sanitizeOverrides({
 			'multigraph.layout.scaleFalloff': 'quite a lot',

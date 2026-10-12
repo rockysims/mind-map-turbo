@@ -78,11 +78,10 @@ export const APP_CONFIG = {
 		nodeRadiusPx: NODE_RADIUS_PX, // default rendered node radius
 		nodeTextFontSizePx: 38, // default title and description font size
 		nodeBorderWidthPx: 8, // default node border width
-		pinnedNodeBorderWidthPx: 8, // border width for pinned nodes
 		minNodeHitRadiusPx: 32, // minimum tap/hit target radius
 		// Border width can show one number per node on a bounded log scale:
 		// `clamp(1 + widthPerDoubling * log2(value / reference), minFactor, maxFactor)`
-		// multiplies both border widths above. `source` picks the number; a node with
+		// multiplies the border width above. `source` picks the number; a node with
 		// no value for it draws the widths as-is.
 		borderWeight: {
 			source: 'size', // none | size | weight | degree | attachments | descriptionLength
