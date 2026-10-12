@@ -3,7 +3,7 @@
 **Created:** 2026-10-11
 **Author:** Claude agent
 **Milestone:** none — extends [milestone 05](../milestones/05-filter-find-search.md) (Find / Filter panel)
-**Status:** draft
+**Status:** done
 **Total estimated effort:** M
 
 ## Summary
@@ -407,6 +407,8 @@ agent can carry them as two commits in one session.
   storybook projects, including the new spec and stories).
 - `pnpm --filter mind-map-sv knip` passes.
 - `pnpm run check:offline-shell` passes with a regenerated shell committed.
+  _Not done in T04: one regeneration is deferred until all four 2026-10-11
+  plans have landed on `feature/graph-tunables` (see Notes)._
 - Clicking a tag button four times in the running app walks the query through
   `#tag`, `+#tag`, `-#tag` and back, leaving any other typed text intact.
 - Milestone 05's UI bullets describe the new behaviour, the ruling is filed in
@@ -416,3 +418,26 @@ agent can carry them as two commits in one session.
 
 - 2026-10-11: drafted from a decided design; the open questions above record
   decisions already made, not proposals.
+- 2026-10-11: executed. What landed:
+  - T01 — `GraphQueryToken` carries a half-open `start`/`end` source range, so
+    `query.slice(token.start, token.end)` is exactly what was typed; empty
+    tokens (`""`, `#`, `+#`) still push nothing.
+  - T02 — new pure `lib/queryTokenCycle.ts` (`tagTokenText`, `tagTokenMode`,
+    `cycleTagToken`) with `lib/queryTokenCycle.spec.ts`; `graphQuery.ts`
+    exports `tagNamesMatch`, which `matchingTag` now calls.
+  - T03 — `GraphQueryPanel.svelte` renders both tag groups through one
+    `tagButton` snippet carrying `aria-pressed`, `data-mode`, the token as
+    typed for its label and a `Node tag lab, <state>` accessible name;
+    `appendToken` is gone and the hover/focus preview fires only for a tag not
+    in the query. New `GraphQueryPanelHarness.svelte` and
+    `GraphQueryPanel.stories.svelte` (four stories), plus
+    `UserCyclesNodeTagButtonIntoQuery` in `Multigraph.stories.svelte`.
+  - T04 — milestone 05's suggestion and hover bullets and the matching
+    acceptance line describe the cycle; the ruling is filed as
+    `docs/ui-decisions/2026-10-11--pointer--a-tag-button-cycles-its-token-and-hover-never-excludes.md`.
+  - T03's agent observed that the tag buttons sit below the 44px touch-target
+    floor. That predates this plan and was left alone; it is filed as
+    `docs/debt/2026-10-11-query-panel-tag-buttons-under-touch-target-floor.md`.
+  - The offline shell was **not** regenerated in T04: it will be rebuilt once,
+    after all four 2026-10-11 plans land, so `check:offline-shell` is still
+    owed for this plan's `src/**` changes.
