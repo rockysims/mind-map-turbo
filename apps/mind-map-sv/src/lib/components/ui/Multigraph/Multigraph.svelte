@@ -166,7 +166,9 @@
 	} from './lib/graph.js';
 	import { addonIntentLabel, type NodeAddonName } from './lib/nodeAddons';
 	import { deriveGraphLayout, withSettledGraphPositions } from './lib/graphLayout.js';
+	import { scaleByHops } from './lib/layout.js';
 	import { evaluateGraphQuery, type GraphQueryElementState } from './lib/graphQuery.js';
+	import { createLayoutSourceReducer, excludedGraphElements } from './lib/excludedElements.js';
 	import { beaconNodeIds } from './lib/beacons.js';
 	import { pinScrollToOrigin } from './lib/pinScroll';
 	import { severedComponentAfterMutation } from './lib/severedComponent.js';
@@ -589,6 +591,8 @@
 	let graphQueryPanelOpen = $state(false);
 	let graphQueryText = $state('');
 	let graphQueryPreviewText = $state<string | null>(null);
+	/** What the canvas shows and the layout runs over: a hover preview, else the typed query. */
+	const activeGraphQueryText = $derived(graphQueryPreviewText ?? graphQueryText);
 	let activeQueryRegionIndex = $state(0);
 	let fitViewRequest = $state<{
 		id: number;
@@ -885,11 +889,63 @@
 	 * than being rebuilt inside the derived chain below.
 	 */
 	const dataflowModel = createDataflowModel();
+	/**
+	 * A second model, for the layout source while the query excludes nodes. An
+	 * excluded node defines nothing, so no equation routes through it or pulls
+	 * toward it — but the full graph's model must keep serving the chips, the
+	 * diagnostics and the edit sheet, and one model cannot serve both: its
+	 * indexer evicts every node missing from its input, so feeding it the two
+	 * node lists in turn would re-extract every excluded node twice a frame.
+	 */
+	const layoutSourceDataflowModel = createDataflowModel();
+	/**
+	 * Memoized, so a position-only frame hands back the same reduced arrays and
+	 * the identity-keyed chain behind it (beacons, hops, dataflow) stays warm.
+	 */
+	const reduceLayoutSource = createLayoutSourceReducer();
+	/**
+	 * Node lists the reducer cut a node out of. Plain, not reactive: it is filled
+	 * from inside the derived chain, and only routes a list to its dataflow model.
+	 */
+	const reducedNodeLists = new WeakSet<readonly NodeData[]>();
+
+	/**
+	 * The graph the layout runs over: `data` minus whatever the active query
+	 * excludes. A node a jump is holding on screen is exempt, so the jump can
+	 * seed it — `revealedNodeIds` is identity-stable, which the reducer's memo
+	 * relies on. Returns `data` itself when nothing in it is excluded.
+	 */
+	function layoutSourceFor(data: MultigraphData) {
+		return layoutSourceUnder(data, activeGraphQueryText, transientReveal.revealedNodeIds);
+	}
+
+	/** `layoutSourceFor` under a given query and exemption, such as the previous ones. */
+	function layoutSourceUnder(
+		data: MultigraphData,
+		queryText: string,
+		exemptNodeIds: ReadonlySet<string>
+	) {
+		const source = reduceLayoutSource(data, queryText, exemptNodeIds);
+		if (source.nodes !== data.nodes) reducedNodeLists.add(source.nodes);
+		return source;
+	}
+
+	/**
+	 * The dataflow model for a layout source. Derived edges depend on the nodes
+	 * alone, so a source that kept every node — nothing excluded, or only edges —
+	 * is answered by the full graph's model and the common path costs nothing new.
+	 */
+	function layoutDataflowFor(source: MultigraphData) {
+		return reducedNodeLists.has(source.nodes)
+			? layoutSourceDataflowModel(source, dataflowEnabled)
+			: dataflowModel(source, dataflowEnabled);
+	}
 
 	const layoutRuntime: LayoutRuntime = new LayoutRuntime({
 		getGraph: () => graph,
+		reduceLayoutSource: layoutSourceFor,
 		computeHops: (data) => hopsFor(data),
-		composeDerivedEdges: (data) => withSpringFactor(dataflowModel(data, dataflowEnabled).edges),
+		composeDerivedEdges: (data) => withSpringFactor(layoutDataflowFor(data).edges),
 		// A getter, re-read every frame, so a physics slider is live while it moves.
 		getLayoutSettings: () => layoutSettingsFromConfig,
 		getActiveDragNodeId: () => activeDragNodeId,
@@ -941,17 +997,46 @@
 	 * together each keep their own anchor, so neither can mostly vanish because
 	 * someone wrote an equation. The dataflow model is identity-stable, so a graph
 	 * whose content did not change costs a lookup here.
+	 *
+	 * Hand it a layout source (`layoutSourceFor`), never the stored graph: what
+	 * the query excludes must route no hops and anchor nothing. It does not reduce
+	 * on its own, so the exclusion diff can ask it about a previous query's source.
 	 */
 	function hopsFor(data: MultigraphData): Record<string, number> {
 		return computeBoundedHops(
 			data,
-			dataflowModel(data, dataflowEnabled).edges,
+			layoutDataflowFor(data).edges,
 			beaconsWithTransientReveals(data),
 			{
 				displayedLayers: resolvedLayoutSettings.displayedLayers,
 				dataflowDisplayedLayers: resolvedLayoutSettings.dataflowDisplayedLayers
 			}
 		);
+	}
+
+	/** Which nodes of a layout source the 04b neighbourhood keeps on screen. */
+	function visibleNodeIdsFor(source: MultigraphData, hops: Record<string, number>): Set<string> {
+		return visibleNodeIdsForPinnedNeighborhood(source, hops, {
+			displayedLayers: resolvedLayoutSettings.displayedLayers
+		});
+	}
+
+	/**
+	 * The edges drawn for a render graph (a layout source plus its derived edges).
+	 * Reads the render graph so derived edges get visibility, trimming, and fade —
+	 * then takes the fade back off the derived ones, which draw only between two
+	 * visible endpoints.
+	 */
+	function renderableEdgeVisibilityFor(
+		renderSource: MultigraphData,
+		hops: Record<string, number>
+	): RenderableEdgeVisibility[] {
+		return withDerivedBoundaryEdgesHidden(
+			edgeVisibilityForPinnedNeighborhood(renderSource, hops, {
+				displayedLayers: resolvedLayoutSettings.displayedLayers
+			}),
+			isDerivedEdgeId
+		).filter((visibility): visibility is RenderableEdgeVisibility => visibility.kind !== 'hidden');
 	}
 
 	/**
@@ -978,11 +1063,22 @@
 		return new Set([...beacons, ...seeds]);
 	}
 
+	/**
+	 * The graph the layout chain below runs over — `graph` minus what the query
+	 * excludes, and `graph` itself when nothing is. Excluded elements are gone
+	 * from physics, hops, beacons, occlusion, focus, fit and hit testing, while
+	 * the stored graph (details, edit sheet, history) still holds them, positions
+	 * and all.
+	 */
+	const layoutSourceGraph = $derived(layoutSourceFor(graph));
+	/** The whole graph's dataflow: what describes a node (chips, diagnostics, details). */
 	const dataflow = $derived(dataflowModel(graph, dataflowEnabled));
+	/** The layout source's dataflow: what is drawn and pulls on the canvas. */
+	const layoutDataflow = $derived(layoutDataflowFor(layoutSourceGraph));
 	/** What the renderer draws: authored edges plus the derived ones. */
-	const renderGraph = $derived(composeEdgesForRender(graph, dataflow.edges));
+	const renderGraph = $derived(composeEdgesForRender(layoutSourceGraph, layoutDataflow.edges));
 	/** The same derived edges the runtime composes, weighted for the spring. */
-	const layoutDerivedEdges = $derived(withSpringFactor(dataflow.edges));
+	const layoutDerivedEdges = $derived(withSpringFactor(layoutDataflow.edges));
 	/** Shared so a node below the size threshold allocates nothing per frame. */
 	const EMPTY_QUANTITY_CHIPS: QuantityChips = { labels: [], overflowCount: 0 };
 	/**
@@ -1005,7 +1101,7 @@
 	});
 	const quantityLabelByEdgeId = $derived(
 		new Map(
-			dataflow.edges.map((edge) => [
+			layoutDataflow.edges.map((edge) => [
 				edge.id,
 				formatQuantityLabel(
 					edge.quantities.map((quantity) => quantity.label),
@@ -1014,12 +1110,8 @@
 			])
 		)
 	);
-	const hopsByNodeId = $derived(hopsFor(graph));
-	const visibleNodeIds = $derived(
-		visibleNodeIdsForPinnedNeighborhood(graph, hopsByNodeId, {
-			displayedLayers: resolvedLayoutSettings.displayedLayers
-		})
-	);
+	const hopsByNodeId = $derived(hopsFor(layoutSourceGraph));
+	const visibleNodeIds = $derived(visibleNodeIdsFor(layoutSourceGraph, hopsByNodeId));
 	/**
 	 * The graph the layout runs over — the same composition `LayoutRuntime` makes
 	 * for the frames it relaxes, through the same function, so what is drawn and
@@ -1028,32 +1120,14 @@
 	 * derived edges riding along in `.edges`.
 	 */
 	const visibleGraph = $derived(
-		composeVisibleLayoutGraph(graph, visibleNodeIds, layoutDerivedEdges)
+		composeVisibleLayoutGraph(layoutSourceGraph, visibleNodeIds, layoutDerivedEdges)
 	);
 	/** Needs the visible set, so that out-of-view reads differently from undefined. */
 	const dataflowDiagnostics = $derived(
 		computeDataflowDiagnostics(dataflow.index, dataflow.edges, { visibleNodeIds })
 	);
-	/**
-	 * Reads the render graph so derived edges get visibility, trimming, and fade —
-	 * then takes the fade back off the derived ones, which draw only between two
-	 * visible endpoints.
-	 */
-	const edgeVisibility = $derived(
-		withDerivedBoundaryEdgesHidden(
-			edgeVisibilityForPinnedNeighborhood(renderGraph, hopsByNodeId, {
-				displayedLayers: resolvedLayoutSettings.displayedLayers
-			}),
-			isDerivedEdgeId
-		)
-	);
-	const renderableEdgeVisibility = $derived(
-		edgeVisibility.filter(
-			(visibility): visibility is RenderableEdgeVisibility => visibility.kind !== 'hidden'
-		)
-	);
+	const renderableEdgeVisibility = $derived(renderableEdgeVisibilityFor(renderGraph, hopsByNodeId));
 	const legendTags = $derived(collectLegendTags(graph));
-	const activeGraphQueryText = $derived(graphQueryPreviewText ?? graphQueryText);
 	const graphQueryResult = $derived(evaluateGraphQuery(graph, activeGraphQueryText));
 	const graphLayout = $derived(
 		deriveGraphLayout(
@@ -1239,24 +1313,31 @@
 		// come to rest under the same forces it will feel from the first interaction
 		// onward, instead of shifting once the runtime takes over — so it settles
 		// over the same composition, through the same function. Nothing is hidden
-		// yet, so every node is in the visible set.
+		// by the hop budget yet, so every node of the layout source is in the
+		// visible set. A query that outlives the swap still excludes what it
+		// matches, so the arriving graph settles without those nodes.
+		const ingestSource = untrack(() => layoutSourceFor(incoming));
 		const layoutGraphForIngest = untrack(() =>
 			composeVisibleLayoutGraph(
-				incoming,
-				new Set(incoming.nodes.map((node) => node.id)),
-				withSpringFactor(dataflowModel(incoming, dataflowEnabled).edges)
+				ingestSource,
+				new Set(ingestSource.nodes.map((node) => node.id)),
+				withSpringFactor(layoutDataflowFor(ingestSource).edges)
 			)
 		);
 		// The same hop map the canvas will draw from, so the graph settles at the
 		// sizes it is about to appear at rather than at a first guess.
-		const hopsByNodeIdForIngest = untrack(() => hopsFor(incoming));
+		const hopsByNodeIdForIngest = untrack(() => hopsFor(ingestSource));
 		const settledLayoutGraph = withSettledGraphPositions(layoutGraphForIngest, {
 			settings: ingestLayoutSettings,
 			hopsByNodeId: hopsByNodeIdForIngest
 		});
 		// Positions only: `settledLayoutGraph.edges` carries the derived edges, and
-		// the graph the app mutates and saves must never see one.
-		graph = { ...incoming, posByNodeId: settledLayoutGraph.posByNodeId };
+		// the graph the app mutates and saves must never see one. An excluded node
+		// keeps its incoming position, for when the exclusion lifts.
+		graph = {
+			...incoming,
+			posByNodeId: { ...incoming.posByNodeId, ...settledLayoutGraph.posByNodeId }
+		};
 		primaryNodeId = primary;
 		internalExitingBuffer = EMPTY_EXITING_BUFFER;
 		nodeEnterAnimations = {};
@@ -1336,6 +1417,52 @@
 	});
 
 	/**
+	 * Which elements the query takes out of the layout, as a string: the same
+	 * set the reducer cuts (same evaluation, same exemption), so two queries that
+	 * exclude the same nodes and edges read equal whatever their text. A hover
+	 * preview only ever adds `+` tokens, which cannot un-exclude anything, so it
+	 * never changes this.
+	 */
+	const excludedElementsKey = $derived.by(() => {
+		const excluded = excludedGraphElements(graphQueryResult, transientReveal.revealedNodeIds);
+		if (excluded.nodeIds.size === 0 && excluded.edgeIds.size === 0) return '';
+		// NUL cannot appear in a typed id, so it separates ids unambiguously.
+		const nodeKey = [...excluded.nodeIds].sort().join('\u0000');
+		const edgeKey = [...excluded.edgeIds].sort().join('\u0000');
+		return `${nodeKey}\u0001${edgeKey}`;
+	});
+	/** The exclusion last seen, and the query and exemption that produced it. */
+	let lastExclusion = $state.raw<{
+		key: string;
+		queryText: string;
+		exemptNodeIds: ReadonlySet<string>;
+	} | null>(null);
+
+	/**
+	 * When the query text changes what is excluded, the canvas loses or regains
+	 * elements without the graph changing: fade out the leavers, grow in the
+	 * returners, and give the rest a settle against their new neighbours.
+	 *
+	 * Only for a change of query. A mutation that tags a node into an exclusion is
+	 * placed by its own relax (it pops rather than fades), and a jump that exempts
+	 * a node brings its own camera and relax; both just move the baseline. A query
+	 * edit that excludes the same set as before does nothing at all. The first run
+	 * only records the baseline: mounting is not a query change.
+	 */
+	$effect(() => {
+		const key = excludedElementsKey;
+		const queryText = activeGraphQueryText;
+		const exemptNodeIds = transientReveal.revealedNodeIds;
+		const previous = untrack(() => lastExclusion);
+		lastExclusion = { key, queryText, exemptNodeIds };
+		if (previous === null || previous.key === key || previous.queryText === queryText) return;
+		untrack(() => {
+			animateExclusionDifference(previous.queryText, previous.exemptNodeIds);
+			layoutRuntime.settleAfterVisibilityChange();
+		});
+	});
+
+	/**
 	 * Opening the settings panel closes whatever else was open, mirroring
 	 * `toggleGraphQueryPanel` — the two panels share the same top-left corner, so
 	 * both on screen at once would stack one over the other.
@@ -1410,43 +1537,72 @@
 	 * while an undone creation leaves a node drawn at full size for a frame.
 	 */
 	function animateRestoreDifference(incoming: MultigraphData) {
-		const durationMs = resolvedLayoutSettings.enterExitDurationMs;
-		if (durationMs <= 0) return;
-		const nowMs = layoutRuntime.now();
 		const currentNodeIds = new Set(graph.nodes.map((node) => node.id));
 		const currentEdgeIds = new Set(graph.edges.map((edge) => edge.id));
 		const incomingNodeIds = new Set(incoming.nodes.map((node) => node.id));
 		const incomingEdgeIds = new Set(incoming.edges.map((edge) => edge.id));
+		animateMembershipChange({
+			enteringNodes: incoming.nodes
+				.filter((node) => !currentNodeIds.has(node.id))
+				.map((node) => ({ nodeId: node.id, targetScale: graphLayout.scaleByNodeId[node.id] ?? 1 })),
+			enteringEdgeIds: incoming.edges
+				.filter((edge) => !currentEdgeIds.has(edge.id))
+				.map((edge) => edge.id),
+			leavingNodes: graph.nodes
+				.filter((node) => !incomingNodeIds.has(node.id))
+				.map((node) => ({
+					node,
+					position: graph.posByNodeId[node.id] ?? CENTERED_POSITION,
+					fromScale: graphLayout.scaleByNodeId[node.id] ?? 1
+				})),
+			leavingEdges: graph.edges.filter((edge) => !incomingEdgeIds.has(edge.id))
+		});
+	}
+
+	/** What arrives on and leaves the canvas in one change, for `animateMembershipChange`. */
+	interface MembershipChange {
+		/** Each arriving node with the scale it grows to. */
+		enteringNodes: readonly { nodeId: string; targetScale: number }[];
+		enteringEdgeIds: readonly string[];
+		/** Each leaving node with where it fades out and the scale it shrinks from. */
+		leavingNodes: readonly { node: NodeData; position: Point; fromScale: number }[];
+		leavingEdges: readonly EdgeData[];
+	}
+
+	/**
+	 * Arrivals grow in and leavers fade out, through the same enter/exit buffers a
+	 * creation and a deletion use. Shared by a history restore (what the graph
+	 * gained and lost) and a query exclusion (what the canvas gained and lost
+	 * while the graph stayed put). An arrival still fading out from an earlier
+	 * change is taken back off the exit buffer, and a leaver still growing in
+	 * fades from where its growth got to.
+	 */
+	function animateMembershipChange(change: MembershipChange) {
+		const durationMs = resolvedLayoutSettings.enterExitDurationMs;
+		if (durationMs <= 0) return;
+		const nowMs = layoutRuntime.now();
 		let nextBuffer = internalExitingBuffer;
 		let started = false;
 
-		for (const node of incoming.nodes) {
-			if (currentNodeIds.has(node.id)) continue;
-			nextBuffer = cancelExitingNode(nextBuffer, node.id);
+		for (const { nodeId, targetScale } of change.enteringNodes) {
+			nextBuffer = cancelExitingNode(nextBuffer, nodeId);
 			nodeEnterAnimations = {
 				...nodeEnterAnimations,
-				[node.id]: createNodeEnterAnimation(
-					graphLayout.scaleByNodeId[node.id] ?? 1,
-					nowMs,
-					durationMs
-				)
+				[nodeId]: createNodeEnterAnimation(targetScale, nowMs, durationMs)
 			};
 			started = true;
 		}
 
-		for (const edge of incoming.edges) {
-			if (currentEdgeIds.has(edge.id)) continue;
-			nextBuffer = cancelExitingEdge(nextBuffer, edge.id);
+		for (const edgeId of change.enteringEdgeIds) {
+			nextBuffer = cancelExitingEdge(nextBuffer, edgeId);
 			edgeEnterAnimations = {
 				...edgeEnterAnimations,
-				[edge.id]: createEdgeEnterAnimation(nowMs, durationMs)
+				[edgeId]: createEdgeEnterAnimation(nowMs, durationMs)
 			};
 			started = true;
 		}
 
-		for (const node of graph.nodes) {
-			if (incomingNodeIds.has(node.id)) continue;
-			const position = graph.posByNodeId[node.id] ?? CENTERED_POSITION;
+		for (const { node, position, fromScale } of change.leavingNodes) {
 			nodeEnterAnimations = Object.fromEntries(
 				Object.entries(nodeEnterAnimations).filter(([id]) => id !== node.id)
 			);
@@ -1455,15 +1611,14 @@
 				nodeData: node,
 				x: position.x,
 				y: position.y,
-				fromScale: graphLayout.scaleByNodeId[node.id] ?? 1,
+				fromScale,
 				startedAtMs: nowMs,
 				durationMs
 			});
 			started = true;
 		}
 
-		for (const edge of graph.edges) {
-			if (incomingEdgeIds.has(edge.id)) continue;
+		for (const edge of change.leavingEdges) {
 			const enterAnim = edgeEnterAnimations[edge.id];
 			edgeEnterAnimations = Object.fromEntries(
 				Object.entries(edgeEnterAnimations).filter(([id]) => id !== edge.id)
@@ -1480,6 +1635,51 @@
 
 		internalExitingBuffer = nextBuffer;
 		if (started) layoutRuntime.start();
+	}
+
+	/**
+	 * Fade out what the new exclusion took off the canvas and grow in what it
+	 * gave back, for the graph as it stands, by diffing what is drawn under the
+	 * previous query against what is drawn now.
+	 *
+	 * The visible sets, not the excluded ones: a node excluded while it was
+	 * already past the hop budget must not flash, and a node that leaves only
+	 * because its route did must still fade. Positions need no diff — an
+	 * excluded node keeps its entry, so a leaver fades where it stood and a
+	 * returner grows where it left.
+	 */
+	function animateExclusionDifference(
+		previousQueryText: string,
+		previousExemptNodeIds: ReadonlySet<string>
+	) {
+		// Composed here rather than through `layoutRuntime.visibleGraphFor`, which
+		// reduces under the *current* query and would strip the leavers again.
+		const previousSource = layoutSourceUnder(graph, previousQueryText, previousExemptNodeIds);
+		const previousHops = hopsFor(previousSource);
+		const previousNodeIds = visibleNodeIdsFor(previousSource, previousHops);
+		const previousScaleByNodeId = scaleByHops(previousHops, resolvedLayoutSettings);
+		const previousRenderableEdges = renderableEdgeVisibilityFor(
+			composeEdgesForRender(previousSource, layoutDataflowFor(previousSource).edges),
+			previousHops
+		).map((visibility) => visibility.edge);
+		const previousEdgeIds = new Set(previousRenderableEdges.map((edge) => edge.id));
+		const nextNodeIds = new Set(visibleGraph.nodes.map((node) => node.id));
+		const nextEdgeIds = new Set(renderableEdgeVisibility.map((visibility) => visibility.edge.id));
+
+		animateMembershipChange({
+			enteringNodes: visibleGraph.nodes
+				.filter((node) => !previousNodeIds.has(node.id))
+				.map((node) => ({ nodeId: node.id, targetScale: graphLayout.scaleByNodeId[node.id] ?? 1 })),
+			enteringEdgeIds: [...nextEdgeIds].filter((edgeId) => !previousEdgeIds.has(edgeId)),
+			leavingNodes: previousSource.nodes
+				.filter((node) => previousNodeIds.has(node.id) && !nextNodeIds.has(node.id))
+				.map((node) => ({
+					node,
+					position: graph.posByNodeId[node.id] ?? CENTERED_POSITION,
+					fromScale: previousScaleByNodeId[node.id] ?? resolvedLayoutSettings.minScale
+				})),
+			leavingEdges: previousRenderableEdges.filter((edge) => !nextEdgeIds.has(edge.id))
+		});
 	}
 
 	/**
@@ -1606,8 +1806,8 @@
 	 * Resolve the node at client coordinates by projecting each visible node's
 	 * on-screen circle from its layout + the live stage view — no DOM
 	 * measurement. Iterates front-to-back (last rendered is topmost) and honors
-	 * the minimum tap radius. Query-excluded nodes are not rendered, so skip
-	 * them here too.
+	 * the minimum tap radius. Query-excluded nodes are not in `visibleGraph` at
+	 * all, so there is nothing to skip.
 	 */
 	function getNodeAt(clientX: number, clientY: number): NodeData | null {
 		const rect = stageRect;
@@ -1620,7 +1820,6 @@
 		const nodes = visibleGraph.nodes;
 		for (let index = nodes.length - 1; index >= 0; index -= 1) {
 			const node = nodes[index];
-			if (queryStateForNode(node.id)?.role === 'excluded') continue;
 			const position = graphLayout.posByNodeId[node.id];
 			const radius = graphLayout.radiusByNodeId[node.id];
 			if (!position || radius === undefined) continue;
@@ -2609,8 +2808,19 @@
 		commitUserGraph(deleteTagEverywhere(graph, namespace, tag), editIntent('delete tag'));
 	}
 
+	/**
+	 * A node a jump holds on screen is exempt from exclusion — it is in the layout
+	 * source and drawn — so it reads as background rather than painting at the
+	 * excluded opacity of 0.
+	 */
+	const EXEMPT_NODE_QUERY_STATE: GraphQueryElementState = { role: 'background' };
+
 	function queryStateForNode(nodeId: string): GraphQueryElementState | undefined {
-		return graphQueryResult.nodeStateById[nodeId];
+		const state = graphQueryResult.nodeStateById[nodeId];
+		if (state?.role === 'excluded' && transientReveal.revealedNodeIds.has(nodeId)) {
+			return EXEMPT_NODE_QUERY_STATE;
+		}
+		return state;
 	}
 
 	function queryStateForEdge(edgeId: string): GraphQueryElementState | undefined {
@@ -3109,148 +3319,142 @@
 			{#each renderableEdgeVisibility as visibility (visibility.edge.id)}
 				{@const edge = visibility.edge}
 				{@const queryEdgeState = queryStateForEdge(edge.id)}
-				{#if queryEdgeState?.role !== 'excluded'}
-					{@const parallelOffset =
-						visibility.kind === 'visible' ? visibleEdgeParallelOffsets[edge.id] : undefined}
-					{@const edgePoints = edgeRenderPoints(
+				{@const parallelOffset =
+					visibility.kind === 'visible' ? visibleEdgeParallelOffsets[edge.id] : undefined}
+				{@const edgePoints = edgeRenderPoints(
+					visibility,
+					graphLayout,
+					graph.posByNodeId,
+					parallelOffset
+				)}
+				{@const edgeLengthPx = Math.hypot(
+					edgePoints.target.x - edgePoints.source.x,
+					edgePoints.target.y - edgePoints.source.y
+				)}
+				{@const boundaryFadeRadiusPx =
+					visibility.kind === 'boundary'
+						? (graphLayout.radiusByNodeId[visibility.visibleNodeId] ?? 0)
+						: undefined}
+				{@const effectiveEdgeOcclusionParameters = edgeOcclusionParametersForZoom(
+					{
+						clearancePx: resolvedLayoutSettings.edgeOcclusionClearancePx,
+						fadeWidthPx: resolvedLayoutSettings.edgeOcclusionFadeWidthPx,
+						zoomScaleExponent: resolvedLayoutSettings.edgeOcclusionZoomScaleExponent
+					},
+					stageScale
+				)}
+				{@const edgeOcclusionWindows =
+					visibility.kind === 'visible'
+						? computeEdgeOcclusionWindows(
+								{
+									sourceNodeId: edge.sourceNodeId,
+									targetNodeId: edge.targetNodeId,
+									source: edgePoints.source,
+									target: edgePoints.target,
+									directed: edge.directed
+								},
+								visibleEdgeOcclusionNodes,
+								{
+									...effectiveEdgeOcclusionParameters,
+									edgeOcclusionMinOpacity: resolvedLayoutSettings.edgeOcclusionMinOpacity
+								}
+							)
+						: []}
+				{@const arrowScale = edgeArrowScale(
+					visibility,
+					graphLayout.scaleByNodeId,
+					arrowReferenceNodeScale
+				)}
+				{@const strokeScale = edgeStrokeScale(
+					visibility,
+					graphLayout.scaleByNodeId,
+					strokeReferenceNodeScale
+				)}
+				{@const edgeColor =
+					queryEdgeState?.role === 'spotlight' && queryEdgeState.spotlightColor
+						? queryEdgeState.spotlightColor
+						: edgeStrokeColor(edge, graph.tagColorConfig.edgeTags)}
+				{@const edgeEnterAnim = edgeEnterAnimations[edge.id]}
+				{@const baseEdgeOpacity =
+					edgeRenderOverrides?.[edge.id]?.opacity ??
+					(edgeEnterAnim ? edgeOpacityAt(edgeEnterAnim, layoutRuntime.animationNowMs) : 1)}
+				{@const edgeOpacity =
+					baseEdgeOpacity *
+					(revealWaveEdgeOpacityByEdgeId[edge.id] ?? 1) *
+					queryOpacity(queryEdgeState)}
+				{@const derivedQuantityLabel = quantityLabelByEdgeId.get(edge.id) ?? ''}
+				{@const showQuantityLabel =
+					derivedQuantityLabel !== '' &&
+					visibility.kind === 'visible' &&
+					shouldRevealQuantityLabel(edgeLengthPx, stageScale, {
+						minStageScale: dataflowCfg.labelMinStageScale,
+						minOnScreenLengthPx: dataflowCfg.labelMinOnScreenLengthPx
+					})}
+				<div
+					class="edge"
+					class:directed={edge.directed === true && visibility.kind === 'visible'}
+					class:boundary={visibility.kind === 'boundary'}
+					class:derived={isDerivedEdgeId(edge.id)}
+					class:query-spotlight={queryEdgeState?.role === 'spotlight'}
+					data-edge-id={edge.id}
+					data-edge-derived={isDerivedEdgeId(edge.id) ? 'true' : undefined}
+					data-query-role={queryEdgeState?.role}
+					data-source-node-id={edge.sourceNodeId}
+					data-target-node-id={edge.targetNodeId}
+					data-directed={edge.directed === true ? 'true' : undefined}
+					data-arrow-target-node-id={edge.directed === true && visibility.kind === 'visible'
+						? edge.targetNodeId
+						: undefined}
+					data-edge-visibility={visibility.kind}
+					data-visible-node-id={visibility.kind === 'boundary'
+						? visibility.visibleNodeId
+						: undefined}
+					data-hidden-node-id={visibility.kind === 'boundary' ? visibility.hiddenNodeId : undefined}
+					data-boundary-fade-ratio={visibility.kind === 'boundary'
+						? visibility.fadeRatio
+						: undefined}
+					data-boundary-fade-radius={boundaryFadeRadiusPx}
+					data-edge-boundary-dashed={visibility.kind === 'boundary' ? 'true' : undefined}
+					data-edge-arrow-scale={edge.directed === true && visibility.kind === 'visible'
+						? arrowScale
+						: undefined}
+					data-edge-stroke-scale={strokeScale}
+					data-edge-opacity={edgeOpacity}
+					data-edge-parallel-count={visibility.kind === 'visible'
+						? parallelOffset?.groupCount
+						: undefined}
+					data-edge-parallel-slot={visibility.kind === 'visible' ? parallelOffset?.slot : undefined}
+					data-edge-parallel-offset={visibility.kind === 'visible'
+						? (parallelOffset?.offsetDistance ?? 0)
+						: undefined}
+					data-edge-occlusion-count={visibility.kind === 'visible'
+						? edgeOcclusionWindows.length
+						: undefined}
+					data-edge-occlusion-fade-width={visibility.kind === 'visible'
+						? effectiveEdgeOcclusionParameters.edgeOcclusionFadeWidthPx
+						: undefined}
+					style={`${edgeStyle(edgePoints.source, edgePoints.target)} --edge-background: ${edgeBackground(
 						visibility,
-						graphLayout,
-						graph.posByNodeId,
-						parallelOffset
-					)}
-					{@const edgeLengthPx = Math.hypot(
-						edgePoints.target.x - edgePoints.source.x,
-						edgePoints.target.y - edgePoints.source.y
-					)}
-					{@const boundaryFadeRadiusPx =
-						visibility.kind === 'boundary'
-							? (graphLayout.radiusByNodeId[visibility.visibleNodeId] ?? 0)
-							: undefined}
-					{@const effectiveEdgeOcclusionParameters = edgeOcclusionParametersForZoom(
+						edgeColor,
 						{
-							clearancePx: resolvedLayoutSettings.edgeOcclusionClearancePx,
-							fadeWidthPx: resolvedLayoutSettings.edgeOcclusionFadeWidthPx,
-							zoomScaleExponent: resolvedLayoutSettings.edgeOcclusionZoomScaleExponent
-						},
-						stageScale
-					)}
-					{@const edgeOcclusionWindows =
-						visibility.kind === 'visible'
-							? computeEdgeOcclusionWindows(
-									{
-										sourceNodeId: edge.sourceNodeId,
-										targetNodeId: edge.targetNodeId,
-										source: edgePoints.source,
-										target: edgePoints.target,
-										directed: edge.directed
-									},
-									visibleEdgeOcclusionNodes,
-									{
-										...effectiveEdgeOcclusionParameters,
-										edgeOcclusionMinOpacity: resolvedLayoutSettings.edgeOcclusionMinOpacity
-									}
-								)
-							: []}
-					{@const arrowScale = edgeArrowScale(
-						visibility,
-						graphLayout.scaleByNodeId,
-						arrowReferenceNodeScale
-					)}
-					{@const strokeScale = edgeStrokeScale(
-						visibility,
-						graphLayout.scaleByNodeId,
-						strokeReferenceNodeScale
-					)}
-					{@const edgeColor =
-						queryEdgeState?.role === 'spotlight' && queryEdgeState.spotlightColor
-							? queryEdgeState.spotlightColor
-							: edgeStrokeColor(edge, graph.tagColorConfig.edgeTags)}
-					{@const edgeEnterAnim = edgeEnterAnimations[edge.id]}
-					{@const baseEdgeOpacity =
-						edgeRenderOverrides?.[edge.id]?.opacity ??
-						(edgeEnterAnim ? edgeOpacityAt(edgeEnterAnim, layoutRuntime.animationNowMs) : 1)}
-					{@const edgeOpacity =
-						baseEdgeOpacity *
-						(revealWaveEdgeOpacityByEdgeId[edge.id] ?? 1) *
-						queryOpacity(queryEdgeState)}
-					{@const derivedQuantityLabel = quantityLabelByEdgeId.get(edge.id) ?? ''}
-					{@const showQuantityLabel =
-						derivedQuantityLabel !== '' &&
-						visibility.kind === 'visible' &&
-						shouldRevealQuantityLabel(edgeLengthPx, stageScale, {
-							minStageScale: dataflowCfg.labelMinStageScale,
-							minOnScreenLengthPx: dataflowCfg.labelMinOnScreenLengthPx
-						})}
-					<div
-						class="edge"
-						class:directed={edge.directed === true && visibility.kind === 'visible'}
-						class:boundary={visibility.kind === 'boundary'}
-						class:derived={isDerivedEdgeId(edge.id)}
-						class:query-spotlight={queryEdgeState?.role === 'spotlight'}
-						data-edge-id={edge.id}
-						data-edge-derived={isDerivedEdgeId(edge.id) ? 'true' : undefined}
-						data-query-role={queryEdgeState?.role}
-						data-source-node-id={edge.sourceNodeId}
-						data-target-node-id={edge.targetNodeId}
-						data-directed={edge.directed === true ? 'true' : undefined}
-						data-arrow-target-node-id={edge.directed === true && visibility.kind === 'visible'
-							? edge.targetNodeId
-							: undefined}
-						data-edge-visibility={visibility.kind}
-						data-visible-node-id={visibility.kind === 'boundary'
-							? visibility.visibleNodeId
-							: undefined}
-						data-hidden-node-id={visibility.kind === 'boundary'
-							? visibility.hiddenNodeId
-							: undefined}
-						data-boundary-fade-ratio={visibility.kind === 'boundary'
-							? visibility.fadeRatio
-							: undefined}
-						data-boundary-fade-radius={boundaryFadeRadiusPx}
-						data-edge-boundary-dashed={visibility.kind === 'boundary' ? 'true' : undefined}
-						data-edge-arrow-scale={edge.directed === true && visibility.kind === 'visible'
-							? arrowScale
-							: undefined}
-						data-edge-stroke-scale={strokeScale}
-						data-edge-opacity={edgeOpacity}
-						data-edge-parallel-count={visibility.kind === 'visible'
-							? parallelOffset?.groupCount
-							: undefined}
-						data-edge-parallel-slot={visibility.kind === 'visible'
-							? parallelOffset?.slot
-							: undefined}
-						data-edge-parallel-offset={visibility.kind === 'visible'
-							? (parallelOffset?.offsetDistance ?? 0)
-							: undefined}
-						data-edge-occlusion-count={visibility.kind === 'visible'
-							? edgeOcclusionWindows.length
-							: undefined}
-						data-edge-occlusion-fade-width={visibility.kind === 'visible'
-							? effectiveEdgeOcclusionParameters.edgeOcclusionFadeWidthPx
-							: undefined}
-						style={`${edgeStyle(edgePoints.source, edgePoints.target)} --edge-background: ${edgeBackground(
-							visibility,
-							edgeColor,
-							{
-								occlusionWindows: edgeOcclusionWindows,
-								edgeLengthPx,
-								edgeArrowLengthPx: arrowLengthPx * arrowScale,
-								edgeOcclusionMinOpacity: resolvedLayoutSettings.edgeOcclusionMinOpacity,
-								boundaryFadeRadiusPx
-							}
-						)}; color: ${edgeColor}; --edge-spotlight-color: ${queryEdgeState?.spotlightColor ?? 'transparent'}; --edge-arrow-length: ${arrowLengthPx * arrowScale}px; --edge-arrow-half-height: ${arrowHalfHeightPx * arrowScale}px; --edge-stroke-width: ${strokeWidthPx * strokeScale}px; opacity: ${edgeOpacity};`}
-					>
-						{#if showQuantityLabel}
-							<!-- Counter-rotated so the text stays upright on an edge at any angle. -->
-							<span
-								class="edge-quantity-label"
-								data-edge-quantity-label={edge.id}
-								style={`transform: translate(-50%, -50%) rotate(${-edgeAngleDegrees(edgePoints.source, edgePoints.target)}deg);`}
-								>{derivedQuantityLabel}</span
-							>
-						{/if}
-					</div>
-				{/if}
+							occlusionWindows: edgeOcclusionWindows,
+							edgeLengthPx,
+							edgeArrowLengthPx: arrowLengthPx * arrowScale,
+							edgeOcclusionMinOpacity: resolvedLayoutSettings.edgeOcclusionMinOpacity,
+							boundaryFadeRadiusPx
+						}
+					)}; color: ${edgeColor}; --edge-spotlight-color: ${queryEdgeState?.spotlightColor ?? 'transparent'}; --edge-arrow-length: ${arrowLengthPx * arrowScale}px; --edge-arrow-half-height: ${arrowHalfHeightPx * arrowScale}px; --edge-stroke-width: ${strokeWidthPx * strokeScale}px; opacity: ${edgeOpacity};`}
+				>
+					{#if showQuantityLabel}
+						<!-- Counter-rotated so the text stays upright on an edge at any angle. -->
+						<span
+							class="edge-quantity-label"
+							data-edge-quantity-label={edge.id}
+							style={`transform: translate(-50%, -50%) rotate(${-edgeAngleDegrees(edgePoints.source, edgePoints.target)}deg);`}
+							>{derivedQuantityLabel}</span
+						>
+					{/if}
+				</div>
 			{/each}
 			{#each revealWaveOnlyEdgeVisibility as visibility (visibility.edge.id)}
 				{@const edge = visibility.edge}
@@ -3349,85 +3553,83 @@
 
 		{#each visibleGraph.nodes as node (node.id)}
 			{@const queryNodeState = queryStateForNode(node.id)}
-			{#if queryNodeState?.role !== 'excluded'}
-				{@const nodePos = graphLayout.posByNodeId[node.id] ?? CENTERED_POSITION}
-				{@const nodeTargetScale = graphLayout.scaleByNodeId[node.id] ?? 1}
-				{@const nodeEnterAnim = nodeEnterAnimations[node.id]}
-				{@const nodeScale = nodeEnterAnim
-					? nodeEnterScaleAt(nodeEnterAnim, layoutRuntime.animationNowMs)
-					: nodeTargetScale}
-				{@const baseNodeOpacity = nodeRenderOverrides?.[node.id]?.opacity ?? 1}
-				{@const nodeOpacity =
-					baseNodeOpacity *
-					(revealWaveNodeOpacityByNodeId[node.id] ?? 1) *
-					queryOpacity(queryNodeState)}
-				{@const nodeChips = shouldShowQuantityChips(nodeDiameterPx, nodeScale, stageScale, {
-					minOnScreenDiameterPx: dataflowCfg.chipMinOnScreenDiameterPx
-				})
-					? quantityChips(definedQuantityLabelsByNodeId.get(node.id) ?? [], {
-							maxVisible: dataflowCfg.chipMaxVisibleQuantities
-						})
-					: EMPTY_QUANTITY_CHIPS}
-				<!--
-					Focusable and named, so the graph is reachable without a pointer.
-					`.stage-content` sets `pointer-events: none` and hit testing stays
-					geometric on the Stage, so nothing here competes with the pointer
-					gestures — `onclick` is the handler this role owes its own contract,
-					not a second path a mouse can take.
-				-->
-				<div
-					class="node-wrapper"
-					class:primary={primaryNodeId === node.id}
-					class:focus-owned={focus.focusedNodeId === node.id}
-					class:merge-target={mergeTargetNodeId === node.id}
-					role="button"
-					tabindex="0"
-					aria-label={nodeAccessibleName(node)}
-					data-node-id={node.id}
-					data-merge-target={mergeTargetNodeId === node.id ? 'true' : undefined}
-					data-query-role={queryNodeState?.role}
-					data-scale={nodeScale}
-					data-node-opacity={nodeOpacity}
-					data-x={nodePos.x}
-					data-y={nodePos.y}
-					onkeydown={(event) => handleNodeKeyDown(event, node)}
-					onclick={() => focus.openFocus(node)}
-					style={`left: calc(50% + ${nodePos.x}px); top: calc(50% + ${nodePos.y}px); transform: translate(-50%, -50%) scale(${nodeScale}); opacity: ${nodeOpacity};`}
-				>
-					<Node
-						{...nodeChromeTunables}
-						nodeData={node}
-						isTitleEditing={titleEditContext?.nodeId === node.id}
-						titleCaretAt={titleEditContext?.nodeId === node.id
-							? titleEditContext?.caretAt
-							: undefined}
-						quantityLabels={nodeChips.labels}
-						quantityOverflowCount={nodeChips.overflowCount}
-						borderSegments={nodeBorderSegments(node, graph.tagColorConfig.nodeTags)}
-						spotlightColor={queryNodeState?.role === 'spotlight'
-							? queryNodeState.spotlightColor
-							: undefined}
-						onTitleCommit={(title) => {
-							const createdEdgeId = titleEditContext?.edgeId;
-							const shouldUnpin = titleEditContext?.unpinOnCommit === true;
-							titleEditContext = null;
-							const committedGraph = commitInlineTitleSyntax(graph, node.id, title, createdEdgeId);
-							if (shouldUnpin) {
-								// `beginScaleChange` kicks the loop on its own account.
-								commitUserGraph(
-									layoutRuntime.beginScaleChange(
-										setNodePinned(committedGraph, node.id, false),
-										node.id
-									),
-									editIntent('rename node')
-								);
-								return;
-							}
-							commitContentGraph(committedGraph, editIntent('rename node'));
-						}}
-					/>
-				</div>
-			{/if}
+			{@const nodePos = graphLayout.posByNodeId[node.id] ?? CENTERED_POSITION}
+			{@const nodeTargetScale = graphLayout.scaleByNodeId[node.id] ?? 1}
+			{@const nodeEnterAnim = nodeEnterAnimations[node.id]}
+			{@const nodeScale = nodeEnterAnim
+				? nodeEnterScaleAt(nodeEnterAnim, layoutRuntime.animationNowMs)
+				: nodeTargetScale}
+			{@const baseNodeOpacity = nodeRenderOverrides?.[node.id]?.opacity ?? 1}
+			{@const nodeOpacity =
+				baseNodeOpacity *
+				(revealWaveNodeOpacityByNodeId[node.id] ?? 1) *
+				queryOpacity(queryNodeState)}
+			{@const nodeChips = shouldShowQuantityChips(nodeDiameterPx, nodeScale, stageScale, {
+				minOnScreenDiameterPx: dataflowCfg.chipMinOnScreenDiameterPx
+			})
+				? quantityChips(definedQuantityLabelsByNodeId.get(node.id) ?? [], {
+						maxVisible: dataflowCfg.chipMaxVisibleQuantities
+					})
+				: EMPTY_QUANTITY_CHIPS}
+			<!--
+				Focusable and named, so the graph is reachable without a pointer.
+				`.stage-content` sets `pointer-events: none` and hit testing stays
+				geometric on the Stage, so nothing here competes with the pointer
+				gestures — `onclick` is the handler this role owes its own contract,
+				not a second path a mouse can take.
+			-->
+			<div
+				class="node-wrapper"
+				class:primary={primaryNodeId === node.id}
+				class:focus-owned={focus.focusedNodeId === node.id}
+				class:merge-target={mergeTargetNodeId === node.id}
+				role="button"
+				tabindex="0"
+				aria-label={nodeAccessibleName(node)}
+				data-node-id={node.id}
+				data-merge-target={mergeTargetNodeId === node.id ? 'true' : undefined}
+				data-query-role={queryNodeState?.role}
+				data-scale={nodeScale}
+				data-node-opacity={nodeOpacity}
+				data-x={nodePos.x}
+				data-y={nodePos.y}
+				onkeydown={(event) => handleNodeKeyDown(event, node)}
+				onclick={() => focus.openFocus(node)}
+				style={`left: calc(50% + ${nodePos.x}px); top: calc(50% + ${nodePos.y}px); transform: translate(-50%, -50%) scale(${nodeScale}); opacity: ${nodeOpacity};`}
+			>
+				<Node
+					{...nodeChromeTunables}
+					nodeData={node}
+					isTitleEditing={titleEditContext?.nodeId === node.id}
+					titleCaretAt={titleEditContext?.nodeId === node.id
+						? titleEditContext?.caretAt
+						: undefined}
+					quantityLabels={nodeChips.labels}
+					quantityOverflowCount={nodeChips.overflowCount}
+					borderSegments={nodeBorderSegments(node, graph.tagColorConfig.nodeTags)}
+					spotlightColor={queryNodeState?.role === 'spotlight'
+						? queryNodeState.spotlightColor
+						: undefined}
+					onTitleCommit={(title) => {
+						const createdEdgeId = titleEditContext?.edgeId;
+						const shouldUnpin = titleEditContext?.unpinOnCommit === true;
+						titleEditContext = null;
+						const committedGraph = commitInlineTitleSyntax(graph, node.id, title, createdEdgeId);
+						if (shouldUnpin) {
+							// `beginScaleChange` kicks the loop on its own account.
+							commitUserGraph(
+								layoutRuntime.beginScaleChange(
+									setNodePinned(committedGraph, node.id, false),
+									node.id
+								),
+								editIntent('rename node')
+							);
+							return;
+						}
+						commitContentGraph(committedGraph, editIntent('rename node'));
+					}}
+				/>
+			</div>
 		{/each}
 		{#each layoutRuntime.revealWavePreviousOnlyNodeIds as nodeId (nodeId)}
 			{@const bufferedNode = nodeById[nodeId]}

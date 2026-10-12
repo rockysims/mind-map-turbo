@@ -5512,7 +5512,7 @@
 />
 
 <Story
-	name="UserExcludesNodeTagWithoutRelayout"
+	name="UserExcludesNodeTagAndTheRestResettles"
 	args={{
 		multigraphData: makeGraph({
 			nodes: [
@@ -5520,12 +5520,16 @@
 				{ id: 'n1', title: 'Hide', description: '', tags: ['hide'] },
 				{ id: 'n2', title: 'Other', description: '', tags: [] }
 			],
-			pinned: ['n0', 'n2'],
+			// n2 is strung between two pins too far apart for both springs to rest:
+			// n1's spring holds it out past where n0's alone would leave it. It hangs
+			// off n0 directly, so it stays on the canvas when n1 goes.
+			pinned: ['n0', 'n1'],
 			edges: [
 				{ source: 'n0', target: 'n1', tags: ['rel'] },
-				{ source: 'n1', target: 'n2', tags: ['rel'] }
+				{ source: 'n1', target: 'n2', tags: ['rel'] },
+				{ source: 'n0', target: 'n2', tags: ['rel'] }
 			],
-			posByNodeId: { n0: { x: -240, y: 0 }, n1: { x: 0, y: 0 }, n2: { x: 240, y: 0 } },
+			posByNodeId: { n0: { x: -800, y: 0 }, n1: { x: 800, y: 0 }, n2: { x: 0, y: 0 } },
 			tagColorConfig: {
 				nodeTags: { hide: '#ff0000', keep: '#00ff00' },
 				edgeTags: { rel: '#0000ff' }
@@ -5536,7 +5540,11 @@
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
-		const n0XBefore = getNodeWrapper(canvasElement, 'n0').dataset.x;
+		const n2XBefore = getNodeWrapper(canvasElement, 'n2').dataset.x;
+		// Control: nothing moves on its own, so a move below is the exclusion's.
+		await waitForFrames(5);
+		expect(getNodeWrapper(canvasElement, 'n2').dataset.x).toBe(n2XBefore);
+
 		const canvas = within(canvasElement);
 		canvas.getByRole('button', { name: 'Find / Filter' }).click();
 		await sleep();
@@ -5544,14 +5552,19 @@
 		const input = canvas.getByLabelText('Graph query') as HTMLInputElement;
 		input.value = '-#hide';
 		input.dispatchEvent(new Event('input', { bubbles: true }));
-		await sleep();
+		// The excluded node and its edges fade out rather than vanish.
+		await sleep(APP_CONFIG.multigraph.layout.enterExitDurationMs + 40);
+		await waitForLayout();
 
 		expect(canvasElement.querySelector('[data-node-id="n1"].node-wrapper')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-node-id="n1"]')).not.toBeInTheDocument();
 		expect(canvasElement.querySelector('[data-edge-id="e0"]')).not.toBeInTheDocument();
 		expect(canvasElement.querySelector('[data-edge-id="e1"]')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('[data-edge-id="e2"]')).toBeInTheDocument();
 		expect(nodeOpacity(canvasElement, 'n0')).toBe(1);
 		expect(nodeOpacity(canvasElement, 'n2')).toBe(1);
-		expect(getNodeWrapper(canvasElement, 'n0').dataset.x).toBe(n0XBefore);
+		// Without n1 pulling and pushing on it, n2 settles somewhere else.
+		await waitFor(() => expect(getNodeWrapper(canvasElement, 'n2').dataset.x).not.toBe(n2XBefore));
 	}}
 />
 
