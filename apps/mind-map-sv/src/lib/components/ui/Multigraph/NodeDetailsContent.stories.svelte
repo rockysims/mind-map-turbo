@@ -184,6 +184,18 @@
 		};
 	}
 
+	/** A described node carrying a stored size (or none, when `sizeBytes` is omitted). */
+	function sizedNode(sizeBytes?: number): NodeData {
+		const node = makeNode('A page about kinematics.');
+		return sizeBytes === undefined ? node : { ...node, sizeBytes };
+	}
+
+	function nodeSizeLine(canvasElement: HTMLElement): HTMLElement {
+		const found = canvasElement.querySelector('[data-node-size]');
+		if (!(found instanceof HTMLElement)) throw new Error('no node size line');
+		return found;
+	}
+
 	function taskGraph(): MultigraphData {
 		return makeGraph({ nodes: [taskNode(false)] });
 	}
@@ -2039,6 +2051,39 @@
 		expect(toggle).toHaveAttribute('data-task-done', 'true');
 		expect(toggle).toHaveAttribute('aria-pressed', 'true');
 		expect(toggle.textContent).toContain('Done');
+	}}
+/>
+
+<Story
+	name="ShowsAStoredSizeAboveTheDescription"
+	args={{ node: sizedNode(3_355_443) }}
+	play={async ({ canvasElement }) => {
+		const line = nodeSizeLine(canvasElement);
+		expect(line).toHaveTextContent('Size 3.2 MB');
+
+		// A fact about the node, so it reads before the prose rather than after.
+		const description = focusContent(canvasElement).querySelector('.description');
+		if (!(description instanceof HTMLElement)) throw new Error('no description');
+		expect(
+			line.compareDocumentPosition(description) & Node.DOCUMENT_POSITION_FOLLOWING
+		).toBeTruthy();
+	}}
+/>
+
+<Story
+	name="ShowsNoSizeLineWhenNoSizeIsStored"
+	args={{ node: sizedNode() }}
+	play={async ({ canvasElement }) => {
+		expect(focusContent(canvasElement).textContent).toContain('A page about kinematics.');
+		expect(canvasElement.querySelector('[data-node-size]')).toBeNull();
+	}}
+/>
+
+<Story
+	name="ShowsAStoredZeroSizeAsZeroBytes"
+	args={{ node: sizedNode(0) }}
+	play={async ({ canvasElement }) => {
+		expect(nodeSizeLine(canvasElement)).toHaveTextContent('Size 0 B');
 	}}
 />
 

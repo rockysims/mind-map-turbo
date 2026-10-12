@@ -480,6 +480,19 @@
 		</button>
 	{/if}
 
+	<!--
+		Above the description so it reads as a fact about the node, not about any
+		one attachment. `!== undefined` rather than truthiness: a stored 0 is still
+		what is stored, and the view reports it; "0 means unknown" is only the
+		border's drawing rule.
+	-->
+	{#if node.sizeBytes !== undefined}
+		<p class="node-size" data-node-size>
+			<span class="node-size-label">Size</span>
+			{formatByteSize(node.sizeBytes)}
+		</p>
+	{/if}
+
 	{#if node.description.trim()}
 		<p class="description"><MathText text={node.description} /></p>
 	{/if}
@@ -703,6 +716,16 @@
 		font-size: 1.125rem;
 		line-height: 1.65;
 		white-space: pre-wrap;
+	}
+
+	/* The file rows' muted slate for their size, at the details body size. */
+	.node-size {
+		color: #64748b;
+		font-size: 1.125rem;
+	}
+
+	.node-size-label {
+		font-weight: 600;
 	}
 
 	/* Positions the peek card, which is absolute so it never reflows the section. */
