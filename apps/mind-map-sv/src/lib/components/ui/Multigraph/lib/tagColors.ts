@@ -26,6 +26,8 @@ export interface LegendTag {
 	color: string;
 	usageCount: number;
 	hasExplicitColor: boolean;
+	/** The tag's stored layout factor, or 1 when it has none. */
+	physicsFactor: number;
 }
 
 export function fallbackTagColor(tag: string): string {
@@ -103,6 +105,7 @@ function collectNamespaceLegendTags(
 	namespace: TagColorNamespace
 ): LegendTag[] {
 	const config = data.tagColorConfig[namespace];
+	const physicsFactors = data.tagPhysicsConfig?.[namespace] ?? {};
 	const usedTags = new Set<string>();
 	const tagLists =
 		namespace === 'nodeTags'
@@ -112,7 +115,10 @@ function collectNamespaceLegendTags(
 	for (const tags of tagLists) {
 		for (const tag of tags) usedTags.add(tag);
 	}
+	// A tag kept alive only by its config — every use edited away — is still
+	// listed, so it can be reset or deleted rather than lingering unseen.
 	for (const tag of Object.keys(config)) usedTags.add(tag);
+	for (const tag of Object.keys(physicsFactors)) usedTags.add(tag);
 
 	return [...usedTags].sort().map((tag) => {
 		const lookup = colorForTag(config, tag);
@@ -121,7 +127,10 @@ function collectNamespaceLegendTags(
 			tag,
 			color: lookup.color,
 			usageCount: tagUsageCount(data, namespace, tag),
-			hasExplicitColor: lookup.hasExplicitColor
+			hasExplicitColor: lookup.hasExplicitColor,
+			physicsFactor: Object.prototype.hasOwnProperty.call(physicsFactors, tag)
+				? physicsFactors[tag]
+				: 1
 		};
 	});
 }

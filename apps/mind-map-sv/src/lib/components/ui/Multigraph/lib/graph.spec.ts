@@ -23,6 +23,7 @@ import {
 	setNodeDesignations,
 	setNodePinned,
 	setTagColor,
+	setTagPhysicsFactor,
 	setTaskDone,
 	togglePinned,
 	updateEdge,
@@ -517,6 +518,145 @@ describe('graph mutations', () => {
 			expect(next.edges.map((edge) => edge.tags)).toEqual([['keep'], []]);
 			expect(next.tagColorConfig.edgeTags).toEqual({});
 			expect(graph.edges[0].tags).toEqual(['rel', 'keep']);
+		});
+	});
+
+	describe('tag physics config', () => {
+		it('stores a factor without mutating the original graph', () => {
+			const graph = makeGraph({ nodeCount: 1 });
+
+			const next = setTagPhysicsFactor(graph, 'edgeTags', 'rel', 2);
+
+			expect(next.tagPhysicsConfig).toEqual({ nodeTags: {}, edgeTags: { rel: 2 } });
+			expect('tagPhysicsConfig' in graph).toBe(false);
+		});
+
+		it('keeps the other namespace and the other tags when setting one', () => {
+			const graph = makeGraph({
+				nodeCount: 1,
+				tagPhysicsConfig: { nodeTags: { topic: 0.5 }, edgeTags: { rel: 2 } }
+			});
+
+			const next = setTagPhysicsFactor(graph, 'edgeTags', 'cites', 3);
+
+			expect(next.tagPhysicsConfig).toEqual({
+				nodeTags: { topic: 0.5 },
+				edgeTags: { rel: 2, cites: 3 }
+			});
+			expect(graph.tagPhysicsConfig?.edgeTags).toEqual({ rel: 2 });
+		});
+
+		it('removes the key when set back to 1, leaving other keys in place', () => {
+			const graph = makeGraph({
+				nodeCount: 1,
+				tagPhysicsConfig: { nodeTags: { topic: 0.5 }, edgeTags: { rel: 2 } }
+			});
+
+			const next = setTagPhysicsFactor(graph, 'edgeTags', 'rel', 1);
+
+			expect(next.tagPhysicsConfig).toEqual({ nodeTags: { topic: 0.5 }, edgeTags: {} });
+		});
+
+		it('removes the whole field when the last factor goes back to 1', () => {
+			const graph = makeGraph({
+				nodeCount: 1,
+				tagPhysicsConfig: { nodeTags: {}, edgeTags: { rel: 2 } }
+			});
+
+			const next = setTagPhysicsFactor(graph, 'edgeTags', 'rel', 1);
+
+			expect('tagPhysicsConfig' in next).toBe(false);
+		});
+
+		it('clamps an out-of-range factor into [0.25, 4]', () => {
+			const graph = makeGraph({ nodeCount: 1 });
+
+			expect(setTagPhysicsFactor(graph, 'nodeTags', 'topic', 9).tagPhysicsConfig?.nodeTags).toEqual(
+				{ topic: 4 }
+			);
+			expect(
+				setTagPhysicsFactor(graph, 'nodeTags', 'topic', 0.01).tagPhysicsConfig?.nodeTags
+			).toEqual({ topic: 0.25 });
+			expect(
+				setTagPhysicsFactor(graph, 'nodeTags', 'topic', -3).tagPhysicsConfig?.nodeTags
+			).toEqual({ topic: 0.25 });
+		});
+
+		it('returns the same object for a non-finite factor', () => {
+			const graph = makeGraph({
+				nodeCount: 1,
+				tagPhysicsConfig: { nodeTags: {}, edgeTags: { rel: 2 } }
+			});
+
+			expect(setTagPhysicsFactor(graph, 'edgeTags', 'rel', NaN)).toBe(graph);
+			expect(setTagPhysicsFactor(graph, 'edgeTags', 'rel', Infinity)).toBe(graph);
+			expect(setTagPhysicsFactor(graph, 'edgeTags', 'rel', -Infinity)).toBe(graph);
+		});
+
+		it('returns the same object when the value does not change', () => {
+			const tuned = makeGraph({
+				nodeCount: 1,
+				tagPhysicsConfig: { nodeTags: {}, edgeTags: { rel: 4 } }
+			});
+			const untuned = makeGraph({ nodeCount: 1 });
+
+			expect(setTagPhysicsFactor(tuned, 'edgeTags', 'rel', 4)).toBe(tuned);
+			// Clamps to the stored 4, so nothing changes.
+			expect(setTagPhysicsFactor(tuned, 'edgeTags', 'rel', 10)).toBe(tuned);
+			expect(setTagPhysicsFactor(untuned, 'edgeTags', 'rel', 1)).toBe(untuned);
+		});
+
+		it('treats a tag named like an Object.prototype key as unset', () => {
+			const graph = makeGraph({ nodeCount: 1 });
+
+			expect(setTagPhysicsFactor(graph, 'nodeTags', 'constructor', 1)).toBe(graph);
+		});
+
+		it('deleteTagEverywhere drops the factor and leaves the other namespace alone', () => {
+			const graph = makeGraph({
+				nodes: [{ id: 'n0', title: 'Node 0', description: '', tags: ['topic'] }],
+				tagPhysicsConfig: { nodeTags: { topic: 2, keep: 3 }, edgeTags: { topic: 0.5 } }
+			});
+
+			const next = deleteTagEverywhere(graph, 'nodeTags', 'topic');
+
+			expect(next.tagPhysicsConfig).toEqual({
+				nodeTags: { keep: 3 },
+				edgeTags: { topic: 0.5 }
+			});
+			expect(graph.tagPhysicsConfig?.nodeTags).toEqual({ topic: 2, keep: 3 });
+		});
+
+		it('deleteTagEverywhere removes the field when it held the last factor', () => {
+			const graph = makeGraph({
+				nodeCount: 2,
+				edges: [{ source: 0, target: 1, tags: ['rel'] }],
+				tagPhysicsConfig: { nodeTags: {}, edgeTags: { rel: 2 } }
+			});
+
+			const next = deleteTagEverywhere(graph, 'edgeTags', 'rel');
+
+			expect('tagPhysicsConfig' in next).toBe(false);
+			expect(next.edges[0].tags).toEqual([]);
+		});
+
+		it('deleteTagEverywhere leaves the config untouched when the tag had no factor', () => {
+			const graph = makeGraph({
+				nodes: [{ id: 'n0', title: 'Node 0', description: '', tags: ['topic'] }],
+				tagPhysicsConfig: { nodeTags: { keep: 3 }, edgeTags: {} }
+			});
+
+			const next = deleteTagEverywhere(graph, 'nodeTags', 'topic');
+
+			expect(next.tagPhysicsConfig).toBe(graph.tagPhysicsConfig);
+		});
+
+		it('deleteTagEverywhere adds no field to an untuned graph', () => {
+			const graph = makeGraph({
+				nodes: [{ id: 'n0', title: 'Node 0', description: '', tags: ['topic'] }]
+			});
+
+			expect('tagPhysicsConfig' in deleteTagEverywhere(graph, 'nodeTags', 'topic')).toBe(false);
 		});
 	});
 

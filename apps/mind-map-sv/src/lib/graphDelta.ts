@@ -25,7 +25,8 @@ import type {
 	GraphAssetMetadata,
 	MultigraphData,
 	Point,
-	TagColorConfig
+	TagColorConfig,
+	TagPhysicsConfig
 } from './components/ui/types/multigraph';
 import type { NodeData } from './components/ui/types/node';
 
@@ -47,14 +48,15 @@ type ElementDelta<TElement> = {
  * A step from one state of a document to another.
  *
  * The graph-level fields appear only when they changed, and `null` is how the
- * format says "the target does not have this one at all" — `assets` and
- * `pinSequence` are optional on `MultigraphData`, and a delta that could only
+ * format says "the target does not have this one at all" — `tagPhysicsConfig`,
+ * `assets` and `pinSequence` are optional on `MultigraphData`, and a delta that could only
  * say "unchanged" or "here is a value" could never take one away.
  */
 export type GraphDelta = {
 	nodes: ElementDelta<NodeData>;
 	edges: ElementDelta<EdgeData>;
 	tagColorConfig?: TagColorConfig;
+	tagPhysicsConfig?: TagPhysicsConfig | null;
 	assets?: Record<string, GraphAssetMetadata> | null;
 	pinSequence?: number | null;
 	removedPositions: Record<string, Point>;
@@ -69,6 +71,9 @@ export function diffByReference(from: MultigraphData, to: MultigraphData): Graph
 	};
 
 	if (from.tagColorConfig !== to.tagColorConfig) delta.tagColorConfig = to.tagColorConfig;
+	if (from.tagPhysicsConfig !== to.tagPhysicsConfig) {
+		delta.tagPhysicsConfig = to.tagPhysicsConfig ?? null;
+	}
 	if (from.assets !== to.assets) delta.assets = to.assets ?? null;
 	if (from.pinSequence !== to.pinSequence) delta.pinSequence = to.pinSequence ?? null;
 
@@ -97,6 +102,10 @@ export function applyDelta(graph: MultigraphData, delta: GraphDelta): Multigraph
 		tagColorConfig: delta.tagColorConfig ?? graph.tagColorConfig
 	};
 
+	if (delta.tagPhysicsConfig !== undefined) {
+		if (delta.tagPhysicsConfig === null) delete next.tagPhysicsConfig;
+		else next.tagPhysicsConfig = delta.tagPhysicsConfig;
+	}
 	if (delta.assets !== undefined) {
 		if (delta.assets === null) delete next.assets;
 		else next.assets = delta.assets;
@@ -141,6 +150,7 @@ export function isEmptyDelta(delta: GraphDelta): boolean {
 		delta.edges.removed.length === 0 &&
 		delta.edges.changed.length === 0 &&
 		delta.tagColorConfig === undefined &&
+		delta.tagPhysicsConfig === undefined &&
 		delta.assets === undefined &&
 		delta.pinSequence === undefined
 	);

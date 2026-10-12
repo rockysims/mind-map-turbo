@@ -5,7 +5,7 @@
  * The whole history rests on one property of the house immutability rule: every
  * layout write ends in `mergeVisiblePositions`, which spreads the graph and
  * replaces `posByNodeId` alone. So the semantic collections come through by
- * reference, and "did this commit change the document?" is five pointer
+ * reference, and "did this commit change the document?" is six pointer
  * comparisons rather than a fingerprint of the whole graph — which matters,
  * because the question is asked on the drag path sixty times a second.
  *
@@ -36,6 +36,7 @@ export function semanticallyUnchanged(prev: MultigraphData, next: MultigraphData
 		prev.nodes === next.nodes &&
 		prev.edges === next.edges &&
 		prev.tagColorConfig === next.tagColorConfig &&
+		prev.tagPhysicsConfig === next.tagPhysicsConfig &&
 		prev.assets === next.assets &&
 		prev.pinSequence === next.pinSequence
 	);
@@ -56,6 +57,7 @@ export function semanticFingerprint(graph: MultigraphData): string {
 		nodes: graph.nodes,
 		edges: graph.edges,
 		tagColorConfig: graph.tagColorConfig,
+		tagPhysicsConfig: graph.tagPhysicsConfig,
 		assets: graph.assets,
 		pinSequence: graph.pinSequence
 	});
@@ -95,7 +97,8 @@ export function removedNodePositions(
  * of accumulating forever.
  *
  * Everything else comes from the snapshot by reference, spread first so an
- * optional field the snapshot never had (`assets`, `pinSequence`) stays absent
+ * optional field the snapshot never had (`tagPhysicsConfig`, `assets`,
+ * `pinSequence`) stays absent
  * rather than inheriting the current graph's.
  */
 export function restoreSemantics(

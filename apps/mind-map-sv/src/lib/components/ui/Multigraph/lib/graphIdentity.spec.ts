@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { MultigraphData } from '../../types/multigraph';
-import { addNode, removeNode, setTagColor } from './graph';
-import { removedNodePositions, restoreSemantics, semanticallyUnchanged } from './graphIdentity';
+import { addNode, removeNode, setTagColor, setTagPhysicsFactor } from './graph';
+import {
+	removedNodePositions,
+	restoreSemantics,
+	semanticallyUnchanged,
+	semanticFingerprint
+} from './graphIdentity';
 import { LayoutRuntime, type LayoutRuntimeScheduler } from './layoutRuntime.svelte';
 import { makeGraph } from './testFixtures';
 
@@ -60,7 +65,7 @@ describe('semanticallyUnchanged', () => {
 		expect(semanticallyUnchanged(graph, relaxed)).toBe(true);
 	});
 
-	it('detects each of the five tracked fields changing', () => {
+	it('detects each of the six tracked fields changing', () => {
 		const graph = baseGraph();
 
 		expect(semanticallyUnchanged(graph, { ...graph, nodes: [...graph.nodes] })).toBe(false);
@@ -68,8 +73,22 @@ describe('semanticallyUnchanged', () => {
 		expect(
 			semanticallyUnchanged(graph, { ...graph, tagColorConfig: { ...graph.tagColorConfig } })
 		).toBe(false);
+		expect(
+			semanticallyUnchanged(graph, {
+				...graph,
+				tagPhysicsConfig: { nodeTags: {}, edgeTags: { rel: 2 } }
+			})
+		).toBe(false);
 		expect(semanticallyUnchanged(graph, { ...graph, assets: {} })).toBe(false);
 		expect(semanticallyUnchanged(graph, { ...graph, pinSequence: 1 })).toBe(false);
+	});
+
+	it('reports a tag physics edit as semantic', () => {
+		const graph = baseGraph();
+		const tuned = setTagPhysicsFactor(graph, 'edgeTags', 'rel', 2);
+
+		expect(semanticallyUnchanged(graph, tuned)).toBe(false);
+		expect(semanticFingerprint(tuned)).not.toBe(semanticFingerprint(graph));
 	});
 
 	it('reports a tag colour edit as semantic', () => {

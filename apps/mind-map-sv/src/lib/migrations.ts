@@ -5,7 +5,8 @@ import type {
 	GraphAssetMetadata,
 	MultigraphData,
 	Point,
-	TagColorConfig
+	TagColorConfig,
+	TagPhysicsConfig
 } from './components/ui/types/multigraph';
 import type {
 	AiAddon,
@@ -20,6 +21,7 @@ import type {
 } from './components/ui/types/node';
 import { isRegisteredAddon, type NodeAddonName } from './components/ui/Multigraph/lib/nodeAddons';
 import { isAiRunStatus } from './components/ui/Multigraph/lib/aiNode';
+import { clampTagPhysicsFactor } from './components/ui/Multigraph/lib/tagPhysics';
 import type { ConfigOverrides } from './config/configOverrides';
 import type { AiResult } from './ai/aiResults';
 
@@ -159,7 +161,59 @@ function readHistoryState(value: unknown): PersistedHistoryState | null {
 }
 
 export function unwrapPersistedGraph(payload: unknown): MultigraphData {
-	return withSeededComponentPins(unwrapPersistedGraphData(payload));
+	return withSeededComponentPins(withSanitizedTagPhysicsConfig(unwrapPersistedGraphData(payload)));
+}
+
+/**
+ * Cleans `tagPhysicsConfig` on the way in rather than validating it.
+ *
+ * Deliberately not part of `isMultigraphData`: a guard failure makes the whole
+ * graph unreadable (`malformed-payload`), and a tuning value must never do that
+ * — the same rule `sanitizeOverrides` applies to settings. Runs on every
+ * version's return, since the field is additive and a hand-edited file of any
+ * version can carry it. A graph without the key comes back untouched, so an
+ * untuned graph keeps serialising exactly as before.
+ */
+function withSanitizedTagPhysicsConfig(data: MultigraphData): MultigraphData {
+	if (!Object.prototype.hasOwnProperty.call(data, 'tagPhysicsConfig')) return data;
+
+	const tagPhysicsConfig = sanitizeTagPhysicsConfig(data.tagPhysicsConfig);
+	const next: MultigraphData = { ...data };
+	if (tagPhysicsConfig === undefined) delete next.tagPhysicsConfig;
+	else next.tagPhysicsConfig = tagPhysicsConfig;
+	return next;
+}
+
+/**
+ * A stored per-tag factor map, made safe to lay out with. A non-record field is
+ * dropped whole; a missing or non-record namespace reads as empty; an entry
+ * that is not a finite number above 0 is dropped (it has no direction to clamp
+ * toward); a usable entry is clamped into range, so a wider-ranged future build
+ * writing ×8 opens here as ×4; an entry that ends up exactly 1 is dropped, and
+ * so is the whole field once both maps are empty.
+ */
+function sanitizeTagPhysicsConfig(value: unknown): TagPhysicsConfig | undefined {
+	if (!isRecord(value)) return undefined;
+
+	const config: TagPhysicsConfig = {
+		nodeTags: sanitizeTagPhysicsFactors(value.nodeTags),
+		edgeTags: sanitizeTagPhysicsFactors(value.edgeTags)
+	};
+	const empty =
+		Object.keys(config.nodeTags).length === 0 && Object.keys(config.edgeTags).length === 0;
+	return empty ? undefined : config;
+}
+
+function sanitizeTagPhysicsFactors(value: unknown): Record<string, number> {
+	const factors: Record<string, number> = {};
+	if (!isRecord(value)) return factors;
+
+	for (const [tag, factor] of Object.entries(value)) {
+		if (!isFiniteNumber(factor) || factor <= 0) continue;
+		const clamped = clampTagPhysicsFactor(factor);
+		if (clamped !== 1) factors[tag] = clamped;
+	}
+	return factors;
 }
 
 function unwrapPersistedGraphData(payload: unknown): MultigraphData {

@@ -93,6 +93,53 @@ describe('tag color helpers', () => {
 		]);
 	});
 
+	it('defaults physicsFactor to 1 and reports a stored factor', () => {
+		const graph = makeGraph({
+			nodes: [{ id: 'n0', title: 'Node 0', description: '', tags: ['topic', 'other'] }],
+			tagPhysicsConfig: { nodeTags: { topic: 2 }, edgeTags: {} }
+		});
+
+		expect(collectLegendTags(graph)).toEqual([
+			expect.objectContaining({ tag: 'other', physicsFactor: 1 }),
+			expect.objectContaining({ tag: 'topic', physicsFactor: 2 })
+		]);
+	});
+
+	it('lists a tag that only has a physics factor', () => {
+		const graph = makeGraph({
+			nodeCount: 2,
+			edges: [{ source: 'n0', target: 'n1', tags: ['rel'] }],
+			tagPhysicsConfig: { nodeTags: {}, edgeTags: { gone: 0.5 } }
+		});
+
+		expect(collectLegendTags(graph)).toEqual([
+			expect.objectContaining({
+				namespace: 'edgeTags',
+				tag: 'gone',
+				usageCount: 0,
+				physicsFactor: 0.5
+			}),
+			expect.objectContaining({
+				namespace: 'edgeTags',
+				tag: 'rel',
+				usageCount: 1,
+				physicsFactor: 1
+			})
+		]);
+	});
+
+	it('does not read a factor from the other namespace', () => {
+		const graph = makeGraph({
+			nodes: [{ id: 'n0', title: 'Node 0', description: '', tags: ['shared'] }],
+			tagPhysicsConfig: { nodeTags: {}, edgeTags: { shared: 3 } }
+		});
+
+		expect(collectLegendTags(graph)).toEqual([
+			expect.objectContaining({ namespace: 'nodeTags', tag: 'shared', physicsFactor: 1 }),
+			expect.objectContaining({ namespace: 'edgeTags', tag: 'shared', physicsFactor: 3 })
+		]);
+	});
+
 	it('counts tag usage in the requested namespace only', () => {
 		const graph = makeGraph({
 			nodes: [{ id: 'n0', title: 'Node 0', description: '', tags: ['shared'] }],

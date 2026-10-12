@@ -201,6 +201,98 @@ describe('persisted graph migrations', () => {
 		).toThrow(new PersistedGraphError('Persisted graph data is malformed.', 'malformed-payload'));
 	});
 
+	describe('tag physics config', () => {
+		it('round-trips a graph with factors through wrap, JSON and unwrap unchanged', () => {
+			const graph = makeGraph({
+				nodeCount: 1,
+				pinned: [0],
+				tagPhysicsConfig: { nodeTags: { topic: 0.25 }, edgeTags: { rel: 2, cites: 1.414 } }
+			});
+
+			const loaded = unwrapPersistedGraph(JSON.parse(JSON.stringify(wrapPersistedGraph(graph))));
+
+			expect(loaded).toEqual(graph);
+		});
+
+		it('loads a payload without the field with no field', () => {
+			const graph = makeGraph({ nodeCount: 1, pinned: [0] });
+
+			const loaded = unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data: graph });
+
+			expect(loaded).not.toHaveProperty('tagPhysicsConfig');
+			expect(loaded).toBe(graph);
+		});
+
+		it('drops unusable entries, clamps out-of-range ones and fills a missing namespace', () => {
+			const graph = makeGraph({ nodeCount: 1, pinned: [0] });
+
+			const loaded = unwrapPersistedGraph({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data: { ...graph, tagPhysicsConfig: { edgeTags: { a: 9, b: -1, c: 'x', d: 1, e: 0.5 } } }
+			});
+
+			expect(loaded.tagPhysicsConfig).toEqual({ edgeTags: { a: 4, e: 0.5 }, nodeTags: {} });
+		});
+
+		it('drops non-finite and zero entries, clamps a tiny one, and empties a non-record map', () => {
+			const graph = makeGraph({ nodeCount: 1, pinned: [0] });
+
+			const loaded = unwrapPersistedGraph({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data: {
+					...graph,
+					tagPhysicsConfig: {
+						nodeTags: { zero: 0, tiny: 0.01, nan: Number.NaN, big: Number.POSITIVE_INFINITY },
+						edgeTags: 'not a record'
+					}
+				}
+			});
+
+			expect(loaded.tagPhysicsConfig).toEqual({ nodeTags: { tiny: 0.25 }, edgeTags: {} });
+		});
+
+		it('drops a field that sanitises to nothing', () => {
+			const graph = makeGraph({ nodeCount: 1, pinned: [0] });
+
+			const loaded = unwrapPersistedGraph({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data: { ...graph, tagPhysicsConfig: { nodeTags: { a: 1 }, edgeTags: { b: -2 } } }
+			});
+
+			expect(loaded).not.toHaveProperty('tagPhysicsConfig');
+		});
+
+		it.each([['a string'], [42], [null], [['nodeTags']]])(
+			'drops a non-object field (%j) and still loads the graph',
+			(value) => {
+				const graph = makeGraph({ nodeCount: 1, pinned: [0] });
+
+				const loaded = unwrapPersistedGraph({
+					schemaVersion: CURRENT_SCHEMA_VERSION,
+					data: { ...graph, tagPhysicsConfig: value }
+				});
+
+				expect(loaded).not.toHaveProperty('tagPhysicsConfig');
+				expect(loaded.nodes).toEqual(graph.nodes);
+			}
+		);
+
+		it('sanitises a version 7 payload too', () => {
+			const graph = makeGraph({ nodeCount: 1, pinned: [0] });
+
+			const loaded = unwrapPersistedGraph({
+				schemaVersion: 7,
+				data: { ...graph, tagPhysicsConfig: { nodeTags: { a: 8 }, edgeTags: {} } }
+			});
+
+			expect(loaded.tagPhysicsConfig).toEqual({ nodeTags: { a: 4 }, edgeTags: {} });
+		});
+
+		it('needs no schema bump', () => {
+			expect(CURRENT_SCHEMA_VERSION).toBe(8);
+		});
+	});
+
 	it('parses serialized version 1 payloads', () => {
 		const graph = makeGraph({ nodeCount: 1, pinned: [0] });
 

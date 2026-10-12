@@ -311,6 +311,62 @@ describe('importGraphData', () => {
 		});
 	});
 
+	describe('tag physics factors', () => {
+		it('keeps the host factor when both graphs tune the same tag name', () => {
+			const host = makeGraph({
+				nodeCount: 1,
+				tagPhysicsConfig: { nodeTags: { topic: 2 }, edgeTags: { supports: 0.5 } }
+			});
+			const incoming = makeGraph({
+				nodeCount: 1,
+				tagPhysicsConfig: { nodeTags: { topic: 4 }, edgeTags: { supports: 3 } }
+			});
+
+			const { next } = importGraphData(host, incoming);
+
+			expect(next.tagPhysicsConfig).toEqual({
+				nodeTags: { topic: 2 },
+				edgeTags: { supports: 0.5 }
+			});
+		});
+
+		it('brings along the factor of a tag only the incoming graph tuned', () => {
+			const host = makeGraph({
+				nodeCount: 1,
+				tagPhysicsConfig: { nodeTags: { topic: 2 }, edgeTags: {} }
+			});
+			const incoming = makeGraph({
+				nodeCount: 1,
+				tagPhysicsConfig: { nodeTags: { idea: 1.5 }, edgeTags: { blocks: 0.75 } }
+			});
+
+			const { next } = importGraphData(host, incoming);
+
+			expect(next.tagPhysicsConfig).toEqual({
+				nodeTags: { topic: 2, idea: 1.5 },
+				edgeTags: { blocks: 0.75 }
+			});
+		});
+
+		it('brings the incoming factors into an untuned host', () => {
+			const host = makeGraph({ nodeCount: 1 });
+			const incoming = makeGraph({
+				nodeCount: 1,
+				tagPhysicsConfig: { nodeTags: {}, edgeTags: { blocks: 2 } }
+			});
+
+			const { next } = importGraphData(host, incoming);
+
+			expect(next.tagPhysicsConfig).toEqual({ nodeTags: {}, edgeTags: { blocks: 2 } });
+		});
+
+		it('adds no field when neither graph tuned a tag', () => {
+			const { next } = importGraphData(makeGraph({ nodeCount: 1 }), makeGraph({ nodeCount: 1 }));
+
+			expect('tagPhysicsConfig' in next).toBe(false);
+		});
+	});
+
 	describe('pin sequencing', () => {
 		it('rebases incoming stamps past the host maximum, preserving their order', () => {
 			const host = makeGraph({
