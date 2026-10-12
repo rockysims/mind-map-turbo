@@ -75,9 +75,9 @@ describe('CONFIG_SCHEMA', () => {
 		expect(unknown).toEqual([]);
 	});
 
-	it('covers exactly the 106 shipped leaves', () => {
-		expect(runtimeLeafPaths).toHaveLength(106);
-		expect(schemaPaths).toHaveLength(106);
+	it('covers exactly the 110 shipped leaves', () => {
+		expect(runtimeLeafPaths).toHaveLength(110);
+		expect(schemaPaths).toHaveLength(110);
 	});
 
 	it('keeps every range default inside its own slider bounds', () => {
