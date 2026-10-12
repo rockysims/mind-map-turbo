@@ -192,6 +192,89 @@ describe('physics', () => {
 			});
 		});
 
+		// The band is the rest length: inside it the spring does nothing. A factor
+		// that only changed convergence speed would leave the graph unchanged at
+		// rest, so these specs relax to rest and look at where the edge ends up.
+		describe('per-edge gap factor', () => {
+			const radii = { n0: 20, n1: 20, m0: 20, m1: 20 };
+			const radiusSum = 40;
+			const { edgeGapMinRadiusFactor: minFactor, edgeGapMaxRadiusFactor: maxFactor } =
+				EDGE_DISTANCE_SETTINGS;
+			// The step stops once a correction is under its epsilon, so a pair
+			// approaching the band from outside rests a hair beyond its edge.
+			const SETTLE_TOLERANCE = 0.01;
+
+			function settle(positions: Record<string, Point>): Record<string, Point> {
+				return relaxGraphPhysics(
+					positions,
+					radii,
+					[
+						{ sourceNodeId: 'n0', targetNodeId: 'n1', gapFactor: 2 },
+						{ sourceNodeId: 'm0', targetNodeId: 'm1' }
+					],
+					GRAPH_PHYSICS_SETTINGS,
+					200
+				);
+			}
+
+			it('moves the rest gap of a stretched edge, not just how fast it gets there', () => {
+				const next = settle({
+					n0: { x: 0, y: 0 },
+					n1: { x: 440, y: 0 },
+					m0: { x: 0, y: 1000 },
+					m1: { x: 440, y: 1000 }
+				});
+
+				const scaled = gapAmount(next, radii, 'n0', 'n1');
+				const unscaled = gapAmount(next, radii, 'm0', 'm1');
+				expect(scaled).toBeGreaterThanOrEqual(2 * minFactor * radiusSum);
+				expect(scaled).toBeLessThanOrEqual(2 * maxFactor * radiusSum + SETTLE_TOLERANCE);
+				expect(unscaled).toBeGreaterThanOrEqual(minFactor * radiusSum);
+				expect(unscaled).toBeLessThanOrEqual(maxFactor * radiusSum + SETTLE_TOLERANCE);
+				// Outside the unscaled band altogether, so no strength could have put it there.
+				expect(scaled).toBeGreaterThan(maxFactor * radiusSum + SETTLE_TOLERANCE);
+			});
+
+			it('moves the rest gap of a compressed edge', () => {
+				const next = settle({
+					n0: { x: 0, y: 0 },
+					n1: { x: 40, y: 0 },
+					m0: { x: 0, y: 1000 },
+					m1: { x: 40, y: 1000 }
+				});
+
+				const scaled = gapAmount(next, radii, 'n0', 'n1');
+				const unscaled = gapAmount(next, radii, 'm0', 'm1');
+				expect(scaled).toBeGreaterThanOrEqual(2 * minFactor * radiusSum - SETTLE_TOLERANCE);
+				expect(scaled).toBeLessThanOrEqual(2 * maxFactor * radiusSum);
+				expect(unscaled).toBeGreaterThanOrEqual(minFactor * radiusSum - SETTLE_TOLERANCE);
+				expect(unscaled).toBeLessThan(scaled);
+			});
+
+			// Unlike `springFactor`, where a bad value means "no pull", a bad gap
+			// factor means "unchanged": a zero rest length would collapse the edge.
+			it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
+				'treats a gap factor of %s exactly like an absent one',
+				(gapFactor) => {
+					const positions = { n0: { x: 0, y: 0 }, n1: { x: 300, y: 0 } };
+					const withFactor = relaxEdgeDistancesStep(
+						positions,
+						radii,
+						[{ sourceNodeId: 'n0', targetNodeId: 'n1', gapFactor }],
+						EDGE_DISTANCE_SETTINGS
+					);
+					const without = relaxEdgeDistancesStep(
+						positions,
+						radii,
+						[{ sourceNodeId: 'n0', targetNodeId: 'n1' }],
+						EDGE_DISTANCE_SETTINGS
+					);
+
+					expect(withFactor).toEqual(without);
+				}
+			);
+		});
+
 		it('pulls more strongly as connected nodes get farther apart', () => {
 			const radii = { n0: 20, n1: 20 };
 			const near = relaxEdgeDistancesStep(
@@ -486,6 +569,86 @@ describe('physics', () => {
 
 			expect(Math.abs(next.heavy.x)).toBeLessThan(Math.abs(next.light.x - positions.light.x));
 		});
+
+		// HOP_REPULSION_SETTINGS run at strength 1, so one step lands each pair on
+		// exactly the distance it wants to hold open.
+		describe('per-node repulsion factor', () => {
+			const radii = { n0: 20, n2: 20 };
+			const radiusSum = 40;
+			const TWO_HOPS = { n0: { n2: 2 }, n2: { n0: 2 } };
+			const touching = { n0: { x: 0, y: 0 }, n2: { x: 40, y: 0 } };
+
+			function restingDistance(
+				repulsionFactorByNodeId?: Record<string, number>,
+				hops: Record<string, Record<string, number>> = TWO_HOPS,
+				settings = HOP_REPULSION_SETTINGS
+			): number {
+				const next = relaxHopRepulsionStep(
+					touching,
+					radii,
+					hops,
+					settings,
+					new Set(),
+					undefined,
+					undefined,
+					repulsionFactorByNodeId
+				);
+				return next.n2.x - next.n0.x;
+			}
+
+			const unscaledExtraGap = restingDistance() - radiusSum;
+
+			it('holds open the geometric mean of the two factors times the unscaled gap', () => {
+				expect(unscaledExtraGap).toBeGreaterThan(0);
+				// sqrt(4 × 1) = 2
+				expect(restingDistance({ n0: 4 }) - radiusSum).toBeCloseTo(2 * unscaledExtraGap, 10);
+				expect(restingDistance({ n0: 4, n2: 1 }) - radiusSum).toBeCloseTo(2 * unscaledExtraGap, 10);
+			});
+
+			it('holds the unscaled gap when the two factors cancel', () => {
+				// sqrt(2 × 0.5) = 1
+				expect(restingDistance({ n0: 2, n2: 0.5 })).toBe(restingDistance());
+			});
+
+			it('treats a non-finite or non-positive factor as absent', () => {
+				for (const factor of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+					expect(restingDistance({ n0: factor })).toBe(restingDistance());
+				}
+			});
+
+			it('leaves positions bit-identical for an empty map', () => {
+				expect(
+					relaxHopRepulsionStep(
+						touching,
+						radii,
+						TWO_HOPS,
+						HOP_REPULSION_SETTINGS,
+						new Set(),
+						undefined,
+						undefined,
+						{}
+					)
+				).toEqual(relaxHopRepulsionStep(touching, radii, TWO_HOPS, HOP_REPULSION_SETTINGS));
+			});
+
+			it('scales the cross-component seam by the same pair factor', () => {
+				const unreachable = { n0: { n2: Infinity }, n2: { n0: Infinity } };
+				const seam = restingDistance(undefined, unreachable) - radiusSum;
+
+				expect(seam).toBeCloseTo(radiusSum * 0.1, 10);
+				expect(restingDistance({ n0: 4 }, unreachable) - radiusSum).toBeCloseTo(2 * seam, 10);
+			});
+
+			it('scales the seam after its cap, so a capped seam still widens', () => {
+				const unreachable = { n0: { n2: Infinity }, n2: { n0: Infinity } };
+				const capped = { ...HOP_REPULSION_SETTINGS, hopRepulsionMaxExtraGapRadiusFactor: 0.02 };
+
+				expect(restingDistance({ n0: 4 }, unreachable, capped) - radiusSum).toBeCloseTo(
+					2 * radiusSum * 0.02,
+					10
+				);
+			});
+		});
 	});
 
 	describe('relaxOverlapsStep', () => {
@@ -602,6 +765,38 @@ describe('physics', () => {
 			expect(gapAmount(next, radii, 'n1', 'n2')).toBeLessThan(
 				gapAmount(positions, radii, 'n1', 'n2')
 			);
+		});
+
+		describe('repulsionFactorByNodeId', () => {
+			const positions = { n0: { x: 0, y: 0 }, n2: { x: 40, y: 0 } };
+			const radii = { n0: 20, n2: 20 };
+			const hops = { n0: { n2: 2 }, n2: { n0: 2 } };
+			const settings = { ...EDGE_DISTANCE_SETTINGS, ...HOP_REPULSION_SETTINGS };
+
+			function relax(repulsionFactorByNodeId?: Record<string, number>): Record<string, Point> {
+				return relaxGraphPhysics(
+					positions,
+					radii,
+					[],
+					settings,
+					4,
+					new Set(),
+					hops,
+					undefined,
+					undefined,
+					repulsionFactorByNodeId
+				);
+			}
+
+			it('reaches hop repulsion, pushing a spaced-out pair further apart', () => {
+				expect(gapAmount(relax({ n0: 4 }), radii, 'n0', 'n2')).toBeGreaterThan(
+					gapAmount(relax(), radii, 'n0', 'n2')
+				);
+			});
+
+			it('changes nothing when empty', () => {
+				expect(relax({})).toEqual(relax());
+			});
 		});
 	});
 });

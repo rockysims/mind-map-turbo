@@ -40,6 +40,16 @@ export interface EdgeEndpointIds {
 	 * force law.
 	 */
 	springFactor?: number;
+	/**
+	 * Scales this edge's rest-gap band — both `edgeGapMinRadiusFactor` and
+	 * `edgeGapMaxRadiusFactor` — so 2 asks the endpoints to rest twice as far
+	 * apart. Defaults to 1. Unlike `springFactor`, which only changes how fast an
+	 * edge converges, this moves where it comes to rest.
+	 *
+	 * Like `springFactor`, physics is handed a number and does not know where it
+	 * came from.
+	 */
+	gapFactor?: number;
 }
 
 function nodeMobility(
@@ -79,7 +89,8 @@ export function relaxGraphPhysics(
 	anchoredIds: Set<string> = new Set(),
 	shortestPathHops: Record<string, Record<string, number>> = {},
 	participatingNodeIds?: ReadonlySet<string>,
-	mobilityByNodeId?: Record<string, number>
+	mobilityByNodeId?: Record<string, number>,
+	repulsionFactorByNodeId?: Record<string, number>
 ): Record<string, Point> {
 	let relaxed = positions;
 
@@ -100,7 +111,8 @@ export function relaxGraphPhysics(
 			settings,
 			anchoredIds,
 			participatingNodeIds,
-			mobilityByNodeId
+			mobilityByNodeId,
+			repulsionFactorByNodeId
 		);
 		const next = relaxOverlapsStep(
 			withRepelledHops,
@@ -130,7 +142,8 @@ export function relaxHopRepulsionStep(
 	settings: HopRepulsionSettings,
 	anchoredIds: Set<string> = new Set(),
 	participatingNodeIds?: ReadonlySet<string>,
-	mobilityByNodeId?: Record<string, number>
+	mobilityByNodeId?: Record<string, number>,
+	repulsionFactorByNodeId?: Record<string, number>
 ): Record<string, Point> {
 	const strength = clamp(settings.hopRepulsionStrength, 0, 1);
 	const maxExtraGapFactor = Math.max(0, settings.hopRepulsionMaxExtraGapRadiusFactor);
@@ -155,8 +168,14 @@ export function relaxHopRepulsionStep(
 			const sourceRadius = radii[sourceId];
 			const targetRadius = radii[targetId];
 			const radiusSum = sourceRadius + targetRadius;
+			// Scaled after `extraHopGap`, so the cross-component seam is scaled after
+			// its cap: a spaced-out node keeps a proportionally wider seam too.
+			const pairFactor = Math.sqrt(
+				repulsionFactorOf(repulsionFactorByNodeId, sourceId) *
+					repulsionFactorOf(repulsionFactorByNodeId, targetId)
+			);
 			const preferredDistance =
-				radiusSum + extraHopGap(radiusSum, hops, minHops, maxHops, maxExtraGapFactor);
+				radiusSum + extraHopGap(radiusSum, hops, minHops, maxHops, maxExtraGapFactor) * pairFactor;
 			const shares = displacementShares(sourceId, targetId, anchoredIds, mobilityByNodeId);
 			if (shares === null) continue;
 
@@ -217,6 +236,31 @@ function springFactorOf(edge: EdgeEndpointIds): number {
 	return Number.isFinite(factor) && factor > 0 ? factor : 0;
 }
 
+/**
+ * An edge with no stated gap factor keeps the configured band. Deliberately not
+ * `springFactorOf`'s rule, which reads a bad value as 0 because a spring that
+ * exerts nothing is a meaningful "no pull". A zero rest length is not
+ * meaningful — it would ask every such edge to close until its endpoints touch —
+ * so a value that is not finite and positive falls back to "unchanged".
+ */
+function gapFactorOf(edge: EdgeEndpointIds): number {
+	const factor = edge.gapFactor ?? 1;
+	return Number.isFinite(factor) && factor > 0 ? factor : 1;
+}
+
+/**
+ * A node's share of the clearance hop repulsion holds open around it. Same rule
+ * as `gapFactorOf`, for the same reason: a zero clearance means nothing, so a
+ * value that is not finite and positive reads as "unchanged".
+ */
+function repulsionFactorOf(
+	repulsionFactorByNodeId: Record<string, number> | undefined,
+	nodeId: string
+): number {
+	const factor = repulsionFactorByNodeId?.[nodeId] ?? 1;
+	return Number.isFinite(factor) && factor > 0 ? factor : 1;
+}
+
 export function relaxEdgeDistancesStep(
 	positions: Record<string, Point>,
 	radii: Record<string, number>,
@@ -252,8 +296,9 @@ export function relaxEdgeDistancesStep(
 		if (!source || !target || sourceRadius === undefined || targetRadius === undefined) continue;
 
 		const radiusSum = sourceRadius + targetRadius;
-		const minGap = radiusSum * minGapFactor;
-		const maxGap = radiusSum * maxGapFactor;
+		const gapFactor = gapFactorOf(edge);
+		const minGap = radiusSum * minGapFactor * gapFactor;
+		const maxGap = radiusSum * maxGapFactor * gapFactor;
 		const shares = displacementShares(sourceId, targetId, anchoredIds, mobilityByNodeId);
 		if (shares === null) continue;
 
