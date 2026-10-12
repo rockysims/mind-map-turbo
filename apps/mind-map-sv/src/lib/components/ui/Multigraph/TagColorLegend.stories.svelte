@@ -201,9 +201,14 @@
 		nodeSlider.dispatchEvent(new Event('change', { bubbles: true }));
 		expect(physicsSpy.mock.calls.at(-1)).toEqual(['nodeTags', 'topic', 2, 'commit']);
 
-		// The far end is ×0.25, not a quarter of the track.
+		// Two notches down is ×0.25, not a quarter of the track; the ends are
+		// ×0.125 and ×8.
 		scrubSlider(nodeSlider, -2);
 		expect(physicsSpy.mock.calls.at(-1)).toEqual(['nodeTags', 'topic', 0.25, 'scrub']);
+		scrubSlider(nodeSlider, -3);
+		expect(physicsSpy.mock.calls.at(-1)).toEqual(['nodeTags', 'topic', 0.125, 'scrub']);
+		scrubSlider(nodeSlider, 3);
+		expect(physicsSpy.mock.calls.at(-1)).toEqual(['nodeTags', 'topic', 8, 'scrub']);
 	}}
 />
 

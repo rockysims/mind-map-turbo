@@ -125,8 +125,8 @@
 										     announces the factor rather than the log position. -->
 										<input
 											type="range"
-											min="-2"
-											max="2"
+											min="-3"
+											max="3"
 											step="0.05"
 											value={sliderPositionForFactor(legendTag.physicsFactor)}
 											aria-valuetext={formatTagPhysicsFactor(legendTag.physicsFactor)}

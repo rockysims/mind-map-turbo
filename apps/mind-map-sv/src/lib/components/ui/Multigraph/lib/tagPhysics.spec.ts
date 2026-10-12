@@ -18,16 +18,16 @@ function edge(id: string, tags: string[], extra: Partial<EdgeData> = {}): EdgeDa
 
 describe('tagPhysics', () => {
 	describe('range', () => {
-		it('spans ×0.25 to ×4', () => {
-			expect(TAG_PHYSICS_MIN_FACTOR).toBe(0.25);
-			expect(TAG_PHYSICS_MAX_FACTOR).toBe(4);
+		it('spans ×0.125 to ×8', () => {
+			expect(TAG_PHYSICS_MIN_FACTOR).toBe(0.125);
+			expect(TAG_PHYSICS_MAX_FACTOR).toBe(8);
 		});
 	});
 
 	describe('clampTagPhysicsFactor', () => {
 		it('clamps into the stored range', () => {
-			expect(clampTagPhysicsFactor(9)).toBe(4);
-			expect(clampTagPhysicsFactor(0.1)).toBe(0.25);
+			expect(clampTagPhysicsFactor(9)).toBe(8);
+			expect(clampTagPhysicsFactor(0.1)).toBe(0.125);
 			expect(clampTagPhysicsFactor(1.4)).toBe(1.4);
 		});
 
@@ -166,13 +166,20 @@ describe('tagPhysics', () => {
 	});
 
 	describe('slider mapping', () => {
-		// Every position the native input can produce: min -2, max 2, step 0.05.
-		const stepPositions = Array.from({ length: 81 }, (_, index) => (index - 40) / 20);
+		// Every position the native input can produce: min -3, max 3, step 0.05.
+		const stepPositions = Array.from({ length: 121 }, (_, index) => (index - 60) / 20);
 
 		it('puts ×1 at the centre and the range ends at the slider ends', () => {
 			expect(factorForSliderPosition(0)).toBe(1);
+			expect(factorForSliderPosition(-3)).toBe(0.125);
+			expect(factorForSliderPosition(3)).toBe(8);
 			expect(factorForSliderPosition(-2)).toBe(0.25);
 			expect(factorForSliderPosition(2)).toBe(4);
+		});
+
+		it('round-trips the slider ends', () => {
+			expect(sliderPositionForFactor(factorForSliderPosition(-3))).toBe(-3);
+			expect(sliderPositionForFactor(factorForSliderPosition(3))).toBe(3);
 		});
 
 		it('rounds a stored factor to three decimals', () => {
@@ -181,8 +188,8 @@ describe('tagPhysics', () => {
 		});
 
 		it('clamps a position past the slider ends into range', () => {
-			expect(factorForSliderPosition(3)).toBe(4);
-			expect(factorForSliderPosition(-3)).toBe(0.25);
+			expect(factorForSliderPosition(4)).toBe(8);
+			expect(factorForSliderPosition(-4)).toBe(0.125);
 		});
 
 		it('round-trips every step position', () => {
@@ -197,8 +204,8 @@ describe('tagPhysics', () => {
 		});
 
 		it('clamps a factor past the range to the slider ends', () => {
-			expect(sliderPositionForFactor(9)).toBe(2);
-			expect(sliderPositionForFactor(0.1)).toBe(-2);
+			expect(sliderPositionForFactor(9)).toBe(3);
+			expect(sliderPositionForFactor(0.1)).toBe(-3);
 		});
 
 		it('reads a factor that is not finite and positive as the centre', () => {
@@ -215,6 +222,8 @@ describe('tagPhysics', () => {
 			expect(formatTagPhysicsFactor(0.707)).toBe('×0.71');
 			expect(formatTagPhysicsFactor(0.25)).toBe('×0.25');
 			expect(formatTagPhysicsFactor(4)).toBe('×4.0');
+			expect(formatTagPhysicsFactor(0.125)).toBe('×0.13');
+			expect(formatTagPhysicsFactor(8)).toBe('×8.0');
 		});
 	});
 });
