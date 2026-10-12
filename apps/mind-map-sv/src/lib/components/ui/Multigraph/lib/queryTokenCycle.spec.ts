@@ -9,8 +9,8 @@ const configuredSyntax: TagSyntaxConfig = {
 	addonMarker: '%'
 };
 
-/** Every query a tag's button walks through in four clicks, starting from `query`. */
-function cycleFourTimes(
+/** Every query a tag's button walks through in one full cycle of three clicks, from `query`. */
+function cycleThreeTimes(
 	query: string,
 	target: 'nodeTag' | 'edgeTag',
 	tag: string,
@@ -18,7 +18,7 @@ function cycleFourTimes(
 ): string[] {
 	const steps: string[] = [];
 	let current = query;
-	for (let click = 0; click < 4; click += 1) {
+	for (let click = 0; click < 3; click += 1) {
 		current = cycleTagToken(current, target, tag, tagSyntax);
 		steps.push(current);
 	}
@@ -73,27 +73,32 @@ describe('tagTokenMode', () => {
 });
 
 describe('cycleTagToken', () => {
-	it('cycles a node tag from an empty query through every mode and back', () => {
-		expect(cycleFourTimes('', 'nodeTag', 'lab')).toEqual(['#lab', '+#lab', '-#lab', '']);
+	it('cycles a node tag from an empty query through spotlight and exclude and back', () => {
+		expect(cycleThreeTimes('', 'nodeTag', 'lab')).toEqual(['+#lab', '-#lab', '']);
 	});
 
 	it('cycles an edge tag with the edge marker', () => {
-		expect(cycleFourTimes('', 'edgeTag', 'rel')).toEqual(['@rel', '+@rel', '-@rel', '']);
+		expect(cycleThreeTimes('', 'edgeTag', 'rel')).toEqual(['+@rel', '-@rel', '']);
 	});
 
 	it('cycles with a configured tag syntax', () => {
-		expect(cycleFourTimes('', 'nodeTag', 'lab', configuredSyntax)).toEqual([
-			':lab',
-			'+:lab',
-			'-:lab',
-			''
-		]);
-		expect(cycleFourTimes('', 'edgeTag', 'rel', configuredSyntax)).toEqual([
-			';rel',
-			'+;rel',
-			'-;rel',
-			''
-		]);
+		expect(cycleThreeTimes('', 'nodeTag', 'lab', configuredSyntax)).toEqual(['+:lab', '-:lab', '']);
+		expect(cycleThreeTimes('', 'edgeTag', 'rel', configuredSyntax)).toEqual(['+;rel', '-;rel', '']);
+	});
+
+	it('never writes a plain focus token', () => {
+		for (const step of cycleThreeTimes('#a', 'nodeTag', 'lab')) {
+			expect(tagTokenMode(step, 'nodeTag', 'lab')).not.toBe('focus');
+		}
+	});
+
+	it('steps a typed focus token on to spotlight, then exclude, then out', () => {
+		expect(cycleThreeTimes('#lab', 'nodeTag', 'lab')).toEqual(['+#lab', '-#lab', '']);
+		expect(cycleTagToken('#a #lab x', 'nodeTag', 'lab')).toBe('#a +#lab x');
+	});
+
+	it('steps a typed spotlight on to exclude', () => {
+		expect(cycleTagToken('#a +#lab', 'nodeTag', 'lab')).toBe('#a -#lab');
 	});
 
 	it('edits only the tag token inside a longer typed query', () => {
@@ -114,14 +119,14 @@ describe('cycleTagToken', () => {
 
 	describe('appending a tag the query does not name', () => {
 		it('adds one space before the token unless the query already ends in whitespace', () => {
-			expect(cycleTagToken('#a', 'nodeTag', 'lab')).toBe('#a #lab');
-			expect(cycleTagToken('#a ', 'nodeTag', 'lab')).toBe('#a #lab');
-			expect(cycleTagToken('#a\n', 'nodeTag', 'lab')).toBe('#a\n#lab');
+			expect(cycleTagToken('#a', 'nodeTag', 'lab')).toBe('#a +#lab');
+			expect(cycleTagToken('#a ', 'nodeTag', 'lab')).toBe('#a +#lab');
+			expect(cycleTagToken('#a\n', 'nodeTag', 'lab')).toBe('#a\n+#lab');
 		});
 
 		it('never trims the text the user typed', () => {
-			expect(cycleTagToken('  x  y', 'nodeTag', 'lab')).toBe('  x  y #lab');
-			expect(cycleTagToken('   ', 'nodeTag', 'lab')).toBe('   #lab');
+			expect(cycleTagToken('  x  y', 'nodeTag', 'lab')).toBe('  x  y +#lab');
+			expect(cycleTagToken('   ', 'nodeTag', 'lab')).toBe('   +#lab');
 		});
 	});
 
@@ -174,31 +179,21 @@ describe('cycleTagToken', () => {
 
 	it('leaves a quoted tag, a bare word, an add-on and an edge tag of the same name untouched', () => {
 		const neighbours = '"#lab" lab !lab @lab';
-		const steps = cycleFourTimes(neighbours, 'nodeTag', 'lab');
-		expect(steps).toEqual([
-			`${neighbours} #lab`,
-			`${neighbours} +#lab`,
-			`${neighbours} -#lab`,
-			neighbours
-		]);
+		const steps = cycleThreeTimes(neighbours, 'nodeTag', 'lab');
+		expect(steps).toEqual([`${neighbours} +#lab`, `${neighbours} -#lab`, neighbours]);
 	});
 
 	it('leaves node tags untouched when cycling the edge tag of the same name', () => {
-		expect(cycleFourTimes('#rel', 'edgeTag', 'rel')).toEqual([
-			'#rel @rel',
-			'#rel +@rel',
-			'#rel -@rel',
-			'#rel'
-		]);
+		expect(cycleThreeTimes('#rel', 'edgeTag', 'rel')).toEqual(['#rel +@rel', '#rel -@rel', '#rel']);
 	});
 
 	describe('round trip', () => {
-		const expectedModes: Array<GraphQueryTokenMode | null> = [
-			'focus',
-			'spotlight',
-			'exclude',
-			null
-		];
+		/** The cycle as a table, kept apart from the module's own: no token and focus both step to spotlight. */
+		function expectedNext(mode: GraphQueryTokenMode | null): GraphQueryTokenMode | null {
+			if (mode === 'spotlight') return 'exclude';
+			if (mode === 'exclude') return null;
+			return 'spotlight';
+		}
 
 		it.each([
 			[''],
@@ -210,12 +205,11 @@ describe('cycleTagToken', () => {
 			['hello#lab'],
 			['"#lab" lab !lab @lab']
 		])('parses every cycle output of %j to at most one token for the tag', (start) => {
-			const firstMode = tagTokenMode(start, 'nodeTag', 'lab');
-			const offset = firstMode === null ? 0 : expectedModes.indexOf(firstMode) + 1;
+			let expected = tagTokenMode(start, 'nodeTag', 'lab');
 			let current = start;
 			for (let click = 0; click < 4; click += 1) {
 				current = cycleTagToken(current, 'nodeTag', 'lab');
-				const expected = expectedModes[(offset + click) % expectedModes.length];
+				expected = expectedNext(expected);
 				const matches = parseGraphQuery(current).filter(
 					(token) => token.target === 'nodeTag' && tagNamesMatch(token.value, 'lab')
 				);

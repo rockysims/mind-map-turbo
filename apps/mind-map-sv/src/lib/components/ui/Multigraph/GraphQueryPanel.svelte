@@ -54,22 +54,24 @@
 		updateQuery(cycleTagToken(query, target, tag, tagSyntax));
 	}
 
-	function previewToken(token: string | null) {
-		onPreviewQueryChange?.(token ? `${query.trim()} ${token}`.trim() : null);
+	/**
+	 * Show a whole query on the canvas in place of the typed one, or stop with
+	 * null. It replaces rather than appends, so a preview can remove a token.
+	 */
+	function previewQuery(previewed: string | null) {
+		onPreviewQueryChange?.(previewed);
 	}
 
 	/**
-	 * Hover and keyboard focus spotlight a tag only while the query does not
-	 * name it. Once the reader has chosen a state, previewing over it would
-	 * misreport that choice, and previewing an exclude would reflow the graph
-	 * under the pointer once excluded nodes leave the layout.
+	 * Hover and keyboard focus show exactly what a click would do: the whole
+	 * query `cycleTag` would commit. A tag not in the query previews its
+	 * spotlight, a spotlighted tag previews its exclusion — so the excluded
+	 * nodes leave the layout while hovered — and an excluded tag previews the
+	 * query without it, bringing them back. Clicking commits the previewed
+	 * query, so the canvas does not move again on the click itself.
 	 */
 	function previewTag(target: TagTarget, tag: string) {
-		previewToken(
-			tagTokenMode(query, target, tag, tagSyntax) === null
-				? tagTokenText('spotlight', target, tag, tagSyntax)
-				: null
-		);
+		previewQuery(cycleTagToken(query, target, tag, tagSyntax));
 	}
 
 	function tokenLabel(token: GraphQueryToken): string {
@@ -88,8 +90,9 @@
 
 {#snippet tagButton(target: TagTarget, tag: LegendTag)}
 	{@const mode = tagTokenMode(query, target, tag.tag, tagSyntax)}
-	<!-- The label is the token as it would be typed, so "none" and "focus" both
-	     read `#tag`; aria-pressed and the pressed styling tell them apart. -->
+	<!-- The label is the token as it would be typed. At rest it is the bare
+	     `#tag`, which a hand-typed focus token also reads as; aria-pressed,
+	     data-mode and the pressed styling tell the two apart. -->
 	<button
 		type="button"
 		aria-pressed={mode !== null}
@@ -97,9 +100,9 @@
 		aria-label={`${target === 'nodeTag' ? 'Node' : 'Edge'} tag ${tag.tag}, ${TAG_STATE_NAME[mode ?? 'none']}`}
 		onclick={() => cycleTag(target, tag.tag)}
 		onmouseenter={() => previewTag(target, tag.tag)}
-		onmouseleave={() => previewToken(null)}
+		onmouseleave={() => previewQuery(null)}
 		onfocus={() => previewTag(target, tag.tag)}
-		onblur={() => previewToken(null)}
+		onblur={() => previewQuery(null)}
 	>
 		<span class="swatch" style={`--tag-color: ${tag.color}`}></span>
 		<span class="tag-label">{tagTokenText(mode ?? 'focus', target, tag.tag, tagSyntax)}</span>

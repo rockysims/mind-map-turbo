@@ -15,7 +15,11 @@ const MODE_PREFIX: Record<GraphQueryTokenMode, string> = {
 	exclude: '-'
 };
 
-/** The cycle a tag button walks: none → focus → spotlight → exclude → none. */
+/**
+ * The cycle a tag button walks: none → spotlight → exclude → none. Plain focus
+ * is not a stop on it, but a hand-typed focus token still counts as in the
+ * query and steps on to spotlight.
+ */
 const NEXT_MODE: Record<GraphQueryTokenMode, GraphQueryTokenMode | null> = {
 	focus: 'spotlight',
 	spotlight: 'exclude',
@@ -52,11 +56,12 @@ export function tagTokenMode(
 }
 
 /**
- * Advance the tag's token one step through none → focus → spotlight → exclude
- * → none, editing only the matching tokens' own text. Duplicates collapse to
- * one token written where the last one was; a tag with no token is appended
- * without trimming what the user typed. The written token uses `tag`'s
- * spelling, since that is what was clicked.
+ * Advance the tag's token one step through none → spotlight → exclude → none
+ * (a typed focus token steps to spotlight), editing only the matching tokens'
+ * own text. Duplicates collapse to one token written where the last one was; a
+ * tag with no token is appended as a spotlight without trimming what the user
+ * typed. The written token uses `tag`'s spelling, since that is what was
+ * clicked.
  */
 export function cycleTagToken(
 	query: string,
@@ -67,12 +72,12 @@ export function cycleTagToken(
 	const matches = matchingTokens(query, target, tag, tagSyntax);
 	const last = matches.at(-1);
 	if (!last) {
-		const token = tagTokenText('focus', target, tag, tagSyntax);
+		const token = tagTokenText('spotlight', target, tag, tagSyntax);
 		return query === '' || isWhitespace(query.at(-1)) ? query + token : `${query} ${token}`;
 	}
 
 	const currentMode = effectiveMode(matches);
-	const nextMode = currentMode ? NEXT_MODE[currentMode] : 'focus';
+	const nextMode = currentMode ? NEXT_MODE[currentMode] : 'spotlight';
 	// Ranges arrive in input order and edits run right to left, so every range
 	// still to be edited sits before anything already changed and stays valid.
 	let result =

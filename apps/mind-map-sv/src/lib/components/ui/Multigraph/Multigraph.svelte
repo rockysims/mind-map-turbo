@@ -1469,9 +1469,11 @@
 	/**
 	 * Which elements the query takes out of the layout, as a string: the same
 	 * set the reducer cuts (same evaluation, same exemption), so two queries that
-	 * exclude the same nodes and edges read equal whatever their text. A hover
-	 * preview only ever adds `+` tokens, which cannot un-exclude anything, so it
-	 * never changes this.
+	 * exclude the same nodes and edges read equal whatever their text. It reads
+	 * the active query, preview included: hovering a tag not in the query
+	 * previews a `+` token, which cannot un-exclude anything and so leaves this
+	 * alone, but hovering a spotlit or excluded tag previews its exclusion or its
+	 * removal, and the canvas shows that as it would a typed edit.
 	 */
 	const excludedElementsKey = $derived.by(() => {
 		const excluded = excludedGraphElements(graphQueryResult, transientReveal.revealedNodeIds);
@@ -1498,6 +1500,11 @@
 	 * a node brings its own camera and relax; both just move the baseline. A query
 	 * edit that excludes the same set as before does nothing at all. The first run
 	 * only records the baseline: mounting is not a query change.
+	 *
+	 * A tag button's hover preview is a query change like any other, so entering
+	 * one that excludes fades its nodes out and leaving brings them back the same
+	 * way. Clicking commits the previewed text verbatim, so the active query does
+	 * not change on the click and nothing runs twice.
 	 */
 	$effect(() => {
 		const key = excludedElementsKey;

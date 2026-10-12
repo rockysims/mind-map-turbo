@@ -250,7 +250,10 @@ describe('createLayoutSourceReducer', () => {
 	});
 });
 
-describe('hover previews never change the excluded set', () => {
+// Hovering a tag button not in the query previews its spotlight, so this is
+// why that hover never reflows the graph. (Hovering a spotlit or excluded tag
+// previews its exclusion or removal and reflows on purpose.)
+describe('appending a spotlight token never changes the excluded set', () => {
 	const exclusions = ['-#hidden', '-#other', '-@bridge', '-@link', '-!task', '-"distant"'];
 	const previews = [
 		...new Set(graph.nodes.flatMap((node) => node.tags.map((tag) => `+#${tag}`))),
