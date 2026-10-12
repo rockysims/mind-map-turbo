@@ -20,6 +20,7 @@
 	import { attachmentSizeWarning } from './lib/attachmentSizeWarning';
 	import { formatByteSize } from './lib/byteSize';
 	import { weightFromDraft, weightName } from './lib/nodeWeight';
+	import { draftChangesNode, type NodeEditDraft } from './lib/nodeEditDraft';
 	import { isRegisteredAddon, NODE_ADDON_REGISTRY, type NodeAddonName } from './lib/nodeAddons';
 	import { normalizeTagList } from './lib/titleSyntax';
 	import { nodeQuantities } from './lib/nodeQuantities';
@@ -63,15 +64,7 @@
 		assets?: Record<string, GraphAssetMetadata>;
 		/** How the graph names its nodes' weight; absent labels the field "Weight". */
 		weightConfig?: WeightConfig;
-		onSave: (content: {
-			title: string;
-			description: string;
-			tags: string[];
-			inputs: QuantityDesignation[];
-			outputs: QuantityDesignation[];
-			/** A number sets it, `null` removes it, absent leaves it alone (see `weightFromDraft`). */
-			weight?: number | null;
-		}) => void;
+		onSave: (content: NodeEditDraft) => void;
 		/**
 		 * Store one picked file. The MIME type decides what it becomes, so both
 		 * upload buttons hand the file to the same callback and a PNG picked
@@ -245,9 +238,10 @@
 		);
 	});
 
-	function save() {
+	/** The drafted fields as Save stores them. */
+	function draftContent(): NodeEditDraft {
 		const weight = weightFromDraft(weightText, weightBadInput);
-		onSave({
+		return {
 			title: normalizeNodeTitle(title),
 			description,
 			tags: normalizeTagList(nodeTags),
@@ -256,7 +250,28 @@
 			// Left out, not passed as `undefined`, when the field could not be read:
 			// the save then keeps the stored weight.
 			...(weight === undefined ? {} : { weight })
-		});
+		};
+	}
+
+	function save() {
+		onSave(draftContent());
+	}
+
+	/**
+	 * Clicking away saves, the way the inline title commits on blur — the owner's
+	 * 2026-10-12 ruling. It is Save's own save, with Save's rules (an empty title
+	 * becomes the fallback title, an unreadable weight keeps the stored one), so
+	 * the two can never disagree about what a draft means.
+	 *
+	 * An untouched sheet only closes. Saving it would commit a copy of the node
+	 * that the undo history then has to recognise and drop, and would kick a
+	 * layout relax for an edit nobody made; not committing at all is simpler
+	 * than relying on that. Escape, Close and Cancel still discard.
+	 */
+	function saveOnClickAway() {
+		const draft = draftContent();
+		if (draftChangesNode(node, draft)) onSave(draft);
+		else onCancel();
 	}
 
 	function editWeight(event: Event & { currentTarget: HTMLInputElement }) {
@@ -517,7 +532,7 @@
 
 	/**
 	 * Applied straight away, the way Pin and the attachment controls are, rather
-	 * than waiting for Done: an add-on is a capability the node either has or
+	 * than waiting for Save: an add-on is a capability the node either has or
 	 * does not, not text being drafted. No confirm on the way off — milestone
 	 * 12's undo is the safety net, and the commit says which add-on it removed.
 	 */
@@ -597,7 +612,12 @@
 </script>
 
 <div class="sheet-layer" role="presentation" onkeydown={handleKeydown}>
-	<button class="sheet-backdrop" type="button" aria-label="Cancel editing" onclick={onCancel}
+	<button
+		class="sheet-backdrop"
+		type="button"
+		aria-label="Save and close"
+		data-sheet-backdrop
+		onclick={saveOnClickAway}
 	></button>
 	<div
 		class="node-edit-sheet"
@@ -698,7 +718,7 @@
 				</label>
 
 				<!--
-					Last of the fields Done saves, so the drafted ones stay together above
+					Last of the fields Save saves, so the drafted ones stay together above
 					the add-ons and attachments, which apply the moment they are touched.
 					The unit sits outside the label so the field's name is the graph's
 					label alone; it is read out as part of the description instead.
@@ -844,7 +864,7 @@
 					</button>
 					<button type="button" class="danger" onclick={onDelete}>Delete</button>
 					<button type="button" class="secondary" onclick={onCancel}>Cancel</button>
-					<button type="button" class="primary" onclick={save}>Done</button>
+					<button type="button" class="primary" onclick={save}>Save</button>
 				</div>
 			</div>
 		{:else}

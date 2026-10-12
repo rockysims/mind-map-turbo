@@ -1458,7 +1458,7 @@
 		descriptionInput.dispatchEvent(new Event('input', { bubbles: true }));
 		await tick();
 		await designationStep?.(canvasElement);
-		canvas.getByRole('button', { name: 'Done' }).click();
+		canvas.getByRole('button', { name: 'Save' }).click();
 		// A microtask flush, not a frame: the settle kick has to be observable
 		// before the first animation frame could have consumed it.
 		await tick();
@@ -2935,7 +2935,7 @@
 		const nodeTagsInput = canvas.getByLabelText('Node tags') as HTMLInputElement;
 		nodeTagsInput.value = 'abc urgent';
 		nodeTagsInput.dispatchEvent(new Event('input', { bubbles: true }));
-		canvas.getByRole('button', { name: 'Done' }).click();
+		canvas.getByRole('button', { name: 'Save' }).click();
 		await sleep();
 
 		expect(canvas.getByText('Updated mobile title')).toBeInTheDocument();
@@ -2944,6 +2944,64 @@
 		// Stamped with the graph load it was made to, so a commit that lands while
 		// the canvas is being replaced can be told apart from a live edit.
 		expect(lastChangeGeneration(args)).toBe(3);
+	}}
+/>
+
+<Story
+	name="ClickingAwayFromTheSheetSavesTheTypedTitle"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1 }),
+		defaultPrimaryNodeId: 'n0',
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+		await dispatchLongPress(circle, center.x, center.y);
+
+		const canvas = within(canvasElement);
+		canvas.getByRole('menuitem', { name: 'Edit' }).click();
+		await sleep();
+
+		const titleInput = canvas.getByLabelText('Title') as HTMLInputElement;
+		titleInput.value = 'Saved by clicking away';
+		titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+		await tick();
+		canvas.getByRole('button', { name: 'Save and close' }).click();
+		await sleep();
+
+		// The same commit Save makes, under the same undo label, and the sheet closes.
+		expect(canvas.queryByRole('dialog')).not.toBeInTheDocument();
+		expect(commitsLabelled(args, 'edit node')).toHaveLength(1);
+		expect(lastChangedGraph(args).nodes[0].title).toBe('Saved by clicking away');
+	}}
+/>
+
+<Story
+	name="ClickingAwayFromAnUntouchedSheetCommitsNothing"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1 }),
+		defaultPrimaryNodeId: 'n0',
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const circle = getCircle(canvasElement, 'n0');
+		const center = getCenter(circle);
+		await dispatchLongPress(circle, center.x, center.y);
+
+		const canvas = within(canvasElement);
+		canvas.getByRole('menuitem', { name: 'Edit' }).click();
+		await sleep();
+		canvas.getByRole('button', { name: 'Save and close' }).click();
+		await sleep();
+
+		// Opening the sheet to look and tapping away is not an edit: no commit at
+		// all, so there is nothing for the undo list to record or drop.
+		expect(canvas.queryByRole('dialog')).not.toBeInTheDocument();
+		const changeSpy = args.onMultigraphChange as ChangeSpy | undefined;
+		expect(changeSpy?.mock.calls).toHaveLength(0);
 	}}
 />
 

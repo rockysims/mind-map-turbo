@@ -1,0 +1,8 @@
+# The edit sheet saves on click-away
+
+- Situation: the node edit sheet drafts its title, description, tags, quantity designations and weight until a button commits them. Its primary button read "Done", and a click on the dimmed canvas behind it (the backdrop) cancelled, throwing the drafts away, while the inline title on a new node has committed on blur since milestone 04d.
+- Proposed: keep "Done", and keep the backdrop as a cancel, as milestone 03 specified ("Cancel = restore previous values"). "Done" was itself a ruling: `2026-08-29--copy--saved-is-the-file-cached-is-the-browser-copy.md` gave the sheet `Done` so that only the toolbar's file save claimed the word; this ruling supersedes that one clause.
+- Chosen: the primary button reads "Save". Clicking away runs that same save and closes: Save's own rules apply, so a blank title becomes the fallback title rather than blocking the click, a negative weight clamps to 0, and a weight the field cannot read keeps the stored one. A click away from a sheet whose drafts would store nothing new only closes: no commit, so no undo entry and no layout relax. Escape, Close and Cancel still discard the drafts.
+- Why: owner ruling, 2026-10-12: "Done" becomes "Save", and clicking away saves instead of cancelling, the way the inline title input already commits on blur (milestone 04d: "Commit on blur or click-away"). Losing typed text to a stray tap on the canvas costs more than an unwanted save, which one undo takes back.
+- Pattern: editing--do-not-discard-drafts-when-the-object-commits (closest: a dismissal that is not a deliberate cancel keeps the reader's typing).
+- Status: ruling

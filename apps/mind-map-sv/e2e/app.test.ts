@@ -995,7 +995,7 @@ test('undo puts back a removed image, and the blob is still there after a reload
 
 	await openEditSheetForFirstNode(page);
 	await page.getByRole('dialog').getByRole('button', { name: 'Remove' }).click();
-	await page.getByRole('dialog').getByRole('button', { name: 'Done' }).click();
+	await page.getByRole('dialog').getByRole('button', { name: 'Save', exact: true }).click();
 
 	await undoControl(page).click();
 	await page.reload();
@@ -1204,7 +1204,7 @@ async function editFirstNodeTitle(page: Page, title: string) {
 	await page.getByRole('menuitem', { name: 'Edit' }).click();
 	await expect(page.getByLabel('Title')).toBeVisible();
 	await page.getByLabel('Title').fill(title);
-	await page.getByRole('dialog').getByRole('button', { name: 'Done' }).click();
+	await page.getByRole('dialog').getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(page.getByText(title)).toBeVisible();
 }
 

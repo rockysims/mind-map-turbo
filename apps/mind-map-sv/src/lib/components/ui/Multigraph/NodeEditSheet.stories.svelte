@@ -333,6 +333,20 @@
 		return userEvent.upload(input, file);
 	}
 
+	/** The dimmed canvas behind the sheet: a click there is a click away. */
+	function backdrop(canvasElement: HTMLElement): HTMLElement {
+		const found = canvasElement.querySelector('[data-sheet-backdrop]');
+		if (!(found instanceof HTMLElement)) throw new Error('no sheet backdrop');
+		return found;
+	}
+
+	/** Type into the title the way a user would, so the sheet's draft updates. */
+	function typeTitle(canvasElement: HTMLElement, value: string): void {
+		const input = fieldOf(canvasElement, 'title');
+		input.value = value;
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+	}
+
 	function harnessState(canvasElement: HTMLElement): HTMLElement {
 		const found = canvasElement.querySelector('[data-edit-sheet-harness]');
 		if (!(found instanceof HTMLElement)) throw new Error('no harness state element');
@@ -449,7 +463,7 @@
 
 		expect(preview(canvasElement)?.querySelector('.temml-error')).toBeTruthy();
 
-		canvas.getByRole('button', { name: 'Done' }).click();
+		canvas.getByRole('button', { name: 'Save' }).click();
 		const saveSpy = args.onSave as unknown as SaveSpy;
 		expect(saveSpy.mock.calls.at(-1)?.[0].description).toBe(draft);
 	}}
@@ -464,7 +478,7 @@
 		typeDescription(canvasElement, draft);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 
-		canvas.getByRole('button', { name: 'Done' }).click();
+		canvas.getByRole('button', { name: 'Save' }).click();
 		const saveSpy = args.onSave as unknown as SaveSpy;
 		expect(saveSpy.mock.calls.at(-1)?.[0].description).toBe(draft);
 	}}
@@ -552,7 +566,7 @@
 		chip(canvasElement, 'g').click();
 		await settle();
 
-		canvas.getByRole('button', { name: 'Done' }).click();
+		canvas.getByRole('button', { name: 'Save' }).click();
 
 		// Structured pairs, not symbol keys: a key embeds a NUL to separate base
 		// from subscript, which must never reach a save file.
@@ -615,7 +629,7 @@
 
 		expect(fieldOf(canvasElement, 'description').value).toBe('Weight is $w = w$ here.');
 
-		canvas.getByRole('button', { name: 'Done' }).click();
+		canvas.getByRole('button', { name: 'Save' }).click();
 		const saveSpy = args.onSave as unknown as SaveSpy;
 		expect(saveSpy.mock.calls.at(-1)?.[0].description).toBe('Weight is $w = w$ here.');
 	}}
@@ -1013,7 +1027,7 @@
 		title.dispatchEvent(new Event('input', { bubbles: true }));
 		await settle();
 
-		canvas.getByRole('button', { name: 'Done' }).click();
+		canvas.getByRole('button', { name: 'Save' }).click();
 
 		await waitFor(() =>
 			expect(harnessState(canvasElement)).toHaveAttribute('data-node-title', 'Buy filters')
@@ -1037,7 +1051,7 @@
 		title.dispatchEvent(new Event('input', { bubbles: true }));
 		await settle();
 
-		canvas.getByRole('button', { name: 'Done' }).click();
+		canvas.getByRole('button', { name: 'Save' }).click();
 
 		// The sheet edits a node that already exists, with no edge created beside
 		// it, so neither marker names anything here and both stay as typed.
@@ -1112,7 +1126,7 @@
 
 		typeWeight(canvasElement, '5');
 		await settle();
-		canvas.getByRole('button', { name: 'Done' }).click();
+		canvas.getByRole('button', { name: 'Save' }).click();
 
 		// Through the same commit as the title and tags, so one undo takes it back.
 		await waitFor(() =>
@@ -1134,7 +1148,7 @@
 
 		typeWeight(canvasElement, '');
 		await settle();
-		canvas.getByRole('button', { name: 'Done' }).click();
+		canvas.getByRole('button', { name: 'Save' }).click();
 
 		// Blank means "no weight": the key is gone, not kept as 0 or undefined.
 		await waitFor(() =>
@@ -1154,7 +1168,7 @@
 
 		typeWeight(canvasElement, '-2');
 		await settle();
-		canvas.getByRole('button', { name: 'Done' }).click();
+		canvas.getByRole('button', { name: 'Save' }).click();
 
 		// Clamped to the floor load enforces, and 0 is a real weight, not "none".
 		await waitFor(() =>
@@ -1214,13 +1228,13 @@
 />
 
 <Story
-	name="DoneCarriesTheTypedWeightInTheSave"
+	name="SaveCarriesTheTypedWeight"
 	play={async ({ canvasElement, args }) => {
 		const canvas = within(canvasElement);
 
 		typeWeight(canvasElement, '5');
 		await settle();
-		canvas.getByRole('button', { name: 'Done' }).click();
+		canvas.getByRole('button', { name: 'Save' }).click();
 
 		const saveSpy = args.onSave as unknown as SaveSpy;
 		expect(saveSpy.mock.calls.at(-1)?.[0].weight).toBe(5);
@@ -1239,6 +1253,119 @@
 
 		// The sheet's one Escape handler, reached from this field like any other.
 		expect(args.onCancel).toHaveBeenCalled();
+		expect(args.onSave).not.toHaveBeenCalled();
+	}}
+/>
+
+<Story
+	name="ClickingAwaySavesTheTypedTitleDescriptionAndWeight"
+	play={async ({ canvasElement }) => {
+		typeTitle(canvasElement, 'Dynamics');
+		typeDescription(canvasElement, 'Forces, not just motion.');
+		typeWeight(canvasElement, '7');
+		await settle();
+
+		backdrop(canvasElement).click();
+
+		// Save's own commit, so one undo takes all three back together.
+		await waitFor(() =>
+			expect(harnessState(canvasElement)).toHaveAttribute('data-node-title', 'Dynamics')
+		);
+		expect(harnessState(canvasElement)).toHaveAttribute(
+			'data-node-description',
+			'Forces, not just motion.'
+		);
+		expect(harnessState(canvasElement)).toHaveAttribute('data-node-weight', '7');
+		expect(harnessState(canvasElement)).toHaveAttribute('data-last-intent', 'edit node');
+	}}
+>
+	{#snippet template()}
+		<NodeEditSheetHarness baseGraph={taggedGraph({ weight: 3 })} nodeId="node-1" />
+	{/snippet}
+</Story>
+
+<Story
+	name="ClickingAwaySavesExactlyWhatSaveWould"
+	play={async ({ canvasElement, args }) => {
+		const canvas = within(canvasElement);
+		const saveSpy = args.onSave as unknown as SaveSpy;
+		typeTitle(canvasElement, '   ');
+		typeWeight(canvasElement, '-2');
+		await settle();
+
+		canvas.getByRole('button', { name: 'Save' }).click();
+		const fromSave = saveSpy.mock.calls.at(-1)?.[0];
+		backdrop(canvasElement).click();
+		const fromClickAway = saveSpy.mock.calls.at(-1)?.[0];
+
+		// Save's rules, not a stricter set: a blank title becomes the fallback
+		// title rather than blocking the click away, and a negative weight clamps.
+		expect(saveSpy.mock.calls).toHaveLength(2);
+		expect(fromClickAway).toEqual(fromSave);
+		expect(fromClickAway?.title).toBe('New Node');
+		expect(fromClickAway?.weight).toBe(0);
+		expect(args.onCancel).not.toHaveBeenCalled();
+	}}
+/>
+
+<Story
+	name="ClickingAwayFromAnUntouchedSheetCommitsNothing"
+	play={async ({ canvasElement, args }) => {
+		await settle();
+		backdrop(canvasElement).click();
+
+		// Nothing was edited, so nothing is saved: the sheet just closes, and the
+		// canvas never commits a copy of the node for the undo list to drop.
+		expect(args.onSave).not.toHaveBeenCalled();
+		expect(args.onCancel).toHaveBeenCalledTimes(1);
+	}}
+/>
+
+<Story
+	name="ClickingAwayAfterTypingBackTheSavedTitleCommitsNothing"
+	play={async ({ canvasElement, args }) => {
+		typeTitle(canvasElement, 'Kinematics!');
+		await settle();
+		typeTitle(canvasElement, '  Kinematics ');
+		await settle();
+
+		backdrop(canvasElement).click();
+
+		// Judged on what the save would store, so an edit undone by hand (and the
+		// whitespace the save trims) is still no edit.
+		expect(args.onSave).not.toHaveBeenCalled();
+		expect(args.onCancel).toHaveBeenCalledTimes(1);
+	}}
+/>
+
+<Story
+	name="EscapeStillCancelsATypedDraft"
+	play={async ({ canvasElement, args }) => {
+		const title = fieldOf(canvasElement, 'title');
+		typeTitle(canvasElement, 'Dynamics');
+		typeDescription(canvasElement, 'Forces, not just motion.');
+		await settle();
+
+		title.focus();
+		await userEvent.keyboard('{Escape}');
+
+		// Clicking away saves; Escape is the deliberate way out without saving.
+		expect(args.onCancel).toHaveBeenCalledTimes(1);
+		expect(args.onSave).not.toHaveBeenCalled();
+	}}
+/>
+
+<Story
+	name="CloseAndCancelStillDiscardATypedDraft"
+	play={async ({ canvasElement, args }) => {
+		const canvas = within(canvasElement);
+		typeTitle(canvasElement, 'Dynamics');
+		await settle();
+
+		canvas.getByRole('button', { name: 'Close' }).click();
+		canvas.getByRole('button', { name: 'Cancel' }).click();
+
+		expect(args.onCancel).toHaveBeenCalledTimes(2);
 		expect(args.onSave).not.toHaveBeenCalled();
 	}}
 />

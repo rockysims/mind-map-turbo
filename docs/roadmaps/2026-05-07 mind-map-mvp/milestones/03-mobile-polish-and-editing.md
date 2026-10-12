@@ -24,6 +24,11 @@ without diving into a debug toast.
 - Save = persists to the in-memory `MultigraphData` via `graph.ts`
   mutations. (Real persistence lands in milestone 04.)
 - Cancel = restore previous values.
+- 2026-10-12: the sheet's "Done" button is now "Save", and clicking away
+  (the backdrop) saves instead of cancelling, matching the inline title's
+  commit on blur; an untouched sheet only closes. Escape, Close and Cancel
+  still discard. Ruling:
+  `docs/ui-decisions/2026-10-12--editing--the-edit-sheet-saves-on-click-away.md`.
 
 ### Long-press contextual menu
 
