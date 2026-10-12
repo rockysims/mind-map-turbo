@@ -8458,7 +8458,7 @@
 	{/snippet}
 </Story>
 <!--
-	Node size as border width. With the shipped `sizeBorder` defaults (1 MiB
+	Node size as border width. With the shipped `borderWeight` defaults (1 MiB
 	reference, 0.15 per doubling, ×0.5..×3) and an 8 px border: 10 KiB sits on
 	the ×0.5 floor (4 px), 1 MiB draws the configured 8 px, 100 MiB draws
 	8 × (1 + 0.15 × log2 100) ≈ 15.97 px, and a node with no size draws 8 px.
@@ -8550,7 +8550,7 @@
 />
 
 <!--
-	`nodeChromeFor` reads `cfg` per render, so the "Size border" sliders are
+	`nodeChromeFor` reads `cfg` per render, so the "Border weight" sliders are
 	instant: 0.15 → 0.25 per doubling takes the 100 MiB node from ≈ 15.97 px to
 	8 × (1 + 0.25 × log2 100) ≈ 21.3 px while the pointer is still down.
 -->
@@ -8576,7 +8576,7 @@
 		slider.dispatchEvent(new Event('change', { bubbles: true }));
 		await waitFor(() => expect(harness.dataset.settingsChangeCount).toBe('1'));
 		expect(harnessSettings(canvasElement)).toEqual({
-			'multigraph.sizeBorder.widthPerDoubling': 0.25
+			'multigraph.borderWeight.widthPerDoubling': 0.25
 		});
 		expect(nodeBorderWidths(canvasElement, 'n3').normal).toBeCloseTo(21.3, 1);
 	}}

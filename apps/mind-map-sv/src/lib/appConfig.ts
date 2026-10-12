@@ -80,14 +80,23 @@ export const APP_CONFIG = {
 		nodeBorderWidthPx: 8, // default node border width
 		pinnedNodeBorderWidthPx: 8, // border width for pinned nodes
 		minNodeHitRadiusPx: 32, // minimum tap/hit target radius
-		// Border width scales with `NodeData.sizeBytes` on a bounded log scale:
-		// `clamp(1 + widthPerDoubling * log2(size / referenceBytes), minFactor, maxFactor)`
-		// multiplies both border widths above. A node with no size draws them as-is.
-		sizeBorder: {
-			referenceBytes: 1048576, // size (1 MiB) that draws exactly the configured border
-			widthPerDoubling: 0.15, // factor added each time the size doubles
+		// Border width can show one number per node on a bounded log scale:
+		// `clamp(1 + widthPerDoubling * log2(value / reference), minFactor, maxFactor)`
+		// multiplies both border widths above. `source` picks the number; a node with
+		// no value for it draws the widths as-is.
+		borderWeight: {
+			source: 'size', // none | size | weight | degree | attachments | descriptionLength
+			widthPerDoubling: 0.15, // factor added each time the value doubles
 			minFactor: 0.5, // thinnest border, as a multiple of the configured width
 			maxFactor: 3 // thickest border, as a multiple of the configured width
+		},
+		// The value that draws exactly the configured border, per source.
+		borderReference: {
+			size: 1048576, // bytes (1 MiB)
+			weight: 1,
+			degree: 3, // edges
+			attachments: 1,
+			descriptionLength: 200 // characters
 		},
 		edgeArrow: {
 			lengthPx: 10, // arrowhead length along the edge

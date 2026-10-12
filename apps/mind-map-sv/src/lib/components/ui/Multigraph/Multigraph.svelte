@@ -257,7 +257,8 @@
 		type FrameViewState,
 		type NodeFrameLayout
 	} from './lib/frameGeometry.js';
-	import { borderWidthFactorForSize } from './lib/sizeBorder.js';
+	import { borderFactorForNode } from './lib/borderWeight.js';
+	import { authoredDegrees } from './lib/nodeWeight.js';
 	import { interpolateMorph } from './lib/morphGeometry.js';
 	import { importRevealTargetNodeId } from './lib/importRevealTarget.js';
 	import {
@@ -548,16 +549,23 @@
 		fontSizePx: nodeTextFontSizePx
 	});
 	/**
-	 * `nodeChromeTunables` with both border widths scaled by the node's size.
+	 * `nodeChromeTunables` with both border widths scaled by the number the
+	 * graph's border source reads off the node (`multigraph.borderWeight`).
 	 *
 	 * Every ring the canvas draws for a node — live, reveal-wave buffer, exiting
-	 * ghost — goes through here, so a node never changes width when it moves from
-	 * one site to another. Returns `nodeChromeTunables` itself when the factor is
-	 * 1 (every sizeless node). Reads `cfg` at call time, which is what lets the
-	 * "Size border" sliders redraw borders while they are being dragged.
+	 * ghost, focus morph — goes through here, so a node never changes width when
+	 * it moves from one site to another. Returns `nodeChromeTunables` itself when
+	 * the factor is 1 (no value for the source, or the source is "none"). Reads
+	 * `cfg` at call time, which is what lets the "Border weight" and "Border
+	 * reference" fields redraw borders while they are being dragged.
 	 */
 	function nodeChromeFor(node: NodeData): typeof nodeChromeTunables {
-		const factor = borderWidthFactorForSize(node.sizeBytes, cfg.multigraph.sizeBorder);
+		const factor = borderFactorForNode(
+			node,
+			degreeByNodeId,
+			cfg.multigraph.borderWeight,
+			cfg.multigraph.borderReference
+		);
 		if (factor === 1) return nodeChromeTunables;
 		return {
 			...nodeChromeTunables,
@@ -573,6 +581,25 @@
 		tagColorConfig: { nodeTags: {}, edgeTags: {} },
 		assets: {}
 	});
+	/**
+	 * The authored edges, held as a derived of their own so the degree map below
+	 * is keyed on the array's identity rather than on `graph`. A relax frame
+	 * reassigns `graph` but carries `edges` across by reference
+	 * (`mergeVisiblePositions`), so this stays put and the degree map is not
+	 * rebuilt on position-only frames.
+	 */
+	const authoredEdges = $derived(graph.edges);
+	const borderSource = $derived(cfg.multigraph.borderWeight.source);
+	const EMPTY_DEGREES: ReadonlyMap<string, number> = new Map();
+	/**
+	 * Authored edge count per node, for the "Edge count" border source. Built
+	 * only under that source; every other source reads the node alone. Counted
+	 * on the full authored `graph`, not `visibleGraph`, so a node's border does
+	 * not change as its neighbours leave the layout under a filter or a reveal.
+	 */
+	const degreeByNodeId = $derived(
+		borderSource === 'degree' ? authoredDegrees(authoredEdges) : EMPTY_DEGREES
+	);
 	let primaryNodeId = $state('');
 	let activeDragNodeId = $state<string | null>(null);
 	let editNodeId = $state<string | null>(null);

@@ -381,3 +381,50 @@
 		expect(canvasElement.querySelector('[data-seed-saved="true"]')).not.toBeNull();
 	}}
 />
+
+<!--
+	The border source is the panel's first select. It leads its own "Border
+	weight" section, and the five per-source references sit directly under it in
+	a sibling "Border reference" section (a nested `reference` group would be
+	headed just "Reference").
+-->
+<Story
+	name="UserSeesTheBorderWeightSectionOfferASourceSelect"
+	args={{ initialOverrides: {} }}
+	play={async ({ canvasElement }: PlayContext) => {
+		const weight = sectionEl(canvasElement, 'basic:multigraph.borderWeight');
+		expect(within(weight).getByRole('heading', { level: 3 })).toHaveTextContent('Border weight');
+
+		const fieldPaths = [...weight.querySelectorAll('[data-setting-path]')].map((element) =>
+			element.getAttribute('data-setting-path')
+		);
+		expect(fieldPaths[0]).toBe('multigraph.borderWeight.source');
+
+		const select = within(weight).getByRole('combobox', { name: 'Border shows' });
+		if (!(select instanceof HTMLSelectElement)) throw new Error('Border shows is not a select');
+		expect([...select.options].map((option) => option.textContent?.trim())).toEqual([
+			'Nothing',
+			'Size',
+			'Node weight',
+			'Edge count',
+			'Attachments',
+			'Description length'
+		]);
+		expect(select.value).toBe('size');
+		expect(select.selectedOptions[0]?.textContent?.trim()).toBe('Size');
+
+		const reference = sectionEl(canvasElement, 'basic:multigraph.borderReference');
+		expect(weight.nextElementSibling).toBe(reference);
+		expect(within(reference).getByRole('heading', { level: 3 })).toHaveTextContent(
+			'Border reference'
+		);
+		const boxes = within(reference).getAllByRole('spinbutton');
+		expect(boxes.map((box) => box.getAttribute('aria-label'))).toEqual([
+			'Reference size',
+			'Reference node weight',
+			'Reference edge count',
+			'Reference attachment count',
+			'Reference description length'
+		]);
+	}}
+/>

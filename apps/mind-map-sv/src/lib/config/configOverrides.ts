@@ -155,6 +155,7 @@ type Coerced =
  *   per-frame rotation cap beyond a half turn. Those are clamped.
  *
  * Non-finite numbers are rejected by both, and `integer` fields are rounded.
+ * A `select` keeps a string that is one of its options and drops anything else.
  */
 const coerceToSchema = (path: ConfigPath, value: unknown): Coerced => {
 	const spec = CONFIG_SCHEMA[path];
@@ -164,6 +165,13 @@ const coerceToSchema = (path: ConfigPath, value: unknown): Coerced => {
 	if (spec.control === 'toggle') {
 		if (typeof value !== 'boolean') return { kind: 'dropped', reason: 'expected a boolean' };
 		return { kind: 'kept', value };
+	}
+	if (spec.control === 'select') {
+		// A select stores one of a fixed set of strings; nothing else is close
+		// enough to adjust, so anything outside the set is dropped.
+		const allowed = spec.options.map((option) => option.value);
+		if (typeof value === 'string' && allowed.includes(value)) return { kind: 'kept', value };
+		return { kind: 'dropped', reason: `expected one of: ${allowed.join(', ')}` };
 	}
 	if (typeof value !== 'number') return { kind: 'dropped', reason: 'expected a number' };
 	if (!Number.isFinite(value)) return { kind: 'dropped', reason: 'expected a finite number' };

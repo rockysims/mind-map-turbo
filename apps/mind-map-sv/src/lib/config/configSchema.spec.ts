@@ -75,9 +75,9 @@ describe('CONFIG_SCHEMA', () => {
 		expect(unknown).toEqual([]);
 	});
 
-	it('covers exactly the 110 shipped leaves', () => {
-		expect(runtimeLeafPaths).toHaveLength(110);
-		expect(schemaPaths).toHaveLength(110);
+	it('covers exactly the 115 shipped leaves', () => {
+		expect(runtimeLeafPaths).toHaveLength(115);
+		expect(schemaPaths).toHaveLength(115);
 	});
 
 	it('keeps every range default inside its own slider bounds', () => {
@@ -164,11 +164,37 @@ describe('CONFIG_SCHEMA', () => {
 		expect(togglePaths.sort()).toEqual(booleanPaths.sort());
 	});
 
-	it('never exposes a string leaf to a numeric control', () => {
+	it('uses select controls for exactly the exposed string leaves', () => {
 		const exposedStrings = Object.entries(CONFIG_SCHEMA)
 			.filter(([path, spec]) => spec.control !== 'hidden' && typeof readAtPath(path) === 'string')
 			.map(([path]) => path);
-		expect(exposedStrings).toEqual([]);
+		const selectPaths = Object.entries(CONFIG_SCHEMA)
+			.filter(([, spec]) => spec.control === 'select')
+			.map(([path]) => path);
+		expect(selectPaths.sort()).toEqual(exposedStrings.sort());
+		expect(selectPaths).toContain('multigraph.borderWeight.source');
+	});
+
+	it('keeps every select default among its options', () => {
+		const outsideOptions = Object.entries(CONFIG_SCHEMA)
+			.filter(([path, spec]) => {
+				if (spec.control !== 'select') return false;
+				const value = readAtPath(path);
+				return !spec.options.some((option) => option.value === value);
+			})
+			.map(([path]) => path);
+		expect(outsideOptions).toEqual([]);
+	});
+
+	it('gives every select at least two distinct options', () => {
+		const malformed = Object.entries(CONFIG_SCHEMA)
+			.filter(([, spec]) => {
+				if (spec.control !== 'select') return false;
+				const values = spec.options.map((option) => option.value);
+				return values.length < 2 || new Set(values).size !== values.length;
+			})
+			.map(([path]) => path);
+		expect(malformed).toEqual([]);
 	});
 });
 

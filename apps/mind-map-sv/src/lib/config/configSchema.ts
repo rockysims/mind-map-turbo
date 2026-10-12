@@ -78,6 +78,8 @@ const HISTORY_REASON =
 const ATTACHMENTS_REASON =
 	'Read by the uploader and the export-size notice outside the canvas’s resolved config, so a per-graph value would not reach them.';
 
+const BORDER_REFERENCE_HELP = 'A node at this value draws the normal border.';
+
 /**
  * Every leaf of `APP_CONFIG`, classified. The mapped type is the point: adding a
  * key to `APP_CONFIG` is a compile error until it is described here.
@@ -252,28 +254,34 @@ export const CONFIG_SCHEMA: { [K in ConfigPath]: FieldSpec } = {
 		unit: 'px'
 	},
 
-	'multigraph.sizeBorder.referenceBytes': {
-		control: 'number',
-		label: 'Reference size',
-		help: 'A node of this many bytes draws the normal border.',
+	'multigraph.borderWeight.source': {
+		control: 'select',
+		label: 'Border shows',
+		help: 'Which number about each node its border thickness shows.',
 		tier: 'basic',
+		// A select commits on change and never previews; `instant` says the
+		// canvas redraws the moment it commits.
 		preview: 'instant',
-		min: 1,
-		step: 1024,
-		integer: true,
-		unit: 'B'
+		options: [
+			{ value: 'none', label: 'Nothing' },
+			{ value: 'size', label: 'Size' },
+			{ value: 'weight', label: 'Node weight' },
+			{ value: 'degree', label: 'Edge count' },
+			{ value: 'attachments', label: 'Attachments' },
+			{ value: 'descriptionLength', label: 'Description length' }
+		]
 	},
-	'multigraph.sizeBorder.widthPerDoubling': {
+	'multigraph.borderWeight.widthPerDoubling': {
 		control: 'range',
 		label: 'Width per doubling',
-		help: 'How much thicker the border gets each time the size doubles.',
+		help: 'How much thicker the border gets each time the value doubles.',
 		tier: 'basic',
 		preview: 'instant',
 		min: 0,
 		max: 0.5,
 		step: 0.01
 	},
-	'multigraph.sizeBorder.minFactor': {
+	'multigraph.borderWeight.minFactor': {
 		control: 'range',
 		label: 'Thinnest border',
 		help: 'The border of the smallest nodes, as a multiple of the normal border.',
@@ -284,7 +292,7 @@ export const CONFIG_SCHEMA: { [K in ConfigPath]: FieldSpec } = {
 		step: 0.05,
 		unit: '×'
 	},
-	'multigraph.sizeBorder.maxFactor': {
+	'multigraph.borderWeight.maxFactor': {
 		control: 'range',
 		label: 'Thickest border',
 		help: 'The border of the largest nodes, as a multiple of the normal border.',
@@ -294,6 +302,58 @@ export const CONFIG_SCHEMA: { [K in ConfigPath]: FieldSpec } = {
 		max: 4,
 		step: 0.1,
 		unit: '×'
+	},
+	'multigraph.borderReference.size': {
+		control: 'number',
+		label: 'Reference size',
+		help: BORDER_REFERENCE_HELP,
+		tier: 'basic',
+		preview: 'instant',
+		min: 1,
+		step: 1024,
+		integer: true,
+		unit: 'B'
+	},
+	// No `min`: weights can be fractional and of any scale, `number` bounds clamp
+	// hard, and there is no honest smallest positive weight. A reference ≤ 0
+	// already draws the normal border.
+	'multigraph.borderReference.weight': {
+		control: 'number',
+		label: 'Reference node weight',
+		help: BORDER_REFERENCE_HELP,
+		tier: 'basic',
+		preview: 'instant'
+	},
+	'multigraph.borderReference.degree': {
+		control: 'number',
+		label: 'Reference edge count',
+		help: BORDER_REFERENCE_HELP,
+		tier: 'basic',
+		preview: 'instant',
+		min: 1,
+		step: 1,
+		integer: true
+	},
+	'multigraph.borderReference.attachments': {
+		control: 'number',
+		label: 'Reference attachment count',
+		help: BORDER_REFERENCE_HELP,
+		tier: 'basic',
+		preview: 'instant',
+		min: 1,
+		step: 1,
+		integer: true
+	},
+	'multigraph.borderReference.descriptionLength': {
+		control: 'number',
+		label: 'Reference description length',
+		help: BORDER_REFERENCE_HELP,
+		tier: 'basic',
+		preview: 'instant',
+		min: 1,
+		step: 10,
+		integer: true,
+		unit: 'chars'
 	},
 
 	'multigraph.edgeArrow.lengthPx': {

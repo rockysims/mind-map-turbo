@@ -25,6 +25,12 @@ describe('setOverride', () => {
 		expect(backToDefault).toEqual({});
 	});
 
+	it('drops a select back to its default too', () => {
+		const degree = setOverride({}, 'multigraph.borderWeight.source', 'degree');
+		expect(degree).toEqual({ 'multigraph.borderWeight.source': 'degree' });
+		expect(setOverride(degree, 'multigraph.borderWeight.source', 'size')).toEqual({});
+	});
+
 	it('drops a boolean back to its default too', () => {
 		const off = setOverride({}, 'multigraph.layout.normalizeRelaxationRotation', false);
 		expect(off).toEqual({ 'multigraph.layout.normalizeRelaxationRotation': false });
@@ -162,6 +168,16 @@ describe('clampToSchema', () => {
 		expect(clampToSchema('multigraph.layout.relaxIterations', 20)).toBe(20);
 	});
 
+	it('keeps a select value only when it is one of the options', () => {
+		expect(clampToSchema('multigraph.borderWeight.source', 'degree')).toBe('degree');
+		expect(clampToSchema('multigraph.borderWeight.source', 'none')).toBe('none');
+		expect(clampToSchema('multigraph.borderWeight.source', 'bogus')).toBeUndefined();
+		expect(clampToSchema('multigraph.borderWeight.source', 'Degree')).toBeUndefined();
+		expect(clampToSchema('multigraph.borderWeight.source', 3)).toBeUndefined();
+		expect(clampToSchema('multigraph.borderWeight.source', true)).toBeUndefined();
+		expect(clampToSchema('multigraph.borderWeight.source', null)).toBeUndefined();
+	});
+
 	it('drops hidden fields, which no panel can edit', () => {
 		expect(clampToSchema('persistence.saveDebounceMs', 1000)).toBeUndefined();
 		expect(clampToSchema('multigraph.tagSyntax.nodeTagMarker', '%')).toBeUndefined();
@@ -187,6 +203,29 @@ describe('sanitizeOverrides', () => {
 		expect(warnings).toHaveLength(2);
 		expect(warnings.join('\n')).toContain('multigraph.layout.gravitationalConstant');
 		expect(warnings.join('\n')).toContain('nonsense');
+	});
+
+	it('names the allowed options when it drops a select value', () => {
+		const { overrides, warnings } = sanitizeOverrides({
+			'multigraph.borderWeight.source': 'bogus'
+		});
+		expect(overrides).toEqual({});
+		expect(warnings).toEqual([
+			'Setting "multigraph.borderWeight.source" was dropped: expected one of: none, size, weight, degree, attachments, descriptionLength.'
+		]);
+	});
+
+	// The size-only border group was renamed to `borderWeight` a day after it
+	// landed and never reached main, so its overrides are dropped, not migrated.
+	it('drops a retired multigraph.sizeBorder override as an unknown setting', () => {
+		const { overrides, warnings } = sanitizeOverrides({
+			'multigraph.sizeBorder.widthPerDoubling': 0.25,
+			'multigraph.borderWeight.widthPerDoubling': 0.3
+		});
+		expect(overrides).toEqual({ 'multigraph.borderWeight.widthPerDoubling': 0.3 });
+		expect(warnings).toEqual([
+			'Unknown setting "multigraph.sizeBorder.widthPerDoubling" was dropped.'
+		]);
 	});
 
 	it('drops wrong-typed values and names them', () => {

@@ -169,11 +169,11 @@
 
 	/**
 	 * The widest border a sized node can draw with the shipped defaults: the
-	 * configured width at `sizeBorder.maxFactor`. Read from `APP_CONFIG` so these
+	 * configured width at `borderWeight.maxFactor`. Read from `APP_CONFIG` so these
 	 * stories follow the default if it is ever lowered.
 	 */
 	const THICKEST_BORDER_PX =
-		APP_CONFIG.multigraph.nodeBorderWidthPx * APP_CONFIG.multigraph.sizeBorder.maxFactor;
+		APP_CONFIG.multigraph.nodeBorderWidthPx * APP_CONFIG.multigraph.borderWeight.maxFactor;
 
 	/**
 	 * A border drawn inside the circle eats into the content area, so at the
