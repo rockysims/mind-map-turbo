@@ -49,7 +49,7 @@ export const AI_EXAMPLE_GRAPH = {
 			id: 'nodes',
 			title: 'Nodes',
 			description:
-				'Every node requires id, title, description, and tags. Use content: [] for no attachments. pinned keeps an important node and its neighbourhood visible; pair a pinned node with lastPinnedSeq and keep graph.pinSequence at least that high. Optional addons can contain task or ai data. Optional inputs and outputs contain confirmed quantity designations shaped like {base, subscript}; those create derived dataflow arrows and are not ordinary stored edges.',
+				'Every node requires id, title, description, and tags. Use content: [] for no attachments. pinned keeps an important node and its neighbourhood visible; pair a pinned node with lastPinnedSeq and keep graph.pinSequence at least that high. Optional addons can contain task or ai data. Optional inputs and outputs contain confirmed quantity designations shaped like {base, subscript}; those create derived dataflow arrows and are not ordinary stored edges. Optional sizeBytes is the size in bytes of the thing the node represents (a page, file, or download), a finite number of at least 0, drawn as border thickness on a log scale so bigger things get thicker outlines; omit it when the size is unknown. The Database example node carries one.',
 			tags: ['format'],
 			content: []
 		},
@@ -131,7 +131,8 @@ export const AI_EXAMPLE_GRAPH = {
 			description:
 				'Example storage boundary. Schema and migrations live under services/api/db. A tagged directed edge from API service says the service depends on this component.',
 			tags: ['example', 'storage'],
-			content: []
+			content: [],
+			sizeBytes: 52428800
 		},
 		{
 			id: 'shared-types',
