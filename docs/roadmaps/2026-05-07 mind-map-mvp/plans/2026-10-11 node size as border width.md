@@ -513,6 +513,8 @@ split exists only so they can run in parallel.
   on it returns 0), so this plan ships the rendering ahead of the data on
   purpose; the scraper change that fills `sizeBytes` is separate and can be
   tested against T05's guide.
+- 2026-10-11: Owner confirmed `maxFactor: 3` over the clip-free 2.2, to be
+  revisited once sized graphs are seen in use.
 - 2026-10-11: Considered and rejected: validating `sizeBytes` inside
   `isNodeData`. It would make one malformed number reject a whole scraped graph,
   which is the opposite of the "drop invalid values" ruling.

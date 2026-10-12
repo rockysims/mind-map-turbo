@@ -266,10 +266,6 @@ Owner rulings of 2026-10-11 are marked _(ruling)_ and are not reopened here.
   repulsion read edge data — a physics design change, not a slider.
 - Per-node or per-edge (untagged) factors, and a per-row reset button. The
   centre detent, Home/End, and undo are the ways back to ×1.
-- Retitling the "Tag colors" toolbar button and dialog heading
-  (`Multigraph.svelte:3025-3032`, `TagColorLegend.svelte:55`) now that the
-  dialog does more than colour. Stories select by those names; it is a copy
-  decision for the owner (see Notes).
 - `mobilityByNodeId`, which is still threaded and still unused in production.
 - Settings-panel controls for these factors. They are graph content, edited
   where the tags are.
@@ -490,6 +486,14 @@ above).
 - `restoreGraphInPlace` and `adoptGraphInPlace`: kick a settle when
   `incoming.tagPhysicsConfig !== graph.tagPhysicsConfig` (read before
   committing).
+- Retitle the surface (owner ruling 2026-10-11): the toolbar button
+  (`Multigraph.svelte:3025-3032`) and the dialog heading
+  (`TagColorLegend.svelte:55`) read **"Tags"** instead of "Tag colors"; the
+  eyebrow "Graph tags" goes, since the heading now says it. Update every story
+  and e2e selector that finds the button or dialog by that name
+  (`getByRole('button', { name: 'Tag colors' })` in `Multigraph.stories.svelte`
+  and `TagColorLegend.stories.svelte`; grep `e2e/` too), and the sr-only
+  "Close tag color legend" label becomes "Close tags".
 
 **Acceptance**
 
@@ -672,7 +676,6 @@ with different forces than the one beside it, and nothing fails.
   be written against that plan's `reduceLayoutSource` (weigh after reducing)
   rather than rebased onto it afterwards. `2026-10-11 query tag buttons cycle
 modes.md` is disjoint and may run in parallel.
-- 2026-10-11: question for the owner, deliberately not decided here — the
-  toolbar button and dialog are titled "Tag colors". With sliders in it, "Tags"
-  or "Tag style" may read better. It is a copy change touching stories that
-  select by name, so it waits for a ruling.
+- 2026-10-11: owner rulings on the two open items: the readout keeps its
+  visible word (`length ×1.4` / `spacing ×1.4`), and the toolbar button and
+  dialog are retitled **"Tags"** (folded into T05).

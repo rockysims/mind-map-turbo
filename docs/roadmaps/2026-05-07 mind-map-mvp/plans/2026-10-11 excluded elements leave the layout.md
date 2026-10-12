@@ -533,7 +533,6 @@ touches the derived chain every frame reads.
   from the graph while excluded. The design points above were decided with the
   ruling and are not to be reopened during execution. Raise any deviation as a
   Note here.
-- 2026-10-11: The jump exemption is the one decision this plan adds beyond the
-  ruling. If the owner prefers the jump to be refused, T03 changes in one
-  place: `jumpToNode` bails out with a notice and the exemption argument goes
-  away.
+- 2026-10-11: The jump exemption was the one decision this plan added beyond
+  the ruling; the owner confirmed it the same day (the jump wins while its nav
+  entry holds the node).
