@@ -371,6 +371,53 @@ describe('graph mutations', () => {
 			expect(titleOnly.nodes[0].inputs).toEqual([{ base: 'a', subscript: null }]);
 			expect(titleOnly.nodes[0].outputs).toEqual([{ base: 'v', subscript: null }]);
 		});
+
+		describe('weight', () => {
+			const edit = { title: 'Node 0', description: 'Description for node 0' };
+
+			it('sets a weight on a node that had none, without touching the original', () => {
+				const graph = makeGraph({ nodeCount: 2 });
+
+				const next = updateNodeContent(graph, 'n0', { ...edit, weight: 5 });
+
+				expect(next.nodes[0].weight).toBe(5);
+				expect('weight' in graph.nodes[0]).toBe(false);
+				// The other node is carried over, not copied.
+				expect(next.nodes[1]).toBe(graph.nodes[1]);
+			});
+
+			it('stores 0 as a real weight', () => {
+				const graph = makeGraph({ nodeCount: 1, weight: { 0: 4 } });
+
+				expect(updateNodeContent(graph, 'n0', { ...edit, weight: 0 }).nodes[0].weight).toBe(0);
+			});
+
+			it('removes the key on null, without touching the original', () => {
+				const graph = makeGraph({ nodeCount: 1, weight: { 0: 4 } });
+
+				const next = updateNodeContent(graph, 'n0', { ...edit, weight: null });
+
+				expect('weight' in next.nodes[0]).toBe(false);
+				expect(graph.nodes[0].weight).toBe(4);
+			});
+
+			it('keeps the stored weight when the save leaves it out', () => {
+				const graph = makeGraph({ nodeCount: 1, weight: { 0: 4 } });
+
+				const next = updateNodeContent(graph, 'n0', edit);
+
+				expect(next.nodes[0].weight).toBe(4);
+				// An unchanged save still changes nothing a reader can see.
+				expect(next.nodes[0]).toEqual(graph.nodes[0]);
+			});
+
+			it('returns the same graph for a missing node, weight or not', () => {
+				const graph = makeGraph({ nodeCount: 1 });
+
+				expect(updateNodeContent(graph, 'missing', { ...edit, weight: 5 })).toBe(graph);
+				expect(updateNodeContent(graph, 'missing', { ...edit, weight: null })).toBe(graph);
+			});
+		});
 	});
 
 	describe('setNodeDesignations', () => {
