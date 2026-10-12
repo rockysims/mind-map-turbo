@@ -95,7 +95,7 @@ MAYBE:
 
 - Make power of physics reduce by an order of magnitude for each hop from pinned (instead of layer by layer layout process)?
 
-Planned and executed 2026-10-11 as four standalone plans (all `done`) in
+Planned and executed 2026-10-11 as five standalone plans (all `done`) in
 `2026-05-07 mind-map-mvp/plans/` (execute in this order; the first two are
 disjoint and may run in parallel):
 
@@ -111,6 +111,10 @@ disjoint and may run in parallel):
   repulsion clearance; factors travel with the graph.
 - `2026-10-11 node size as border width.md` — optional `sizeBytes` on a node
   (written by scrapers/importers) drawn as border width on a bounded log scale.
+- `2026-10-11 border width sources and node weight.md` — a per-graph "Border
+  shows" setting picks what border width draws (size, a generic node `weight`
+  named by the graph's `weightConfig`, edge count, attachments, description
+  length, or nothing); the details view names the weight with the graph's label.
 
 UNSORTED TODO:
 open node/edges edit dialog (with edges pre-selected) when trying to add a second edge (instead of current confirm delete dialog)
@@ -154,6 +158,10 @@ TODO: make long press work too even if its not a mobile device
   need to be able to attach to container node
   container node should be a full fledged node in terms of being taggable, having edges, etc.
 - Add scale factor to nodes (on top of existing scaling)
+  2026-10-11: owner ruled node scale stays reserved for hop distance; a
+  per-node number now draws as border width instead (see the two border-width
+  plans above and `docs/ui-decisions/2026-10-11--display--border-width-shows-a-chosen-node-number.md`).
+  Reopen only if a scale factor separate from that number is still wanted.
 
 - Input notes (repeatedly over time so mind map grows/changes as more input notes/data is added) and visualize the notes in a mind map (via AI) and also have the AI notice and add connections. Should be able to start with a template graph where the super structure (non placeholder nodes) is set and there are specific placeholder nodes for the AI to replace. For example, there might be a structural node for the people involved (with a placeholder node to indicate where/how to add more people and how to shape that info) and another structural node for goals (also with placeholder to establish the pattern/shape).
 

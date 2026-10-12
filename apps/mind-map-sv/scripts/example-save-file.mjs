@@ -49,7 +49,7 @@ export const AI_EXAMPLE_GRAPH = {
 			id: 'nodes',
 			title: 'Nodes',
 			description:
-				'Every node requires id, title, description, and tags. Use content: [] for no attachments. pinned keeps an important node and its neighbourhood visible; pair a pinned node with lastPinnedSeq and keep graph.pinSequence at least that high. Optional addons can contain task or ai data. Optional inputs and outputs contain confirmed quantity designations shaped like {base, subscript}; those create derived dataflow arrows and are not ordinary stored edges. Optional sizeBytes is the size in bytes of the thing the node represents (a page, file, or download), a finite number of at least 0, drawn as border thickness on a log scale so bigger things get thicker outlines; omit it when the size is unknown. The Database example node carries one.',
+				'Every node requires id, title, description, and tags. Use content: [] for no attachments. pinned keeps an important node and its neighbourhood visible; pair a pinned node with lastPinnedSeq and keep graph.pinSequence at least that high. Optional addons can contain task or ai data. Optional inputs and outputs contain confirmed quantity designations shaped like {base, subscript}; those create derived dataflow arrows and are not ordinary stored edges. Optional sizeBytes is the size in bytes of the thing the node represents (a page, file, or download), a finite number of at least 0, drawn as border thickness on a log scale so bigger things get thicker outlines when the border source chosen for the graph is size (the default); omit it when the size is unknown. The Database example node carries one. Optional weight is a finite number of at least 0 that ranks the node by whatever the importer measured (word count, importance, citations); unlike sizeBytes, 0 is a real value meaning it weighs nothing, so omit weight when it is unknown. The Web application and API service example nodes carry one. Which number the border shows is a per-graph setting in the app, not graph data: size, weight, edge count, attachment count, description length, or nothing.',
 			tags: ['format'],
 			content: []
 		},
@@ -65,7 +65,7 @@ export const AI_EXAMPLE_GRAPH = {
 			id: 'envelope',
 			title: 'Required graph collections',
 			description:
-				'data.nodes and data.edges are arrays. data.posByNodeId maps every node id to a finite {x, y} seed position. data.tagColorConfig has nodeTags and edgeTags objects, even when both are empty. data.tagPhysicsConfig is optional: when present it has nodeTags and edgeTags objects mapping a tag name to a layout factor between 0.125 and 8, and a tag it omits (or the whole field omitted) means ×1. data.assets is an object; use {} when there are no attachments. pinSequence is optional unless you provide lastPinnedSeq values. Keep JSON references internally consistent: unique ids, real endpoints, real position keys, and no dangling asset ids.',
+				'data.nodes and data.edges are arrays. data.posByNodeId maps every node id to a finite {x, y} seed position. data.tagColorConfig has nodeTags and edgeTags objects, even when both are empty. data.tagPhysicsConfig is optional: when present it has nodeTags and edgeTags objects mapping a tag name to a layout factor between 0.125 and 8, and a tag it omits (or the whole field omitted) means ×1. data.weightConfig is optional: {label, unit?} names what node weight means in this graph, and the details view reads label, value, then unit (for example Importance 3); omit it and the line reads Weight. data.assets is an object; use {} when there are no attachments. pinSequence is optional unless you provide lastPinnedSeq values. Keep JSON references internally consistent: unique ids, real endpoints, real position keys, and no dangling asset ids.',
 			tags: ['format'],
 			content: []
 		},
@@ -115,7 +115,8 @@ export const AI_EXAMPLE_GRAPH = {
 			description:
 				'Example module node. Entry point: apps/web/src/main.ts. Owns the browser UI and calls the API client. In a real codebase map, describe responsibilities and boundaries here instead of pasting large source files.',
 			tags: ['example', 'module'],
-			content: []
+			content: [],
+			weight: 3
 		},
 		{
 			id: 'api-service',
@@ -123,7 +124,8 @@ export const AI_EXAMPLE_GRAPH = {
 			description:
 				'Example module node. Entry point: services/api/src/server.ts. Validates requests, applies business rules, and owns database access. The incoming calls edge and outgoing depends-on edge make the dependency direction visible.',
 			tags: ['example', 'module'],
-			content: []
+			content: [],
+			weight: 5
 		},
 		{
 			id: 'database',
@@ -310,6 +312,7 @@ export const AI_EXAMPLE_GRAPH = {
 			next: '#16a34a'
 		}
 	},
+	weightConfig: { label: 'Importance' },
 	assets: {},
 	pinSequence: 1
 };
