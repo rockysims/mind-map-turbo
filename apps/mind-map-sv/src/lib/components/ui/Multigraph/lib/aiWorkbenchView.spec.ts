@@ -10,6 +10,7 @@ import {
 	modeNoticeLine,
 	prosePreviewLine,
 	resultRows,
+	resolveAiModel,
 	stepStatusText,
 	stepsPreviewLine,
 	inputsChangedSince,
@@ -356,6 +357,30 @@ describe('prosePreviewLine', () => {
 
 	it('has nothing to preview on a node that has never run', () => {
 		expect(prosePreviewLine(IDLE_RUN_STATE, '')).toBe('Nothing yet');
+	});
+});
+
+describe('resolveAiModel', () => {
+	const MODELS = ['claude-opus-5', 'claude-sonnet-5'];
+
+	it('follows the app-wide choice when the node is not pinned', () => {
+		expect(resolveAiModel(makeAddon(), 'claude-opus-5', MODELS)).toBe('claude-opus-5');
+	});
+
+	it('calls what the node is pinned to', () => {
+		const ai = makeAddon({ model: 'claude-sonnet-5' });
+
+		expect(resolveAiModel(ai, 'claude-opus-5', MODELS)).toBe('claude-sonnet-5');
+	});
+
+	it('falls back when the pin names a model this browser no longer offers', () => {
+		const ai = makeAddon({ model: 'claude-from-another-build' });
+
+		expect(resolveAiModel(ai, 'claude-opus-5', MODELS)).toBe('claude-opus-5');
+	});
+
+	it('follows the app-wide choice for a node with no add-on at all', () => {
+		expect(resolveAiModel(undefined, 'claude-opus-5', MODELS)).toBe('claude-opus-5');
 	});
 });
 

@@ -11,6 +11,7 @@ import {
 	recordAiRun,
 	refreshPromotedOutputs,
 	replaceAiRun,
+	setAiModel,
 	setAiPrompt,
 	setAiScript
 } from './aiNode';
@@ -126,6 +127,63 @@ describe('setAiPrompt', () => {
 		});
 		const after = setAiPrompt(before, 'ai', 'plot it');
 
+		expect(aiAddon(after).runs).toBe(aiAddon(before).runs);
+		expect(aiAddon(after).promoted).toEqual({ 'plot.png': 'promoted' });
+	});
+});
+
+describe('setAiModel', () => {
+	it('pins the node to the chosen model', () => {
+		const graph = setAiModel(graphWithAi(), 'ai', 'claude-sonnet-5');
+
+		expect(aiAddon(graph).model).toBe('claude-sonnet-5');
+	});
+
+	it('clears the pin, so the node follows the app-wide choice again', () => {
+		const before = graphWithAi({ model: 'claude-sonnet-5' });
+		const after = setAiModel(before, 'ai', undefined);
+
+		// Absent, not `undefined`: the add-on round-trips through JSON, where only
+		// the absent field survives unchanged.
+		expect('model' in aiAddon(after)).toBe(false);
+	});
+
+	it('returns the same graph object when the pin is unchanged', () => {
+		const before = graphWithAi({ model: 'claude-opus-5' });
+
+		expect(setAiModel(before, 'ai', 'claude-opus-5')).toBe(before);
+	});
+
+	it('returns the same graph object when an unpinned node is cleared', () => {
+		const before = graphWithAi();
+
+		expect(setAiModel(before, 'ai', undefined)).toBe(before);
+	});
+
+	it('returns the same graph object for a node without the add-on', () => {
+		const before = makeGraph({ nodeCount: 1 });
+
+		expect(setAiModel(before, 'n0', 'claude-sonnet-5')).toBe(before);
+	});
+
+	it('does not mutate the graph it was handed', () => {
+		const before = graphWithAi({ model: 'claude-opus-5' });
+		setAiModel(before, 'ai', 'claude-sonnet-5');
+
+		expect(aiAddon(before).model).toBe('claude-opus-5');
+	});
+
+	it('leaves the prompt, script, runs and promoted bindings alone', () => {
+		const before = graphWithAi({
+			prompt: 'plot it',
+			script: 'print(1)',
+			runs: [makeRun({ id: 'r1' })],
+			promoted: { 'plot.png': 'promoted' }
+		});
+		const after = setAiModel(before, 'ai', 'claude-sonnet-5');
+
+		expect(aiAddon(after).prompt).toBe('plot it');
+		expect(aiAddon(after).script).toBe('print(1)');
 		expect(aiAddon(after).runs).toBe(aiAddon(before).runs);
 		expect(aiAddon(after).promoted).toEqual({ 'plot.png': 'promoted' });
 	});

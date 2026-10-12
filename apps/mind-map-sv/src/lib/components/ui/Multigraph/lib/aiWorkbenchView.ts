@@ -10,6 +10,7 @@
  * story can pin them and the component can stay markup.
  */
 
+import { APP_CONFIG } from '$lib/appConfig';
 import { isSubmittableFollowUpPrompt, latestDoneRun } from './aiNode';
 import { renderAncestorContext, type AiAncestor } from './aiAncestry';
 import { renderResultTex } from '$lib/ai/aiResults';
@@ -410,6 +411,25 @@ export function followUpSubmitDisabledReason(prompt: string): string | undefined
 	return isSubmittableFollowUpPrompt(prompt)
 		? undefined
 		: 'Nothing to ask yet — type the follow-up first.';
+}
+
+/**
+ * The model this node's next run would call: its own pin when it carries one
+ * the app still offers, and the app-wide choice otherwise.
+ *
+ * A pin outside `models` falls back rather than being honoured, for the reason
+ * `loadAiSettings` drops a stored model it does not recognise: the workbench
+ * draws this answer in a select whose options are exactly that list, and a
+ * value with no option renders as an empty control. A graph written on a
+ * browser that offered a model this one does not is what reaches it.
+ */
+export function resolveAiModel(
+	ai: AiAddon | undefined,
+	fallback: string,
+	models: readonly string[] = APP_CONFIG.ai.models
+): string {
+	const pinned = ai?.model;
+	return pinned !== undefined && models.includes(pinned) ? pinned : fallback;
 }
 
 /**

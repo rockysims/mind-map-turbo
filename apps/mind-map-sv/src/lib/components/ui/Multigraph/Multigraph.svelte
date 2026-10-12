@@ -100,8 +100,14 @@
 	import { prefersReducedMotion } from '$lib/reducedMotion';
 	import { collectAiAncestors } from './lib/aiAncestry';
 	import { collectAiInputs } from './lib/aiInputs';
-	import { createFollowUpNode, inheritedScript, promoteAiOutput, setAiPrompt } from './lib/aiNode';
-	import { defaultRunMode } from './lib/aiWorkbenchView';
+	import {
+		createFollowUpNode,
+		inheritedScript,
+		promoteAiOutput,
+		setAiModel,
+		setAiPrompt
+	} from './lib/aiNode';
+	import { defaultRunMode, resolveAiModel } from './lib/aiWorkbenchView';
 	import { createAiRunController, type AiRunOutcome } from './lib/aiRunController.svelte';
 	import type { AiRunMode, NodeContentBlock, NodeData } from '../types/node';
 	import type { EdgeData } from '../types/edge';
@@ -3590,7 +3596,7 @@
 							{assetScope}
 							runState={aiRun.stateFor(detailsNode.id)}
 							hasKey={aiClient !== null}
-							model={aiSettings.model}
+							model={resolveAiModel(detailsNode.addons.ai, aiSettings.model)}
 							ancestors={collectAiAncestors(graph, detailsNode.id)}
 							inheritedScript={inheritedScript(graph, detailsNode.id)}
 							{titleForNodeId}
@@ -3599,6 +3605,11 @@
 								commitUserGraph(
 									setAiPrompt(graph, detailsNode.id, prompt),
 									editIntent('edit AI prompt')
+								)}
+							onModelChange={(nextModel) =>
+								commitUserGraph(
+									setAiModel(graph, detailsNode.id, nextModel),
+									editIntent('choose AI model')
 								)}
 							onRun={(mode) => runAiNode(detailsNode.id, mode)}
 							onCancel={() => aiRun.cancel(detailsNode.id)}

@@ -17,13 +17,13 @@
 	import AiNodeContent from './AiNodeContent.svelte';
 	import { collectAiAncestors } from './lib/aiAncestry';
 	import { collectAiInputs } from './lib/aiInputs';
-	import { inheritedScript, promoteAiOutput, setAiPrompt } from './lib/aiNode';
+	import { inheritedScript, promoteAiOutput, setAiModel, setAiPrompt } from './lib/aiNode';
 	import {
 		addNodeContentBlock,
 		removeNodeContentBlock,
 		replaceNodeContentBlockAsset
 	} from './lib/graph';
-	import { IDLE_RUN_STATE, type AiRunState } from './lib/aiWorkbenchView';
+	import { IDLE_RUN_STATE, resolveAiModel, type AiRunState } from './lib/aiWorkbenchView';
 	import { startsOnInteractiveContent } from './lib/interactiveContent';
 	import { nestedScrollChain, nestedWheelDecision } from './lib/nestedScrollTarget';
 	import { APP_CONFIG } from '$lib/appConfig';
@@ -40,6 +40,7 @@
 		assetScope = '',
 		runState = IDLE_RUN_STATE,
 		hasKey = true,
+		appModel = APP_CONFIG.ai.defaultModel,
 		frameHeightPx = 0,
 		confirmAttachment = () => true,
 		warnBytesPerFile = APP_CONFIG.multigraph.attachments.warnBytesPerFile
@@ -51,6 +52,8 @@
 		assetScope?: string;
 		runState?: AiRunState;
 		hasKey?: boolean;
+		/** The app-wide model a node with no pin of its own follows. */
+		appModel?: string;
 		/**
 		 * The focus frame's height, which the real surface gets from
 		 * `NodeDetailsLayer`'s definite body row. Zero leaves the stage
@@ -66,6 +69,8 @@
 	// story states a starting graph and every later value is committed here.
 	let graph = $state(untrack(() => baseGraph));
 	let lastPrompt = $state('');
+	/** The model last picked on the connection line, as the surface reported it. */
+	let lastModel = $state('');
 	let lastRunMode = $state('');
 	let cancels = $state(0);
 	let lastPromote = $state('');
@@ -99,6 +104,8 @@
 	let stage = $state<HTMLElement | null>(null);
 
 	const node = $derived(graph.nodes.find((candidate) => candidate.id === nodeId));
+	/** What `Multigraph` resolves for the same node: its pin, or the app's choice. */
+	const model = $derived(resolveAiModel(node?.addons?.ai, appModel));
 	const inputs = $derived(collectAiInputs(graph, nodeId));
 	/**
 	 * The two graph walks the workbench cannot do for itself, exactly as
@@ -197,6 +204,8 @@
 	<div
 		data-ai-harness
 		data-last-prompt={lastPrompt}
+		data-last-model={lastModel}
+		data-node-model={node.addons?.ai?.model ?? ''}
 		data-last-run-mode={lastRunMode}
 		data-cancels={cancels}
 		data-last-promote={lastPromote}
@@ -239,6 +248,7 @@
 			{assetScope}
 			{runState}
 			{hasKey}
+			{model}
 			{confirmAttachment}
 			{warnBytesPerFile}
 			assets={graph.assets ?? {}}
@@ -247,6 +257,10 @@
 			onPromptChange={(prompt) => {
 				graph = setAiPrompt(graph, nodeId, prompt);
 				lastPrompt = prompt;
+			}}
+			onModelChange={(chosen) => {
+				graph = setAiModel(graph, nodeId, chosen);
+				lastModel = chosen;
 			}}
 			onRun={(mode: AiRunMode) => (lastRunMode = mode)}
 			onCancel={() => (cancels += 1)}
