@@ -164,6 +164,43 @@
 		{ type: 'file', assetId: 'a3', name: 'notes.pdf' }
 	];
 
+	const SHORT_TITLE = 'Short node title goes here.';
+	const LONG_TITLE = 'Really long node title goes here. '.repeat(40);
+
+	/**
+	 * The widest border a sized node can draw with the shipped defaults: the
+	 * configured width at `sizeBorder.maxFactor`. Read from `APP_CONFIG` so these
+	 * stories follow the default if it is ever lowered.
+	 */
+	const THICKEST_BORDER_PX =
+		APP_CONFIG.multigraph.nodeBorderWidthPx * APP_CONFIG.multigraph.sizeBorder.maxFactor;
+
+	/**
+	 * A border drawn inside the circle eats into the content area, so at the
+	 * thickest border the title must still sit wholly inside the padding box:
+	 * the circle's rect inset by the rendered border on every side.
+	 */
+	async function titleInsideThickestBorderPlayHandler({ canvasElement, args }: PlayArgs) {
+		const circle = canvasElement.querySelector('.node .circle');
+		const titleEl = canvasElement.querySelector('.node .title');
+		if (!(circle instanceof HTMLElement)) throw new Error('Circle not found');
+		if (!(titleEl instanceof HTMLElement)) throw new Error('Title not found');
+
+		const border = parseFloat(window.getComputedStyle(circle).borderTopWidth);
+		expect(border).toBeCloseTo(THICKEST_BORDER_PX, 0);
+
+		expect(titleEl).toBeVisible();
+		expect(titleEl.textContent).toBe(args.nodeData.title);
+
+		const circleRect = circle.getBoundingClientRect();
+		const titleRect = titleEl.getBoundingClientRect();
+		const tolerance = 1;
+		expect(titleRect.left).toBeGreaterThanOrEqual(circleRect.left + border - tolerance);
+		expect(titleRect.right).toBeLessThanOrEqual(circleRect.right - border + tolerance);
+		expect(titleRect.top).toBeGreaterThanOrEqual(circleRect.top + border - tolerance);
+		expect(titleRect.bottom).toBeLessThanOrEqual(circleRect.bottom - border + tolerance);
+	}
+
 	async function pinnedClosedPlayHandler(ctx: PlayArgs) {
 		await playHandler(ctx);
 
@@ -184,7 +221,7 @@
 	args={{
 		nodeData: {
 			id: 'node id short title',
-			title: 'Short node title goes here.',
+			title: SHORT_TITLE,
 			description:
 				'Node description and of course the description is probably going to be fairly long. Certainly multiple sentences. Maybe more.',
 			tags: []
@@ -198,7 +235,7 @@
 	args={{
 		nodeData: {
 			id: 'node id long title',
-			title: 'Really long node title goes here. '.repeat(40),
+			title: LONG_TITLE,
 			description:
 				'Node description and of course the description is probably going to be fairly long. Likely multiple sentences long. Maybe even more. '.repeat(
 					10
@@ -207,6 +244,36 @@
 		}
 	}}
 	play={playHandler}
+/>
+
+<Story
+	name="ShortTitleStaysInsideTheCircleAtTheThickestBorder"
+	args={{
+		nodeData: {
+			id: 'node id short title thickest border',
+			title: SHORT_TITLE,
+			description: '',
+			tags: []
+		},
+		borderWidthPx: THICKEST_BORDER_PX,
+		pinnedBorderWidthPx: THICKEST_BORDER_PX
+	}}
+	play={titleInsideThickestBorderPlayHandler}
+/>
+
+<Story
+	name="LongTitleStaysInsideTheCircleAtTheThickestBorder"
+	args={{
+		nodeData: {
+			id: 'node id long title thickest border',
+			title: LONG_TITLE,
+			description: '',
+			tags: []
+		},
+		borderWidthPx: THICKEST_BORDER_PX,
+		pinnedBorderWidthPx: THICKEST_BORDER_PX
+	}}
+	play={titleInsideThickestBorderPlayHandler}
 />
 
 <Story

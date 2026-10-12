@@ -257,6 +257,7 @@
 		type FrameViewState,
 		type NodeFrameLayout
 	} from './lib/frameGeometry.js';
+	import { borderWidthFactorForSize } from './lib/sizeBorder.js';
 	import { interpolateMorph } from './lib/morphGeometry.js';
 	import { importRevealTargetNodeId } from './lib/importRevealTarget.js';
 	import {
@@ -546,6 +547,24 @@
 		pinnedBorderWidthPx: pinnedNodeBorderWidthPx,
 		fontSizePx: nodeTextFontSizePx
 	});
+	/**
+	 * `nodeChromeTunables` with both border widths scaled by the node's size.
+	 *
+	 * Every ring the canvas draws for a node — live, reveal-wave buffer, exiting
+	 * ghost — goes through here, so a node never changes width when it moves from
+	 * one site to another. Returns `nodeChromeTunables` itself when the factor is
+	 * 1 (every sizeless node). Reads `cfg` at call time, which is what lets the
+	 * "Size border" sliders redraw borders while they are being dragged.
+	 */
+	function nodeChromeFor(node: NodeData): typeof nodeChromeTunables {
+		const factor = borderWidthFactorForSize(node.sizeBytes, cfg.multigraph.sizeBorder);
+		if (factor === 1) return nodeChromeTunables;
+		return {
+			...nodeChromeTunables,
+			borderWidthPx: nodeChromeTunables.borderWidthPx * factor,
+			pinnedBorderWidthPx: nodeChromeTunables.pinnedBorderWidthPx * factor
+		};
+	}
 
 	let graph = $state<MultigraphData>({
 		nodes: [],
@@ -2208,12 +2227,15 @@
 			};
 		}
 		// Passed rather than left to `frameGeometry`'s own fallbacks, which read the
-		// constants module and so would be frozen at import.
+		// constants module and so would be frozen at import. The source widths are
+		// the subject's own sized chrome, so progress 0 matches the canvas node.
+		const subject = nodeById[level.subjectId];
+		const chrome = subject ? nodeChromeFor(subject) : nodeChromeTunables;
 		return frameGeometry(layout, view, fill, level.morphProgress, {
 			targetRadiusPx: focusDetailsCornerRadiusPx,
 			targetBorderWidthPx: focusDetailsBorderWidthPx,
-			nodeBorderWidthPx,
-			pinnedNodeBorderWidthPx
+			nodeBorderWidthPx: chrome.borderWidthPx,
+			pinnedNodeBorderWidthPx: chrome.pinnedBorderWidthPx
 		});
 	}
 
@@ -3277,7 +3299,7 @@
 		style={passiveNodeStyle(entry)}
 	>
 		<Node
-			{...nodeChromeTunables}
+			{...nodeChromeFor(entry.nodeData)}
 			nodeData={entry.nodeData}
 			isTitleEditing={false}
 			borderSegments={nodeBorderSegments(entry.nodeData, graph.tagColorConfig.nodeTags)}
@@ -3664,7 +3686,7 @@
 				style={`left: calc(50% + ${nodePos.x}px); top: calc(50% + ${nodePos.y}px); transform: translate(-50%, -50%) scale(${nodeScale}); opacity: ${nodeOpacity};`}
 			>
 				<Node
-					{...nodeChromeTunables}
+					{...nodeChromeFor(node)}
 					nodeData={node}
 					isTitleEditing={titleEditContext?.nodeId === node.id}
 					titleCaretAt={titleEditContext?.nodeId === node.id
