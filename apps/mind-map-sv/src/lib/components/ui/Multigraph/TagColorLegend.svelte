@@ -169,13 +169,20 @@
 									/>
 								</label>
 
+								<!-- Icon-only so the row's controls fit on one line beside the tag's
+								     name. The name rides in `aria-label`; the title is the pointer's
+								     hint, not a substitute for it. A drawn bin, like the toolbar's
+								     gear, rather than an emoji each platform's font restyles. -->
 								<button
 									type="button"
-									class="danger"
+									class="danger icon-button"
 									aria-label={`Delete ${labelFor(legendTag.namespace)} ${legendTag.tag}`}
+									title="Delete this tag from everything that uses it"
 									onclick={() => onDelete?.(legendTag.namespace, legendTag.tag)}
 								>
-									Delete
+									<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+										<path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l1 12.5h9l1-12.5M10 10.5v6M14 10.5v6" />
+									</svg>
 								</button>
 							</li>
 						{/each}
@@ -291,11 +298,13 @@
 		font-size: 0.8125rem;
 	}
 
+	/* A column, readout under the track: beside it, the readout pushed the
+	   delete button onto a second line at the dialog's normal width. */
 	.physics-control {
 		display: flex;
 		flex: 0 0 auto;
-		align-items: center;
-		gap: 0.375rem;
+		flex-direction: column;
+		align-items: stretch;
 	}
 
 	.physics-control label {
@@ -312,9 +321,13 @@
 	}
 
 	.physics-readout {
-		/* Wide enough for the longest readout (`spacing ×0.71`), so the row does
-		   not jump as the thumb moves. */
-		min-width: 13ch;
+		/* Tucked up into the slack below the drawn track, inside the slider's
+		   44px box, so the column is barely taller than the slider alone. It
+		   takes no pointer, so the whole box still grabs the thumb. The column is
+		   the slider's fixed width, so the text cannot shift the row as it moves. */
+		margin-top: -0.625rem;
+		pointer-events: none;
+		text-align: center;
 		color: #475569;
 		font-size: 0.8125rem;
 		font-variant-numeric: tabular-nums;
@@ -347,6 +360,29 @@
 		color: #991b1b;
 	}
 
+	/* The glyph is small; the button around it is the 44px target. */
+	.icon-button {
+		display: inline-flex;
+		flex: 0 0 auto;
+		align-items: center;
+		justify-content: center;
+		box-sizing: border-box;
+		min-width: 2.75rem;
+		min-height: 2.75rem;
+		padding: 0;
+	}
+
+	.icon-button svg {
+		display: block;
+		width: 1.125rem;
+		height: 1.125rem;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.9;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+
 	.sr-only {
 		position: absolute;
 		width: 1px;
@@ -376,6 +412,12 @@
 			flex-direction: column;
 		}
 
+		/* In a column, the wide-row `flex-basis: 8rem` would be a height, leaving
+		   a tall blank band under the tag's name. */
+		.tag-copy {
+			flex: 0 0 auto;
+		}
+
 		/* Its own full-width line: a short track under a thumb is a coarse one. */
 		.physics-control label {
 			flex: 1 1 auto;
@@ -383,10 +425,6 @@
 
 		.physics-control input[type='range'] {
 			width: 100%;
-		}
-
-		.physics-readout {
-			min-width: auto;
 		}
 	}
 </style>

@@ -239,10 +239,28 @@
 		// A full-width dialog keeps every control of a row on one line, and the
 		// slider still clears the touch-target floor.
 		const colorInput = canvas.getByLabelText('Color for edge tag rel');
-		expect(
-			onSeparateLines(edgeSlider.getBoundingClientRect(), colorInput.getBoundingClientRect())
-		).toBe(false);
-		expect(edgeSlider.getBoundingClientRect().height).toBeGreaterThanOrEqual(TOUCH_TARGET_PX);
+		const sliderBox = edgeSlider.getBoundingClientRect();
+		const colorBox = colorInput.getBoundingClientRect();
+		expect(onSeparateLines(sliderBox, colorBox)).toBe(false);
+		expect(sliderBox.height).toBeGreaterThanOrEqual(TOUCH_TARGET_PX);
+
+		// The readout sits under the track, not beside it: beside it, it pushed
+		// the delete button onto a second line.
+		const readout = rowOf(edgeSlider).querySelector('.physics-readout');
+		if (!(readout instanceof HTMLElement)) throw new Error('row has no readout');
+		const readoutBox = readout.getBoundingClientRect();
+		expect(readoutBox.top).toBeGreaterThan(sliderBox.top + sliderBox.height / 2);
+		expect(readoutBox.left).toBeGreaterThanOrEqual(sliderBox.left - 1);
+		expect(readoutBox.right).toBeLessThanOrEqual(sliderBox.right + 1);
+
+		// So delete shares the colour input's line, as an icon with a full-size
+		// target and its name intact for anyone reading by name.
+		const deleteButton = canvas.getByRole('button', { name: 'Delete edge tag rel' });
+		const deleteBox = deleteButton.getBoundingClientRect();
+		expect(onSeparateLines(deleteBox, colorBox)).toBe(false);
+		expect(deleteButton).not.toHaveTextContent('Delete');
+		expect(deleteBox.width).toBeGreaterThanOrEqual(TOUCH_TARGET_PX);
+		expect(deleteBox.height).toBeGreaterThanOrEqual(TOUCH_TARGET_PX);
 	}}
 />
 
@@ -275,9 +293,20 @@
 		expect(onSeparateLines(sliderBox, nameBox)).toBe(true);
 		expect(onSeparateLines(sliderBox, colorBox)).toBe(true);
 
+		// Straight under the name, not below a blank band: the wide row's
+		// `flex-basis: 8rem` would otherwise become the name block's height.
+		expect(sliderBox.top - nameBox.bottom).toBeLessThan(24);
+
 		// And most of the row's width, so a thumb gets a long, fine-grained track
-		// rather than a stub beside the readout.
+		// rather than a stub.
 		expect(sliderBox.width).toBeGreaterThan(row.getBoundingClientRect().width / 2);
 		expect(sliderBox.height).toBeGreaterThanOrEqual(TOUCH_TARGET_PX);
+
+		// The readout sits under the track here too.
+		const readout = row.querySelector('.physics-readout');
+		if (!(readout instanceof HTMLElement)) throw new Error('row has no readout');
+		expect(readout.getBoundingClientRect().top).toBeGreaterThan(
+			sliderBox.top + sliderBox.height / 2
+		);
 	}}
 />
