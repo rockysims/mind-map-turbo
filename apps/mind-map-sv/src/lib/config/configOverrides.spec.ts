@@ -28,7 +28,8 @@ describe('setOverride', () => {
 	it('drops a select back to its default too', () => {
 		const degree = setOverride({}, 'multigraph.borderWeight.source', 'degree');
 		expect(degree).toEqual({ 'multigraph.borderWeight.source': 'degree' });
-		expect(setOverride(degree, 'multigraph.borderWeight.source', 'none')).toEqual({});
+		expect(APP_CONFIG.multigraph.borderWeight.source).toBe('weight');
+		expect(setOverride(degree, 'multigraph.borderWeight.source', 'weight')).toEqual({});
 	});
 
 	it('drops a boolean back to its default too', () => {

@@ -286,8 +286,8 @@ export const CONFIG_SCHEMA: { [K in ConfigPath]: FieldSpec } = {
 		tier: 'basic',
 		preview: 'instant',
 		min: 0,
-		max: 0.5,
-		step: 0.01
+		max: 1,
+		step: 0.05
 	},
 	'multigraph.borderWeight.minFactor': {
 		control: 'range',
@@ -307,8 +307,8 @@ export const CONFIG_SCHEMA: { [K in ConfigPath]: FieldSpec } = {
 		tier: 'basic',
 		preview: 'instant',
 		min: 1,
-		max: 4,
-		step: 0.1,
+		max: 12,
+		step: 0.5,
 		unit: '×'
 	},
 	// No `min`: weights can be fractional and of any scale, `number` bounds clamp

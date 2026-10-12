@@ -86,10 +86,10 @@ export const APP_CONFIG = {
 		// descriptionLength). A value of 0 draws the thinnest border; a node with no
 		// value for the source draws the widths as-is.
 		borderWeight: {
-			source: 'none', // none | weight | degree | attachmentBytes | descriptionLength
-			widthPerDoubling: 0.15, // factor added each time the value doubles (logarithmic sources)
+			source: 'weight', // none | weight | degree | attachmentBytes | descriptionLength (owner ruling 2026-10-12: weight)
+			widthPerDoubling: 0.5, // factor added each time the value doubles (logarithmic sources)
 			minFactor: 0.5, // thinnest border, as a multiple of the configured width
-			maxFactor: 3 // thickest border, as a multiple of the configured width
+			maxFactor: 10 // thickest border, as a multiple of the configured width
 		},
 		// The value that draws exactly the configured border, per source.
 		borderReference: {

@@ -1609,11 +1609,12 @@
 	/**
 	 * The shipped logarithmic curve with an 8 px base, written out independently
 	 * of `logBorderFactor` so the stories pin the numbers the plan promises:
-	 * `8 × (1 + 0.15 × log2(value / reference))`. Only called with values whose
-	 * factor lies inside the ×0.5..×3 clamp.
+	 * `8 × (1 + 0.5 × log2(value / reference))` (0.5 per doubling since the
+	 * 2026-10-12 defaults ruling). Only called with values whose factor lies
+	 * inside the ×0.5..×10 clamp.
 	 */
 	function curveWidth(value: number, reference: number): number {
-		return 8 * (1 + 0.15 * Math.log2(value / reference));
+		return 8 * (1 + 0.5 * Math.log2(value / reference));
 	}
 
 	/** A node with an empty description, so no source reads anything by accident. */
@@ -8718,20 +8719,21 @@
 	{/snippet}
 </Story>
 <!--
-	A node's size no longer drives its border (owner ruling, 2026-10-12): borders
-	show nothing by default, so every spoke of `SIZED_SPOKES` (10 KiB, 1 MiB,
-	100 MiB, no size) and the hub draw the configured 8 px.
+	A node's size no longer drives its border (owner ruling, 2026-10-12): under
+	"Nothing" every spoke of `SIZED_SPOKES` (10 KiB, 1 MiB, 100 MiB, no size) and
+	the hub draw the configured 8 px. "Nothing" is no longer the shipped source
+	(node weight is, since the 2026-10-12 defaults ruling), so it is chosen here.
 -->
 <Story
 	name="ChoosingNothingDrawsEveryBorderTheSame"
 	args={{
 		multigraphData: SIZED_SPOKES,
 		defaultPrimaryNodeId: 'n0',
-		layoutSettings: { relaxIterations: 0 }
+		layoutSettings: { relaxIterations: 0 },
+		settings: { [BORDER_SOURCE]: 'none' }
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
-		expect(APP_CONFIG.multigraph.borderWeight.source).toBe('none');
 		for (const id of ['n0', 'n1', 'n2', 'n3', 'n4']) {
 			const widths = nodeBorderWidths(canvasElement, id);
 			expect(widths.asked).toBeCloseTo(8, 5);
@@ -8764,10 +8766,10 @@
 />
 
 <!--
-	Attachment size is logarithmic. With the shipped curve (1 MiB reference, 0.15
-	per doubling, ×0.5..×3) and an 8 px border: nothing attached sits on the ×0.5
+	Attachment size is logarithmic. With the shipped curve (1 MiB reference, 0.5
+	per doubling, ×0.5..×10) and an 8 px border: nothing attached sits on the ×0.5
 	floor (4 px), one 1 MiB file draws the configured 8 px, and 60 + 40 MiB draws
-	8 × (1 + 0.15 × log2 100) ≈ 15.97 px.
+	8 × (1 + 0.5 × log2 100) ≈ 34.58 px.
 -->
 <Story
 	name="NodesWithLargerAttachmentsDrawThickerBorders"
@@ -8861,9 +8863,9 @@
 
 <!--
 	`nodeChromeFor` reads `cfg` per render, so the "Border weight" sliders are
-	instant: under "Attachment size", 0.15 → 0.25 per doubling takes the 100 MiB
-	node from ≈ 15.97 px to 8 × (1 + 0.25 × log2 100) ≈ 21.3 px while the pointer
-	is still down.
+	instant: under "Attachment size", the shipped 0.5 → 0.75 per doubling takes the
+	100 MiB node from ≈ 34.58 px to 8 × (1 + 0.75 × log2 100) ≈ 47.86 px while the
+	pointer is still down.
 -->
 <Story
 	name="DraggingWidthPerDoublingRedrawsBordersLive"
@@ -8871,13 +8873,13 @@
 		await waitForLayout();
 		const harness = getSettingsHarness(canvasElement);
 		const startingSettings = { [BORDER_SOURCE]: 'attachmentBytes' };
-		expect(nodeBorderWidths(canvasElement, 'hundred').asked).toBeCloseTo(15.97, 1);
+		expect(nodeBorderWidths(canvasElement, 'hundred').asked).toBeCloseTo(34.58, 1);
 
 		const slider = settingsSlider(canvasElement, 'Width per doubling (logarithmic sources)');
-		dragSettingsSlider(slider, [0.2, 0.25], false);
+		dragSettingsSlider(slider, [0.6, 0.75], false);
 
 		await waitFor(() =>
-			expect(nodeBorderWidths(canvasElement, 'hundred').asked).toBeCloseTo(21.3, 1)
+			expect(nodeBorderWidths(canvasElement, 'hundred').asked).toBeCloseTo(47.86, 1)
 		);
 		const live = nodeBorderWidths(canvasElement, 'hundred');
 		expectDrawnBorder(live.rendered, live.asked);
@@ -8892,9 +8894,9 @@
 		await waitFor(() => expect(harness.dataset.settingsChangeCount).toBe('1'));
 		expect(harnessSettings(canvasElement)).toEqual({
 			...startingSettings,
-			'multigraph.borderWeight.widthPerDoubling': 0.25
+			'multigraph.borderWeight.widthPerDoubling': 0.75
 		});
-		expect(nodeBorderWidths(canvasElement, 'hundred').asked).toBeCloseTo(21.3, 1);
+		expect(nodeBorderWidths(canvasElement, 'hundred').asked).toBeCloseTo(47.86, 1);
 	}}
 >
 	{#snippet template()}
@@ -8959,7 +8961,7 @@
 <!--
 	Border width sources. Each story picks one through the graph's settings and
 	asserts both the width each `.circle` is told to draw and what it draws, with
-	an 8 px base and the shipped ×0.5..×3 bounds. Edge count is linear against a
+	an 8 px base and the shipped ×0.5..×10 bounds. Edge count is linear against a
 	reference of 3 edges.
 -->
 <Story
@@ -9008,22 +9010,26 @@
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
-		// Logarithmic against a 200-character reference: 0 → floor, 50 → ×0.7,
-		// 200 → ×1, 800 → ×1.3.
+		// Logarithmic against a 200-character reference at the shipped 0.5 per
+		// doubling: 0 → floor; 50 is two halvings, 1 − 2 × 0.5 = ×0, so it clamps
+		// to the ×0.5 floor too; 200 → ×1; 800 → ×2.
 		const expected: Array<[string, number]> = [
 			['d0', 4],
-			['d50', 5.6],
+			['d50', 4],
 			['d200', 8],
-			['d800', 10.4]
+			['d800', 16]
 		];
-		let previous = 0;
 		for (const [id, width] of expected) {
 			const widths = nodeBorderWidths(canvasElement, id);
 			expect(widths.asked).toBeCloseTo(width, 5);
 			expectDrawnBorder(widths.rendered, width);
-			expect(widths.rendered).toBeGreaterThan(previous);
-			previous = widths.rendered;
 		}
+		// What the reader sees still grows with the description past the floor.
+		const rendered = ['d50', 'd200', 'd800'].map(
+			(id) => nodeBorderWidths(canvasElement, id).rendered
+		);
+		expect(rendered[0]).toBeLessThan(rendered[1]);
+		expect(rendered[1]).toBeLessThan(rendered[2]);
 		// The hub has no description, so it draws the floor too.
 		expect(nodeBorderWidths(canvasElement, 'hub').asked).toBeCloseTo(4, 5);
 	}}
@@ -9041,13 +9047,13 @@
 		await waitForLayout();
 		// Linear against a reference of 1. No weight is "unknown" and draws the
 		// configured border; 0 is a real weight and lands on the floor; 2 draws
-		// twice the border; 8 would be ×8 and is capped at ×3.
+		// twice the border; 8 draws ×8, inside the shipped ×10 cap.
 		const expected: Array<[string, number]> = [
 			['absent', 8],
 			['w0', 4],
 			['w1', 8],
 			['w2', 16],
-			['w8', 24]
+			['w8', 64]
 		];
 		for (const [id, width] of expected) {
 			const widths = nodeBorderWidths(canvasElement, id);
@@ -9061,10 +9067,11 @@
 
 <!--
 	The "Border shows" select commits on change, with no preview, and the canvas
-	redraws on that commit. On `ATTACHMENT_SPOKES` the 100 MiB spoke draws 8 px
-	under "Nothing", the ×0.5 floor (4 px) under "Edge count" (one edge against a
-	reference of three), and ≈ 15.97 px under "Attachment size"; the hub has
-	three edges and nothing attached, so 8 px, 8 px, then 4 px.
+	redraws on that commit. On `ATTACHMENT_SPOKES`, where no node carries a
+	weight, the 100 MiB spoke draws 8 px under the shipped "Node weight" (no
+	weight draws the normal border), the ×0.5 floor (4 px) under "Edge count" (one
+	edge against a reference of three), and ≈ 34.58 px under "Attachment size";
+	the hub has three edges and nothing attached, so 8 px, 8 px, then 4 px.
 -->
 <Story
 	name="ChoosingASourceInSettingsRedrawsBordersAtOnce"
@@ -9072,7 +9079,7 @@
 		await waitForLayout();
 		const harness = getSettingsHarness(canvasElement);
 		const select = borderSourceSelect(canvasElement);
-		expect(select.value).toBe('none');
+		expect(select.value).toBe('weight');
 		expect(nodeBorderWidths(canvasElement, 'hundred').asked).toBeCloseTo(8, 5);
 		expect(nodeBorderWidths(canvasElement, 'hub').asked).toBeCloseTo(8, 5);
 
@@ -9096,8 +9103,8 @@
 		expectDrawnBorder(attached.rendered, attached.asked);
 		expect(nodeBorderWidths(canvasElement, 'hub').asked).toBeCloseTo(4, 5);
 
-		// Back to the shipped source: the override is dropped, not stored as "none".
-		chooseOption(borderSourceSelect(canvasElement), 'none');
+		// Back to the shipped source: the override is dropped, not stored as "weight".
+		chooseOption(borderSourceSelect(canvasElement), 'weight');
 		await waitFor(() => expect(harness.dataset.settingsChangeCount).toBe('3'));
 		expect(harnessSettings(canvasElement)).toEqual({});
 		await waitFor(() => expect(nodeBorderWidths(canvasElement, 'hundred').asked).toBeCloseTo(8, 5));

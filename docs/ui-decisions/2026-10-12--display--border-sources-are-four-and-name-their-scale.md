@@ -6,3 +6,8 @@
 - Why: owner ruling, 2026-10-12. Naming the scale in the label answers "how much thicker is twice as much" before the reader asks. Weights and edge counts sit in a narrow range where readers compare them directly; bytes and characters span orders of magnitude and would pin to the bounds on a linear scale. Old saved choices of Size or Attachments are dropped by the settings' option check, so those graphs draw Nothing.
 - Pattern: none
 - Status: ruling
+
+## Addendum, 2026-10-12: shipped defaults
+
+- Chosen (owner ruling, later the same day): the shipped source is **Node weight (linear)**, not Nothing; "Thickest border" (`maxFactor`) is ×10 and "Width per doubling (logarithmic sources)" is 0.5; "Thinnest border" stays ×0.5. The sliders widen so these sit inside with room to go further: Thickest border 1..12 (step 0.5), Width per doubling 0..1 (step 0.05). A graph whose nodes carry no weight still draws the normal border everywhere, so the new default changes nothing until an importer or the edit sheet sets weights.
+- Consequence: at ×10 a node is mostly border (80 px a side on a 200 px radius) and its title cannot stay inside the circle, so the readability story no longer tracks the cap. It asserts at a named readable factor of ×3 instead; past about ×2.2 the badge rows already clip.

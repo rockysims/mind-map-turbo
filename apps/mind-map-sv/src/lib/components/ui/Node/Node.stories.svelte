@@ -166,26 +166,28 @@
 	const LONG_TITLE = 'Really long node title goes here. '.repeat(40);
 
 	/**
-	 * The widest border a sized node can draw with the shipped defaults: the
-	 * configured width at `borderWeight.maxFactor`. Read from `APP_CONFIG` so these
-	 * stories follow the default if it is ever lowered.
+	 * The thickest border factor these stories promise stays readable. It does
+	 * not track `borderWeight.maxFactor`: the shipped cap is higher (×10 since the
+	 * 2026-10-12 defaults ruling, 80 px a side on a 200 px radius), so a node at
+	 * the cap is mostly border and its content cannot fit. Past roughly ×2.2 the
+	 * badge rows already clip; ×3 is where the title alone still fits.
 	 */
-	const THICKEST_BORDER_PX =
-		APP_CONFIG.multigraph.nodeBorderWidthPx * APP_CONFIG.multigraph.borderWeight.maxFactor;
+	const READABLE_BORDER_FACTOR = 3;
+	const READABLE_BORDER_PX = APP_CONFIG.multigraph.nodeBorderWidthPx * READABLE_BORDER_FACTOR;
 
 	/**
 	 * A border drawn inside the circle eats into the content area, so at the
-	 * thickest border the title must still sit wholly inside the padding box:
+	 * readable border the title must still sit wholly inside the padding box:
 	 * the circle's rect inset by the rendered border on every side.
 	 */
-	async function titleInsideThickestBorderPlayHandler({ canvasElement, args }: PlayArgs) {
+	async function titleInsideReadableBorderPlayHandler({ canvasElement, args }: PlayArgs) {
 		const circle = canvasElement.querySelector('.node .circle');
 		const titleEl = canvasElement.querySelector('.node .title');
 		if (!(circle instanceof HTMLElement)) throw new Error('Circle not found');
 		if (!(titleEl instanceof HTMLElement)) throw new Error('Title not found');
 
 		const border = parseFloat(window.getComputedStyle(circle).borderTopWidth);
-		expect(border).toBeCloseTo(THICKEST_BORDER_PX, 0);
+		expect(border).toBeCloseTo(READABLE_BORDER_PX, 0);
 
 		expect(titleEl).toBeVisible();
 		expect(titleEl.textContent).toBe(args.nodeData.title);
@@ -263,31 +265,31 @@
 />
 
 <Story
-	name="ShortTitleStaysInsideTheCircleAtTheThickestBorder"
+	name="ShortTitleStaysInsideTheCircleAtAReadableBorder"
 	args={{
 		nodeData: {
-			id: 'node id short title thickest border',
+			id: 'node id short title readable border',
 			title: SHORT_TITLE,
 			description: '',
 			tags: []
 		},
-		borderWidthPx: THICKEST_BORDER_PX
+		borderWidthPx: READABLE_BORDER_PX
 	}}
-	play={titleInsideThickestBorderPlayHandler}
+	play={titleInsideReadableBorderPlayHandler}
 />
 
 <Story
-	name="LongTitleStaysInsideTheCircleAtTheThickestBorder"
+	name="LongTitleStaysInsideTheCircleAtAReadableBorder"
 	args={{
 		nodeData: {
-			id: 'node id long title thickest border',
+			id: 'node id long title readable border',
 			title: LONG_TITLE,
 			description: '',
 			tags: []
 		},
-		borderWidthPx: THICKEST_BORDER_PX
+		borderWidthPx: READABLE_BORDER_PX
 	}}
-	play={titleInsideThickestBorderPlayHandler}
+	play={titleInsideReadableBorderPlayHandler}
 />
 
 <Story

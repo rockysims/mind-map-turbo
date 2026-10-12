@@ -210,7 +210,8 @@ describe('CONFIG_SCHEMA', () => {
 			['descriptionLength', 'Description length (logarithmic)']
 		]);
 		for (const option of spec.options) expect(option.help).toBeTruthy();
-		expect(readAtPath('multigraph.borderWeight.source')).toBe('none');
+		// Owner ruling 2026-10-12 (later the same day): node weight is the default.
+		expect(readAtPath('multigraph.borderWeight.source')).toBe('weight');
 	});
 
 	it('gives every valued border source a reference, and nothing else', () => {

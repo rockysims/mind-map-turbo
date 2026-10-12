@@ -403,7 +403,7 @@
 		const select = within(weight).getByRole('combobox', { name: 'Border shows' });
 		if (!(select instanceof HTMLSelectElement)) throw new Error('Border shows is not a select');
 		// Each source names its scale (owner ruling, 2026-10-12), and borders show
-		// nothing until a reader picks one.
+		// node weight until a reader picks another (defaults ruling, same day).
 		expect([...select.options].map((option) => option.textContent?.trim())).toEqual([
 			'Nothing',
 			'Node weight (linear)',
@@ -411,8 +411,8 @@
 			'Attachment size (logarithmic)',
 			'Description length (logarithmic)'
 		]);
-		expect(select.value).toBe('none');
-		expect(select.selectedOptions[0]?.textContent?.trim()).toBe('Nothing');
+		expect(select.value).toBe('weight');
+		expect(select.selectedOptions[0]?.textContent?.trim()).toBe('Node weight (linear)');
 
 		const reference = sectionEl(canvasElement, 'basic:multigraph.borderReference');
 		expect(weight.nextElementSibling).toBe(reference);
