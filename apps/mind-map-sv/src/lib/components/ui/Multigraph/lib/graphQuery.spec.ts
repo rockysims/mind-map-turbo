@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { evaluateGraphQuery, parseGraphQuery } from './graphQuery';
 import { fallbackTagColor } from './tagColors';
 import { makeGraph } from './testFixtures';
+import { DEFAULT_TAG_SYNTAX, type TagSyntaxConfig } from './titleSyntax';
 
 describe('graphQuery', () => {
 	const graph = makeGraph({
@@ -30,7 +31,7 @@ describe('graphQuery', () => {
 	it('parses node tags, edge tags, text, phrases, spotlight, and exclude tokens', () => {
 		expect(
 			parseGraphQuery('+@edgy +#nodal@link #dialog-#modal -@edgo Some words "and a phrase"')
-		).toEqual([
+		).toMatchObject([
 			{ mode: 'spotlight', target: 'edgeTag', value: 'edgy' },
 			{ mode: 'spotlight', target: 'nodeTag', value: 'nodal' },
 			{ mode: 'focus', target: 'edgeTag', value: 'link' },
@@ -50,7 +51,7 @@ describe('graphQuery', () => {
 				edgeTagMarker: ';',
 				addonMarker: '%'
 			})
-		).toEqual([
+		).toMatchObject([
 			{ mode: 'spotlight', target: 'nodeTag', value: 'nodal' },
 			{ mode: 'focus', target: 'edgeTag', value: 'link' },
 			{ mode: 'focus', target: 'nodeTag', value: 'dialog' },
@@ -59,6 +60,70 @@ describe('graphQuery', () => {
 			{ mode: 'focus', target: 'addon', value: 'task' },
 			{ mode: 'focus', target: 'text', value: 'text' }
 		]);
+	});
+
+	describe('token source ranges', () => {
+		const configuredSyntax: TagSyntaxConfig = {
+			nodeTagMarker: ':',
+			edgeTagMarker: ';',
+			addonMarker: '%'
+		};
+
+		function typedTokens(query: string, tagSyntax = DEFAULT_TAG_SYNTAX): string[] {
+			return parseGraphQuery(query, tagSyntax).map((token) => query.slice(token.start, token.end));
+		}
+
+		it('slices back to exactly what was typed for every token', () => {
+			expect(
+				typedTokens('+@edgy +#nodal@link #dialog-#modal -@edgo Some words "and a phrase"')
+			).toEqual([
+				'+@edgy',
+				'+#nodal',
+				'@link',
+				'#dialog',
+				'-#modal',
+				'-@edgo',
+				'Some',
+				'words',
+				'"and a phrase"'
+			]);
+			expect(typedTokens('  "  spaced   phrase "  #lab')).toEqual(['"  spaced   phrase "', '#lab']);
+			expect(typedTokens('#lab "unclosed phrase')).toEqual(['#lab', '"unclosed phrase']);
+			expect(typedTokens('-"quoted"')).toEqual(['-"quoted"']);
+			expect(typedTokens('hello#lab')).toEqual(['hello', '#lab']);
+			expect(typedTokens('#a#b')).toEqual(['#a', '#b']);
+			expect(
+				typedTokens('+:nodal;link :dialog-:modal -;edgo %task text', configuredSyntax)
+			).toEqual(['+:nodal', ';link', ':dialog', '-:modal', '-;edgo', '%task', 'text']);
+		});
+
+		it('spells a tag token as prefix plus marker plus value', () => {
+			const prefixes = { focus: '', spotlight: '+', exclude: '-' };
+			const cases: Array<[string, TagSyntaxConfig]> = [
+				['+@edgy +#nodal@link #dialog-#modal -@edgo !task -!task', DEFAULT_TAG_SYNTAX],
+				['+:nodal;link :dialog-:modal -;edgo %task', configuredSyntax]
+			];
+			for (const [query, tagSyntax] of cases) {
+				const markers = {
+					nodeTag: tagSyntax.nodeTagMarker,
+					edgeTag: tagSyntax.edgeTagMarker,
+					addon: tagSyntax.addonMarker
+				};
+				for (const token of parseGraphQuery(query, tagSyntax)) {
+					if (token.target === 'text') continue;
+					expect(query.slice(token.start, token.end)).toBe(
+						`${prefixes[token.mode]}${markers[token.target]}${token.value}`
+					);
+				}
+			}
+		});
+
+		it('produces no token, and so no range, for text that parses to nothing', () => {
+			expect(parseGraphQuery('""')).toEqual([]);
+			expect(parseGraphQuery('#')).toEqual([]);
+			expect(parseGraphQuery('+#')).toEqual([]);
+			expect(typedTokens('#a "" # +# #b')).toEqual(['#a', '#b']);
+		});
 	});
 
 	it('returns inactive state for empty queries', () => {
@@ -233,41 +298,43 @@ describe('graphQuery', () => {
 		});
 
 		it('parses the add-on marker with focus, spotlight, and exclude prefixes', () => {
-			expect(parseGraphQuery('!task')).toEqual([{ mode: 'focus', target: 'addon', value: 'task' }]);
-			expect(parseGraphQuery('+!task')).toEqual([
+			expect(parseGraphQuery('!task')).toMatchObject([
+				{ mode: 'focus', target: 'addon', value: 'task' }
+			]);
+			expect(parseGraphQuery('+!task')).toMatchObject([
 				{ mode: 'spotlight', target: 'addon', value: 'task' }
 			]);
-			expect(parseGraphQuery('-!task')).toEqual([
+			expect(parseGraphQuery('-!task')).toMatchObject([
 				{ mode: 'exclude', target: 'addon', value: 'task' }
 			]);
 		});
 
 		it('keeps an unregistered add-on name as a token rather than dropping it', () => {
-			expect(parseGraphQuery('!nothing')).toEqual([
+			expect(parseGraphQuery('!nothing')).toMatchObject([
 				{ mode: 'focus', target: 'addon', value: 'nothing' }
 			]);
 		});
 
 		it('combines an add-on token with a node tag token', () => {
-			expect(parseGraphQuery('!task #lab')).toEqual([
+			expect(parseGraphQuery('!task #lab')).toMatchObject([
 				{ mode: 'focus', target: 'addon', value: 'task' },
 				{ mode: 'focus', target: 'nodeTag', value: 'lab' }
 			]);
 		});
 
 		it('ends a text token at the add-on marker the way it does at a tag marker', () => {
-			expect(parseGraphQuery('hello#lab')).toEqual([
+			expect(parseGraphQuery('hello#lab')).toMatchObject([
 				{ mode: 'focus', target: 'text', value: 'hello' },
 				{ mode: 'focus', target: 'nodeTag', value: 'lab' }
 			]);
-			expect(parseGraphQuery('hello!task')).toEqual([
+			expect(parseGraphQuery('hello!task')).toMatchObject([
 				{ mode: 'focus', target: 'text', value: 'hello' },
 				{ mode: 'focus', target: 'addon', value: 'task' }
 			]);
 		});
 
 		it('leaves a quoted add-on marker as literal text', () => {
-			expect(parseGraphQuery('"!task"')).toEqual([
+			expect(parseGraphQuery('"!task"')).toMatchObject([
 				{ mode: 'focus', target: 'text', value: '!task' }
 			]);
 		});
