@@ -45,6 +45,12 @@ export interface GraphLayoutOptions {
 	scaleByNodeId?: Record<string, number>;
 	participatingNodeIds?: ReadonlySet<string>;
 	mobilityByNodeId?: Record<string, number>;
+	/**
+	 * Node id → how much of hop repulsion's extra clearance that node holds open
+	 * (in the app, its tags' spacing factors). Physics combines a pair's two
+	 * factors itself; absent nodes and an absent map read as 1.
+	 */
+	repulsionFactorByNodeId?: Record<string, number>;
 }
 
 interface GraphRelaxationStep {
@@ -85,7 +91,8 @@ export function deriveGraphLayout(data: MultigraphData, options: GraphLayoutOpti
 					anchoredIds,
 					shortestPathHops,
 					options.participatingNodeIds,
-					options.mobilityByNodeId
+					options.mobilityByNodeId,
+					options.repulsionFactorByNodeId
 				)
 			: basePositions;
 

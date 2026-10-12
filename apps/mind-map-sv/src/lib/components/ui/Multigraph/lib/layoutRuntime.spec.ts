@@ -761,6 +761,135 @@ describe('LayoutRuntime', () => {
 		});
 	});
 
+	describe('weighLayoutGraph and repulsionFactorsFor', () => {
+		// n0 — n1 joined by a `rel` edge; n2 hangs off nothing and is off screen
+		// unless the hop map says otherwise.
+		const graph = {
+			...makeGraph({
+				nodeCount: 3,
+				pinned: [0],
+				edges: [{ source: 0, target: 1, tags: ['rel'] }]
+			}),
+			posByNodeId: {
+				n0: { x: 0, y: 0 },
+				n1: { x: 300, y: 0 },
+				n2: { x: 1400, y: 0 }
+			}
+		};
+		const derived: EdgeData = {
+			id: 'dataflow:n0->n1',
+			sourceNodeId: 'n0',
+			targetNodeId: 'n1',
+			tags: [],
+			directed: true,
+			springFactor: 1
+		};
+
+		/** Stamps every edge with `gapFactor`, as the app's tag hook would. */
+		function stampingGapFactor(gapFactor: number) {
+			return (layoutGraph: MultigraphData): MultigraphData => ({
+				...layoutGraph,
+				edges: layoutGraph.edges.map((edge) => ({ ...edge, gapFactor }))
+			});
+		}
+
+		function runtimeWith(
+			hooks: {
+				weighLayoutGraph?: (layoutGraph: MultigraphData) => MultigraphData;
+				repulsionFactorsFor?: (layoutGraph: MultigraphData) => Record<string, number> | undefined;
+				composeDerivedEdges?: (graph: MultigraphData) => readonly EdgeData[];
+			} = {},
+			hopsByNodeId: Record<string, number> = { n0: 0, n1: 1, n2: Infinity }
+		): LayoutRuntime {
+			return new LayoutRuntime({
+				getGraph: () => graph,
+				getLayoutSettings: () => ({ relaxIterations: 0, displayedLayers: 2 }),
+				getActiveDragNodeId: () => null,
+				getPreferredBeaconNodeIds: () => [],
+				applyGraph: () => {},
+				computeHops: () => hopsByNodeId,
+				scheduler: new TestScheduler(),
+				...hooks
+			});
+		}
+
+		it('weighs the composed graph as its last step', () => {
+			// After reduction and composition: the hook sees the derived edge and
+			// not the off-screen node, and what it returns is the layout graph.
+			const seen: MultigraphData[] = [];
+			const layoutGraph = runtimeWith({
+				composeDerivedEdges: () => [derived],
+				weighLayoutGraph: (composed) => {
+					seen.push(composed);
+					return stampingGapFactor(2)(composed);
+				}
+			}).visibleGraphFor(graph);
+
+			expect(seen).toHaveLength(1);
+			expect(seen[0].nodes.map((node) => node.id)).toEqual(['n0', 'n1']);
+			expect(seen[0].edges.map((edge) => edge.id)).toEqual(['e0', derived.id]);
+			expect(layoutGraph.edges.map((edge) => edge.gapFactor)).toEqual([2, 2]);
+		});
+
+		it('leaves the layout graph unweighed without the hook', () => {
+			const layoutGraph = runtimeWith().visibleGraphFor(graph);
+
+			expect(layoutGraph.edges).toEqual(graph.edges);
+			expect(layoutGraph.edges.every((edge) => edge.gapFactor === undefined)).toBe(true);
+		});
+
+		it("carries the hook's repulsion map for the layout graph it builds options for", () => {
+			const asked: MultigraphData[] = [];
+			const runtime = runtimeWith({
+				repulsionFactorsFor: (layoutGraph) => {
+					asked.push(layoutGraph);
+					return { n1: 3 };
+				}
+			});
+			const layoutGraph = runtime.visibleGraphFor(graph);
+			const options = runtime.layoutOptions(layoutGraph, { hopsByNodeId: { n0: 0, n1: 1 } });
+
+			expect(options.repulsionFactorByNodeId).toEqual({ n1: 3 });
+			expect(asked).toEqual([layoutGraph]);
+		});
+
+		it('lets an explicit repulsion map win over the hook', () => {
+			const runtime = runtimeWith({ repulsionFactorsFor: () => ({ n1: 3 }) });
+			const options = runtime.layoutOptions(runtime.visibleGraphFor(graph), {
+				hopsByNodeId: { n0: 0, n1: 1 },
+				repulsionFactorByNodeId: { n0: 0.5 }
+			});
+
+			expect(options.repulsionFactorByNodeId).toEqual({ n0: 0.5 });
+		});
+
+		it('has no repulsion map without the hook', () => {
+			const runtime = runtimeWith();
+			const options = runtime.layoutOptions(runtime.visibleGraphFor(graph), {
+				hopsByNodeId: { n0: 0, n1: 1 }
+			});
+
+			expect(options.repulsionFactorByNodeId).toBeUndefined();
+		});
+
+		it('relaxes a weighed edge to its longer rest gap, and keeps the factor off the graph', () => {
+			function settled(weighLayoutGraph?: (layoutGraph: MultigraphData) => MultigraphData) {
+				return runtimeWith({ weighLayoutGraph }).relaxAfterMutation(graph, null, 400);
+			}
+			function gapN0ToN1(relaxed: MultigraphData): number {
+				const source = relaxed.posByNodeId.n0;
+				const target = relaxed.posByNodeId.n1;
+				return Math.hypot(target.x - source.x, target.y - source.y);
+			}
+
+			const weighed = settled(stampingGapFactor(2));
+
+			expect(gapN0ToN1(weighed)).toBeGreaterThan(gapN0ToN1(settled()) + 1);
+			// Positions only come back: the saved graph's edges never see the factor.
+			expect(weighed.edges).toEqual(graph.edges);
+		});
+	});
+
 	describe('computeHops', () => {
 		// n4 is four authored hops from the pin with only two layers shown, and it
 		// starts sitting on top of the pinned node. Overlap resolution will shove it

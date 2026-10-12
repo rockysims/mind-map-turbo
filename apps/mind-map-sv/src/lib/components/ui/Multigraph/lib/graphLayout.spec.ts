@@ -194,6 +194,40 @@ describe('graphLayout', () => {
 		expect(layout.scaleByNodeId.n1).toBe(0.2);
 	});
 
+	describe('repulsionFactorByNodeId', () => {
+		// A chain n0 — n1 — n2 laid out on a line, so n0 and n2 are a
+		// non-adjacent pair held apart by hop repulsion's extra clearance.
+		const graph = makeGraph({
+			nodeCount: 3,
+			pinned: [0],
+			edges: [
+				[0, 1],
+				[1, 2]
+			],
+			posByNodeId: { n0: { x: 0, y: 0 }, n1: { x: 120, y: 0 }, n2: { x: 240, y: 0 } }
+		});
+
+		function settledGapN0ToN2(repulsionFactorByNodeId?: Record<string, number>): number {
+			const layout = deriveGraphLayout(graph, {
+				hopsByNodeId: { n0: 0, n1: 1, n2: 2 },
+				settings: { baseRadius: 100 },
+				relaxIterations: 400,
+				repulsionFactorByNodeId
+			});
+			const source = layout.posByNodeId.n0;
+			const target = layout.posByNodeId.n2;
+			return Math.hypot(target.x - source.x, target.y - source.y);
+		}
+
+		it('pushes a non-adjacent pair further apart when a node holds more clearance', () => {
+			expect(settledGapN0ToN2({ n2: 4 })).toBeGreaterThan(settledGapN0ToN2() + 1);
+		});
+
+		it('lays out exactly as without it when the map is empty', () => {
+			expect(settledGapN0ToN2({})).toBe(settledGapN0ToN2());
+		});
+	});
+
 	// An import is parked beside its host with the two components touching, and
 	// nothing connects them, so whatever the layout does next is where they stay.
 	describe('two disconnected components parked side by side', () => {

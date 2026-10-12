@@ -166,6 +166,7 @@
 	} from './lib/graph.js';
 	import { addonIntentLabel, type NodeAddonName } from './lib/nodeAddons';
 	import { deriveGraphLayout, withSettledGraphPositions } from './lib/graphLayout.js';
+	import { repulsionFactorByNodeId, withTagGapFactors } from './lib/tagPhysics.js';
 	import { scaleByHops } from './lib/layout.js';
 	import { evaluateGraphQuery, type GraphQueryElementState } from './lib/graphQuery.js';
 	import { createLayoutSourceReducer, excludedGraphElements } from './lib/excludedElements.js';
@@ -946,6 +947,8 @@
 		reduceLayoutSource: layoutSourceFor,
 		computeHops: (data) => hopsFor(data),
 		composeDerivedEdges: (data) => withSpringFactor(layoutDataflowFor(data).edges),
+		weighLayoutGraph: withTagGapFactorsOn,
+		repulsionFactorsFor: repulsionFactorsOn,
 		// A getter, re-read every frame, so a physics slider is live while it moves.
 		getLayoutSettings: () => layoutSettingsFromConfig,
 		getActiveDragNodeId: () => activeDragNodeId,
@@ -984,6 +987,28 @@
 	function withSpringFactor(edges: readonly DerivedEdge[]): DerivedEdge[] {
 		const springFactor = resolvedLayoutSettings.derivedEdgeSpringFactor;
 		return edges.map((edge) => ({ ...edge, springFactor }));
+	}
+
+	/**
+	 * Stamps a composed layout graph's edges with the `gapFactor` their tags ask
+	 * for, under the layout graph's own `tagPhysicsConfig` (it rides along through
+	 * every `...data` spread), so a mutation being relaxed is weighed by its own
+	 * config. Hands the graph straight back when no edge factor applies — this
+	 * runs every relax frame.
+	 *
+	 * Applied at every place a layout graph is composed: the runtime's
+	 * `visibleGraphFor` (as `weighLayoutGraph`), `visibleGraph` below, and the
+	 * ingest settle. A composition without it would lay out under different
+	 * forces from the one drawn beside it, and nothing would fail.
+	 */
+	function withTagGapFactorsOn(layoutGraph: MultigraphData): MultigraphData {
+		const edges = withTagGapFactors(layoutGraph.edges, layoutGraph.tagPhysicsConfig);
+		return edges === layoutGraph.edges ? layoutGraph : { ...layoutGraph, edges };
+	}
+
+	/** The hop-repulsion clearance factors a layout graph's node tags ask for. */
+	function repulsionFactorsOn(layoutGraph: MultigraphData): Record<string, number> | undefined {
+		return repulsionFactorByNodeId(layoutGraph.nodes, layoutGraph.tagPhysicsConfig);
 	}
 
 	/**
@@ -1120,7 +1145,9 @@
 	 * derived edges riding along in `.edges`.
 	 */
 	const visibleGraph = $derived(
-		composeVisibleLayoutGraph(layoutSourceGraph, visibleNodeIds, layoutDerivedEdges)
+		withTagGapFactorsOn(
+			composeVisibleLayoutGraph(layoutSourceGraph, visibleNodeIds, layoutDerivedEdges)
+		)
 	);
 	/** Needs the visible set, so that out-of-view reads differently from undefined. */
 	const dataflowDiagnostics = $derived(
@@ -1318,10 +1345,12 @@
 		// matches, so the arriving graph settles without those nodes.
 		const ingestSource = untrack(() => layoutSourceFor(incoming));
 		const layoutGraphForIngest = untrack(() =>
-			composeVisibleLayoutGraph(
-				ingestSource,
-				new Set(ingestSource.nodes.map((node) => node.id)),
-				withSpringFactor(layoutDataflowFor(ingestSource).edges)
+			withTagGapFactorsOn(
+				composeVisibleLayoutGraph(
+					ingestSource,
+					new Set(ingestSource.nodes.map((node) => node.id)),
+					withSpringFactor(layoutDataflowFor(ingestSource).edges)
+				)
 			)
 		);
 		// The same hop map the canvas will draw from, so the graph settles at the
@@ -1329,7 +1358,8 @@
 		const hopsByNodeIdForIngest = untrack(() => hopsFor(ingestSource));
 		const settledLayoutGraph = withSettledGraphPositions(layoutGraphForIngest, {
 			settings: ingestLayoutSettings,
-			hopsByNodeId: hopsByNodeIdForIngest
+			hopsByNodeId: hopsByNodeIdForIngest,
+			repulsionFactorByNodeId: repulsionFactorsOn(layoutGraphForIngest)
 		});
 		// Positions only: `settledLayoutGraph.edges` carries the derived edges, and
 		// the graph the app mutates and saves must never see one. An excluded node

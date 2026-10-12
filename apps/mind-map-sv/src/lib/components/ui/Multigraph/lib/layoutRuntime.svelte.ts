@@ -114,6 +114,24 @@ interface LayoutRuntimeOptions {
 	 * already-reduced graph gets it straight back.
 	 */
 	reduceLayoutSource?: (graph: MultigraphData) => MultigraphData;
+	/**
+	 * The last pass over a composed layout graph, after reduction and the derived
+	 * edges have joined it — in the app, stamping each edge with the `gapFactor`
+	 * its tags ask for. Handed the layout graph itself, so a mutation being
+	 * relaxed is weighed by its own config rather than the live graph's.
+	 * Defaults to identity.
+	 *
+	 * Whatever it writes stays on the layout graph: only positions come back
+	 * into the graph the app keeps (`mergeVisiblePositions`).
+	 */
+	weighLayoutGraph?: (layoutGraph: MultigraphData) => MultigraphData;
+	/**
+	 * Node id → hop-repulsion clearance factor for a layout graph — in the app,
+	 * the factors its node tags ask for. `layoutOptions` consults it for every
+	 * layout it builds options for, unless the caller passes a map of its own.
+	 * Defaults to none (every node ×1).
+	 */
+	repulsionFactorsFor?: (layoutGraph: MultigraphData) => Record<string, number> | undefined;
 	scheduler?: LayoutRuntimeScheduler;
 	/** Returns true while enter/exit animations are active; keeps the frame loop running. */
 	getHasActiveTransitions?: () => boolean;
@@ -390,6 +408,7 @@ export class LayoutRuntime {
 			scaleAnchoredNodeIds?: readonly string[];
 			participatingNodeIds?: ReadonlySet<string>;
 			mobilityByNodeId?: Record<string, number>;
+			repulsionFactorByNodeId?: Record<string, number>;
 		}
 	): GraphLayoutOptions {
 		const nodeIds = layoutGraph.nodes.map((node) => node.id);
@@ -404,7 +423,9 @@ export class LayoutRuntime {
 			relaxIterations: overrides.relaxIterations,
 			scaleByNodeId: overrides.scaleByNodeId ?? this.animatedScaleByNodeId,
 			participatingNodeIds: relayoutParticipating,
-			mobilityByNodeId: overrides.mobilityByNodeId
+			mobilityByNodeId: overrides.mobilityByNodeId,
+			repulsionFactorByNodeId:
+				overrides.repulsionFactorByNodeId ?? this.#options.repulsionFactorsFor?.(layoutGraph)
 		};
 	}
 
@@ -530,7 +551,9 @@ export class LayoutRuntime {
 	 * and no way for two of them to disagree.
 	 *
 	 * Reduces its argument to the layout source first, so it may be handed the
-	 * whole graph or an already-reduced one with the same result.
+	 * whole graph or an already-reduced one with the same result, and weighs the
+	 * composition last (`weighLayoutGraph`), so every relax frame, mutation and
+	 * scale change lays out under the same per-element factors.
 	 */
 	visibleGraphFor(
 		graph: MultigraphData,
@@ -540,11 +563,12 @@ export class LayoutRuntime {
 		const visibleNodeIds = visibleNodeIdsForPinnedNeighborhood(layoutSource, hopsByNodeId, {
 			displayedLayers: this.#resolvedSettings().displayedLayers
 		});
-		return composeVisibleLayoutGraph(
+		const layoutGraph = composeVisibleLayoutGraph(
 			layoutSource,
 			visibleNodeIds,
 			this.#options.composeDerivedEdges?.(layoutSource)
 		);
+		return this.#options.weighLayoutGraph?.(layoutGraph) ?? layoutGraph;
 	}
 
 	/**
