@@ -61,22 +61,32 @@ BUGS:
 - Edit dialog background (click to close) has very rounded edges and padding so it doesn't cover the full Stage.
 - Pinned node doesn't show description.
 - e2e `reload restores graph data and viewState from localStorage without file
-  import` flakes under a full parallel run: the failure snapshot shows the title
+import` flakes under a full parallel run: the failure snapshot shows the title
   as `RootRefresh Test Node`, so `editFirstNodeTitle`'s `fill` landed before the
   title input had cleared its initial value. Passes 3/3 in isolation. The helper
   should wait for the field to hold what it typed before moving on.
 - e2e `deep zoom nests a node image as a second level and pops back to the node`
   fails: the assertion after the first wheel-in reads `data-zoom-world-scale` as
   1. Confirmed pre-existing on a clean tree at 5517f5c (checked while landing
-  milestone 12, which does not touch the zoom path). Still failing at the same
-  line after the ZoomWorld subject-sizing fix, and the failure snapshot says
-  why: it is reading the wrong world. That first `deltaY: -3000` asks for
-  `e^6 ≈ 403x`, far past `maxScale * (1 + preInscribeZoneFraction)`, so
-  `descendBoundaryDelta` saturates at 1 and the descend fires on that same
-  wheel — the node world unmounts (level 1 freezes) and `.zoom-world.first()`
-  is the fresh depth-2 image world, sitting at scale 1. Either the test should
-  zoom in with a wheel that does not also saturate the descend zone, or a
-  descend should need more than one event's worth of pressure.
+     milestone 12, which does not touch the zoom path). Still failing at the same
+     line after the ZoomWorld subject-sizing fix, and the failure snapshot says
+     why: it is reading the wrong world. That first `deltaY: -3000` asks for
+     `e^6 ≈ 403x`, far past `maxScale * (1 + preInscribeZoneFraction)`, so
+     `descendBoundaryDelta` saturates at 1 and the descend fires on that same
+     wheel — the node world unmounts (level 1 freezes) and `.zoom-world.first()`
+     is the fresh depth-2 image world, sitting at scale 1. Either the test should
+     zoom in with a wheel that does not also saturate the descend zone, or a
+     descend should need more than one event's worth of pressure.
+- e2e `app.test.ts` "deep zoom nests a node image as a second level and pops back
+  to the node" fails at the `data-zoom-world-scale` assertion (line ~784): a wheel
+  event over the nested image leaves the world scale at 1. Reproduces on `temp`
+  alone in a clean detached worktree, so it predates the settings panel and is not
+  a merge artifact. Unknown whether the zoom-world behaviour or the test's
+  expectation is the wrong one.
+- e2e `app.test.ts` is intermittently flaky around `waitForStoredTitle`: a
+  different test times out waiting on localStorage on different runs (seen under
+  both 2 workers and `--workers=1`), and each passes in isolation. Smells like
+  cross-test storage or webServer contention rather than a product bug.
 
 MAYBE:
 
@@ -142,3 +152,8 @@ big findings became milestone 11 and two standalone bug-fix tasks):
 - Group diagnostics references by node id at compute time (`referencesForNode` is a linear scan per rendered node).
 
 TODO: look into vector embedding search (using transform) so users can search title, description, images (later videos), etc.
+
+TODO: show first image as node background (high value, low lift probably)
+TODO: global AI chat that can edit the graph for the user (and, ideally, scrap data from a url or uploaded file)
+TODO: try to figure out how to make deep zoom properly sticky so I don't accidently keep overshooting one way or the other
+TODO: make sure AI output nodes / promoted nodes in general have meaningful names

@@ -7,6 +7,7 @@ import { addNode, setTagColor } from './components/ui/Multigraph/lib/graph';
 import { makeGraph } from './components/ui/Multigraph/lib/testFixtures';
 import type { GraphCommitIntent } from './components/ui/types/history';
 import type { MultigraphData } from './components/ui/types/multigraph';
+import type { ConfigOverrides } from './config/configOverrides';
 import {
 	GRAPH_HTML_READER_VERSION,
 	parseGraphFileText,
@@ -83,9 +84,10 @@ class TestScheduler implements GraphSaveScheduler {
 			id: string,
 			data: MultigraphData,
 			viewState: ViewState,
-			readHistory?: ReadHistoryTail
+			readHistory?: ReadHistoryTail,
+			settings?: ConfigOverrides
 		): void => {
-			this.pending = { id, graph: { data, viewState }, readHistory };
+			this.pending = { id, graph: { data, viewState, settings }, readHistory };
 		}
 	);
 
@@ -256,6 +258,7 @@ function setup(
 			draftGraph: MultigraphData;
 			fileGraph: MultigraphData;
 		}) => EmbeddedDocumentConflictChoice | Promise<EmbeddedDocumentConflictChoice>;
+		createSettingsSeed?: () => ConfigOverrides;
 		assetStore?: GraphAssetStore;
 		durability?: 'durable' | 'memory-only';
 		historyCeiling?: number;
@@ -283,6 +286,7 @@ function setup(
 		confirmGraphImportReplace: options.confirmGraphImportReplace,
 		confirmNewGraphReplace: options.confirmNewGraphReplace,
 		chooseEmbeddedDocumentConflict: options.chooseEmbeddedDocumentConflict,
+		createSettingsSeed: options.createSettingsSeed,
 		assetStore: options.assetStore,
 		historyCeiling: options.historyCeiling,
 		createDocumentId: () => 'doc-new',
@@ -1086,6 +1090,128 @@ describe('GraphPersistenceController', () => {
 			state: 'notice',
 			sticky: true,
 			message: 'Import failed. Could not read the file.'
+		});
+	});
+
+	it("loads a graph's settings and carries them through export and import", async () => {
+		const settings = {
+			'multigraph.layout.scaleFalloff': 0.5,
+			'multigraph.layout.normalizeRelaxationRotation': false
+		} satisfies ConfigOverrides;
+		const source = setup();
+		await source.persistence.save('active', {
+			data: createDefaultGraph(),
+			viewState: nonNeutralViewState(),
+			settings
+		});
+		await source.controller.load('active');
+
+		expect(source.controller.getView().settings).toEqual(settings);
+
+		const artifact = await source.controller.exportGraphDocument();
+		const target = setup();
+		await target.controller.load('other');
+		const result = await target.controller.importGraphDocument(artifact.content);
+
+		expect(result).toBe('imported');
+		expect(target.controller.getView().settings).toEqual(settings);
+		await expect(target.persistence.load('other')).resolves.toMatchObject({ settings });
+	});
+
+	it('starts a new graph untuned and stores no settings for it', async () => {
+		const { controller, persistence } = setup();
+		await controller.load('active');
+
+		await controller.createGraph('graph-new');
+
+		expect(controller.getView().settings).toEqual({});
+		expect((await persistence.load('graph-new'))?.settings).toBeUndefined();
+	});
+
+	it('stamps the saved seed into a new graph at creation', async () => {
+		const seed = { 'multigraph.layout.scaleFalloff': 0.4 } satisfies ConfigOverrides;
+		const createSettingsSeed = vi.fn(() => seed);
+		const { controller, persistence } = setup({ createSettingsSeed });
+		await controller.load('active');
+
+		await controller.createGraph('graph-new');
+
+		expect(createSettingsSeed).toHaveBeenCalledTimes(1);
+		expect(controller.getView().settings).toEqual(seed);
+		expect((await persistence.load('graph-new'))?.settings).toEqual(seed);
+	});
+
+	it('does not let a seed change after creation retune an existing graph', async () => {
+		let seed: ConfigOverrides = { 'multigraph.layout.scaleFalloff': 0.4 };
+		const { controller, persistence } = setup({ createSettingsSeed: () => seed });
+		await controller.load('active');
+
+		await controller.createGraph('graph-new');
+		expect(controller.getView().settings).toEqual({ 'multigraph.layout.scaleFalloff': 0.4 });
+
+		// The seed changes (or is cleared) after the graph was created...
+		seed = { 'multigraph.layout.scaleFalloff': 0.9 };
+
+		// ...but the already-created graph's stored settings are untouched: the
+		// seed is read exactly once, at creation, never again.
+		expect((await persistence.load('graph-new'))?.settings).toEqual({
+			'multigraph.layout.scaleFalloff': 0.4
+		});
+		expect(controller.getView().settings).toEqual({ 'multigraph.layout.scaleFalloff': 0.4 });
+	});
+
+	it('autosaves settings changes without remounting the canvas', async () => {
+		const { controller, persistence, scheduler } = setup();
+		await controller.load('active');
+		const before = controller.getView();
+		const settings = { 'multigraph.layout.scaleFalloff': 0.5 } satisfies ConfigOverrides;
+
+		controller.notifySettingsChanged(settings, { syncView: true });
+		await scheduler.flush();
+
+		const after = controller.getView();
+		expect(after.settings).toEqual(settings);
+		// The {#key} in +page.svelte is keyed on graphGeneration, and everything
+		// derived from the graph is keyed on its identity: neither may move here.
+		expect(after.graphGeneration).toBe(before.graphGeneration);
+		expect(after.graph).toBe(before.graph);
+		expect(persistence.save).toHaveBeenLastCalledWith('active', {
+			data: before.graph,
+			viewState: before.viewState,
+			settings
+		});
+	});
+
+	it('keeps the loaded settings on later graph and view state saves', async () => {
+		const settings = { 'multigraph.layout.scaleFalloff': 0.5 } satisfies ConfigOverrides;
+		const { controller, persistence, scheduler } = setup();
+		await persistence.save('active', {
+			data: createDefaultGraph(),
+			viewState: NEUTRAL_VIEW_STATE,
+			settings
+		});
+		await controller.load('active');
+
+		const edited = makeGraph({ nodeCount: 3 });
+		controller.notifyGraphChanged(edited, { syncView: true });
+		await scheduler.flush();
+		expect(persistence.save).toHaveBeenLastCalledWith('active', {
+			data: edited,
+			viewState: NEUTRAL_VIEW_STATE,
+			settings
+		});
+
+		// A camera move schedules no write of its own — it is folded into the next
+		// flush — so the settings have to survive that path too, not just the
+		// scheduled one above.
+		const viewState = nonNeutralViewState();
+		controller.notifyViewStateChanged(viewState, { syncView: true });
+		await controller.flushPendingSave();
+		await scheduler.flush();
+		expect(persistence.save).toHaveBeenLastCalledWith('active', {
+			data: edited,
+			viewState,
+			settings
 		});
 	});
 

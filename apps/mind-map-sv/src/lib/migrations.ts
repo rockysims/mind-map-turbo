@@ -20,6 +20,7 @@ import type {
 } from './components/ui/types/node';
 import { isRegisteredAddon, type NodeAddonName } from './components/ui/Multigraph/lib/nodeAddons';
 import { isAiRunStatus } from './components/ui/Multigraph/lib/aiNode';
+import type { ConfigOverrides } from './config/configOverrides';
 
 export const CURRENT_SCHEMA_VERSION = 8;
 
@@ -40,6 +41,13 @@ export type PersistedGraphPayload = {
 	schemaVersion: typeof CURRENT_SCHEMA_VERSION;
 	data: MultigraphData;
 	viewState?: ViewState;
+	/**
+	 * A graph's sparse config overrides. Deliberately no schema bump: the
+	 * envelope check below only validates `payload.data`, so a payload that
+	 * carries this key loads in every build and one that omits it loads here.
+	 * Absent and empty mean the same thing, so an untuned graph omits the key.
+	 */
+	settings?: ConfigOverrides;
 	history?: PersistedHistoryTail;
 };
 
@@ -74,6 +82,13 @@ export type PersistedHistoryTail = {
 	entries: Array<PersistedHistoryState & { delta: GraphDelta }>;
 };
 
+/** Whether an override map actually carries anything worth persisting. */
+export function hasConfigOverrides(
+	settings: ConfigOverrides | undefined
+): settings is ConfigOverrides {
+	return settings !== undefined && Object.keys(settings).length > 0;
+}
+
 export class PersistedGraphError extends Error {
 	constructor(
 		message: string,
@@ -86,13 +101,16 @@ export class PersistedGraphError extends Error {
 
 export function wrapPersistedGraph(
 	data: MultigraphData,
+	settings?: ConfigOverrides,
 	history?: PersistedHistoryTail
 ): PersistedGraphPayload {
-	return {
+	const payload: PersistedGraphPayload = {
 		schemaVersion: CURRENT_SCHEMA_VERSION,
 		data,
 		...(history === undefined ? {} : { history })
 	};
+	if (hasConfigOverrides(settings)) payload.settings = settings;
+	return payload;
 }
 
 /**

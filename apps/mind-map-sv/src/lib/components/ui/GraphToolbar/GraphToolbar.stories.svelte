@@ -10,10 +10,12 @@
 		argTypes: {
 			notice: { control: 'text' },
 			severity: { control: 'radio', options: ['info', 'warning'] },
+			settingsOpen: { control: 'boolean' },
 			onNewGraph: { control: false },
 			onOpenGraphFilePicker: { control: false },
 			onImportGraphFile: { control: false },
-			onSave: { control: false }
+			onSave: { control: false },
+			onOpenSettings: { control: false }
 		},
 		parameters: {
 			viewport: {
@@ -32,11 +34,13 @@
 			notice?: string;
 			severity?: 'info' | 'warning';
 			aiConnected?: boolean;
+			settingsOpen?: boolean;
 			onNewGraph?: () => void;
 			onOpenGraphFilePicker?: () => void;
 			onImportGraphFile?: (file: File) => void;
 			onSave?: () => void;
 			onOpenAiSettings?: () => void;
+			onOpenSettings?: () => void;
 		};
 	};
 
@@ -248,6 +252,41 @@
 		// The dot the reader looks for after pressing Connect.
 		const dot = control.querySelector('[data-ai-connected-dot]');
 		await expect(getComputedStyle(dot as Element).backgroundColor).toBe('rgb(74, 222, 128)');
+	}}
+/>
+
+<Story
+	name="UserOpensSettingsFromTheSecondPill"
+	args={{
+		notice: 'Draft cached in this browser. Save to keep it.',
+		settingsOpen: false,
+		onNewGraph: fn(),
+		onOpenGraphFilePicker: fn(),
+		onImportGraphFile: fn(),
+		onSave: fn(),
+		onOpenSettings: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		const canvas = within(canvasElement);
+		const settings = canvas.getByRole('button', { name: 'Settings' });
+
+		// A dialog opener, not a toggle button: the panel it opens is a dialog, and
+		// `aria-expanded` is what tells a screen reader whether it is already there.
+		await expect(settings).toHaveAttribute('aria-haspopup', 'dialog');
+		await expect(settings).toHaveAttribute('aria-expanded', 'false');
+
+		// One row holds both pills, so Settings cannot drift away from the document
+		// controls however the toolbar's contents change.
+		const row = settings.closest('.toolbar-row');
+		await expect(row).not.toBeNull();
+		await expect(row).toContainElement(canvas.getByRole('button', { name: 'Save' }));
+		await expect(row).toContainElement(canvas.getByRole('status'));
+
+		settings.click();
+
+		expect(spyFor(args.onOpenSettings).mock.calls).toHaveLength(1);
+		expect(spyFor(args.onNewGraph).mock.calls).toHaveLength(0);
+		expect(spyFor(args.onSave).mock.calls).toHaveLength(0);
 	}}
 />
 

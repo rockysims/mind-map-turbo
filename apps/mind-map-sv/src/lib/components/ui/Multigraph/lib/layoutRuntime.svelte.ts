@@ -188,6 +188,32 @@ export class LayoutRuntime {
 		this.start();
 	}
 
+	/**
+	 * A layout setting just changed under a graph that may well be sitting still.
+	 * Physics reads its tunables per frame, so nothing has to be recomputed here —
+	 * what is missing is frames. This buys some, and the nodes walk to the rest
+	 * positions the new numbers describe instead of holding the ones the old
+	 * numbers left them in, overlapping wherever a resize made them bigger.
+	 *
+	 * The budget is topped up rather than assigned because this fires on every
+	 * pointermove of a slider drag: a plain assignment would hand back the full
+	 * budget on each of them, and the settle could never count down to a stop
+	 * while the pointer was still holding the slider.
+	 */
+	settleAfterSettingsChange(): void {
+		// A drag owns the budget while it lasts: `beginDrag` zeroes it deliberately,
+		// keeping the loop alive off the drag itself so the settle only begins when
+		// the finger lifts. Funding a settle here would run one against a node the
+		// pointer is still moving.
+		if (this.#options.getActiveDragNodeId() === null) {
+			this.settleFramesRemaining = Math.max(
+				this.settleFramesRemaining,
+				this.#resolvedSettings().postDragSettleMaxFrames
+			);
+		}
+		this.start();
+	}
+
 	relaxAfterMutation(
 		nextGraph: MultigraphData,
 		dragNodeId: string | null = this.#options.getActiveDragNodeId(),

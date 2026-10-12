@@ -1,6 +1,8 @@
 import type { MultigraphData } from './components/ui/types/multigraph';
+import { sanitizeOverrides, type ConfigOverrides } from './config/configOverrides';
 import {
 	NEUTRAL_VIEW_STATE,
+	hasConfigOverrides,
 	unwrapPersistedGraph,
 	unwrapPersistedHistory,
 	wrapPersistedGraph,
@@ -32,6 +34,11 @@ type StoredGraphPayload = PersistedGraphPayload & {
 export type PersistedGraphRecord = {
 	data: MultigraphData;
 	viewState: ViewState;
+	/**
+	 * The graph's sparse config overrides. Optional because absent and empty
+	 * mean the same thing: a graph with no overrides stores no `settings` key.
+	 */
+	settings?: ConfigOverrides;
 	/**
 	 * The recent undo tail, in the draft only. Absent on a record that never had
 	 * one, and on every exported file — see `PersistedHistoryTail`.
@@ -68,13 +75,14 @@ export class LocalStoragePersistence implements Persistence {
 		return {
 			data: unwrapPersistedGraph(raw),
 			viewState: readViewState(raw),
+			settings: readSettings(raw),
 			...(history === null ? {} : { history })
 		};
 	}
 
 	async save(id: string, graph: PersistedGraphRecord): Promise<void> {
 		const payload: StoredGraphPayload = {
-			...wrapPersistedGraph(graph.data, graph.history ?? undefined),
+			...wrapPersistedGraph(graph.data, graph.settings, graph.history ?? undefined),
 			viewState: graph.viewState,
 			updatedAt: this.now()
 		};
@@ -121,6 +129,7 @@ export class ServerPersistence implements Persistence {
 		return {
 			data: unwrapPersistedGraph(payload),
 			viewState: readViewState(payload),
+			settings: readSettings(payload),
 			...(history === null ? {} : { history })
 		};
 	}
@@ -130,7 +139,7 @@ export class ServerPersistence implements Persistence {
 			method: 'PUT',
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify({
-				...wrapPersistedGraph(graph.data, graph.history ?? undefined),
+				...wrapPersistedGraph(graph.data, graph.settings, graph.history ?? undefined),
 				viewState: graph.viewState
 			})
 		});
@@ -190,6 +199,20 @@ function readUpdatedAt(payload: unknown): number {
 	}
 
 	return 0;
+}
+
+/**
+ * Stored JSON is untrusted — another tab, an older build, or a hand edit could
+ * have written it — so overrides come back through `sanitizeOverrides`, which
+ * drops what it cannot use instead of throwing. An empty result is reported as
+ * no settings at all, so a graph without overrides round-trips as it always did.
+ */
+function readSettings(payload: unknown): ConfigOverrides | undefined {
+	if (typeof payload !== 'object' || payload === null || !('settings' in payload)) {
+		return undefined;
+	}
+	const { overrides } = sanitizeOverrides(payload.settings);
+	return hasConfigOverrides(overrides) ? overrides : undefined;
 }
 
 function readViewState(payload: unknown): ViewState {

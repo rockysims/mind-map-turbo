@@ -11,6 +11,7 @@ import {
 } from './components/ui/Multigraph/lib/graphIdentity';
 import { importGraphData } from './components/ui/Multigraph/lib/graphImport';
 import { newerAppNotice } from './buildInfo';
+import type { ConfigOverrides } from './config/configOverrides';
 import {
 	documentStatusHasUnsavedChanges,
 	documentStatusForGraph,
@@ -34,6 +35,7 @@ import { applyDelta, deltaApplies, diffByReference } from './graphDelta';
 import {
 	NEUTRAL_VIEW_STATE,
 	PersistedGraphError,
+	hasConfigOverrides,
 	type PersistedHistoryState,
 	type PersistedHistoryTail,
 	type ViewState
@@ -150,6 +152,12 @@ type HistoryEntry = {
 type ControllerView = {
 	graph: MultigraphData;
 	viewState: ViewState;
+	/**
+	 * This graph's sparse config overrides. Presentation, like `viewState`, so
+	 * it lives beside the graph rather than inside it: changing a setting must
+	 * not re-run anything derived from `MultigraphData`.
+	 */
+	settings: ConfigOverrides;
 	graphSummaries: GraphSummary[];
 	loadedGraphId: string;
 	documentId: string | null;
@@ -212,7 +220,8 @@ export type GraphSaveScheduler = {
 		id: string,
 		data: MultigraphData,
 		viewState: ViewState,
-		readHistory?: ReadHistoryTail
+		readHistory?: ReadHistoryTail,
+		settings?: ConfigOverrides
 	): void;
 	flush(): Promise<void>;
 	dispose(): void;
@@ -230,6 +239,15 @@ export type GraphPersistenceControllerDeps = {
 	persistence: Persistence;
 	createScheduler: (onStatus: (status: SaveStatus) => void) => GraphSaveScheduler;
 	createDefaultGraph: () => MultigraphData;
+	/**
+	 * Reads the sparse "seed" overrides saved by the settings panel's "Use as
+	 * seed for new graphs" action, if any. Called once per `createGraph`, never
+	 * stored — the seed is stamped into the new graph's own overrides and is
+	 * never consulted again, so changing or clearing it afterwards cannot
+	 * retune a graph that already exists. A dep (mirroring `createDefaultGraph`)
+	 * rather than an import, so `localStorage` stays out of this pure controller.
+	 */
+	createSettingsSeed?: () => ConfigOverrides;
 	navigate: (graphId: string) => void | Promise<void>;
 	storageNamespace: string;
 	/** 'memory-only' when the browser blocks site data; defaults to 'durable'. */
@@ -304,6 +322,7 @@ export class GraphPersistenceController {
 		this.view = {
 			graph: defaultGraph,
 			viewState: { ...NEUTRAL_VIEW_STATE },
+			settings: {},
 			graphSummaries: [],
 			loadedGraphId: '',
 			documentId: null,
@@ -359,6 +378,7 @@ export class GraphPersistenceController {
 		const defaultGraph = this.deps.createDefaultGraph();
 		const nextGraph = savedGraph?.data ?? defaultGraph;
 		const nextViewState = savedGraph?.viewState ?? { ...NEUTRAL_VIEW_STATE };
+		const nextSettings = savedGraph?.settings ?? {};
 		this.baseline = {
 			kind: 'new',
 			graph: defaultGraph
@@ -373,6 +393,7 @@ export class GraphPersistenceController {
 		this.update({
 			graph: nextGraph,
 			viewState: nextViewState,
+			settings: nextSettings,
 			loadedGraphId: graphId,
 			documentId: options.documentId ?? null,
 			documentStatus: this.currentDocumentStatus(),
@@ -419,6 +440,7 @@ export class GraphPersistenceController {
 		const recoveredDraft = shouldRecoverDraft && !graphDataEquals(savedDraft.data, doc.data);
 		const nextGraph = shouldRecoverDraft ? savedDraft.data : doc.data;
 		const nextViewState = shouldRecoverDraft ? savedDraft.viewState : doc.viewState;
+		const nextSettings = (shouldRecoverDraft ? savedDraft.settings : doc.settings) ?? {};
 		if (shouldOpenFile) {
 			await this.hydrateEmbeddedAssets(graphId, doc);
 		}
@@ -437,6 +459,7 @@ export class GraphPersistenceController {
 		this.update({
 			graph: nextGraph,
 			viewState: nextViewState,
+			settings: nextSettings,
 			loadedGraphId: graphId,
 			documentId: doc.documentId,
 			documentStatus: this.currentDocumentStatus(),
@@ -692,6 +715,24 @@ export class GraphPersistenceController {
 		this.view = { ...this.view, viewState };
 	}
 
+	/**
+	 * Records a settings change. Unlike a camera change it is not deferred: the
+	 * reader committed a value deliberately, so it is written like a graph edit.
+	 * It deliberately leaves `graphGeneration` alone — bumping it would remount
+	 * the canvas through the `{#key}` in `+page.svelte` on every committed
+	 * slider — and never rewrites `view.graph`, whose identity everything
+	 * derived from `MultigraphData` is keyed on.
+	 */
+	notifySettingsChanged(settings: ConfigOverrides, options: { syncView?: boolean } = {}): void {
+		const graphId = this.view.loadedGraphId || DEFAULT_GRAPH_ID;
+		this.scheduleSave(graphId, this.view.graph, this.view.viewState, settings);
+		if (options.syncView) {
+			this.update({ settings });
+			return;
+		}
+		this.view = { ...this.view, settings };
+	}
+
 	async exportGraphDocument(htmlShell?: string): Promise<GraphFileArtifact> {
 		const documentId = this.view.documentId ?? this.nextDocumentId();
 		if (this.view.documentId === null) {
@@ -707,6 +748,7 @@ export class GraphPersistenceController {
 			{
 				data: this.view.graph,
 				viewState: this.view.viewState,
+				settings: this.view.settings,
 				documentId,
 				exportedAt: this.now(),
 				appVersion: this.deps.appVersion,
@@ -770,6 +812,7 @@ export class GraphPersistenceController {
 		this.update({
 			graph: imported.data,
 			viewState: imported.viewState,
+			settings: imported.settings ?? {},
 			documentId: imported.documentId ?? this.view.documentId,
 			documentStatus: this.currentDocumentStatus(imported.data),
 			graphGeneration: this.graphGeneration
@@ -1066,6 +1109,10 @@ export class GraphPersistenceController {
 
 		await this.flushPendingSave();
 		const nextGraph = this.deps.createDefaultGraph();
+		// Read exactly once, here: the seed is stamped into the new graph's own
+		// overrides and never consulted again, so changing or clearing it later
+		// cannot retune a graph that already exists.
+		const seedSettings = this.deps.createSettingsSeed?.() ?? {};
 		this.baseline = { kind: 'new', graph: nextGraph };
 		this.recoveredDraft = false;
 		this.lastPersistedFingerprint = null;
@@ -1074,6 +1121,7 @@ export class GraphPersistenceController {
 		this.update({
 			graph: nextGraph,
 			viewState: { ...NEUTRAL_VIEW_STATE },
+			settings: seedSettings,
 			loadedGraphId: graphId,
 			documentId: null,
 			documentStatus: this.currentDocumentStatus(nextGraph),
@@ -1135,13 +1183,26 @@ export class GraphPersistenceController {
 	 * Every scheduled cache write goes through here so `cachePending` cannot
 	 * drift from what the scheduler was actually asked to do.
 	 */
-	private scheduleSave(id: string, data: MultigraphData, viewState: ViewState): void {
+	private scheduleSave(
+		id: string,
+		data: MultigraphData,
+		viewState: ViewState,
+		settings: ConfigOverrides = this.view.settings
+	): void {
 		this.cachePending = true;
 		// The scheduled write carries the current camera, so it is no longer owed.
 		this.viewStateDirty = false;
 		// A thunk, so the O(K·N) tail is built once per debounced write rather than
 		// on every commit — this runs on every `pointermove` of a drag.
-		this.scheduler.schedule(id, data, viewState, () => this.persistedHistoryTail());
+		const readHistory = () => this.persistedHistoryTail();
+		// Empty and absent mean the same thing everywhere below — the stored record
+		// and the exported file both omit the key — so an untuned graph keeps the
+		// exact call it made before settings existed.
+		if (hasConfigOverrides(settings)) {
+			this.scheduler.schedule(id, data, viewState, readHistory, settings);
+			return;
+		}
+		this.scheduler.schedule(id, data, viewState, readHistory);
 	}
 
 	/**

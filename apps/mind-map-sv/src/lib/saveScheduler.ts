@@ -1,4 +1,5 @@
 import type { MultigraphData } from './components/ui/types/multigraph';
+import type { ConfigOverrides } from './config/configOverrides';
 import { graphFingerprint } from './documentStatus';
 import type { PersistedHistoryTail, ViewState } from './migrations';
 import type { Persistence } from './persistence';
@@ -24,6 +25,7 @@ type PendingSave = {
 	graph: {
 		data: MultigraphData;
 		viewState: ViewState;
+		settings?: ConfigOverrides;
 	};
 	readHistory?: ReadHistoryTail;
 };
@@ -65,9 +67,10 @@ export class SaveScheduler {
 		id: string,
 		data: MultigraphData,
 		viewState: ViewState,
-		readHistory?: ReadHistoryTail
+		readHistory?: ReadHistoryTail,
+		settings?: ConfigOverrides
 	): void {
-		this.pending = { id, graph: { data, viewState }, readHistory };
+		this.pending = { id, graph: { data, viewState, settings }, readHistory };
 		this.clearPendingTimer();
 		this.timer = this.setTimer(() => {
 			this.timer = null;
@@ -128,7 +131,8 @@ export class SaveScheduler {
 					this.pending.id,
 					this.pending.graph.data,
 					this.pending.graph.viewState,
-					this.pending.readHistory
+					this.pending.readHistory,
+					this.pending.graph.settings
 				);
 			}
 		}

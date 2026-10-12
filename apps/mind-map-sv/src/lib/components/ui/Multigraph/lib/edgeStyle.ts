@@ -340,30 +340,32 @@ function formatNumber(value: number): string {
 
 export function edgeArrowScale(
 	visibility: RenderableEdgeVisibility,
-	scaleByNodeId: Record<string, number>
+	scaleByNodeId: Record<string, number>,
+	referenceNodeScale: number = EDGE_ARROW_REFERENCE_NODE_SCALE
 ): number {
 	if (visibility.kind !== 'visible' || visibility.edge.directed !== true) return 1;
 	const targetScale = scaleByNodeId[visibility.edge.targetNodeId] ?? 1;
-	return targetScale / EDGE_ARROW_REFERENCE_NODE_SCALE;
+	return targetScale / referenceNodeScale;
 }
 
 export function edgeStrokeScale(
 	visibility: RenderableEdgeVisibility,
-	scaleByNodeId: Record<string, number>
+	scaleByNodeId: Record<string, number>,
+	referenceNodeScale: number = EDGE_STROKE_REFERENCE_NODE_SCALE
 ): number {
 	if (visibility.kind === 'boundary') {
-		return nodeScale(scaleByNodeId, visibility.visibleNodeId) / EDGE_STROKE_REFERENCE_NODE_SCALE;
+		return nodeScale(scaleByNodeId, visibility.visibleNodeId) / referenceNodeScale;
 	}
 
 	const edge = visibility.edge;
 	if (edge.directed === true) {
-		return nodeScale(scaleByNodeId, edge.targetNodeId) / EDGE_STROKE_REFERENCE_NODE_SCALE;
+		return nodeScale(scaleByNodeId, edge.targetNodeId) / referenceNodeScale;
 	}
 
 	return (
 		(nodeScale(scaleByNodeId, edge.sourceNodeId) + nodeScale(scaleByNodeId, edge.targetNodeId)) /
 		2 /
-		EDGE_STROKE_REFERENCE_NODE_SCALE
+		referenceNodeScale
 	);
 }
 

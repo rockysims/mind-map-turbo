@@ -321,6 +321,71 @@ describe('LayoutRuntime', () => {
 		expect(runtime.revealWaveNodeOpacityByNodeId.n5 ?? 1).toBeLessThan(1);
 	});
 
+	describe('settleAfterSettingsChange', () => {
+		it('starts the frame loop from idle', () => {
+			// A setting changed under a graph at rest. Physics reads the new numbers
+			// per frame, so the settle only shows up if something asks for frames.
+			const { runtime, scheduler } = createRuntimeFixture(undefined, {
+				postDragSettleEpsilonPx: -1,
+				postDragSettleMaxFrames: 2
+			});
+			expect(scheduler.requests).toBe(0);
+
+			runtime.settleAfterSettingsChange();
+
+			expect(scheduler.requests).toBe(1);
+			expect(runtime.settleFramesRemaining).toBe(2);
+			expect(runtime.isSettling).toBe(true);
+		});
+
+		it('tops the budget up instead of restarting or shortening it', () => {
+			const { runtime } = createRuntimeFixture(undefined, {
+				postDragSettleEpsilonPx: -1,
+				postDragSettleMaxFrames: 2
+			});
+
+			// Three pointermoves of one slider drag buy two frames, not six: the
+			// budget is capped, so a held pointer cannot inflate it.
+			runtime.settleAfterSettingsChange();
+			runtime.settleAfterSettingsChange();
+			runtime.settleAfterSettingsChange();
+			expect(runtime.settleFramesRemaining).toBe(2);
+
+			// Frames already spent are refunded — a slider that keeps moving keeps
+			// its full budget ahead of it — but the count still counts down.
+			runtime.step(1);
+			expect(runtime.settleFramesRemaining).toBe(1);
+			runtime.settleAfterSettingsChange();
+			expect(runtime.settleFramesRemaining).toBe(2);
+
+			// And a longer settle already in flight — a scale change's, say — is not
+			// cut short to the smaller post-drag budget.
+			runtime.settleFramesRemaining = 5;
+			runtime.settleAfterSettingsChange();
+			expect(runtime.settleFramesRemaining).toBe(5);
+		});
+
+		it('leaves the budget at zero while a node drag is active', () => {
+			// `beginDrag` zeroes it on purpose: the loop runs off the drag, and the
+			// settle is meant to start when the finger lifts, not against a node the
+			// pointer is still moving.
+			const { runtime, scheduler, setActiveDragNodeId } = createRuntimeFixture(undefined, {
+				postDragSettleEpsilonPx: -1,
+				postDragSettleMaxFrames: 2
+			});
+			setActiveDragNodeId('n0');
+			runtime.beginDrag();
+			expect(runtime.settleFramesRemaining).toBe(0);
+			expect(scheduler.requests).toBe(1);
+
+			runtime.settleAfterSettingsChange();
+
+			expect(runtime.settleFramesRemaining).toBe(0);
+			// The loop was already scheduled, so no second frame is queued for it.
+			expect(scheduler.requests).toBe(1);
+		});
+	});
+
 	describe('composeDerivedEdges', () => {
 		// n2 hangs off nothing, so with one layer shown it is off screen while n0
 		// and n1 are on it.

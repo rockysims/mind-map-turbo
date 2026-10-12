@@ -1,4 +1,5 @@
 import type { MultigraphData } from '$lib/components/ui/types/multigraph';
+import type { ConfigOverrides } from '$lib/config/configOverrides';
 import { NEUTRAL_VIEW_STATE, type ViewState } from '$lib/migrations';
 import type { GraphSummary, PersistedGraphRecord, Persistence } from '$lib/persistence';
 
@@ -25,13 +26,21 @@ export class InMemoryPersistence implements Persistence {
 	async load(id: string): Promise<PersistedGraphRecord | null> {
 		const graph = this.graphs.get(id);
 		return graph
-			? { data: cloneGraph(graph.graph.data), viewState: cloneViewState(graph.graph.viewState) }
+			? {
+					data: cloneGraph(graph.graph.data),
+					viewState: cloneViewState(graph.graph.viewState),
+					settings: cloneSettings(graph.graph.settings)
+				}
 			: null;
 	}
 
 	async save(id: string, graph: PersistedGraphRecord): Promise<void> {
 		this.graphs.set(id, {
-			graph: { data: cloneGraph(graph.data), viewState: cloneViewState(graph.viewState) },
+			graph: {
+				data: cloneGraph(graph.data),
+				viewState: cloneViewState(graph.viewState),
+				settings: cloneSettings(graph.settings)
+			},
 			updatedAt: this.now()
 		});
 	}
@@ -53,4 +62,8 @@ function cloneGraph(graph: MultigraphData): MultigraphData {
 
 function cloneViewState(viewState: ViewState): ViewState {
 	return { panX: viewState.panX, panY: viewState.panY, scale: viewState.scale };
+}
+
+function cloneSettings(settings: ConfigOverrides | undefined): ConfigOverrides | undefined {
+	return settings === undefined ? undefined : { ...settings };
 }

@@ -1,8 +1,10 @@
 import type { MultigraphData } from './components/ui/types/multigraph';
+import { sanitizeOverrides, type ConfigOverrides } from './config/configOverrides';
 import {
 	CURRENT_SCHEMA_VERSION,
 	NEUTRAL_VIEW_STATE,
 	PersistedGraphError,
+	hasConfigOverrides,
 	unwrapPersistedGraph,
 	type ViewState
 } from './migrations';
@@ -25,6 +27,8 @@ const GRAPH_HTML_ASSET_ID_ATTRIBUTE = 'data-mind-map-asset-id';
 export type GraphFileDocument = {
 	data: MultigraphData;
 	viewState: ViewState;
+	/** The graph's sparse config overrides; absent when it has none. */
+	settings?: ConfigOverrides;
 	documentId?: string;
 	exportedAt?: number;
 	/**
@@ -54,6 +58,7 @@ type GraphFilePayload = {
 	schemaVersion: typeof CURRENT_SCHEMA_VERSION;
 	data: MultigraphData;
 	viewState: ViewState;
+	settings?: ConfigOverrides;
 	documentId?: string;
 	exportedAt?: number;
 	appVersion?: string;
@@ -174,6 +179,57 @@ export function isUnsupportedHtmlGraphFile(error: unknown): boolean {
 	return error instanceof PersistedGraphError && error.code === 'unsupported-app-version';
 }
 
+/** The three distinguishable results of lifting settings out of a graph file. */
+export type SettingsImportOutcome =
+	| { kind: 'applied'; overrides: ConfigOverrides; warnings: string[] }
+	| { kind: 'no-settings' }
+	| { kind: 'unreadable' };
+
+/**
+ * Lifts just the `settings` blob out of a `.html` or `.json` graph file's
+ * text, for the settings panel's "Import from graph file…" action. There is
+ * no settings file format of its own — every exported graph already carries
+ * its own tuning (see the plan's "Reusing tuning across graphs" decision), so
+ * this is the only way settings move between graphs.
+ *
+ * Two things this deliberately does NOT do, both load-bearing:
+ *
+ * - It never calls `extractHtmlAssetPayloads`. Reading tuning out of a 100 MB
+ *   illustrated graph must cost one regex match and one `JSON.parse`, not a
+ *   base64 decode of every embedded image.
+ * - It never calls `unwrapPersistedGraph`. Settings must be readable from a
+ *   graph file whose `data` this build cannot open — a future-version graph,
+ *   or one hand-edited into invalidity — because the two are unrelated
+ *   payload keys and a broken graph should not also cost the user their tuning.
+ *
+ * `raw.settings` is run through `sanitizeOverrides`, the same trust boundary
+ * `readSettings` (above) uses for the normal load path; the difference is that
+ * this function surfaces the warnings instead of discarding them, and treats
+ * "no settings key" and "every key got dropped" as the same common,
+ * non-error outcome: `'no-settings'`. Only a file that could not be parsed at
+ * all is `'unreadable'`.
+ */
+export function readSettingsFromGraphFileText(text: string): SettingsImportOutcome {
+	let raw: unknown;
+	try {
+		const json = looksLikeHtml(text) ? extractHtmlGraphPayload(text) : text;
+		raw = JSON.parse(json);
+	} catch {
+		return { kind: 'unreadable' };
+	}
+
+	if (!isRecord(raw) || raw.settings === undefined) {
+		return { kind: 'no-settings' };
+	}
+
+	const { overrides, warnings } = sanitizeOverrides(raw.settings);
+	if (!hasConfigOverrides(overrides)) {
+		return { kind: 'no-settings' };
+	}
+
+	return { kind: 'applied', overrides, warnings };
+}
+
 function parseGraphFilePayload(
 	json: string,
 	opts: { minScale?: number; maxScale?: number } = {}
@@ -198,6 +254,7 @@ function parseGraphFilePayload(
 	return {
 		data,
 		viewState,
+		settings: readSettings(raw),
 		documentId: readOptionalString(raw, 'documentId'),
 		exportedAt: readOptionalNumber(raw, 'exportedAt'),
 		appVersion: readOptionalString(raw, 'appVersion')
@@ -209,6 +266,9 @@ function graphFilePayload(doc: GraphFileDocument): GraphFilePayload {
 		schemaVersion: CURRENT_SCHEMA_VERSION,
 		data: doc.data,
 		viewState: doc.viewState,
+		// Omitted rather than written as `{}` so an untuned graph serializes
+		// byte-for-byte the way it did before settings existed.
+		settings: hasConfigOverrides(doc.settings) ? doc.settings : undefined,
 		documentId: doc.documentId,
 		exportedAt: doc.exportedAt,
 		appVersion: doc.appVersion
@@ -394,6 +454,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isFiniteNumber(value: unknown): value is number {
 	return typeof value === 'number' && Number.isFinite(value);
+}
+
+/**
+ * Lifts a file's `settings` blob through `sanitizeOverrides` — a file is
+ * untrusted input, so unknown paths and wrong types are dropped rather than
+ * trusted or thrown on. The warnings are discarded here; T09's dedicated
+ * settings read path is what surfaces them to the user.
+ */
+function readSettings(raw: unknown): ConfigOverrides | undefined {
+	if (!isRecord(raw) || raw.settings === undefined) return undefined;
+	const { overrides } = sanitizeOverrides(raw.settings);
+	return hasConfigOverrides(overrides) ? overrides : undefined;
 }
 
 function readOptionalString(raw: unknown, key: string): string | undefined {

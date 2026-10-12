@@ -13,13 +13,15 @@
 		redoBlockedReason = 'Nothing to redo.',
 		aiConnected = false,
 		onOpenAiSettings,
+		settingsOpen = false,
 		onNewGraph,
 		onOpenGraphFilePicker,
 		onImportGraphFile,
 		onSave,
 		onUndo,
 		onRedo,
-		onBlockedAction
+		onBlockedAction,
+		onOpenSettings
 	}: {
 		notice?: string;
 		/** 'warning' announces assertively and wraps: the work is at risk. */
@@ -35,6 +37,8 @@
 		/** Whether an Anthropic API key is in hand, so the control can say so. */
 		aiConnected?: boolean;
 		onOpenAiSettings?: () => void;
+		/** Drives `aria-expanded` on the Settings button; the panel lives elsewhere. */
+		settingsOpen?: boolean;
 		onNewGraph?: () => void;
 		onOpenGraphFilePicker?: () => void;
 		/** Given the chosen file, to fold into the graph already on screen. */
@@ -44,6 +48,7 @@
 		onRedo?: () => void;
 		/** A tap on a control with nothing to do, carrying the reason to say so. */
 		onBlockedAction?: (reason: string) => void;
+		onOpenSettings?: () => void;
 	} = $props();
 
 	let importInput = $state<HTMLInputElement | null>(null);
@@ -95,115 +100,190 @@
 	}
 </script>
 
-<div class="graph-toolbar" aria-label="Graph persistence controls">
-	<button type="button" title="Start a blank graph in a new tab" onclick={() => onNewGraph?.()}
-		>New</button
-	>
-	<button
-		type="button"
-		title="Open a saved graph file in a new tab"
-		onclick={() => onOpenGraphFilePicker?.()}>Open</button
-	>
-	<button
-		type="button"
-		title="Add a saved graph file to this graph, keeping both"
-		onclick={chooseImportFile}>Import…</button
-	>
-	<input
-		bind:this={importInput}
-		class="import-input"
-		type="file"
-		accept=".html,.json,text/html,application/json"
-		aria-label="Graph file to import"
-		onchange={handleImportFileChange}
-	/>
-	<button
-		type="button"
-		title="Download this graph as a file you can reopen later"
-		onclick={() => onSave?.()}>Save</button
-	>
-	<!--
-		Icon-only in an otherwise text toolbar: two more *text* buttons wrap the
-		phone toolbar to a third row (the four above already fill a 375px width),
-		and ↶/↷ are as close to self-explanatory as icons get. The operation rides
-		in the accessible name instead.
-	-->
-	<!--
-		One flex item, not three: at a 375px width the row runs out after Save, and
-		letting the icons wrap independently drops one onto a line of its own, which
-		reads as a mistake rather than as a control.
-	-->
-	<div class="icon-controls">
-		<button
-			type="button"
-			class="icon"
-			aria-disabled={!canUndo}
-			aria-label={canUndo && undoLabel ? `Undo ${undoLabel}` : 'Undo'}
-			aria-describedby={canUndo ? undefined : 'graph-toolbar-undo-reason'}
-			onclick={() => step(canUndo, undoBlockedReason, onUndo)}>↶</button
+<!--
+	Two pills, centred as one unit. Settings is a separate pill because it acts on
+	the view rather than on the document the other three share, and the row is what
+	keeps the pair adjacent: each pill keeps its own chrome, and neither can drift
+	from the other as the toolbar's contents change.
+-->
+<div class="toolbar-row">
+	<div class="graph-toolbar" aria-label="Graph persistence controls">
+		<button type="button" title="Start a blank graph in a new tab" onclick={() => onNewGraph?.()}
+			>New</button
 		>
 		<button
 			type="button"
-			class="icon"
-			aria-disabled={!canRedo}
-			aria-label={canRedo && redoLabel ? `Redo ${redoLabel}` : 'Redo'}
-			aria-describedby={canRedo ? undefined : 'graph-toolbar-redo-reason'}
-			onclick={() => step(canRedo, redoBlockedReason, onRedo)}>↷</button
+			title="Open a saved graph file in a new tab"
+			onclick={() => onOpenGraphFilePicker?.()}>Open</button
 		>
-		{#if !canUndo}
-			<span id="graph-toolbar-undo-reason" class="sr-only">{undoBlockedReason}</span>
-		{/if}
-		{#if !canRedo}
-			<span id="graph-toolbar-redo-reason" class="sr-only">{redoBlockedReason}</span>
-		{/if}
+		<button
+			type="button"
+			title="Add a saved graph file to this graph, keeping both"
+			onclick={chooseImportFile}>Import…</button
+		>
+		<input
+			bind:this={importInput}
+			class="import-input"
+			type="file"
+			accept=".html,.json,text/html,application/json"
+			aria-label="Graph file to import"
+			onchange={handleImportFileChange}
+		/>
+		<button
+			type="button"
+			title="Download this graph as a file you can reopen later"
+			onclick={() => onSave?.()}>Save</button
+		>
 		<!--
-			Connected state rides in the accessible name, not in the fill alone: the
-			colour is the glance, the name is the answer for anyone who cannot see it.
-			The dot is the glance made legible — a filled glyph and an unfilled one
-			are the same shape, and a reader who has just pressed Connect wants a
-			difference they can name. `aria-hidden`, because the name already says it.
+			Icon-only in an otherwise text toolbar: two more *text* buttons wrap the
+			phone toolbar to a third row (the four above already fill a 375px width),
+			and ↶/↷ are as close to self-explanatory as icons get. The operation rides
+			in the accessible name instead.
+		-->
+		<!--
+			One flex item, not three: at a 375px width the row runs out after Save, and
+			letting the icons wrap independently drops one onto a line of its own, which
+			reads as a mistake rather than as a control.
+		-->
+		<div class="icon-controls">
+			<button
+				type="button"
+				class="icon"
+				aria-disabled={!canUndo}
+				aria-label={canUndo && undoLabel ? `Undo ${undoLabel}` : 'Undo'}
+				aria-describedby={canUndo ? undefined : 'graph-toolbar-undo-reason'}
+				onclick={() => step(canUndo, undoBlockedReason, onUndo)}>↶</button
+			>
+			<button
+				type="button"
+				class="icon"
+				aria-disabled={!canRedo}
+				aria-label={canRedo && redoLabel ? `Redo ${redoLabel}` : 'Redo'}
+				aria-describedby={canRedo ? undefined : 'graph-toolbar-redo-reason'}
+				onclick={() => step(canRedo, redoBlockedReason, onRedo)}>↷</button
+			>
+			{#if !canUndo}
+				<span id="graph-toolbar-undo-reason" class="sr-only">{undoBlockedReason}</span>
+			{/if}
+			{#if !canRedo}
+				<span id="graph-toolbar-redo-reason" class="sr-only">{redoBlockedReason}</span>
+			{/if}
+			<!--
+				Connected state rides in the accessible name, not in the fill alone: the
+				colour is the glance, the name is the answer for anyone who cannot see it.
+				The dot is the glance made legible — a filled glyph and an unfilled one
+				are the same shape, and a reader who has just pressed Connect wants a
+				difference they can name. `aria-hidden`, because the name already says it.
+			-->
+			<button
+				type="button"
+				class="icon ai"
+				class:connected={aiConnected}
+				title="Anthropic API key, model and data settings"
+				aria-label={aiConnected ? 'AI settings, connected' : 'AI settings, not connected'}
+				data-ai-connected={aiConnected}
+				onclick={() => onOpenAiSettings?.()}
+				>✦<span class="ai-dot" data-ai-connected-dot={aiConnected} aria-hidden="true"
+				></span></button
+			>
+		</div>
+		{#if severity === 'warning'}
+			<p class="notice warning" role="alert" aria-live="assertive">
+				{#each lines as line, index (index)}<span class="notice-line">{spoken(line)}</span>{/each}
+			</p>
+		{:else}
+			<p class="notice" role="status">
+				{#each lines as line, index (index)}<span class="notice-line">{spoken(line)}</span>{/each}
+			</p>
+		{/if}
+	</div>
+
+	<div class="settings-toolbar" aria-label="Graph settings controls">
+		<!--
+			A gear rather than the word: this pill sits beside three verbs that each
+			act on the document, and an icon is what keeps it from reading as a
+			fourth. `aria-label` carries the name the buttons beside it wear openly,
+			so nothing is lost to anyone reading by name rather than by shape.
 		-->
 		<button
 			type="button"
-			class="icon ai"
-			class:connected={aiConnected}
-			title="Anthropic API key, model and data settings"
-			aria-label={aiConnected ? 'AI settings, connected' : 'AI settings, not connected'}
-			data-ai-connected={aiConnected}
-			onclick={() => onOpenAiSettings?.()}
-			>✦<span class="ai-dot" data-ai-connected-dot={aiConnected} aria-hidden="true"></span></button
+			class="icon-button"
+			title="Adjust how this graph looks and behaves"
+			aria-label="Settings"
+			aria-haspopup="dialog"
+			aria-expanded={settingsOpen}
+			onclick={() => onOpenSettings?.()}
 		>
+			<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+				<!-- Eight teeth on a ring: a gear reads as one at this size from the
+				     silhouette, so it is drawn from that rather than an outline. -->
+				<circle cx="12" cy="12" r="5.5" />
+				<circle cx="12" cy="12" r="2.1" />
+				<path
+					class="teeth"
+					d="M17.5 12h2.7M15.889 15.889l1.909 1.909M12 17.5v2.7M8.111 15.889 6.202 17.798M6.5 12H3.8M8.111 8.111 6.202 6.202M12 6.5V3.8M15.889 8.111 17.798 6.202"
+				/>
+			</svg>
+		</button>
 	</div>
-	{#if severity === 'warning'}
-		<p class="notice warning" role="alert" aria-live="assertive">
-			{#each lines as line, index (index)}<span class="notice-line">{spoken(line)}</span>{/each}
-		</p>
-	{:else}
-		<p class="notice" role="status">
-			{#each lines as line, index (index)}<span class="notice-line">{spoken(line)}</span>{/each}
-		</p>
-	{/if}
 </div>
 
 <style>
-	.graph-toolbar {
+	/* The row owns the placement; the pills inside it own their own chrome. */
+	.toolbar-row {
 		position: fixed;
 		z-index: 40;
 		top: 0.75rem;
 		left: 50%;
 		display: flex;
-		align-items: center;
+		align-items: flex-start;
 		gap: 0.5rem;
 		max-width: calc(100vw - 1.5rem);
+		transform: translateX(-50%);
+	}
+
+	.graph-toolbar,
+	.settings-toolbar {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
 		padding: 0.5rem;
 		border: 1px solid #cbd5e1;
 		border-radius: 999px;
 		background: rgb(255 255 255 / 92%);
 		box-shadow: 0 8px 24px rgb(15 23 42 / 12%);
-		transform: translateX(-50%);
 	}
 
-	.graph-toolbar button {
+	.graph-toolbar {
+		min-width: 0;
+	}
+
+	.icon-button {
+		/* Square, so the gear sits centred in a target the same height as the
+		   lettered buttons beside it rather than in a wider slab. */
+		padding: 0.375rem;
+		aspect-ratio: 1;
+	}
+
+	.icon-button svg {
+		display: block;
+		width: 1.125rem;
+		height: 1.125rem;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.9;
+		stroke-linecap: round;
+	}
+
+	/* Thicker than the ring, and squared off: tooth weight is what separates a
+	   gear from a sun at this size. */
+	.icon-button svg .teeth {
+		stroke-width: 2.9;
+		stroke-linecap: butt;
+	}
+
+	.graph-toolbar button,
+	.settings-toolbar button {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
@@ -323,13 +403,22 @@
 	}
 
 	@media (max-width: 640px) {
-		.graph-toolbar {
+		.toolbar-row {
 			right: 0.75rem;
 			left: 0.75rem;
 			flex-wrap: wrap;
 			justify-content: center;
-			border-radius: 1rem;
 			transform: none;
+		}
+
+		.graph-toolbar {
+			flex-wrap: wrap;
+			justify-content: center;
+			border-radius: 1rem;
+		}
+
+		.settings-toolbar {
+			border-radius: 1rem;
 		}
 
 		.graph-toolbar .notice {

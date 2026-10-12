@@ -1,5 +1,8 @@
 <script module lang="ts">
 	import type { QuantityDesignation } from '../types/node';
+	import type { ConfigOverrides, ResolvedConfig } from '$lib/config/configOverrides';
+	import type { ConfigPath, ConfigValue } from '$lib/config/configPaths';
+	import { CONFIG_SCHEMA } from '$lib/config/configSchema';
 
 	/**
 	 * Shared so a node with no confirmed inputs allocates nothing. The peek
@@ -8,6 +11,63 @@
 	 * the cards' derived work for a graph that did not change.
 	 */
 	const EMPTY_DESIGNATIONS: readonly QuantityDesignation[] = [];
+
+	/**
+	 * Shared empty overrides, so a graph with no settings of its own hands the
+	 * same object to `resolveConfig` on every render and the derived config keeps
+	 * its identity. A fresh `{}` prop fallback would invalidate every measurement
+	 * this component derives, once per render.
+	 */
+	const NO_OVERRIDES: ConfigOverrides = {};
+
+	/**
+	 * The settings whose change the layout cannot show on its own.
+	 *
+	 * `resize-only` fields recompute radius and scale through a `$derived` layout
+	 * built with `relaxIterations: 0`, so nodes grow in place and overlap;
+	 * `physics` fields are read per frame, so they change nothing at all while the
+	 * loop is stopped. Both need the frame loop kicked. `instant`, `gesture` and
+	 * `none` fields either redraw themselves or are correct the moment the next
+	 * gesture asks, so kicking for them would settle the graph for nothing.
+	 *
+	 * Derived from the schema once, at module scope: the list follows
+	 * `CONFIG_SCHEMA`, so a field reclassified there needs no edit here.
+	 */
+	const SETTLE_KICK_PATHS: readonly ConfigPath[] = (
+		Object.entries(CONFIG_SCHEMA) as [ConfigPath, (typeof CONFIG_SCHEMA)[ConfigPath]][]
+	)
+		.filter(
+			([, spec]) =>
+				spec.control !== 'hidden' && (spec.preview === 'resize-only' || spec.preview === 'physics')
+		)
+		.map(([path]) => path);
+
+	/** Reads the leaf at a dotted path out of an already-resolved config. */
+	function readResolvedValue(config: ResolvedConfig, path: ConfigPath): ConfigValue | undefined {
+		let current: unknown = config;
+		for (const segment of path.split('.')) {
+			if (typeof current !== 'object' || current === null) return undefined;
+			current = (current as Record<string, unknown>)[segment];
+		}
+		if (
+			typeof current === 'number' ||
+			typeof current === 'boolean' ||
+			typeof current === 'string'
+		) {
+			return current;
+		}
+		return undefined;
+	}
+
+	/**
+	 * One string standing for every value that needs a settle kick, so the effect
+	 * that kicks depends on those values and nothing else — not on the override
+	 * map, whose identity changes on every preview tick regardless of which field
+	 * moved.
+	 */
+	function settleKickFingerprint(config: ResolvedConfig): string {
+		return SETTLE_KICK_PATHS.map((path) => String(readResolvedValue(config, path))).join('|');
+	}
 </script>
 
 <script lang="ts">
@@ -30,7 +90,8 @@
 	import DeepZoomStack, { type StackFrameArgs, type LayerBaseSize } from './DeepZoomStack.svelte';
 	import Stage from './Stage.svelte';
 	import TagColorLegend from './TagColorLegend.svelte';
-	import { APP_CONFIG } from '$lib/appConfig';
+	import SettingsPanel from '$lib/components/ui/SettingsPanel/SettingsPanel.svelte';
+	import { resolveConfig, setOverride } from '$lib/config/configOverrides';
 	import type { AiClient } from '$lib/ai/aiClient';
 	import { defaultAiSettings, type AiSettings } from '$lib/ai/aiSettings';
 	import type { PyExecutor } from '$lib/ai/pyExecutor';
@@ -102,7 +163,7 @@
 	import { pinScrollToOrigin } from './lib/pinScroll';
 	import { severedComponentAfterMutation } from './lib/severedComponent.js';
 	import type { LayoutSettings } from './lib/layoutSettings.js';
-	import { withDefaultLayoutSettings } from './lib/layoutSettings.js';
+	import { DEFAULT_LAYOUT_SETTINGS, withDefaultLayoutSettings } from './lib/layoutSettings.js';
 	import {
 		composeVisibleLayoutGraph,
 		computeBoundedHops,
@@ -136,12 +197,6 @@
 		tagBorderBackground,
 		tagUsageCount
 	} from './lib/tagColors.js';
-	import {
-		EDGE_ARROW_HALF_HEIGHT,
-		EDGE_ARROW_LENGTH,
-		EDGE_STROKE_WIDTH,
-		MIN_NODE_HIT_RADIUS
-	} from '$lib/constants.js';
 	import type { ViewState } from '$lib/migrations.js';
 	import {
 		EMPTY_EXITING_BUFFER,
@@ -204,7 +259,6 @@
 	import type { Rect } from './lib/zoomBoundary.js';
 	import type { StageRect } from './lib/stageCoordinates.js';
 	import { hasSize, usableStageRect } from './lib/stageCoordinates.js';
-	import { NODE_RADIUS, NODE_TEXT_FONT_SIZE } from '$lib/constants.js';
 
 	const CENTERED_POSITION: Point = { x: 0, y: 0 };
 
@@ -242,31 +296,13 @@
 	 * `.node-wrapper.merge-target` ring in the style block below.
 	 */
 	const MERGE_PREVIEW_COLOR = '#b45309';
-	const FOCUS_TRANSITION_MS = APP_CONFIG.multigraph.focus.entryTransitionMs;
-	/**
-	 * How long the camera takes to travel to an arriving import.
-	 *
-	 * The focus morph duration, not a new constant: it is the one length in the
-	 * config that already means "the view is travelling somewhere on its own", and
-	 * a second number would only invite the two to drift apart.
-	 */
-	const IMPORT_REVEAL_TRANSITION_MS = APP_CONFIG.multigraph.focus.entryTransitionMs;
 	/**
 	 * Breathing room around the revealed node, as a fraction of its own radius —
 	 * so the reveal frames a node rather than jamming it against the bezel, at
 	 * whatever size the layout drew it.
 	 */
 	const IMPORT_REVEAL_MARGIN_RADIUS_FACTOR = 0.5;
-	/**
-	 * Hard cap on how long the reveal may keep chasing a still-moving arrival.
-	 *
-	 * The pursuit normally ends the moment the node comes to rest, but physics can
-	 * jitter below its own settle epsilon indefinitely, and a camera that never
-	 * lets go of the reader is worse than one that stops a little early.
-	 */
-	const IMPORT_REVEAL_MAX_PURSUIT_MS = APP_CONFIG.multigraph.focus.entryTransitionMs * 3;
 	const DETAILS_TITLE_ID = 'node-focus-title';
-	const NODE_DIAMETER_PX = NODE_RADIUS * 2;
 	/** Modest starting corner radius for an image frame's descend morph. */
 	const IMAGE_SOURCE_RADIUS_PX = 8;
 	/** Fixed logical size of the image level's compact (thumbnail) layer. */
@@ -300,7 +336,11 @@
 		aiClient = null,
 		aiExecutor = null,
 		aiSettings = defaultAiSettings(),
-		onOpenAiSettings
+		onOpenAiSettings,
+		settings = NO_OVERRIDES,
+		settingsPanelOpen = false,
+		onSettingsChange,
+		onSettingsPanelClose
 	}: {
 		multigraphData: MultigraphData;
 		/** Bumped when the document is swapped: this component is keyed on it and remounts. */
@@ -370,7 +410,130 @@
 		 * is how a run stopped by a missing key resumes without a second press.
 		 */
 		onOpenAiSettings?: (afterConnect?: () => void) => void;
+		/** This graph's persisted tunables, sparse: only what its author changed. */
+		settings?: ConfigOverrides;
+		/** Whether the settings panel is showing. Owned by the page, beside the toolbar button. */
+		settingsPanelOpen?: boolean;
+		/** A committed settings map, ready to persist. Never fired while a slider is moving. */
+		onSettingsChange?: (next: ConfigOverrides) => void;
+		/** The panel asked to close itself; the page owns whether it is open. */
+		onSettingsPanelClose?: () => void;
 	} = $props();
+
+	/**
+	 * The setting a slider is moving right now, if any. One is enough: a pointer
+	 * drags one slider at a time, and the panel's contract is that a preview is
+	 * transient by construction — it is replaced by the next preview and dropped
+	 * by the commit that ends the drag.
+	 */
+	let settingsPreview = $state<{ path: ConfigPath; value: ConfigValue } | null>(null);
+
+	/**
+	 * `settings` with the in-flight preview laid over it.
+	 *
+	 * Deliberately a plain write rather than `setOverride`: that function drops a
+	 * value equal to the shipped default, which is right for a commit (so saved
+	 * settings never accumulate no-ops) and wrong here — dragging a slider back
+	 * through its default must show the default, not the value underneath it.
+	 */
+	const previewedOverrides = $derived.by((): ConfigOverrides => {
+		const preview = settingsPreview;
+		if (preview === null) return settings;
+		const next: Partial<Record<ConfigPath, ConfigValue>> = { ...settings };
+		next[preview.path] = preview.value;
+		// Every key still holds the value of its own leaf; the widened map type is
+		// what forgets which key each value came from.
+		return next as ConfigOverrides;
+	});
+
+	/**
+	 * The one place this component reads tunables: the shipped defaults with this
+	 * graph's own settings merged over them, plus whatever slider is moving.
+	 *
+	 * Every measurement, timing and threshold below is derived from `cfg` rather
+	 * than captured at import or at component init, and every child that needs one
+	 * is handed it explicitly — never left to its own prop default, which is
+	 * evaluated once and would silently swallow a change. That is what makes a
+	 * slider visible while it is being dragged: the drag feeds `previewedOverrides`
+	 * and every pixel below re-derives from it.
+	 */
+	const cfg = $derived(resolveConfig(previewedOverrides));
+
+	const focusTransitionMs = $derived(cfg.multigraph.focus.entryTransitionMs);
+	/**
+	 * How long the camera takes to travel to an arriving import.
+	 *
+	 * The focus morph duration, not a number of its own: it is the one length in
+	 * the config that already means "the view is travelling somewhere on its own",
+	 * and a second would only invite the two to drift apart. Derived rather than
+	 * captured, because that length is a setting the reader can change.
+	 */
+	const importRevealTransitionMs = $derived(focusTransitionMs);
+	/**
+	 * Hard cap on how long the reveal may keep chasing a still-moving arrival.
+	 *
+	 * The pursuit normally ends the moment the node comes to rest, but physics can
+	 * jitter below its own settle epsilon indefinitely, and a camera that never
+	 * lets go of the reader is worse than one that stops a little early.
+	 */
+	const importRevealMaxPursuitMs = $derived(focusTransitionMs * 3);
+	const focusEntryGestureIdleMs = $derived(cfg.multigraph.focus.entryGestureIdleMs);
+	const focusEntryGestureMaxMs = $derived(cfg.multigraph.focus.entryGestureMaxMs);
+	const focusDetailsCornerRadiusPx = $derived(cfg.multigraph.focus.detailsCornerRadiusPx);
+	const focusDetailsBorderWidthPx = $derived(cfg.multigraph.focus.detailsBorderWidthPx);
+	const nodeTextFontSizePx = $derived(cfg.multigraph.nodeTextFontSizePx);
+	const nodeBorderWidthPx = $derived(cfg.multigraph.nodeBorderWidthPx);
+	const pinnedNodeBorderWidthPx = $derived(cfg.multigraph.pinnedNodeBorderWidthPx);
+	const minNodeHitRadiusPx = $derived(cfg.multigraph.minNodeHitRadiusPx);
+	const arrowLengthPx = $derived(cfg.multigraph.edgeArrow.lengthPx);
+	const arrowHalfHeightPx = $derived(cfg.multigraph.edgeArrow.halfHeightPx);
+	const arrowReferenceNodeScale = $derived(cfg.multigraph.edgeArrow.referenceNodeScale);
+	const strokeWidthPx = $derived(cfg.multigraph.edgeStroke.widthPx);
+	const strokeReferenceNodeScale = $derived(cfg.multigraph.edgeStroke.referenceNodeScale);
+	const dataflowCfg = $derived(cfg.multigraph.dataflow);
+	/**
+	 * This graph's layout tunables, with the `layoutSettings` prop on top.
+	 *
+	 * Order matters and is not negotiable: ~40 stories pin layout values through
+	 * the prop to make a behavior reproducible, and a graph's saved settings must
+	 * not be able to overrule a test that pins one. So the config supplies the
+	 * base — which is what makes the panel's layout sliders live — and an explicit
+	 * prop still wins over it, exactly as it wins over `DEFAULT_LAYOUT_SETTINGS`.
+	 */
+	const layoutSettingsFromConfig = $derived<Partial<LayoutSettings>>({
+		...cfg.multigraph.layout,
+		...layoutSettings
+	});
+	/**
+	 * Node chrome is sized from the layout's own base radius, not from
+	 * `multigraph.nodeRadiusPx`.
+	 *
+	 * They ship as the same number and the schema hides the latter for exactly
+	 * this reason: the layout trims every edge at `baseRadius * scale`, so a
+	 * circle drawn from a second, independent radius would leave its edges
+	 * stopping short of — or crossing into — its own border the moment the two
+	 * disagreed. Reading one number is what makes them unable to.
+	 */
+	const nodeRadiusPx = $derived(
+		layoutSettingsFromConfig.baseRadius ?? DEFAULT_LAYOUT_SETTINGS.baseRadius
+	);
+	const nodeDiameterPx = $derived(nodeRadiusPx * 2);
+	/** Everything Stage needs; a prop default there is only a story's fallback. */
+	const stageTunables = $derived({
+		dragThreshold: cfg.interaction.dragThresholdPx,
+		doubleClickMs: cfg.interaction.doubleClickMs,
+		longPressMs: cfg.interaction.longPressMs,
+		longPressDistancePx: cfg.interaction.longPressDistancePx,
+		minScale: cfg.multigraph.zoom.minScale,
+		maxScale: cfg.multigraph.zoom.maxScale
+	});
+	/** Everything a rendered Node needs to size its chrome, for the same reason. */
+	const nodeChromeTunables = $derived({
+		radiusPx: nodeRadiusPx,
+		borderWidthPx: nodeBorderWidthPx,
+		pinnedBorderWidthPx: pinnedNodeBorderWidthPx,
+		fontSizePx: nodeTextFontSizePx
+	});
 
 	let graph = $state<MultigraphData>({
 		nodes: [],
@@ -499,10 +662,19 @@
 		getReduceMotion: () => reduceMotion,
 		armEntryGate: (direction) => armStageEntryGestureGate(direction),
 		closeOverlays: () => closeOverlays(),
+		// Getters, not values: the controller reads `config.*` when a gesture asks,
+		// so a plain object literal here would freeze three tunables into the
+		// controller for the lifetime of the component.
 		config: {
-			transitionMs: FOCUS_TRANSITION_MS,
-			entryGestureIdleMs: APP_CONFIG.multigraph.focus.entryGestureIdleMs,
-			entryGestureMaxMs: APP_CONFIG.multigraph.focus.entryGestureMaxMs
+			get transitionMs() {
+				return focusTransitionMs;
+			},
+			get entryGestureIdleMs() {
+				return focusEntryGestureIdleMs;
+			},
+			get entryGestureMaxMs() {
+				return focusEntryGestureMaxMs;
+			}
 		}
 	});
 
@@ -615,7 +787,7 @@
 	function promoteAiOutputToNode(aiNodeId: string, outputName: string): void {
 		const origin = graphLayout.posByNodeId[aiNodeId] ?? CENTERED_POSITION;
 		const next = promoteAiOutput(graph, aiNodeId, outputName, {
-			position: { x: origin.x, y: origin.y + NODE_RADIUS * 2.5 }
+			position: { x: origin.x, y: origin.y + nodeRadiusPx * 2.5 }
 		});
 		if (next === graph) return;
 		commitUserGraph(layoutRuntime.relaxAfterMutation(next), editIntent('promote AI output'));
@@ -638,7 +810,8 @@
 		getGraph: () => graph,
 		computeHops: (data) => hopsFor(data),
 		composeDerivedEdges: (data) => withSpringFactor(dataflowModel(data, dataflowEnabled).edges),
-		getLayoutSettings: () => layoutSettings,
+		// A getter, re-read every frame, so a physics slider is live while it moves.
+		getLayoutSettings: () => layoutSettingsFromConfig,
 		getActiveDragNodeId: () => activeDragNodeId,
 		getPreferredBeaconNodeIds: () => severedBeaconPreference,
 		applyGraph: (nextGraph) => {
@@ -663,7 +836,13 @@
 		}
 	});
 
-	const resolvedLayoutSettings = $derived(withDefaultLayoutSettings(layoutSettings));
+	/**
+	 * `withDefaultLayoutSettings` still runs, but only as a type completion: the
+	 * config already supplies every key, so `DEFAULT_LAYOUT_SETTINGS` is a
+	 * last-resort fallback for callers of the pure module, not a path this
+	 * component takes.
+	 */
+	const resolvedLayoutSettings = $derived(withDefaultLayoutSettings(layoutSettingsFromConfig));
 
 	/** Tags derived edges with how hard they pull. */
 	function withSpringFactor(edges: readonly DerivedEdge[]): DerivedEdge[] {
@@ -750,7 +929,7 @@
 				edge.id,
 				formatQuantityLabel(
 					edge.quantities.map((quantity) => quantity.label),
-					APP_CONFIG.multigraph.dataflow.labelMaxVisibleQuantities
+					dataflowCfg.labelMaxVisibleQuantities
 				)
 			])
 		)
@@ -819,10 +998,13 @@
 
 			const edge = visibility.edge;
 			const strokeHalfWidth =
-				(EDGE_STROKE_WIDTH * edgeStrokeScale(visibility, graphLayout.scaleByNodeId)) / 2;
+				(strokeWidthPx *
+					edgeStrokeScale(visibility, graphLayout.scaleByNodeId, strokeReferenceNodeScale)) /
+				2;
 			const arrowHalfHeight =
 				edge.directed === true
-					? EDGE_ARROW_HALF_HEIGHT * edgeArrowScale(visibility, graphLayout.scaleByNodeId)
+					? arrowHalfHeightPx *
+						edgeArrowScale(visibility, graphLayout.scaleByNodeId, arrowReferenceNodeScale)
 					: 0;
 			visibleEdges.push(edge);
 			visualHalfWidthByEdgeId[edge.id] = Math.max(strokeHalfWidth, arrowHalfHeight);
@@ -965,7 +1147,7 @@
 		lastSyncedGeneration = generation;
 		const incoming = untrack(() => multigraphData);
 		const primary = untrack(() => defaultPrimaryNodeId);
-		const settings = untrack(() => layoutSettings);
+		const ingestLayoutSettings = untrack(() => layoutSettingsFromConfig);
 		layoutRuntime.reset();
 		// Cleared before the settle measures anything: a preference left over from
 		// the graph being replaced must not pick a beacon in the one arriving.
@@ -989,7 +1171,7 @@
 		// sizes it is about to appear at rather than at a first guess.
 		const hopsByNodeIdForIngest = untrack(() => hopsFor(incoming));
 		const settledLayoutGraph = withSettledGraphPositions(layoutGraphForIngest, {
-			settings,
+			settings: ingestLayoutSettings,
 			hopsByNodeId: hopsByNodeIdForIngest
 		});
 		// Positions only: `settledLayoutGraph.edges` carries the derived edges, and
@@ -1048,6 +1230,47 @@
 		if (activeDragNodeId !== null) return 'Finish the drag first.';
 		if (creationPreview !== null) return 'Finish the drag first.';
 		return null;
+	});
+
+	/**
+	 * Kicks the frame loop when a setting changes that the canvas cannot show on
+	 * its own — the `resize-only` and `physics` fields, and only those.
+	 *
+	 * It depends on a fingerprint of those resolved values rather than on the
+	 * override map, so a preview of an `instant` field (which redraws itself) does
+	 * not settle the graph, and a commit that merely re-shapes the map without
+	 * changing a value does nothing at all. The first run only records the
+	 * baseline: mounting is not a settings change, and the ingest settle above has
+	 * already put the graph where it belongs.
+	 */
+	const layoutSettleFingerprint = $derived(settleKickFingerprint(cfg));
+	let lastLayoutSettleFingerprint = $state<string | null>(null);
+
+	$effect(() => {
+		const fingerprint = layoutSettleFingerprint;
+		const previous = untrack(() => lastLayoutSettleFingerprint);
+		if (previous === fingerprint) return;
+		lastLayoutSettleFingerprint = fingerprint;
+		if (previous === null) return;
+		layoutRuntime.settleAfterSettingsChange();
+	});
+
+	/**
+	 * Opening the settings panel closes whatever else was open, mirroring
+	 * `toggleGraphQueryPanel` — the two panels share the same top-left corner, so
+	 * both on screen at once would stack one over the other.
+	 *
+	 * Guarded on the transition rather than the value: `closeOverlays` on every
+	 * render while the panel is open would make the panel impossible to edit a
+	 * node behind, and would fight the reader's own overlays for no reason.
+	 */
+	let settingsPanelWasOpen = $state(false);
+
+	$effect(() => {
+		const isOpen = settingsPanelOpen;
+		if (isOpen === untrack(() => settingsPanelWasOpen)) return;
+		settingsPanelWasOpen = isOpen;
+		if (isOpen) closeOverlays();
 	});
 
 	$effect(() => {
@@ -1322,7 +1545,7 @@
 			const radius = graphLayout.radiusByNodeId[node.id];
 			if (!position || radius === undefined) continue;
 			const circle = nodeScreenCircle(node.id, position, radius, rect, view);
-			const hitRadius = effectiveHitRadius(circle.radius, MIN_NODE_HIT_RADIUS);
+			const hitRadius = effectiveHitRadius(circle.radius, minNodeHitRadiusPx);
 			if (isPointInCircle(clientX, clientY, circle.center.x, circle.center.y, hitRadius)) {
 				return node;
 			}
@@ -1568,8 +1791,8 @@
 		stageEntryGestureGateRequest = {
 			id: stageEntryGestureGateRequestId,
 			direction,
-			idleMs: APP_CONFIG.multigraph.focus.entryGestureIdleMs,
-			maxMs: APP_CONFIG.multigraph.focus.entryGestureMaxMs
+			idleMs: focusEntryGestureIdleMs,
+			maxMs: focusEntryGestureMaxMs
 		};
 	}
 
@@ -1643,9 +1866,9 @@
 			// the viewport through the SAME interpolation used for node frames.
 			const morph = interpolateMorph(level.sourceRect, level.fillRect, level.morphProgress, {
 				sourceRadiusPx: IMAGE_SOURCE_RADIUS_PX,
-				targetRadiusPx: APP_CONFIG.multigraph.focus.detailsCornerRadiusPx,
+				targetRadiusPx: focusDetailsCornerRadiusPx,
 				sourceBorderWidthPx: 0,
-				targetBorderWidthPx: APP_CONFIG.multigraph.focus.detailsBorderWidthPx
+				targetBorderWidthPx: focusDetailsBorderWidthPx
 			});
 			return {
 				x: morph.x,
@@ -1665,11 +1888,18 @@
 				y: fill.top,
 				width: fill.width,
 				height: fill.height,
-				borderRadiusPx: APP_CONFIG.multigraph.focus.detailsCornerRadiusPx,
-				borderWidthPx: APP_CONFIG.multigraph.focus.detailsBorderWidthPx
+				borderRadiusPx: focusDetailsCornerRadiusPx,
+				borderWidthPx: focusDetailsBorderWidthPx
 			};
 		}
-		return frameGeometry(layout, view, fill, level.morphProgress);
+		// Passed rather than left to `frameGeometry`'s own fallbacks, which read the
+		// constants module and so would be frozen at import.
+		return frameGeometry(layout, view, fill, level.morphProgress, {
+			targetRadiusPx: focusDetailsCornerRadiusPx,
+			targetBorderWidthPx: focusDetailsBorderWidthPx,
+			nodeBorderWidthPx,
+			pinnedNodeBorderWidthPx
+		});
 	}
 
 	function baseSizeForFocusLevel(level: FocusLevel): LayerBaseSize {
@@ -1685,7 +1915,7 @@
 		}
 		const fill = focusFillRect();
 		return {
-			compactPx: NODE_DIAMETER_PX,
+			compactPx: nodeDiameterPx,
 			detailsWidthPx: fill.width,
 			detailsHeightPx: fill.height
 		};
@@ -1700,6 +1930,9 @@
 	function toggleGraphQueryPanel() {
 		const shouldOpen = !graphQueryPanelOpen;
 		closeOverlays();
+		// The other half of the mutual exclusion: the settings panel is owned by the
+		// page, so closing it is a request rather than an assignment.
+		if (shouldOpen) onSettingsPanelClose?.();
 		graphQueryPanelOpen = shouldOpen;
 	}
 
@@ -1906,7 +2139,7 @@
 		const nextGraph = addNode(graph, {
 			title,
 			description: '',
-			position: { x: origin.x, y: origin.y + NODE_RADIUS * 2.5 },
+			position: { x: origin.x, y: origin.y + nodeRadiusPx * 2.5 },
 			outputs: symbol ? [{ base: symbol.base, subscript: symbol.subscript }] : undefined
 		});
 		const newNode = nextGraph.nodes[nextGraph.nodes.length - 1] ?? null;
@@ -2458,8 +2691,8 @@
 			viewport: viewportWorldRect(from, stage),
 			stage,
 			startedAtMs,
-			durationMs: IMPORT_REVEAL_TRANSITION_MS,
-			deadlineMs: startedAtMs + IMPORT_REVEAL_MAX_PURSUIT_MS,
+			durationMs: importRevealTransitionMs,
+			deadlineMs: startedAtMs + importRevealMaxPursuitMs,
 			marginRadiusFactor: IMPORT_REVEAL_MARGIN_RADIUS_FACTOR,
 			minScale: DEFAULT_MIN_SCALE,
 			maxScale: DEFAULT_MAX_SCALE,
@@ -2649,6 +2882,7 @@
 		style={passiveNodeStyle(entry)}
 	>
 		<Node
+			{...nodeChromeTunables}
 			nodeData={entry.nodeData}
 			isTitleEditing={false}
 			borderSegments={nodeBorderSegments(entry.nodeData, graph.tagColorConfig.nodeTags)}
@@ -2660,7 +2894,7 @@
 	class="graph"
 	class:focus-active={focus.committed && !focus.exiting}
 	bind:this={graphRef}
-	style={`--focus-transition-duration: ${FOCUS_TRANSITION_MS}ms;`}
+	style={`--focus-transition-duration: ${focusTransitionMs}ms;`}
 	data-settling={layoutRuntime.isSettling ? 'true' : undefined}
 	data-scale-change-focal={layoutRuntime.scaleAnchoredNodeIds[0]}
 	data-scale-animation-active={layoutRuntime.hasActiveScaleAnimations ? 'true' : undefined}
@@ -2722,6 +2956,7 @@
 	{/if}
 
 	<Stage
+		{...stageTunables}
 		{getNodeAt}
 		{fitViewRequest}
 		{viewStateRequest}
@@ -2797,8 +3032,16 @@
 									}
 								)
 							: []}
-					{@const arrowScale = edgeArrowScale(visibility, graphLayout.scaleByNodeId)}
-					{@const strokeScale = edgeStrokeScale(visibility, graphLayout.scaleByNodeId)}
+					{@const arrowScale = edgeArrowScale(
+						visibility,
+						graphLayout.scaleByNodeId,
+						arrowReferenceNodeScale
+					)}
+					{@const strokeScale = edgeStrokeScale(
+						visibility,
+						graphLayout.scaleByNodeId,
+						strokeReferenceNodeScale
+					)}
 					{@const edgeColor =
 						queryEdgeState?.role === 'spotlight' && queryEdgeState.spotlightColor
 							? queryEdgeState.spotlightColor
@@ -2816,8 +3059,8 @@
 						derivedQuantityLabel !== '' &&
 						visibility.kind === 'visible' &&
 						shouldRevealQuantityLabel(edgeLengthPx, stageScale, {
-							minStageScale: APP_CONFIG.multigraph.dataflow.labelMinStageScale,
-							minOnScreenLengthPx: APP_CONFIG.multigraph.dataflow.labelMinOnScreenLengthPx
+							minStageScale: dataflowCfg.labelMinStageScale,
+							minOnScreenLengthPx: dataflowCfg.labelMinOnScreenLengthPx
 						})}
 					<div
 						class="edge"
@@ -2872,11 +3115,11 @@
 							{
 								occlusionWindows: edgeOcclusionWindows,
 								edgeLengthPx,
-								edgeArrowLengthPx: EDGE_ARROW_LENGTH * arrowScale,
+								edgeArrowLengthPx: arrowLengthPx * arrowScale,
 								edgeOcclusionMinOpacity: resolvedLayoutSettings.edgeOcclusionMinOpacity,
 								boundaryFadeRadiusPx
 							}
-						)}; color: ${edgeColor}; --edge-spotlight-color: ${queryEdgeState?.spotlightColor ?? 'transparent'}; --edge-arrow-length: ${EDGE_ARROW_LENGTH * arrowScale}px; --edge-arrow-half-height: ${EDGE_ARROW_HALF_HEIGHT * arrowScale}px; --edge-stroke-width: ${EDGE_STROKE_WIDTH * strokeScale}px; opacity: ${edgeOpacity};`}
+						)}; color: ${edgeColor}; --edge-spotlight-color: ${queryEdgeState?.spotlightColor ?? 'transparent'}; --edge-arrow-length: ${arrowLengthPx * arrowScale}px; --edge-arrow-half-height: ${arrowHalfHeightPx * arrowScale}px; --edge-stroke-width: ${strokeWidthPx * strokeScale}px; opacity: ${edgeOpacity};`}
 					>
 						{#if showQuantityLabel}
 							<!-- Counter-rotated so the text stays upright on an edge at any angle. -->
@@ -2901,8 +3144,16 @@
 					visibility.kind === 'boundary'
 						? (combinedEdgeLayout.radiusByNodeId[visibility.visibleNodeId] ?? 0)
 						: undefined}
-				{@const arrowScale = edgeArrowScale(visibility, combinedScaleByNodeId)}
-				{@const strokeScale = edgeStrokeScale(visibility, combinedScaleByNodeId)}
+				{@const arrowScale = edgeArrowScale(
+					visibility,
+					combinedScaleByNodeId,
+					arrowReferenceNodeScale
+				)}
+				{@const strokeScale = edgeStrokeScale(
+					visibility,
+					combinedScaleByNodeId,
+					strokeReferenceNodeScale
+				)}
 				{@const edgeColor = edgeStrokeColor(edge, graph.tagColorConfig.edgeTags)}
 				{@const baseEdgeOpacity = edgeRenderOverrides?.[edge.id]?.opacity ?? 1}
 				{@const edgeOpacity = baseEdgeOpacity * (revealWaveEdgeOpacityByEdgeId[edge.id] ?? 1)}
@@ -2940,7 +3191,7 @@
 							edgeLengthPx,
 							boundaryFadeRadiusPx
 						}
-					)}; color: ${edgeColor}; --edge-arrow-length: ${EDGE_ARROW_LENGTH * arrowScale}px; --edge-arrow-half-height: ${EDGE_ARROW_HALF_HEIGHT * arrowScale}px; --edge-stroke-width: ${EDGE_STROKE_WIDTH * strokeScale}px; opacity: ${edgeOpacity}; pointer-events: none;`}
+					)}; color: ${edgeColor}; --edge-arrow-length: ${arrowLengthPx * arrowScale}px; --edge-arrow-half-height: ${arrowHalfHeightPx * arrowScale}px; --edge-stroke-width: ${strokeWidthPx * strokeScale}px; opacity: ${edgeOpacity}; pointer-events: none;`}
 				></div>
 			{/each}
 			{#each exitingOnlyEdges as [id, entry] (id)}
@@ -2958,7 +3209,7 @@
 						data-target-node-id={entry.edgeData.targetNodeId}
 						data-edge-exiting="true"
 						data-edge-opacity={edgeOpacity}
-						style={`${edgeStyle(sourcePos, targetPos)} --edge-background: ${edgeColor}; color: ${edgeColor}; --edge-stroke-width: ${EDGE_STROKE_WIDTH}px; opacity: ${edgeOpacity}; pointer-events: none;`}
+						style={`${edgeStyle(sourcePos, targetPos)} --edge-background: ${edgeColor}; color: ${edgeColor}; --edge-stroke-width: ${strokeWidthPx}px; opacity: ${edgeOpacity}; pointer-events: none;`}
 					></div>
 				{/if}
 			{/each}
@@ -2972,7 +3223,7 @@
 					class:merge-preview={isMergePreview}
 					data-creation-preview-edge="true"
 					data-creation-preview-mode={creationPreview?.mode ?? 'create'}
-					style={`${edgeStyle(creationPreviewEdgePoints.source, creationPreviewEdgePoints.target)} --edge-background: ${previewEdgeColor}; color: ${previewEdgeColor}; --edge-stroke-width: ${EDGE_STROKE_WIDTH}px; pointer-events: none;`}
+					style={`${edgeStyle(creationPreviewEdgePoints.source, creationPreviewEdgePoints.target)} --edge-background: ${previewEdgeColor}; color: ${previewEdgeColor}; --edge-stroke-width: ${strokeWidthPx}px; pointer-events: none;`}
 				></div>
 			{/if}
 		</div>
@@ -2991,11 +3242,11 @@
 					baseNodeOpacity *
 					(revealWaveNodeOpacityByNodeId[node.id] ?? 1) *
 					queryOpacity(queryNodeState)}
-				{@const nodeChips = shouldShowQuantityChips(NODE_RADIUS * 2, nodeScale, stageScale, {
-					minOnScreenDiameterPx: APP_CONFIG.multigraph.dataflow.chipMinOnScreenDiameterPx
+				{@const nodeChips = shouldShowQuantityChips(nodeDiameterPx, nodeScale, stageScale, {
+					minOnScreenDiameterPx: dataflowCfg.chipMinOnScreenDiameterPx
 				})
 					? quantityChips(definedQuantityLabelsByNodeId.get(node.id) ?? [], {
-							maxVisible: APP_CONFIG.multigraph.dataflow.chipMaxVisibleQuantities
+							maxVisible: dataflowCfg.chipMaxVisibleQuantities
 						})
 					: EMPTY_QUANTITY_CHIPS}
 				<!--
@@ -3025,6 +3276,7 @@
 					style={`left: calc(50% + ${nodePos.x}px); top: calc(50% + ${nodePos.y}px); transform: translate(-50%, -50%) scale(${nodeScale}); opacity: ${nodeOpacity};`}
 				>
 					<Node
+						{...nodeChromeTunables}
 						nodeData={node}
 						isTitleEditing={titleEditContext?.nodeId === node.id}
 						titleCaretAt={titleEditContext?.nodeId === node.id
@@ -3141,6 +3393,7 @@
 			onCancel={() => (editNodeId = null)}
 			onTogglePinned={() => toggleNodePinned(editNode.id)}
 			onDelete={() => deleteNode(editNode.id)}
+			chipInsertHoldMs={dataflowCfg.chipInsertLongPressMs}
 		/>
 	{/if}
 
@@ -3160,7 +3413,7 @@
 			{#if frameNode}
 				{@const segments = nodeBorderSegments(frameNode, graph.tagColorConfig.nodeTags)}
 				<NodeChrome
-					diameterPx={NODE_DIAMETER_PX}
+					diameterPx={nodeDiameterPx}
 					{borderRadiusPx}
 					{borderWidthPx}
 					pinnedBorderWidthPx={borderWidthPx}
@@ -3187,8 +3440,8 @@
 				<div class="focus-compact-fill">
 					<NodeCompactContent
 						title={compactNode.title}
-						diameterPx={NODE_DIAMETER_PX}
-						fontSizePx={NODE_TEXT_FONT_SIZE}
+						diameterPx={nodeDiameterPx}
+						fontSizePx={nodeTextFontSizePx}
 						detailsMode
 					/>
 				</div>
@@ -3267,6 +3520,7 @@
 							onConfirmDefiner={confirmDefinerOutput}
 							onJumpToNode={(nodeId) => jumpToNode(detailsNode.id, nodeId)}
 							onToggleTaskDone={(done) => toggleNodeTaskDone(detailsNode.id, done)}
+							chipPeekHoldMs={dataflowCfg.chipPeekLongPressMs}
 						/>
 					</NodeDetailsLayer>
 				</div>
@@ -3315,7 +3569,7 @@
 				levels={focus.levels}
 				{reduceMotion}
 				entryGestureIdleMs={focus.entryGestureIdleMs}
-				entryGestureMaxMs={APP_CONFIG.multigraph.focus.entryGestureMaxMs}
+				entryGestureMaxMs={focusEntryGestureMaxMs}
 				geometryForLevel={geometryForFocusLevel}
 				baseSizeForLevel={baseSizeForFocusLevel}
 				frame={focusFrame}
@@ -3423,6 +3677,29 @@
 			onClose={() => {
 				graphQueryPanelOpen = false;
 				graphQueryPreviewText = null;
+			}}
+		/>
+	{/if}
+
+	{#if settingsPanelOpen}
+		<SettingsPanel
+			overrides={settings}
+			onPreview={(path, value) => (settingsPreview = { path, value })}
+			onCommit={(path, value) => {
+				// The preview goes first: `setOverride` may drop the key (a value equal
+				// to the default), and a preview left standing would keep showing the
+				// value the user just cleared.
+				settingsPreview = null;
+				onSettingsChange?.(setOverride(settings, path, value));
+			}}
+			onOverridesChange={(next) => {
+				settingsPreview = null;
+				onSettingsChange?.(next);
+			}}
+			onClose={() => {
+				// A preview belongs to a pointer that is no longer on a slider.
+				settingsPreview = null;
+				onSettingsPanelClose?.();
 			}}
 		/>
 	{/if}
