@@ -3,6 +3,7 @@
 	import type { FieldSpec } from '$lib/config/configSchema';
 	import SettingNumber from './SettingNumber.svelte';
 	import SettingRange from './SettingRange.svelte';
+	import SettingSelect from './SettingSelect.svelte';
 	import SettingToggle from './SettingToggle.svelte';
 
 	/**
@@ -18,7 +19,9 @@
 	 *
 	 * Renders nothing for a `hidden` spec, and nothing when the value's runtime
 	 * type disagrees with the spec's control — a panel with one mistyped override
-	 * must not lose the other 68 fields.
+	 * must not lose the other 68 fields. A `select` also renders nothing when its
+	 * string is not one of the options: a `<select>` cannot show a value it does
+	 * not offer.
 	 */
 	let {
 		path,
@@ -39,11 +42,13 @@
 	} = $props();
 
 	type ToggleSpec = Extract<FieldSpec, { control: 'toggle' }>;
+	type SelectSpec = Extract<FieldSpec, { control: 'select' }>;
 	type RangeSpec = Extract<FieldSpec, { control: 'range' }>;
 	type NumberSpec = Extract<FieldSpec, { control: 'number' }>;
 
 	type FieldView =
 		| { kind: 'toggle'; spec: ToggleSpec; value: boolean }
+		| { kind: 'select'; spec: SelectSpec; value: string }
 		| { kind: 'range'; spec: RangeSpec; value: number }
 		| { kind: 'number'; spec: NumberSpec; value: number };
 
@@ -53,6 +58,10 @@
 				return null;
 			case 'toggle':
 				return typeof value === 'boolean' ? { kind: 'toggle', spec, value } : null;
+			case 'select':
+				return typeof value === 'string' && spec.options.some((option) => option.value === value)
+					? { kind: 'select', spec, value }
+					: null;
 			case 'range':
 				return typeof value === 'number' ? { kind: 'range', spec, value } : null;
 			case 'number':
@@ -86,6 +95,16 @@
 			<SettingToggle
 				label={view.spec.label}
 				help={view.spec.help}
+				value={view.value}
+				{isModified}
+				onCommit={(next) => onCommit(path, next)}
+				onReset={() => onReset(path)}
+			/>
+		{:else if view.kind === 'select'}
+			<SettingSelect
+				label={view.spec.label}
+				help={view.spec.help}
+				options={view.spec.options}
 				value={view.value}
 				{isModified}
 				onCommit={(next) => onCommit(path, next)}

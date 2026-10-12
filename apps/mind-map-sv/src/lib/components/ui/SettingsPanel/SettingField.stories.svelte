@@ -1,7 +1,7 @@
 <script module lang="ts">
 	import { defineMeta } from '@storybook/addon-svelte-csf';
 	import { expect, userEvent, waitFor, within } from 'storybook/test';
-	import { CONFIG_SCHEMA } from '$lib/config/configSchema';
+	import { CONFIG_SCHEMA, type FieldSpec } from '$lib/config/configSchema';
 	import SettingFieldHarness from './SettingFieldHarness.svelte';
 
 	const { Story } = defineMeta({
@@ -38,6 +38,25 @@
 
 	const HIDDEN_PATH = 'multigraph.nodeRadiusPx';
 	const HIDDEN_SPEC = CONFIG_SCHEMA[HIDDEN_PATH];
+
+	// No schema leaf uses `select` yet, so the select stories pair a fixture spec
+	// with an existing string leaf. The harness never reads the schema itself.
+	const SELECT_PATH = 'ai.defaultModel';
+	const SELECT_LABEL = 'Border shows';
+	const SELECT_HELP = 'Which number about each node its border thickness shows.';
+	const SELECT_OPTIONS = [
+		{ value: 'none', label: 'Nothing' },
+		{ value: 'size', label: 'Size' },
+		{ value: 'degree', label: 'Edge count' }
+	] as const;
+	const SELECT_SPEC: FieldSpec = {
+		control: 'select',
+		label: SELECT_LABEL,
+		help: SELECT_HELP,
+		tier: 'basic',
+		preview: 'instant',
+		options: SELECT_OPTIONS
+	};
 
 	function getHarness(canvasElement: HTMLElement): HTMLElement {
 		const harness = canvasElement.querySelector('.harness');
@@ -84,6 +103,12 @@
 		slider.dispatchEvent(new Event('input', { bubbles: true }));
 		slider.dispatchEvent(new Event('change', { bubbles: true }));
 		slider.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowRight', bubbles: true }));
+	}
+
+	function getSelect(canvasElement: HTMLElement, label: string): HTMLSelectElement {
+		const select = within(canvasElement).getByRole('combobox', { name: label });
+		if (!(select instanceof HTMLSelectElement)) throw new Error('Select not found');
+		return select;
 	}
 
 	function typeValue(input: HTMLInputElement, text: string): void {
@@ -280,6 +305,105 @@
 
 		expect(harness.querySelector('[data-setting-path]')).toBeNull();
 		expect(harness.querySelector('input')).toBeNull();
+		expect(harness.querySelector('button')).toBeNull();
+	}}
+/>
+
+<Story
+	name="UserPicksAnOptionAndItCommitsImmediately"
+	args={{
+		path: SELECT_PATH,
+		spec: SELECT_SPEC,
+		defaultValue: 'size'
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const select = getSelect(canvasElement, SELECT_LABEL);
+
+		await userEvent.selectOptions(select, 'degree');
+
+		await expectHarnessData(canvasElement, 'commitCount', '1');
+		await expectHarnessData(canvasElement, 'lastCommit', 'degree');
+		await expectHarnessData(canvasElement, 'lastPath', SELECT_PATH);
+		await expectHarnessData(canvasElement, 'value', 'degree');
+		await expectHarnessData(canvasElement, 'previewCount', '0');
+		expect(select.value).toBe('degree');
+	}}
+/>
+
+<Story
+	name="UserSeesTheResetButtonOnceAnOptionDiffersFromTheDefault"
+	args={{
+		path: SELECT_PATH,
+		spec: SELECT_SPEC,
+		defaultValue: 'size'
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const canvas = within(canvasElement);
+		const select = getSelect(canvasElement, SELECT_LABEL);
+
+		expect(canvas.queryByRole('button', { name: `Reset ${SELECT_LABEL}` })).not.toBeInTheDocument();
+		expect(getHarness(canvasElement).querySelector('[data-modified="true"]')).toBeNull();
+
+		await userEvent.selectOptions(select, 'none');
+
+		const reset = await canvas.findByRole('button', { name: `Reset ${SELECT_LABEL}` });
+		expect(getHarness(canvasElement).querySelector('[data-modified="true"]')).not.toBeNull();
+
+		await userEvent.click(reset);
+
+		await expectHarnessData(canvasElement, 'resetCount', '1');
+		await expectHarnessData(canvasElement, 'value', 'size');
+		// The select itself shows the default again, not just the harness.
+		await waitFor(() => expect(getSelect(canvasElement, SELECT_LABEL).value).toBe('size'));
+		await waitFor(() =>
+			expect(
+				canvas.queryByRole('button', { name: `Reset ${SELECT_LABEL}` })
+			).not.toBeInTheDocument()
+		);
+	}}
+/>
+
+<Story
+	name="TheSelectIsNamedForAssistiveTech"
+	args={{
+		path: SELECT_PATH,
+		spec: SELECT_SPEC,
+		defaultValue: 'size',
+		initialValue: 'degree'
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const select = getSelect(canvasElement, SELECT_LABEL);
+		const options = within(select).getAllByRole('option');
+
+		expect(options.map((option) => option.textContent?.trim())).toEqual(
+			SELECT_OPTIONS.map((option) => option.label)
+		);
+		expect(options.map((option) => option.getAttribute('value'))).toEqual(
+			SELECT_OPTIONS.map((option) => option.value)
+		);
+		// It reflects the current value, which here is not the default.
+		expect(select.value).toBe('degree');
+		expect(select.title).toBe(SELECT_HELP);
+		expect(within(canvasElement).getByText(SELECT_HELP)).toBeInTheDocument();
+		expect(getHarness(canvasElement).querySelector('[data-control="select"]')).not.toBeNull();
+		// The box is the whole hit area, so it holds the 44px touch floor.
+		expect(select.getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+	}}
+/>
+
+<Story
+	name="ASelectValueOutsideTheOptionsRendersNothing"
+	args={{
+		path: SELECT_PATH,
+		spec: SELECT_SPEC,
+		defaultValue: 'size',
+		initialValue: 'bogus'
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const harness = getHarness(canvasElement);
+
+		expect(harness.querySelector('[data-setting-path]')).toBeNull();
+		expect(harness.querySelector('select')).toBeNull();
 		expect(harness.querySelector('button')).toBeNull();
 	}}
 />

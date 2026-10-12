@@ -24,6 +24,19 @@ export type FieldSpec =
 			preview: Preview;
 	  }
 	| {
+			/**
+			 * A string leaf that takes one of a fixed set of values. `value` is what
+			 * is stored; `label` is the reader's word for it. Like a toggle, a change
+			 * commits at once and never previews.
+			 */
+			control: 'select';
+			label: string;
+			help?: string;
+			tier: Tier;
+			preview: Preview;
+			options: readonly { value: string; label: string }[];
+	  }
+	| {
 			control: 'range';
 			label: string;
 			help?: string;
