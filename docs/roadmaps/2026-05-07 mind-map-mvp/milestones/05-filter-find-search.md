@@ -4,6 +4,8 @@
 **Depends on:** milestones 01 (graph data), 03 (editing UX provides
 title/description content), 04e (node/edge tags), and 04f (tag colors).
 **Plan:** [2026-06-22 05-filter-find-search.md](../plans/2026-06-22%2005-filter-find-search.md)
+**Follow-up plan:**
+[2026-10-11 query tag buttons cycle modes.md](../plans/2026-10-11%20query%20tag%20buttons%20cycle%20modes.md)
 
 ## Goal
 
@@ -87,12 +89,17 @@ transition and status indicator.
 - The panel includes:
   - A token input that converts recognized text into chips.
   - Node-tag and edge-tag suggestions sourced from the existing tag legend data.
+    Each suggestion is a button that cycles its tag's query token none →
+    focus (`#tag`) → spotlight (`+#tag`) → exclude (`-#tag`) → none, editing
+    only that token in the typed query, and shows the tag's current mode
+    (exclusion wins when the query names the tag more than once).
   - Color-coded tag chips/swatches using the configured or fallback tag colors.
   - Result counts for focused nodes, focused edges, and connected regions.
   - Next/previous result-region navigation.
-- Hovering or keyboard-focusing a tag suggestion temporarily spotlights matching
-  graph elements so users can connect tag names, colors, and physical graph
-  locations.
+- Hovering or keyboard-focusing a tag suggestion whose tag is not already in the
+  query temporarily spotlights matching graph elements so users can connect tag
+  names, colors, and physical graph locations. A tag already in the query
+  previews nothing, and a preview never excludes.
 - The panel is a bottom sheet on mobile and a compact overlay on larger
   screens.
 
@@ -131,7 +138,9 @@ transition and status indicator.
     for the stroke and persistent halo while the query is active.
   - A user excludes a node tag and matching nodes plus incident edges stop
     rendering without layout reflow.
-  - Hovering or focusing a tag suggestion spotlights matching graph locations.
+  - Hovering or focusing a tag suggestion not already in the query spotlights
+    matching graph locations, and clicking a tag suggestion cycles its token
+    through focus, spotlight and exclude back to none.
   - Region navigation pans/fits the stage to the selected result region.
   - An empty query restores the normal graph rendering.
 - Query evaluation across a 1000-node graph completes in < 50 ms in a pure spec.
