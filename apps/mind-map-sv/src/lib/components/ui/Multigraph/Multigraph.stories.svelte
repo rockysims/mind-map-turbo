@@ -3218,7 +3218,7 @@
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
-		const toolbarButton = within(canvasElement).getByRole('button', { name: 'Tag colors' });
+		const toolbarButton = within(canvasElement).getByRole('button', { name: 'Tags' });
 		toolbarButton.focus();
 		const circle = getCircle(canvasElement, 'n0');
 		const center = getCenter(circle);
@@ -3246,7 +3246,7 @@
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
-		const toolbarButton = within(canvasElement).getByRole('button', { name: 'Tag colors' });
+		const toolbarButton = within(canvasElement).getByRole('button', { name: 'Tags' });
 		toolbarButton.focus();
 		const circle = getCircle(canvasElement, 'n0');
 		const center = getCenter(circle);
@@ -5251,7 +5251,7 @@
 	play={async ({ canvasElement, args }: PlayContext) => {
 		await waitForLayout();
 		const canvas = within(canvasElement);
-		canvas.getByRole('button', { name: 'Tag colors' }).click();
+		canvas.getByRole('button', { name: 'Tags' }).click();
 		await sleep();
 
 		const colorInput = canvas.getByLabelText('Color for node tag topic') as HTMLInputElement;
@@ -5260,6 +5260,111 @@
 		await sleep();
 
 		expect(lastChangedGraph(args).tagColorConfig.nodeTags.topic).toBe('#00ff00');
+	}}
+/>
+
+<Story
+	name="UserLengthensAnEdgeTagFromLegend"
+	args={{
+		// Pinned at one end and started inside the default band, so the pair is at
+		// rest from the first frame and only the slider can move it.
+		multigraphData: makeGraph({
+			nodeCount: 2,
+			pinned: [0],
+			edges: [{ source: 'n0', target: 'n1', tags: ['rel'] }],
+			posByNodeId: { n0: { x: -280, y: 0 }, n1: { x: 280, y: 0 } }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const canvas = within(canvasElement);
+		const endpointDistance = () =>
+			distanceBetween(nodePosition(canvasElement, 'n0'), nodePosition(canvasElement, 'n1'));
+
+		// Spring strength would show nothing here — inside the band its correction
+		// is zero — which is why the slider moves the band instead. Establish rest
+		// first, or a settle already running could pass for the slider's work.
+		await waitFor(() => expect(isSettling(canvasElement)).toBe(false));
+		const before = endpointDistance();
+		await waitForFrames(4);
+		expect(endpointDistance()).toBe(before);
+
+		canvas.getByRole('button', { name: 'Tags' }).click();
+		await sleep();
+		const slider = canvas.getByLabelText('Edge length for edge tag rel') as HTMLInputElement;
+
+		// A drag: scrub frames with the graph following, then the release.
+		for (const position of [0.25, 0.5, 0.75, 1]) {
+			slider.value = String(position);
+			slider.dispatchEvent(new Event('input', { bubbles: true }));
+			await waitForFrames(2);
+		}
+		expect(isSettling(canvasElement)).toBe(true);
+		slider.dispatchEvent(new Event('change', { bubbles: true }));
+
+		await waitFor(() => expect(isSettling(canvasElement)).toBe(false), { timeout: 5000 });
+
+		// ×2 lifts the band's lower edge past where the pair sat, so the free end
+		// walks out to it and stays there.
+		const after = endpointDistance();
+		expect(after).toBeGreaterThan(before + 40);
+		await waitForFrames(4);
+		expect(endpointDistance()).toBeCloseTo(after, 1);
+		expect(lastChangedGraph(args).tagPhysicsConfig?.edgeTags.rel).toBe(2);
+	}}
+/>
+
+<Story
+	name="UserSpacesOutANodeTagFromLegend"
+	args={{
+		// A bent chain: `n0` and `n2` are two hops apart, so only hop repulsion
+		// (not a spring) decides how far apart they sit.
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'n0', title: 'Root', description: '' },
+				{ id: 'n1', title: 'Middle', description: '' },
+				{ id: 'n2', title: 'Far', description: '', tags: ['far'] }
+			],
+			pinned: ['n0'],
+			edges: [
+				['n0', 'n1'],
+				['n1', 'n2']
+			],
+			posByNodeId: { n0: { x: 0, y: 0 }, n1: { x: 520, y: 0 }, n2: { x: 300, y: 420 } }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const canvas = within(canvasElement);
+		const outerDistance = () =>
+			distanceBetween(nodePosition(canvasElement, 'n0'), nodePosition(canvasElement, 'n2'));
+
+		await waitFor(() => expect(isSettling(canvasElement)).toBe(false));
+		const before = outerDistance();
+		await waitForFrames(4);
+		expect(outerDistance()).toBe(before);
+
+		canvas.getByRole('button', { name: 'Tags' }).click();
+		await sleep();
+		const slider = canvas.getByLabelText('Node spacing for node tag far') as HTMLInputElement;
+
+		for (const position of [0.5, 1, 1.5, 2]) {
+			slider.value = String(position);
+			slider.dispatchEvent(new Event('input', { bubbles: true }));
+			await waitForFrames(2);
+		}
+		slider.dispatchEvent(new Event('change', { bubbles: true }));
+
+		await waitFor(() => expect(isSettling(canvasElement)).toBe(false), { timeout: 5000 });
+
+		// ×4 on `far` alone is a pair factor of sqrt(4 × 1) = 2 on the clearance the
+		// non-adjacent pair holds open, so the chain straightens and they part.
+		expect(outerDistance()).toBeGreaterThan(before + 40);
+		expect(lastChangedGraph(args).tagPhysicsConfig?.nodeTags.far).toBe(4);
 	}}
 />
 
@@ -5274,7 +5379,7 @@
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
 		const canvas = within(canvasElement);
-		const tagColorButton = canvas.getByRole('button', { name: 'Tag colors' });
+		const tagColorButton = canvas.getByRole('button', { name: 'Tags' });
 		const graphQueryButton = canvas.getByRole('button', { name: 'Find / Filter' });
 
 		const tagColorStyle = getComputedStyle(tagColorButton);
@@ -5628,7 +5733,7 @@
 	play={async ({ canvasElement, args }: PlayContext) => {
 		await waitForLayout();
 		const canvas = within(canvasElement);
-		canvas.getByRole('button', { name: 'Tag colors' }).click();
+		canvas.getByRole('button', { name: 'Tags' }).click();
 		await sleep();
 
 		canvas.getByRole('button', { name: 'Delete node tag unused' }).click();

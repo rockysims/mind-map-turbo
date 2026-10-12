@@ -1,9 +1,15 @@
 <script lang="ts">
 	import type { LegendTag, TagColorChangePhase } from './lib/tagColors';
+	import {
+		factorForSliderPosition,
+		formatTagPhysicsFactor,
+		sliderPositionForFactor
+	} from './lib/tagPhysics';
 
 	let {
 		tags = [],
 		onColorChange,
+		onPhysicsChange,
 		onDelete,
 		onClose
 	}: {
@@ -20,6 +26,18 @@
 			color: string,
 			phase: TagColorChangePhase
 		) => void;
+		/**
+		 * The tag's edge length (edge tags) or node spacing (node tags) factor.
+		 * Same phases as colour: `'scrub'` per slider frame, `'commit'` when the
+		 * thumb is let go, so one drag is one undo entry while the graph follows
+		 * the thumb live.
+		 */
+		onPhysicsChange?: (
+			namespace: LegendTag['namespace'],
+			tag: string,
+			factor: number,
+			phase: TagColorChangePhase
+		) => void;
 		onDelete?: (namespace: LegendTag['namespace'], tag: string) => void;
 		onClose?: () => void;
 	} = $props();
@@ -34,15 +52,39 @@
 	function labelFor(namespace: LegendTag['namespace']): string {
 		return namespace === 'nodeTags' ? 'node tag' : 'edge tag';
 	}
+
+	/** What the slider scales, as the screen reader names it. */
+	function physicsNameFor(legendTag: LegendTag): string {
+		const quantity = legendTag.namespace === 'nodeTags' ? 'Node spacing' : 'Edge length';
+		return `${quantity} for ${labelFor(legendTag.namespace)} ${legendTag.tag}`;
+	}
+
+	/**
+	 * The visible readout. One word says what the factor scales — a bare `×1.4`
+	 * beside a colour swatch would not — and it survives the stacked layout,
+	 * where a column header would not.
+	 */
+	function physicsReadoutFor(legendTag: LegendTag): string {
+		const quantity = legendTag.namespace === 'nodeTags' ? 'spacing' : 'length';
+		return `${quantity} ${formatTagPhysicsFactor(legendTag.physicsFactor)}`;
+	}
+
+	function emitPhysicsChange(
+		legendTag: LegendTag,
+		slider: HTMLInputElement,
+		phase: TagColorChangePhase
+	) {
+		onPhysicsChange?.(
+			legendTag.namespace,
+			legendTag.tag,
+			factorForSliderPosition(Number(slider.value)),
+			phase
+		);
+	}
 </script>
 
 <div class="legend-layer" role="presentation">
-	<button
-		class="legend-backdrop"
-		type="button"
-		aria-label="Close tag color legend"
-		onclick={onClose}
-	></button>
+	<button class="legend-backdrop" type="button" aria-label="Close tags" onclick={onClose}></button>
 	<div
 		class="tag-color-legend"
 		role="dialog"
@@ -50,10 +92,7 @@
 		aria-labelledby="tag-color-legend-title"
 	>
 		<header>
-			<div>
-				<p class="eyebrow">Graph tags</p>
-				<h2 id="tag-color-legend-title">Tag colors</h2>
-			</div>
+			<h2 id="tag-color-legend-title">Tags</h2>
 			<button type="button" class="secondary" onclick={onClose}>Close</button>
 		</header>
 
@@ -76,6 +115,33 @@
 											{legendTag.hasExplicitColor ? ' · configured' : ' · fallback'}
 										</p>
 									</div>
+								</div>
+
+								<div class="physics-control">
+									<label>
+										<span class="sr-only">{physicsNameFor(legendTag)}</span>
+										<!-- The track runs over log2(factor), so ×1 sits at the centre and
+										     ×0.5 and ×2 sit equally far either side; `aria-valuetext`
+										     announces the factor rather than the log position. -->
+										<input
+											type="range"
+											min="-2"
+											max="2"
+											step="0.05"
+											value={sliderPositionForFactor(legendTag.physicsFactor)}
+											aria-valuetext={formatTagPhysicsFactor(legendTag.physicsFactor)}
+											oninput={(event) =>
+												emitPhysicsChange(legendTag, event.currentTarget, 'scrub')}
+											onchange={(event) =>
+												emitPhysicsChange(legendTag, event.currentTarget, 'commit')}
+										/>
+									</label>
+									<!-- Hidden from the accessibility tree: the slider's own
+									     `aria-valuetext` already says the factor, and a second copy
+									     would be read out on every scrub frame. -->
+									<span class="physics-readout" aria-hidden="true">
+										{physicsReadoutFor(legendTag)}
+									</span>
 								</div>
 
 								<label>
@@ -181,13 +247,6 @@
 		font-size: 0.95rem;
 	}
 
-	.eyebrow {
-		color: #64748b;
-		font-size: 0.75rem;
-		text-transform: uppercase;
-		letter-spacing: 0.06em;
-	}
-
 	ul {
 		display: grid;
 		gap: 0.5rem;
@@ -196,16 +255,20 @@
 		list-style: none;
 	}
 
+	/* Wraps rather than squeezing the tag's name to nothing: between the stacked
+	   layout and a full-width dialog, the controls drop to a second line and
+	   keep to the right, under the controls of the rows that fit. */
 	li {
-		justify-content: space-between;
+		flex-wrap: wrap;
+		justify-content: flex-end;
 		padding: 0.625rem;
 		border: 1px solid #e2e8f0;
 		border-radius: 0.75rem;
 	}
 
 	.tag-copy {
+		flex: 1 1 8rem;
 		min-width: 0;
-		margin-right: auto;
 	}
 
 	.swatch {
@@ -226,6 +289,36 @@
 	.empty-state {
 		color: #64748b;
 		font-size: 0.8125rem;
+	}
+
+	.physics-control {
+		display: flex;
+		flex: 0 0 auto;
+		align-items: center;
+		gap: 0.375rem;
+	}
+
+	.physics-control label {
+		display: flex;
+		align-items: center;
+	}
+
+	/* The input's own box is the hit area, so its height is the touch target:
+	   2.75rem (44px) at every width, though the drawn track stays thin. */
+	input[type='range'] {
+		width: 6.5rem;
+		height: 2.75rem;
+		margin: 0;
+	}
+
+	.physics-readout {
+		/* Wide enough for the longest readout (`spacing ×0.71`), so the row does
+		   not jump as the thumb moves. */
+		min-width: 13ch;
+		color: #475569;
+		font-size: 0.8125rem;
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
 	}
 
 	input[type='color'] {
@@ -281,6 +374,19 @@
 		li {
 			align-items: stretch;
 			flex-direction: column;
+		}
+
+		/* Its own full-width line: a short track under a thumb is a coarse one. */
+		.physics-control label {
+			flex: 1 1 auto;
+		}
+
+		.physics-control input[type='range'] {
+			width: 100%;
+		}
+
+		.physics-readout {
+			min-width: auto;
 		}
 	}
 </style>

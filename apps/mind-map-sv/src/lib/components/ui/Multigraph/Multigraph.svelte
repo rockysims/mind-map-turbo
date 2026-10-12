@@ -157,6 +157,7 @@
 		setNodeDesignations,
 		setNodePinned,
 		setTagColor,
+		setTagPhysicsFactor,
 		setTaskDone,
 		togglePinned,
 		updateEdge,
@@ -1555,7 +1556,12 @@
 		transientReveal.pruneMissing(liveNodeIds);
 		closeFocusOnMissingSubject(incoming, liveNodeIds);
 		closeOverlays();
+		// Read before committing. `relaxAfterMutation` runs a handful of steps and
+		// no settle loop, which is enough for an edit but strands an undone ×4
+		// edge length part-way back; a changed factor needs the full settle.
+		const tagPhysicsChanged = incoming.tagPhysicsConfig !== graph.tagPhysicsConfig;
 		commitUserGraph(layoutRuntime.relaxAfterMutation(incoming), editIntent('restore'));
+		if (tagPhysicsChanged) layoutRuntime.settleAfterSettingsChange();
 	}
 
 	/**
@@ -2825,6 +2831,32 @@
 		);
 	}
 
+	/**
+	 * A legend slider: the tag's edge length (edge tags) or node spacing (node
+	 * tags). Coalesced exactly like a colour scrub — one entry per drag, while the
+	 * graph follows the thumb — and committed every time, even when the factor
+	 * did not move: the closing `change` repeats the last `input`'s value, and
+	 * the run still has to end there.
+	 *
+	 * A factor shows nothing until the physics runs, so every frame tops the
+	 * settle budget up and the graph walks to its new rest as the thumb moves.
+	 */
+	function updateTagPhysics(
+		namespace: TagColorNamespace,
+		tag: string,
+		factor: number,
+		phase: TagColorChangePhase = 'scrub'
+	) {
+		commitUserGraph(
+			setTagPhysicsFactor(graph, namespace, tag, factor),
+			editIntent(namespace === 'edgeTags' ? 'edge length' : 'node spacing', {
+				coalesceKey: `tag-physics:${namespace}:${tag}`,
+				...(phase === 'commit' ? { endsCoalesceRun: true } : {})
+			})
+		);
+		layoutRuntime.settleAfterSettingsChange();
+	}
+
 	function deleteLegendTag(namespace: TagColorNamespace, tag: string) {
 		const usageCount = tagUsageCount(graph, namespace, tag);
 		if (usageCount > 0) {
@@ -3004,7 +3036,11 @@
 		if (!incoming.nodes.some((node) => node.id === primaryNodeId)) {
 			primaryNodeId = fallbackPrimaryNodeId(incoming);
 		}
+		// An import can bring per-tag factors in, which reshape the host's layout
+		// too; the relax alone would leave it part-way to its new rest.
+		const tagPhysicsChanged = incoming.tagPhysicsConfig !== graph.tagPhysicsConfig;
 		commitUserGraph(layoutRuntime.relaxAfterMutation(incoming), editIntent(label));
+		if (tagPhysicsChanged) layoutRuntime.settleAfterSettingsChange();
 		if (revealNodeId) revealImportedNode(revealNodeId);
 	}
 
@@ -3269,7 +3305,7 @@
 		aria-expanded={tagColorLegendOpen}
 		onclick={toggleTagColorLegend}
 	>
-		Tag colors
+		Tags
 	</button>
 
 	<button
@@ -4015,6 +4051,7 @@
 		<TagColorLegend
 			tags={legendTags}
 			onColorChange={updateTagColor}
+			onPhysicsChange={updateTagPhysics}
 			onDelete={deleteLegendTag}
 			onClose={() => (tagColorLegendOpen = false)}
 		/>
