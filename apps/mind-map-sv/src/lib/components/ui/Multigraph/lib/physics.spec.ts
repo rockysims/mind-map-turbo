@@ -598,16 +598,37 @@ describe('physics', () => {
 
 			const unscaledExtraGap = restingDistance() - radiusSum;
 
-			it('holds open the geometric mean of the two factors times the unscaled gap', () => {
+			// A lone tuned node beside untuned ones keeps its whole factor: the pair
+			// rule is the larger of the two, not their geometric mean (which gave a
+			// ×4 node beside a ×1 one only ×2).
+			it('holds open the larger of the two factors times the unscaled gap', () => {
 				expect(unscaledExtraGap).toBeGreaterThan(0);
-				// sqrt(4 × 1) = 2
-				expect(restingDistance({ n0: 4 }) - radiusSum).toBeCloseTo(2 * unscaledExtraGap, 10);
-				expect(restingDistance({ n0: 4, n2: 1 }) - radiusSum).toBeCloseTo(2 * unscaledExtraGap, 10);
+				// max(4, 1) = 4
+				expect(restingDistance({ n0: 4 }) - radiusSum).toBeCloseTo(4 * unscaledExtraGap, 10);
+				expect(restingDistance({ n0: 4, n2: 1 }) - radiusSum).toBeCloseTo(4 * unscaledExtraGap, 10);
+				expect(restingDistance({ n0: 1, n2: 4 }) - radiusSum).toBeCloseTo(4 * unscaledExtraGap, 10);
 			});
 
-			it('holds the unscaled gap when the two factors cancel', () => {
-				// sqrt(2 × 0.5) = 1
-				expect(restingDistance({ n0: 2, n2: 0.5 })).toBe(restingDistance());
+			it('lets the larger factor win when the two disagree', () => {
+				// max(2, 0.5) = 2
+				expect(restingDistance({ n0: 2, n2: 0.5 }) - radiusSum).toBeCloseTo(
+					2 * unscaledExtraGap,
+					10
+				);
+			});
+
+			it('shrinks the gap only when both nodes ask for less', () => {
+				// max(0.5, 1) = 1, but max(0.5, 0.5) = 0.5
+				expect(restingDistance({ n0: 0.5 })).toBe(restingDistance());
+				expect(restingDistance({ n0: 0.5, n2: 0.5 }) - radiusSum).toBeCloseTo(
+					0.5 * unscaledExtraGap,
+					10
+				);
+			});
+
+			it('reaches the top of the widened range on a lone node', () => {
+				// max(8, 1) = 8
+				expect(restingDistance({ n2: 8 }) - radiusSum).toBeCloseTo(8 * unscaledExtraGap, 10);
 			});
 
 			it('treats a non-finite or non-positive factor as absent', () => {
@@ -636,7 +657,7 @@ describe('physics', () => {
 				const seam = restingDistance(undefined, unreachable) - radiusSum;
 
 				expect(seam).toBeCloseTo(radiusSum * 0.1, 10);
-				expect(restingDistance({ n0: 4 }, unreachable) - radiusSum).toBeCloseTo(2 * seam, 10);
+				expect(restingDistance({ n0: 4 }, unreachable) - radiusSum).toBeCloseTo(4 * seam, 10);
 			});
 
 			it('scales the seam after its cap, so a capped seam still widens', () => {
@@ -644,7 +665,7 @@ describe('physics', () => {
 				const capped = { ...HOP_REPULSION_SETTINGS, hopRepulsionMaxExtraGapRadiusFactor: 0.02 };
 
 				expect(restingDistance({ n0: 4 }, unreachable, capped) - radiusSum).toBeCloseTo(
-					2 * radiusSum * 0.02,
+					4 * radiusSum * 0.02,
 					10
 				);
 			});

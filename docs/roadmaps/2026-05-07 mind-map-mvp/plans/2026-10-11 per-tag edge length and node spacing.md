@@ -84,6 +84,17 @@ Owner rulings of 2026-10-11 are marked _(ruling)_ and are not reopened here.
   `sqrt(fa × fb)`** _(ruling)_ — the same rule one level up, symmetric in the two
   nodes so the push stays equal and opposite.
 
+  _Addendum 2026-10-11 (owner request, after T05 shipped):_ the pair rule is now
+  **the larger of the two factors, `max(fa, fb)`**. The geometric mean halved a
+  lone tuned node's factor in log space — ×4 beside an untuned neighbour held
+  only ×2 clearance — and the owner found the high end too weak. `max` is still
+  symmetric, so the push stays equal and opposite; a node tuned to ×4 now holds
+  ×4 against every other node, and a factor below 1 only takes effect between
+  two nodes that both ask for less. The per-element rule (geometric mean of the
+  configured tags, above) is an owner ruling and is unchanged. The resolution
+  "What the node-tag slider controls" reads with `max(fa, fb)` in place of
+  `sqrt(fa × fb)`.
+
 - **Range, slider and readout.** **Factors in `[0.25, 4]`, logarithmic slider**
   _(ruling)_. The native range input runs over `log2(factor)`:
   `min=-2 max=2 step=0.05`, so 1 sits at the centre and one step near 1 is
@@ -93,6 +104,18 @@ Owner rulings of 2026-10-11 are marked _(ruling)_ and are not reopened here.
   `×` + `factor.toPrecision(2)` (`×1.4`, `×0.71`, `×4.0`, `×0.25`) and is also
   the input's `aria-valuetext`, so a screen reader announces the factor, not the
   log position.
+
+  _Addendum 2026-10-11 (owner request: "the tag's node spacing slider needs
+  more range on the high end"):_ the range widens to **`[0.125, 8]`**
+  (`TAG_PHYSICS_MIN_FACTOR = 0.125`, `TAG_PHYSICS_MAX_FACTOR = 8`) and the slider
+  to `min=-3 max=3`; the step and readout format are unchanged (`×8.0`,
+  `×0.13`). Why: ×4, already halved to ×2 for a lone node by the old pair rule,
+  was too weak, and push-only hop repulsion never moves a pair already past its
+  preferred distance, so a modest clearance increase often showed little. Saved
+  ×4 factors load unchanged; `sanitizeTagPhysicsConfig` clamps through
+  `clampTagPhysicsFactor`, which reads the constants, so out-of-range entries
+  now clamp into the new bounds with no code change there. The edge-length
+  slider shares the range.
 
 - **Where the range lives.** **Module constants in `lib/tagPhysics.ts`
   (`TAG_PHYSICS_MIN_FACTOR = 0.25`, `TAG_PHYSICS_MAX_FACTOR = 4`), not
@@ -756,3 +779,11 @@ modes.md` is disjoint and may run in parallel.
   the deterministic output" and "parses through the production reader as
   the canonical graph"), because the example prose changed and the committed
   example has not been rebuilt from it. The regeneration fixes both.
+- 2026-10-11: owner follow-up after T05 — node spacing needed more range at the
+  high end. The pair rule became `max(fa, fb)` and the range `[0.125, 8]`
+  (slider `-3`…`3`); see the addenda under "Pair combination for repulsion"
+  and "Range, slider and readout". Specs pinning the `sqrt` rule and the ×4/×0.25
+  ends were updated (`physics.spec`, `tagPhysics.spec`, `graph.spec`,
+  `migrations.spec`, `TagColorLegend` stories); the logged ruling got the same
+  addendum. The example-save-file prose now says "between 0.125 and 8"; the
+  offline shell and example are rebuilt separately.

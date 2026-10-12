@@ -7,8 +7,8 @@ import type { NodeData } from '../../types/node';
  * `APP_CONFIG` entries: the range is part of what a saved value means, so a
  * setting that moved it would silently re-interpret every saved graph.
  */
-export const TAG_PHYSICS_MIN_FACTOR = 0.25;
-export const TAG_PHYSICS_MAX_FACTOR = 4;
+export const TAG_PHYSICS_MIN_FACTOR = 0.125;
+export const TAG_PHYSICS_MAX_FACTOR = 8;
 
 /**
  * One slider step in log2 space: `2 ** 0.05 ≈ ×1.035`, so a step near ×1 moves

@@ -65,7 +65,7 @@ export const AI_EXAMPLE_GRAPH = {
 			id: 'envelope',
 			title: 'Required graph collections',
 			description:
-				'data.nodes and data.edges are arrays. data.posByNodeId maps every node id to a finite {x, y} seed position. data.tagColorConfig has nodeTags and edgeTags objects, even when both are empty. data.tagPhysicsConfig is optional: when present it has nodeTags and edgeTags objects mapping a tag name to a layout factor between 0.25 and 4, and a tag it omits (or the whole field omitted) means ×1. data.assets is an object; use {} when there are no attachments. pinSequence is optional unless you provide lastPinnedSeq values. Keep JSON references internally consistent: unique ids, real endpoints, real position keys, and no dangling asset ids.',
+				'data.nodes and data.edges are arrays. data.posByNodeId maps every node id to a finite {x, y} seed position. data.tagColorConfig has nodeTags and edgeTags objects, even when both are empty. data.tagPhysicsConfig is optional: when present it has nodeTags and edgeTags objects mapping a tag name to a layout factor between 0.125 and 8, and a tag it omits (or the whole field omitted) means ×1. data.assets is an object; use {} when there are no attachments. pinSequence is optional unless you provide lastPinnedSeq values. Keep JSON references internally consistent: unique ids, real endpoints, real position keys, and no dangling asset ids.',
 			tags: ['format'],
 			content: []
 		},

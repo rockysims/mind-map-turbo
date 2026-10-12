@@ -223,7 +223,7 @@ function withSanitizedTagPhysicsConfig(data: MultigraphData): MultigraphData {
  * dropped whole; a missing or non-record namespace reads as empty; an entry
  * that is not a finite number above 0 is dropped (it has no direction to clamp
  * toward); a usable entry is clamped into range, so a wider-ranged future build
- * writing ×8 opens here as ×4; an entry that ends up exactly 1 is dropped, and
+ * writing ×16 opens here as ×8; an entry that ends up exactly 1 is dropped, and
  * so is the whole field once both maps are empty.
  */
 function sanitizeTagPhysicsConfig(value: unknown): TagPhysicsConfig | undefined {

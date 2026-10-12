@@ -228,10 +228,19 @@ describe('persisted graph migrations', () => {
 
 			const loaded = unwrapPersistedGraph({
 				schemaVersion: CURRENT_SCHEMA_VERSION,
-				data: { ...graph, tagPhysicsConfig: { edgeTags: { a: 9, b: -1, c: 'x', d: 1, e: 0.5 } } }
+				data: {
+					...graph,
+					tagPhysicsConfig: {
+						edgeTags: { a: 9, b: -1, c: 'x', d: 1, e: 0.5, f: 0.1, g: 8, h: 0.125 }
+					}
+				}
 			});
 
-			expect(loaded.tagPhysicsConfig).toEqual({ edgeTags: { a: 4, e: 0.5 }, nodeTags: {} });
+			// The range is [0.125, 8]: both ends load as they are, past them clamps.
+			expect(loaded.tagPhysicsConfig).toEqual({
+				edgeTags: { a: 8, e: 0.5, f: 0.125, g: 8, h: 0.125 },
+				nodeTags: {}
+			});
 		});
 
 		it('drops non-finite and zero entries, clamps a tiny one, and empties a non-record map', () => {
@@ -248,7 +257,7 @@ describe('persisted graph migrations', () => {
 				}
 			});
 
-			expect(loaded.tagPhysicsConfig).toEqual({ nodeTags: { tiny: 0.25 }, edgeTags: {} });
+			expect(loaded.tagPhysicsConfig).toEqual({ nodeTags: { tiny: 0.125 }, edgeTags: {} });
 		});
 
 		it('drops a field that sanitises to nothing', () => {
@@ -282,10 +291,10 @@ describe('persisted graph migrations', () => {
 
 			const loaded = unwrapPersistedGraph({
 				schemaVersion: 7,
-				data: { ...graph, tagPhysicsConfig: { nodeTags: { a: 8 }, edgeTags: {} } }
+				data: { ...graph, tagPhysicsConfig: { nodeTags: { a: 16 }, edgeTags: {} } }
 			});
 
-			expect(loaded.tagPhysicsConfig).toEqual({ nodeTags: { a: 4 }, edgeTags: {} });
+			expect(loaded.tagPhysicsConfig).toEqual({ nodeTags: { a: 8 }, edgeTags: {} });
 		});
 
 		it('needs no schema bump', () => {

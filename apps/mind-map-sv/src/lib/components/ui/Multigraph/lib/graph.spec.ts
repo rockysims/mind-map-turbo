@@ -568,18 +568,18 @@ describe('graph mutations', () => {
 			expect('tagPhysicsConfig' in next).toBe(false);
 		});
 
-		it('clamps an out-of-range factor into [0.25, 4]', () => {
+		it('clamps an out-of-range factor into [0.125, 8]', () => {
 			const graph = makeGraph({ nodeCount: 1 });
 
 			expect(setTagPhysicsFactor(graph, 'nodeTags', 'topic', 9).tagPhysicsConfig?.nodeTags).toEqual(
-				{ topic: 4 }
+				{ topic: 8 }
 			);
 			expect(
 				setTagPhysicsFactor(graph, 'nodeTags', 'topic', 0.01).tagPhysicsConfig?.nodeTags
-			).toEqual({ topic: 0.25 });
+			).toEqual({ topic: 0.125 });
 			expect(
 				setTagPhysicsFactor(graph, 'nodeTags', 'topic', -3).tagPhysicsConfig?.nodeTags
-			).toEqual({ topic: 0.25 });
+			).toEqual({ topic: 0.125 });
 		});
 
 		it('returns the same object for a non-finite factor', () => {
@@ -596,12 +596,12 @@ describe('graph mutations', () => {
 		it('returns the same object when the value does not change', () => {
 			const tuned = makeGraph({
 				nodeCount: 1,
-				tagPhysicsConfig: { nodeTags: {}, edgeTags: { rel: 4 } }
+				tagPhysicsConfig: { nodeTags: {}, edgeTags: { rel: 8 } }
 			});
 			const untuned = makeGraph({ nodeCount: 1 });
 
-			expect(setTagPhysicsFactor(tuned, 'edgeTags', 'rel', 4)).toBe(tuned);
-			// Clamps to the stored 4, so nothing changes.
+			expect(setTagPhysicsFactor(tuned, 'edgeTags', 'rel', 8)).toBe(tuned);
+			// Clamps to the stored 8, so nothing changes.
 			expect(setTagPhysicsFactor(tuned, 'edgeTags', 'rel', 10)).toBe(tuned);
 			expect(setTagPhysicsFactor(untuned, 'edgeTags', 'rel', 1)).toBe(untuned);
 		});

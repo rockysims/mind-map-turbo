@@ -168,11 +168,14 @@ export function relaxHopRepulsionStep(
 			const sourceRadius = radii[sourceId];
 			const targetRadius = radii[targetId];
 			const radiusSum = sourceRadius + targetRadius;
+			// The larger of the two factors, so a lone node tuned to ×4 holds ×4
+			// clearance against every untuned neighbour (a geometric mean would give
+			// it only ×2). Still symmetric, so the push stays equal and opposite.
 			// Scaled after `extraHopGap`, so the cross-component seam is scaled after
 			// its cap: a spaced-out node keeps a proportionally wider seam too.
-			const pairFactor = Math.sqrt(
-				repulsionFactorOf(repulsionFactorByNodeId, sourceId) *
-					repulsionFactorOf(repulsionFactorByNodeId, targetId)
+			const pairFactor = Math.max(
+				repulsionFactorOf(repulsionFactorByNodeId, sourceId),
+				repulsionFactorOf(repulsionFactorByNodeId, targetId)
 			);
 			const preferredDistance =
 				radiusSum + extraHopGap(radiusSum, hops, minHops, maxHops, maxExtraGapFactor) * pairFactor;

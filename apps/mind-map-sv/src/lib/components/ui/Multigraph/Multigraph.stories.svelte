@@ -5446,7 +5446,7 @@
 
 		await waitFor(() => expect(isSettling(canvasElement)).toBe(false), { timeout: 5000 });
 
-		// ×4 on `far` alone is a pair factor of sqrt(4 × 1) = 2 on the clearance the
+		// ×4 on `far` alone is a pair factor of max(4, 1) = 4 on the clearance the
 		// non-adjacent pair holds open, so the chain straightens and they part.
 		expect(outerDistance()).toBeGreaterThan(before + 40);
 		expect(lastChangedGraph(args).tagPhysicsConfig?.nodeTags.far).toBe(4);
