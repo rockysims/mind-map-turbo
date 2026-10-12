@@ -1551,6 +1551,58 @@
 		hopRepulsionStrength: 0,
 		edgeSpringStrength: 0
 	};
+
+	const KIB = 1024;
+	const MIB = 1024 * KIB;
+
+	/**
+	 * A pinned, sizeless hub with four unpinned spokes one hop out: 10 KiB, 1 MiB
+	 * (the shipped reference size), 100 MiB, and one with no size at all.
+	 */
+	const SIZED_SPOKES = makeGraph({
+		nodeCount: 5,
+		pinned: [0],
+		edges: [
+			[0, 1],
+			[0, 2],
+			[0, 3],
+			[0, 4]
+		],
+		sizeBytes: { 1: 10 * KIB, 2: MIB, 3: 100 * MIB },
+		posByNodeId: {
+			n0: { x: 0, y: 0 },
+			n1: { x: -480, y: -480 },
+			n2: { x: 480, y: -480 },
+			n3: { x: 480, y: 480 },
+			n4: { x: -480, y: 480 }
+		}
+	});
+
+	/**
+	 * What a node's `.circle` was told to draw and what it draws: both widths as
+	 * set inline by `NodeChrome`, and the computed border it actually renders.
+	 */
+	function nodeBorderWidths(
+		el: HTMLElement,
+		nodeId: string
+	): { normal: number; pinned: number; rendered: number } {
+		const circle = getCircle(el, nodeId);
+		return {
+			normal: parseFloat(circle.style.getPropertyValue('--node-border-width')),
+			pinned: parseFloat(circle.style.getPropertyValue('--pinned-node-border-width')),
+			rendered: parseFloat(getComputedStyle(circle).borderTopWidth)
+		};
+	}
+
+	/**
+	 * Chromium snaps a border width down to whole device pixels, so a sized
+	 * border of 15.97 px renders as 15 px at a device pixel ratio of 1. What
+	 * the reader sees is the asked width, floored by less than one device pixel.
+	 */
+	function expectDrawnBorder(rendered: number, asked: number): void {
+		expect(rendered).toBeLessThanOrEqual(asked + 0.01);
+		expect(rendered).toBeGreaterThan(asked - 1 / window.devicePixelRatio - 0.01);
+	}
 	/* ---------------------------------------------------------------------- *
 	 * Follow-ups: composing one on the node the reader is reading, and the
 	 * node the submit makes.
@@ -8343,6 +8395,214 @@
 		/>
 	{/snippet}
 </Story>
+<!--
+	Node size as border width. With the shipped `sizeBorder` defaults (1 MiB
+	reference, 0.15 per doubling, ×0.5..×3) and an 8 px border: 10 KiB sits on
+	the ×0.5 floor (4 px), 1 MiB draws the configured 8 px, 100 MiB draws
+	8 × (1 + 0.15 × log2 100) ≈ 15.97 px, and a node with no size draws 8 px.
+-->
+<Story
+	name="NodesWithLargerSizesDrawThickerBorders"
+	args={{
+		multigraphData: SIZED_SPOKES,
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const small = nodeBorderWidths(canvasElement, 'n1');
+		const reference = nodeBorderWidths(canvasElement, 'n2');
+		const large = nodeBorderWidths(canvasElement, 'n3');
+		const sizeless = nodeBorderWidths(canvasElement, 'n4');
+
+		expect(small.normal).toBeCloseTo(4, 5);
+		expect(reference.normal).toBeCloseTo(8, 5);
+		expect(large.normal).toBeCloseTo(15.97, 1);
+		expect(sizeless.normal).toBeCloseTo(8, 5);
+
+		// What the reader sees, not just what was asked for.
+		expect(small.rendered).toBeLessThan(reference.rendered);
+		expect(reference.rendered).toBeLessThan(large.rendered);
+		expectDrawnBorder(small.rendered, 4);
+		expectDrawnBorder(reference.rendered, 8);
+		expectDrawnBorder(large.rendered, large.normal);
+		expectDrawnBorder(sizeless.rendered, 8);
+
+		// Size is border only: every spoke is one hop out and drawn at one scale.
+		const scales = ['n1', 'n2', 'n3', 'n4'].map((id) => nodeScale(canvasElement, id));
+		expect(new Set(scales).size).toBe(1);
+	}}
+/>
+
+<Story
+	name="APinnedSizedNodeScalesItsPinnedBorder"
+	args={{
+		multigraphData: makeGraph({ nodeCount: 1, pinned: [0], sizeBytes: { 0: 100 * MIB } }),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const circle = getCircle(canvasElement, 'n0');
+		expect(circle).toHaveAttribute('data-pinned', 'true');
+
+		const widths = nodeBorderWidths(canvasElement, 'n0');
+		expect(widths.pinned).toBeCloseTo(15.97, 1);
+		expect(widths.normal).toBeCloseTo(15.97, 1);
+		expectDrawnBorder(widths.rendered, widths.pinned);
+		// The pin still reads as a pin: darker border, white halo.
+		expect(getComputedStyle(circle).borderTopColor).toBe('rgb(85, 85, 85)');
+	}}
+/>
+
+<Story
+	name="TagColoursFillASizedBorder"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'hub', title: 'Hub', description: '', tags: [] },
+				{ id: 'big', title: 'Big', description: '', tags: ['topic'] }
+			],
+			pinned: ['hub'],
+			edges: [{ source: 'hub', target: 'big' }],
+			sizeBytes: { big: 100 * MIB },
+			posByNodeId: { hub: { x: -240, y: 0 }, big: { x: 240, y: 0 } },
+			tagColorConfig: { nodeTags: { topic: '#ff0000' }, edgeTags: {} }
+		}),
+		defaultPrimaryNodeId: 'hub',
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const circle = getCircle(canvasElement, 'big');
+		expect(circle).toHaveAttribute('data-tag-border', 'true');
+		expect(circle.style.getPropertyValue('--node-tag-border')).toContain('#ff0000');
+
+		const widths = nodeBorderWidths(canvasElement, 'big');
+		expect(widths.normal).toBeCloseTo(15.97, 1);
+		expectDrawnBorder(widths.rendered, widths.normal);
+		// The colour is painted into the border box, so a wider border is a wider
+		// ring: the border itself stays transparent over the gradient.
+		expect(getComputedStyle(circle).borderTopColor).toBe('rgba(0, 0, 0, 0)');
+	}}
+/>
+
+<!--
+	`nodeChromeFor` reads `cfg` per render, so the "Size border" sliders are
+	instant: 0.15 → 0.25 per doubling takes the 100 MiB node from ≈ 15.97 px to
+	8 × (1 + 0.25 × log2 100) ≈ 21.3 px while the pointer is still down.
+-->
+<Story
+	name="DraggingWidthPerDoublingRedrawsBordersLive"
+	play={async ({ canvasElement }: HarnessPlayContext) => {
+		await waitForLayout();
+		const harness = getSettingsHarness(canvasElement);
+		expect(nodeBorderWidths(canvasElement, 'n3').normal).toBeCloseTo(15.97, 1);
+
+		const slider = settingsSlider(canvasElement, 'Width per doubling');
+		dragSettingsSlider(slider, [0.2, 0.25], false);
+
+		await waitFor(() => expect(nodeBorderWidths(canvasElement, 'n3').normal).toBeCloseTo(21.3, 1));
+		const live = nodeBorderWidths(canvasElement, 'n3');
+		expectDrawnBorder(live.rendered, live.normal);
+		// The reference-sized and sizeless nodes do not move with the slope.
+		expect(nodeBorderWidths(canvasElement, 'n2').normal).toBeCloseTo(8, 5);
+		expect(nodeBorderWidths(canvasElement, 'n4').normal).toBeCloseTo(8, 5);
+		expect(harness.dataset.settingsChangeCount).toBe('0');
+		expect(harnessSettings(canvasElement)).toEqual({});
+
+		slider.dispatchEvent(new Event('change', { bubbles: true }));
+		await waitFor(() => expect(harness.dataset.settingsChangeCount).toBe('1'));
+		expect(harnessSettings(canvasElement)).toEqual({
+			'multigraph.sizeBorder.widthPerDoubling': 0.25
+		});
+		expect(nodeBorderWidths(canvasElement, 'n3').normal).toBeCloseTo(21.3, 1);
+	}}
+>
+	{#snippet template()}
+		<MultigraphSettingsHarness
+			multigraphData={SIZED_SPOKES}
+			defaultPrimaryNodeId="n0"
+			layoutSettings={SETTINGS_STILL_LAYOUT}
+			panelOpenAtMount
+		/>
+	{/snippet}
+</Story>
+
+<!--
+	The sized twin of `MorphSurfaceMatchesInStageNodeAtProgressZero`: the morph
+	starts from the subject's own sized border, so entering and leaving focus on
+	a 100 MiB node does not jump between ≈ 15.97 px and the default 8 px.
+-->
+<Story
+	name="SizedMorphSurfaceMatchesInStageNodeAtProgressZero"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 1,
+			pinned: [0],
+			sizeBytes: { 0: 100 * MIB },
+			posByNodeId: { n0: { x: 0, y: 0 } }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: { panX: 0, panY: 0, scale: 0.95 },
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const center = getCenter(getCircle(canvasElement, 'n0'));
+		expect(nodeBorderWidths(canvasElement, 'n0').pinned).toBeCloseTo(15.97, 1);
+
+		const assertHandoff = () => {
+			const morph = morphRectOf(getFocusLayer(canvasElement));
+			expect(morph.progress).toBe(0);
+			const inStage = getCircle(canvasElement, 'n0');
+			const nodeRect = inStage.getBoundingClientRect();
+			expect(morph.width).toBeCloseTo(nodeRect.width, 0);
+			const visualScale = nodeRect.width / inStage.offsetWidth;
+			// Against the width the node was told to draw, so the comparison is
+			// exact rather than at the mercy of the browser's border snapping...
+			const asked = nodeBorderWidths(canvasElement, 'n0').pinned;
+			expect(asked * visualScale).toBeCloseTo(morph.borderWidth, 1);
+			// ...and against what it draws, the existing story's check, within the
+			// device pixel the browser's snapping takes off a fractional border.
+			const localBorder = parseFloat(getComputedStyle(inStage).borderTopWidth);
+			expectDrawnBorder(localBorder * visualScale, morph.borderWidth);
+			// Not the unsized default: this story would pass vacuously otherwise.
+			expect(morph.borderWidth).toBeGreaterThan(
+				APP_CONFIG.multigraph.pinnedNodeBorderWidthPx * visualScale + 4
+			);
+		};
+
+		// Entry: scrub in a little, then back to 0 while the surface is mounted.
+		dispatchWheel(stage, wheelFactor(1.16), center.x, center.y);
+		await waitFor(() => {
+			expect(morphRectOf(getFocusLayer(canvasElement)).progress).toBeGreaterThan(0);
+		});
+		dispatchWheel(stage, wheelFactor(0.6), center.x, center.y);
+		await waitFor(() => {
+			expect(morphRectOf(getFocusLayer(canvasElement)).progress).toBe(0);
+		});
+		assertHandoff();
+
+		await sleep(APP_CONFIG.multigraph.focus.entryGestureIdleMs + 40);
+		await waitFor(() => {
+			expect(canvasElement.querySelector('.deep-zoom-layer')).not.toBeInTheDocument();
+		});
+
+		// Exit: commit, then flick out to progress 0.
+		dispatchWheel(stage, wheelFactor(3), center.x, center.y);
+		await within(canvasElement).findByRole('dialog');
+		const world = canvasElement.querySelector('.zoom-world');
+		if (!(world instanceof HTMLElement)) throw new Error('Zoom world not found');
+		dispatchWheel(world, WHEEL_SLAM_OUT, center.x, center.y);
+		await waitFor(() => {
+			expect(morphRectOf(getFocusLayer(canvasElement)).progress).toBe(0);
+		});
+		assertHandoff();
+	}}
+/>
+
 <!--
 	Composing is not committing. The composer opens inside the workbench the
 	reader is already in, and nothing about the graph moves until they press Ask
