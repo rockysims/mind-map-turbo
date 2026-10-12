@@ -126,6 +126,42 @@
 		});
 	}
 
+	/**
+	 * A pinned node and a free one joined by an `@rel` edge, started stretched
+	 * well past the default band so the load's settle pulls the free end in to
+	 * the band's upper edge. That edge is a rest the spring defines, rather than
+	 * anywhere inside the band's dead zone, so an undo has a definite distance to
+	 * walk back to.
+	 */
+	function edgeLengthPairGraph(): MultigraphData {
+		return makeGraph({
+			nodeCount: 2,
+			pinned: [0],
+			edges: [{ source: 'n0', target: 'n1', tags: ['rel'] }],
+			posByNodeId: { n0: { x: -500, y: 0 }, n1: { x: 500, y: 0 } }
+		});
+	}
+
+	/** World-space distance between two drawn nodes, from their layout positions. */
+	function nodeDistance(canvasElement: HTMLElement, sourceId: string, targetId: string): number {
+		const source = getNodeWrapper(canvasElement, sourceId).dataset;
+		const target = getNodeWrapper(canvasElement, targetId).dataset;
+		return Math.hypot(Number(target.x) - Number(source.x), Number(target.y) - Number(source.y));
+	}
+
+	/** Drag a legend slider: scrub frames with the graph following, then the release. */
+	async function dragLegendSlider(
+		slider: HTMLInputElement,
+		positions: readonly number[]
+	): Promise<void> {
+		for (const position of positions) {
+			slider.value = String(position);
+			slider.dispatchEvent(new Event('input', { bubbles: true }));
+			await waitForFrames(2);
+		}
+		slider.dispatchEvent(new Event('change', { bubbles: true }));
+	}
+
 	/** Delete a node the way a reader does: hold it, then pick Delete. */
 	async function deleteNodeFromMenu(canvasElement: HTMLElement, nodeId: string): Promise<void> {
 		const circle = getCircle(canvasElement, nodeId);
@@ -1050,6 +1086,58 @@
 		// `Ctrl+Y` is the redo Windows hands expect, beside `Shift+Cmd/Ctrl+Z`.
 		dispatchKey(stage, 'y', { ctrlKey: true });
 		await waitFor(() => expect(harness.dataset.nodeCount).toBe('2'));
+	}}
+/>
+
+<Story
+	name="UndoWalksAnEdgeLengthDragBackInOneStep"
+	args={{
+		initialGraphId: 'undo-edge-length',
+		graphs: { 'undo-edge-length': edgeLengthPairGraph() },
+		// One relax step per mutation, so a restore's own relax barely starts the
+		// walk and only the settle it kicks can finish it — which is the half of
+		// the restore this story exists to pin.
+		layoutSettings: { enterExitDurationMs: 0, relaxIterations: 1 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		const canvas = within(canvasElement);
+		await waitForHarnessData(canvasElement, 'loadedGraphId', 'undo-edge-length');
+		await waitForLayout();
+		const root = getGraphRoot(canvasElement);
+		const endpointDistance = () => nodeDistance(canvasElement, 'n0', 'n1');
+		const settled = () =>
+			waitFor(() => expect(root.dataset.settling).toBeUndefined(), { timeout: 5000 });
+
+		await settled();
+		const before = endpointDistance();
+
+		await userEvent.click(canvas.getByRole('button', { name: 'Tags' }));
+		const slider = canvas.getByLabelText('Edge length for edge tag rel') as HTMLInputElement;
+		await dragLegendSlider(slider, [0.5, 1, 1.5, 2]);
+		await settled();
+		const stretched = endpointDistance();
+		expect(stretched).toBeGreaterThan(before + 40);
+
+		await userEvent.click(
+			within(canvas.getByRole('dialog', { name: 'Tags' })).getByRole('button', { name: 'Close' })
+		);
+
+		// Four `input`s and a `change`, one entry: the label names the slider, and
+		// a single undo takes the whole drag back with nothing behind it.
+		expect(undoButton(canvasElement)).toHaveAccessibleName('Undo edge length');
+		await userEvent.click(undoButton(canvasElement));
+
+		// A restore keeps the positions nodes occupy now and puts the factor back,
+		// so the pair starts the undo stretched to ×4 under a ×1 band. The spring
+		// walks it back in to where the load's settle left it.
+		await settled();
+		expect(Math.abs(endpointDistance() - before)).toBeLessThan(2);
+		expect(undoButton(canvasElement)).toHaveAttribute('aria-disabled', 'true');
+
+		// And forward again: ×4 restored onto a pair at ×1's rest.
+		await userEvent.click(redoButton(canvasElement));
+		await settled();
+		expect(Math.abs(endpointDistance() - stretched)).toBeLessThan(2);
 	}}
 />
 

@@ -1070,7 +1070,7 @@ test('a colour scrub lands as one undo', async ({ page }) => {
 	await page.evaluate(() => localStorage.clear());
 	await seedTwoNodeGraph(page, graphId, { tags: ['topic'] });
 	await page.goto(graphUrl(graphId));
-	await page.getByRole('button', { name: 'Tag colors' }).click();
+	await page.getByRole('button', { name: 'Tags', exact: true }).click();
 
 	const swatch = page.getByLabel('Color for node tag topic');
 	for (const color of ['#112233', '#445566', '#778899']) {
@@ -1080,10 +1080,7 @@ test('a colour scrub lands as one undo', async ({ page }) => {
 		}, color);
 	}
 	await swatch.evaluate((input) => input.dispatchEvent(new Event('change', { bubbles: true })));
-	await page
-		.getByRole('dialog', { name: 'Tag colors' })
-		.getByRole('button', { name: 'Close' })
-		.click();
+	await page.getByRole('dialog', { name: 'Tags' }).getByRole('button', { name: 'Close' }).click();
 
 	await expect.poll(() => readStoredTagColor(page, graphId, 'topic')).toBe('#778899');
 	await expect(undoControl(page)).toHaveAccessibleName('Undo tag color');
