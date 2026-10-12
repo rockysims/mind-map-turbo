@@ -195,4 +195,13 @@ export interface NodeData {
 	 * a finite number ≥ 0.
 	 */
 	sizeBytes?: number;
+	/**
+	 * Whatever number the importer or scraper that built the graph chose to rank
+	 * nodes by — word count, importance, citations. The graph's `weightConfig`
+	 * names it for the details view. Unlike `sizeBytes`, `0` is a real value
+	 * ("weighs nothing") and draws the thinnest border when border width shows
+	 * weight; absent means unknown. Must be a finite number ≥ 0: load drops
+	 * anything else.
+	 */
+	weight?: number;
 }

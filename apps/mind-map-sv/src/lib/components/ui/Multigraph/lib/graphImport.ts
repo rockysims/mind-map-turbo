@@ -103,6 +103,11 @@ export function importGraphData(host: MultigraphData, incoming: MultigraphData):
 
 	const tagPhysicsConfig = mergedTagPhysicsConfig(host, incoming);
 
+	// Taken whole, never merged key by key: a label and its unit belong
+	// together. The host's wins; an incoming one is adopted only by a host that
+	// names nothing, which relabels any weights the host already had.
+	const weightConfig = host.weightConfig ?? incoming.weightConfig;
+
 	const pinSequence = mergedPinSequence(host, incoming, nodes, pinShift);
 
 	return {
@@ -119,6 +124,7 @@ export function importGraphData(host: MultigraphData, incoming: MultigraphData):
 				edgeTags: { ...incoming.tagColorConfig.edgeTags, ...host.tagColorConfig.edgeTags }
 			},
 			...(tagPhysicsConfig === undefined ? {} : { tagPhysicsConfig }),
+			...(weightConfig === undefined ? {} : { weightConfig }),
 			...(assets === undefined ? {} : { assets }),
 			...(pinSequence === undefined ? {} : { pinSequence })
 		},

@@ -65,7 +65,7 @@ describe('semanticallyUnchanged', () => {
 		expect(semanticallyUnchanged(graph, relaxed)).toBe(true);
 	});
 
-	it('detects each of the six tracked fields changing', () => {
+	it('detects each of the seven tracked fields changing', () => {
 		const graph = baseGraph();
 
 		expect(semanticallyUnchanged(graph, { ...graph, nodes: [...graph.nodes] })).toBe(false);
@@ -79,8 +79,21 @@ describe('semanticallyUnchanged', () => {
 				tagPhysicsConfig: { nodeTags: {}, edgeTags: { rel: 2 } }
 			})
 		).toBe(false);
+		expect(semanticallyUnchanged(graph, { ...graph, weightConfig: { label: 'Word count' } })).toBe(
+			false
+		);
 		expect(semanticallyUnchanged(graph, { ...graph, assets: {} })).toBe(false);
 		expect(semanticallyUnchanged(graph, { ...graph, pinSequence: 1 })).toBe(false);
+	});
+
+	it('reports a weight label change as semantic', () => {
+		const graph = baseGraph();
+		const labelled: MultigraphData = { ...graph, weightConfig: { label: 'Word count' } };
+		const relabelled: MultigraphData = { ...graph, weightConfig: { label: 'Mass', unit: 'kg' } };
+
+		expect(semanticallyUnchanged(graph, labelled)).toBe(false);
+		expect(semanticFingerprint(labelled)).not.toBe(semanticFingerprint(graph));
+		expect(semanticFingerprint(relabelled)).not.toBe(semanticFingerprint(labelled));
 	});
 
 	it('reports a tag physics edit as semantic', () => {

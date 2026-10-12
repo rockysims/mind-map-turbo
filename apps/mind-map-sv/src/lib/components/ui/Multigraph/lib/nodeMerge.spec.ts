@@ -242,6 +242,38 @@ describe('planNodeMerge', () => {
 
 			expect(nodeById(next, 'n0')?.sizeBytes).toBeUndefined();
 		});
+
+		it("keeps the survivor's weight over the absorbed node's", () => {
+			const graph = makeGraph({ nodeCount: 2, weight: { 0: 3, 1: 5 } });
+
+			const { next } = planNodeMerge(graph, 'n1', 'n0');
+
+			expect(nodeById(next, 'n0')?.weight).toBe(3);
+		});
+
+		it("keeps a survivor's weight of 0 over the absorbed node's 5", () => {
+			const graph = makeGraph({ nodeCount: 2, weight: { 0: 0, 1: 5 } });
+
+			const { next } = planNodeMerge(graph, 'n1', 'n0');
+
+			expect(nodeById(next, 'n0')?.weight).toBe(0);
+		});
+
+		it("fills a weightless survivor with the absorbed node's weight", () => {
+			const graph = makeGraph({ nodeCount: 2, weight: { 1: 5 } });
+
+			const { next } = planNodeMerge(graph, 'n1', 'n0');
+
+			expect(nodeById(next, 'n0')?.weight).toBe(5);
+		});
+
+		it('leaves the weight undefined when neither node has one', () => {
+			const graph = makeGraph({ nodeCount: 2 });
+
+			const { next } = planNodeMerge(graph, 'n1', 'n0');
+
+			expect(nodeById(next, 'n0')?.weight).toBeUndefined();
+		});
 	});
 
 	describe('edges', () => {

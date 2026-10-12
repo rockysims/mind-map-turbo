@@ -394,6 +394,192 @@ describe('persisted graph migrations', () => {
 		});
 	});
 
+	describe('node weights', () => {
+		it('round-trips valid weights, including 0, through wrap, JSON and unwrap unchanged', () => {
+			const graph = makeGraph({ nodeCount: 3, pinned: [0], weight: { 0: 0, 1: 12.5, 2: 4200 } });
+
+			const loaded = unwrapPersistedGraph(JSON.parse(JSON.stringify(wrapPersistedGraph(graph))));
+
+			expect(loaded).toEqual(graph);
+			expect(loaded.nodes.map((node) => node.weight)).toEqual([0, 12.5, 4200]);
+		});
+
+		it('drops invalid weights and keeps every other field of those nodes', () => {
+			const graph = makeGraph({
+				nodes: [
+					{ id: 'neg', title: 'Negative', description: 'a', tags: ['file'] },
+					{ id: 'str', title: 'String', description: 'b', tags: [] },
+					{ id: 'nul', title: 'Null', description: 'c', tags: [] },
+					{ id: 'obj', title: 'Object', description: 'd', tags: [] },
+					{ id: 'ok', title: 'Valid', description: 'e', tags: [] }
+				],
+				pinned: ['neg'],
+				pinHistory: { neg: 1 },
+				sizeBytes: { neg: 2048 }
+			});
+			const stored = {
+				...graph,
+				nodes: graph.nodes.map((node, index) => ({
+					...node,
+					weight: [-1, '7', null, { value: 7 }, 3][index]
+				}))
+			};
+
+			const loaded = unwrapPersistedGraph(
+				JSON.parse(JSON.stringify({ schemaVersion: CURRENT_SCHEMA_VERSION, data: stored }))
+			);
+
+			expect(loaded.nodes.slice(0, 4)).toEqual(graph.nodes.slice(0, 4));
+			for (const node of loaded.nodes.slice(0, 4)) {
+				expect(node).not.toHaveProperty('weight');
+			}
+			// A bad weight costs the node nothing else, its size included.
+			expect(loaded.nodes[0].sizeBytes).toBe(2048);
+			expect(loaded.nodes[4]).toEqual({ ...graph.nodes[4], weight: 3 });
+			expect(loaded.edges).toEqual(graph.edges);
+			expect(loaded.posByNodeId).toEqual(graph.posByNodeId);
+		});
+
+		it('cleans a bad size and a bad weight on the same node independently', () => {
+			const graph = makeGraph({ nodeCount: 2, pinned: [0] });
+			const data = {
+				...graph,
+				nodes: [
+					{ ...graph.nodes[0], sizeBytes: -5, weight: 2 },
+					{ ...graph.nodes[1], sizeBytes: 10, weight: Number.NaN }
+				]
+			};
+
+			const loaded = unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data });
+
+			expect(loaded.nodes[0]).toEqual({ ...graph.nodes[0], weight: 2 });
+			expect(loaded.nodes[0]).not.toHaveProperty('sizeBytes');
+			expect(loaded.nodes[1]).toEqual({ ...graph.nodes[1], sizeBytes: 10 });
+			expect(loaded.nodes[1]).not.toHaveProperty('weight');
+		});
+
+		it('rebuilds only the nodes it cleans', () => {
+			const graph = makeGraph({ nodeCount: 2, pinned: [0], weight: { 0: 10 } });
+			const data = { ...graph, nodes: [graph.nodes[0], { ...graph.nodes[1], weight: -5 }] };
+
+			const loaded = unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data });
+
+			expect(loaded).not.toBe(data);
+			expect(loaded.nodes[0]).toBe(data.nodes[0]);
+			expect(loaded.nodes[1]).not.toHaveProperty('weight');
+		});
+
+		it.each([
+			['NaN', Number.NaN],
+			['Infinity', Number.POSITIVE_INFINITY],
+			['-Infinity', Number.NEGATIVE_INFINITY],
+			['undefined', undefined]
+		])('drops a %s weight handed over as an object', (_label, weight) => {
+			const graph = makeGraph({ nodeCount: 1, pinned: [0] });
+
+			const loaded = unwrapPersistedGraph({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data: { ...graph, nodes: [{ ...graph.nodes[0], weight }] }
+			});
+
+			expect(loaded.nodes[0]).not.toHaveProperty('weight');
+			expect(loaded.nodes[0]).toEqual(graph.nodes[0]);
+		});
+
+		it('returns a graph with nothing to clean by identity', () => {
+			const weighted = makeGraph({ nodeCount: 2, pinned: [0], weight: { 0: 0, 1: 99 } });
+
+			expect(unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data: weighted })).toBe(
+				weighted
+			);
+		});
+	});
+
+	describe('weight config', () => {
+		it('round-trips a valid config through wrap, JSON and unwrap unchanged', () => {
+			const graph = makeGraph({
+				nodeCount: 1,
+				pinned: [0],
+				weight: { 0: 12.5 },
+				weightConfig: { label: 'Mass', unit: 'kg' }
+			});
+
+			const loaded = unwrapPersistedGraph(JSON.parse(JSON.stringify(wrapPersistedGraph(graph))));
+
+			expect(loaded).toEqual(graph);
+		});
+
+		it('drops a blank or non-string unit and keeps the label', () => {
+			const graph = makeGraph({ nodeCount: 1, pinned: [0] });
+
+			for (const unit of ['', '   ', 7, null]) {
+				const loaded = unwrapPersistedGraph({
+					schemaVersion: CURRENT_SCHEMA_VERSION,
+					data: { ...graph, weightConfig: { label: 'Word count', unit } }
+				});
+
+				expect(loaded.weightConfig).toEqual({ label: 'Word count' });
+				expect(loaded.weightConfig).not.toHaveProperty('unit');
+			}
+		});
+
+		it.each([
+			['missing', { unit: 'kg' }],
+			['blank', { label: '  ', unit: 'kg' }],
+			['empty', { label: '' }],
+			['not a string', { label: 42 }]
+		])('drops the whole config when the label is %s', (_label, weightConfig) => {
+			const graph = makeGraph({ nodeCount: 1, pinned: [0] });
+
+			const loaded = unwrapPersistedGraph({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data: { ...graph, weightConfig }
+			});
+
+			expect(loaded).not.toHaveProperty('weightConfig');
+			expect(loaded.nodes).toEqual(graph.nodes);
+		});
+
+		it.each([['a string'], [42], [null], [['label']]])(
+			'drops a non-object field (%j) and still loads the graph',
+			(value) => {
+				const graph = makeGraph({ nodeCount: 1, pinned: [0] });
+
+				const loaded = unwrapPersistedGraph({
+					schemaVersion: CURRENT_SCHEMA_VERSION,
+					data: { ...graph, weightConfig: value }
+				});
+
+				expect(loaded).not.toHaveProperty('weightConfig');
+				expect(loaded.nodes).toEqual(graph.nodes);
+			}
+		);
+
+		it('drops extra keys', () => {
+			const graph = makeGraph({ nodeCount: 1, pinned: [0] });
+
+			const loaded = unwrapPersistedGraph({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data: { ...graph, weightConfig: { label: 'Mass', unit: 'kg', colour: 'red' } }
+			});
+
+			expect(loaded.weightConfig).toEqual({ label: 'Mass', unit: 'kg' });
+		});
+
+		it('returns a graph with neither node numbers nor a weight config by identity', () => {
+			const graph = makeGraph({ nodeCount: 2, pinned: [0] });
+
+			const loaded = unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data: graph });
+
+			expect(loaded).toBe(graph);
+			expect(loaded).not.toHaveProperty('weightConfig');
+		});
+
+		it('needs no schema bump', () => {
+			expect(CURRENT_SCHEMA_VERSION).toBe(8);
+		});
+	});
+
 	it('parses serialized version 1 payloads', () => {
 		const graph = makeGraph({ nodeCount: 1, pinned: [0] });
 

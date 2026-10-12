@@ -6,7 +6,8 @@ import type {
 	MultigraphData,
 	Point,
 	TagColorConfig,
-	TagPhysicsConfig
+	TagPhysicsConfig,
+	WeightConfig
 } from './components/ui/types/multigraph';
 import type {
 	AiAddon,
@@ -162,40 +163,87 @@ function readHistoryState(value: unknown): PersistedHistoryState | null {
 
 export function unwrapPersistedGraph(payload: unknown): MultigraphData {
 	return withSeededComponentPins(
-		withValidNodeSizes(withSanitizedTagPhysicsConfig(unwrapPersistedGraphData(payload)))
+		withValidNodeNumbers(
+			withSanitizedWeightConfig(withSanitizedTagPhysicsConfig(unwrapPersistedGraphData(payload)))
+		)
 	);
 }
 
 /**
- * Drops any `sizeBytes` that is not a finite number ≥ 0 rather than rejecting
- * the node.
+ * The optional per-node numbers an importer or scraper writes. Both must be a
+ * finite number ≥ 0; what `0` means differs (unknown size, weightless node),
+ * but that is for the border to decide, not for load.
+ */
+const NODE_NUMBER_KEYS = ['sizeBytes', 'weight'] as const;
+
+/**
+ * Drops any node number (`sizeBytes`, `weight`) that is not a finite number ≥ 0
+ * rather than rejecting the node.
  *
  * Deliberately not part of `isNodeData`, which is all-or-nothing: one bad
  * number from a scraper must not make an otherwise good graph unreadable. The
  * key is removed, not set to `undefined`, so a re-save writes nothing for it.
  * Returns `data` by identity when no node needs cleaning, and otherwise
- * rebuilds only the offending nodes. The field is optional and additive, so no
- * schema bump: an older v8 build passes it through untouched.
+ * rebuilds only the offending nodes. The fields are optional and additive, so
+ * no schema bump: an older v8 build passes them through untouched.
  */
-function withValidNodeSizes(data: MultigraphData): MultigraphData {
-	if (!data.nodes.some(hasInvalidSize)) return data;
+function withValidNodeNumbers(data: MultigraphData): MultigraphData {
+	if (!data.nodes.some(hasInvalidNodeNumber)) return data;
 
 	return {
 		...data,
 		nodes: data.nodes.map((node) => {
-			if (!hasInvalidSize(node)) return node;
+			if (!hasInvalidNodeNumber(node)) return node;
 			const cleaned = { ...node };
-			delete cleaned.sizeBytes;
+			for (const key of NODE_NUMBER_KEYS) {
+				if (isInvalidNodeNumber(node, key)) delete cleaned[key];
+			}
 			return cleaned;
 		})
 	};
 }
 
-function hasInvalidSize(node: NodeData): boolean {
-	if (!Object.prototype.hasOwnProperty.call(node, 'sizeBytes')) return false;
+function hasInvalidNodeNumber(node: NodeData): boolean {
+	return NODE_NUMBER_KEYS.some((key) => isInvalidNodeNumber(node, key));
+}
+
+function isInvalidNodeNumber(node: NodeData, key: (typeof NODE_NUMBER_KEYS)[number]): boolean {
+	if (!Object.prototype.hasOwnProperty.call(node, key)) return false;
 	// Read as `unknown`: the stored value has not been validated yet.
-	const value: unknown = node.sizeBytes;
+	const value: unknown = node[key];
 	return !isFiniteNumber(value) || value < 0;
+}
+
+/**
+ * Cleans `weightConfig` on the way in rather than validating it, for the same
+ * reason as `withSanitizedTagPhysicsConfig`: a display label must never make
+ * the whole graph unreadable. A graph without the key comes back by identity.
+ */
+function withSanitizedWeightConfig(data: MultigraphData): MultigraphData {
+	if (!Object.prototype.hasOwnProperty.call(data, 'weightConfig')) return data;
+
+	const weightConfig = sanitizeWeightConfig(data.weightConfig);
+	const next: MultigraphData = { ...data };
+	if (weightConfig === undefined) delete next.weightConfig;
+	else next.weightConfig = weightConfig;
+	return next;
+}
+
+/**
+ * A stored weight label, made safe to show. A non-record value, or a `label`
+ * that is not a non-blank string, drops the whole config: a unit with nothing
+ * to label is meaningless. A `unit` that is not a non-blank string is dropped by
+ * itself. Extra keys are dropped. Strings are kept as written, not trimmed.
+ */
+function sanitizeWeightConfig(value: unknown): WeightConfig | undefined {
+	if (!isRecord(value) || !isNonBlankString(value.label)) return undefined;
+	return isNonBlankString(value.unit)
+		? { label: value.label, unit: value.unit }
+		: { label: value.label };
+}
+
+function isNonBlankString(value: unknown): value is string {
+	return typeof value === 'string' && value.trim() !== '';
 }
 
 /**

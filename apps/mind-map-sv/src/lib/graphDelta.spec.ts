@@ -58,6 +58,7 @@ const document = (graph: MultigraphData) => ({
 	edges: graph.edges,
 	tagColorConfig: graph.tagColorConfig,
 	tagPhysicsConfig: graph.tagPhysicsConfig,
+	weightConfig: graph.weightConfig,
 	assets: graph.assets,
 	pinSequence: graph.pinSequence
 });
@@ -138,6 +139,15 @@ const MUTATIONS: Array<[string, (graph: MultigraphData) => MultigraphData]> = [
 	[
 		'importGraphData',
 		(graph) => importGraphData(graph, makeGraph({ nodeCount: 2, edges: [[0, 1]] })).next
+	],
+	[
+		// Undoing this must take the adopted label away again.
+		'importGraphData (weight config)',
+		(graph) =>
+			importGraphData(
+				graph,
+				makeGraph({ nodeCount: 1, weight: { 0: 4 }, weightConfig: { label: 'Word count' } })
+			).next
 	]
 ];
 
@@ -276,6 +286,56 @@ describe('diffByReference / applyDelta', () => {
 			const applied = applyDelta(before, diffByReference(before, removeNode(before, 'n1')));
 
 			expect(applied.tagPhysicsConfig).toBe(before.tagPhysicsConfig);
+		});
+	});
+
+	describe('weight config', () => {
+		const labelled = (): MultigraphData => ({
+			...baseGraph(),
+			weightConfig: { label: 'Word count' }
+		});
+
+		it('round-trips adding the field', () => {
+			const before = baseGraph();
+
+			const applied = applyDelta(before, diffByReference(before, labelled()));
+
+			expect(applied.weightConfig).toEqual({ label: 'Word count' });
+		});
+
+		it('round-trips changing the field', () => {
+			const before = labelled();
+			const after: MultigraphData = { ...before, weightConfig: { label: 'Mass', unit: 'kg' } };
+
+			const applied = applyDelta(before, diffByReference(before, after));
+
+			expect(applied.weightConfig).toEqual({ label: 'Mass', unit: 'kg' });
+		});
+
+		it('round-trips removing the field as null, leaving no key behind', () => {
+			const before = labelled();
+			const delta = diffByReference(before, baseGraph());
+
+			expect(delta.weightConfig).toBeNull();
+			expect('weightConfig' in applyDelta(before, delta)).toBe(false);
+			const stored = JSON.parse(JSON.stringify(delta));
+			expect('weightConfig' in applyDelta(before, stored)).toBe(false);
+		});
+
+		it('does not call a delta that only changes the weight config empty', () => {
+			const before = baseGraph();
+
+			expect(isEmptyDelta(diffByReference(before, labelled()))).toBe(false);
+			expect(isEmptyDelta(diffByReference(labelled(), before))).toBe(false);
+		});
+
+		it('leaves the field alone when the delta does not mention it', () => {
+			const before = labelled();
+
+			const delta = diffByReference(before, removeNode(before, 'n1'));
+
+			expect('weightConfig' in delta).toBe(false);
+			expect(applyDelta(before, delta).weightConfig).toBe(before.weightConfig);
 		});
 	});
 

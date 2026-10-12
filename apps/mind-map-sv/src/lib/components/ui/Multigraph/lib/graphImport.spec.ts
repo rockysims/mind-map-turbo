@@ -367,6 +367,32 @@ describe('importGraphData', () => {
 		});
 	});
 
+	describe('weight config', () => {
+		it("keeps the host's config whole, unit and all, over the incoming one", () => {
+			const host = makeGraph({ nodeCount: 1, weightConfig: { label: 'Word count' } });
+			const incoming = makeGraph({ nodeCount: 1, weightConfig: { label: 'Mass', unit: 'kg' } });
+
+			const { next } = importGraphData(host, incoming);
+
+			expect(next.weightConfig).toEqual({ label: 'Word count' });
+		});
+
+		it('adopts the incoming config into a host that has none', () => {
+			const host = makeGraph({ nodeCount: 1 });
+			const incoming = makeGraph({ nodeCount: 1, weightConfig: { label: 'Mass', unit: 'kg' } });
+
+			const { next } = importGraphData(host, incoming);
+
+			expect(next.weightConfig).toEqual({ label: 'Mass', unit: 'kg' });
+		});
+
+		it('adds no field when neither graph has one', () => {
+			const { next } = importGraphData(makeGraph({ nodeCount: 1 }), makeGraph({ nodeCount: 1 }));
+
+			expect('weightConfig' in next).toBe(false);
+		});
+	});
+
 	describe('pin sequencing', () => {
 		it('rebases incoming stamps past the host maximum, preserving their order', () => {
 			const host = makeGraph({
