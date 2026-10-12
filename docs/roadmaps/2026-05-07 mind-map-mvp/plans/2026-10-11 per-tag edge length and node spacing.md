@@ -3,7 +3,7 @@
 **Created:** 2026-10-11
 **Author:** Claude agent
 **Milestone:** none — extends [milestone 04f](../milestones/04f-tag-colors-and-graph-tag-config.md) (tag config) and [milestone 02](../milestones/02-layout-and-repulsion.md) (physics)
-**Status:** draft
+**Status:** done
 **Total estimated effort:** M
 
 ## Summary
@@ -679,3 +679,80 @@ modes.md` is disjoint and may run in parallel.
 - 2026-10-11: owner rulings on the two open items: the readout keeps its
   visible word (`length ×1.4` / `spacing ×1.4`), and the toolbar button and
   dialog are retitled **"Tags"** (folded into T05).
+- 2026-10-11: executed. What landed:
+  - T01 — `lib/physics.ts`: `EdgeEndpointIds.gapFactor?` multiplies both ends
+    of an edge's rest-gap band in `relaxEdgeDistancesStep`, and a trailing
+    `repulsionFactorByNodeId?` on `relaxGraphPhysics` / `relaxHopRepulsionStep`
+    scales each pair's `extraHopGap` by `sqrt(fa × fb)`, after the
+    cross-component seam's cap. Non-finite or non-positive values read as 1.
+    With no factors every existing physics result is bit-identical.
+  - T02 — new pure `lib/tagPhysics.ts` (range constants, clamp,
+    geometric-mean `elementFactor`, `withTagGapFactors` returning its input
+    by reference when nothing is configured, sparse `repulsionFactorByNodeId`,
+    and the log2 slider mapping and `×` formatter), plus the
+    `TagPhysicsConfig` type, the optional `MultigraphData.tagPhysicsConfig`
+    and `EdgeData.gapFactor`.
+  - T03 — `setTagPhysicsFactor` (clamps, removes the key at 1 and the field
+    when both maps empty, same object back when nothing changes);
+    `deleteTagEverywhere` drops the factor; host-wins import merge;
+    `sanitizeTagPhysicsConfig` in the `unwrapPersistedGraph` load funnel;
+    `physicsFactor` on every `LegendTag`, physics-only tags listed. The
+    undo-tracking fix: `tagPhysicsConfig` joined `semanticallyUnchanged`,
+    `semanticFingerprint` and `GraphDelta` (with `null` for absent), without
+    which a slider drag would have recorded no undo entry.
+  - T04 — `GraphLayoutOptions.repulsionFactorByNodeId`; the runtime's
+    `weighLayoutGraph` (last step of `visibleGraphFor`, after the excluded-
+    elements reducer) and `repulsionFactorsFor` (consulted by
+    `layoutOptions()`, an explicit override winning). `Multigraph.svelte`
+    applies the gap factors and passes the node factors at all three
+    composition sites: `visibleGraph`, the ingest settle, and the runtime's
+    `visibleGraphFor`.
+  - T05 — `TagColorLegend.svelte` gives each row a log slider left of its
+    colour, read out as `length ×1.4` / `spacing ×1.4` with the factor in
+    `aria-valuetext`, on its own full-width line below 420px and ≥ 44px tall.
+    `updateTagPhysics` always commits (so the release ends the coalesce run)
+    and kicks a settle; `restoreGraphInPlace` and `adoptGraphInPlace` kick one
+    when the incoming config differs. The dialog and toolbar button read
+    "Tags" (stories and `e2e/app.test.ts` updated). Stories:
+    `TagColorLegend` (`EmitsEdgeLengthAndNodeSpacingScrubsThenCommits`,
+    `ShowsAStoredFactorOnItsSliderAndReadout`,
+    `GivesTheSliderItsOwnLineOnANarrowScreen`), `Multigraph`
+    (`UserLengthensAnEdgeTagFromLegend`, `UserSpacesOutANodeTagFromLegend`).
+    The undo story, `UndoWalksAnEdgeLengthDragBackInOneStep`, lives in
+    `GraphPersistence.stories.svelte` rather than `Multigraph.stories.svelte`,
+    because undo and redo belong to the persistence controller that harness
+    mounts; Multigraph stories can only observe commit intents. It runs with
+    `relaxIterations: 1` so a restore's own `relaxAfterMutation` barely
+    starts the walk and only the settle kick can finish it — the half of the
+    restore the story exists to pin.
+  - T06 — `edgeSpringStrength` and `hopRepulsionStrength` slider max 2 → 1,
+    pinned by a `configSchema.spec` case; the edge-gap help text and config
+    comments now say "the two nodes' combined radius";
+    `DraggingEdgeSpringStrengthStartsTheFrameLoop` drags `[0.5, 1]`.
+  - T07 — `scripts/example-save-file.mjs` gained one sentence in the
+    data-shape paragraph and one in the tag paragraph (not in the step-4
+    replace list); the rulings are logged in
+    `docs/ui-decisions/2026-10-11--editing--tune-layout-per-tag-from-the-legend.md`,
+    including the risk that a node's spacing also lengthens its own edges.
+- 2026-10-11: T05 found three places where the plan's assumptions did not
+  hold, none of which changed the design:
+  - **Undo keeps current positions and restores only the factor.** A restore
+    does not put nodes back where they were; the pair starts the undo where
+    the drag left it, under the old band, and the spring walks it back. The
+    undo acceptance is therefore met by the settle kick, not by the restore.
+  - **A ×2 undo case would not move.** ×2's band `[0.84, 1.68] × radiusSum`
+    touches ×1's `[0.42, 0.84]` at 0.84, so a pair resting at ×2's lower edge
+    is already inside ×1's band and an undo leaves it there. The undo story
+    drags to ×4 and starts the pair stretched past the band so the load's
+    settle leaves it at a spring-defined rest.
+  - **At default settings the settle kick is rarely what finishes an undo.**
+    A two-node pair converges within `relaxAfterMutation`'s 12 iterations, so
+    the kick matters only when iterations are low or forces compete — hence
+    the story's `relaxIterations: 1`.
+- 2026-10-11: the offline shell and `examples/ai-mind-map.html` were **not**
+  regenerated: one build regenerates both after all four 2026-10-11 plans
+  land. Until then `pnpm check:offline-shell` is owed for this plan's
+  `src/**` changes, and two `exampleSaveFile.spec.ts` cases fail ("exactly
+  the deterministic output" and "parses through the production reader as
+  the canonical graph"), because the example prose changed and the committed
+  example has not been rebuilt from it. The regeneration fixes both.

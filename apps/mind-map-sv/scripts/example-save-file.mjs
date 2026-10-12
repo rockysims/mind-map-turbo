@@ -65,7 +65,7 @@ export const AI_EXAMPLE_GRAPH = {
 			id: 'envelope',
 			title: 'Required graph collections',
 			description:
-				'data.nodes and data.edges are arrays. data.posByNodeId maps every node id to a finite {x, y} seed position. data.tagColorConfig has nodeTags and edgeTags objects, even when both are empty. data.assets is an object; use {} when there are no attachments. pinSequence is optional unless you provide lastPinnedSeq values. Keep JSON references internally consistent: unique ids, real endpoints, real position keys, and no dangling asset ids.',
+				'data.nodes and data.edges are arrays. data.posByNodeId maps every node id to a finite {x, y} seed position. data.tagColorConfig has nodeTags and edgeTags objects, even when both are empty. data.tagPhysicsConfig is optional: when present it has nodeTags and edgeTags objects mapping a tag name to a layout factor between 0.25 and 4, and a tag it omits (or the whole field omitted) means ×1. data.assets is an object; use {} when there are no attachments. pinSequence is optional unless you provide lastPinnedSeq values. Keep JSON references internally consistent: unique ids, real endpoints, real position keys, and no dangling asset ids.',
 			tags: ['format'],
 			content: []
 		},
@@ -81,7 +81,7 @@ export const AI_EXAMPLE_GRAPH = {
 			id: 'tags',
 			title: 'Tags colour the graph',
 			description:
-				'Node tags colour the node outline. One tag gives one colour; multiple tags split the outline into equal coloured segments, as the guide node demonstrates. Edge tags colour the edge from the first tag only. tagColorConfig.nodeTags and .edgeTags are separate name-to-hex-colour maps. A tag without an explicit entry still gets a deterministic fallback and appears in the legend. Tags are structured arrays in the save, not # or @ syntax.',
+				'Node tags colour the node outline. One tag gives one colour; multiple tags split the outline into equal coloured segments, as the guide node demonstrates. Edge tags colour the edge from the first tag only. tagColorConfig.nodeTags and .edgeTags are separate name-to-hex-colour maps. A tag without an explicit entry still gets a deterministic fallback and appears in the legend. The optional tagPhysicsConfig tunes the layout per tag: an edge-tag factor scales the length of every edge carrying that tag, a node-tag factor scales the spacing kept around every node carrying it, and an element with several tuned tags uses the geometric mean of their factors. Tags are structured arrays in the save, not # or @ syntax.',
 			tags: ['behavior', 'format'],
 			content: []
 		},
