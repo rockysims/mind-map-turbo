@@ -91,7 +91,9 @@ function mergeNodeFields(survivor: NodeData, absorbed: NodeData): NodeData {
 		// The survivor's size wins; the absorbed one only fills a gap. A merge
 		// unites duplicates, and summing two scrapes of the same file would
 		// double it.
-		sizeBytes: survivor.sizeBytes ?? absorbed.sizeBytes
+		sizeBytes: survivor.sizeBytes ?? absorbed.sizeBytes,
+		// Same rule for weight, and a survivor's 0 is a real weight that wins.
+		weight: survivor.weight ?? absorbed.weight
 	};
 }
 

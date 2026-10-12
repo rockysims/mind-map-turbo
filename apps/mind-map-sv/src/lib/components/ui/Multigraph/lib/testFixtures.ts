@@ -12,7 +12,8 @@ import type {
 	MultigraphData,
 	Point,
 	TagColorConfig,
-	TagPhysicsConfig
+	TagPhysicsConfig,
+	WeightConfig
 } from '../../types/multigraph';
 import type { ParsedTitleDirection } from './titleSyntax';
 
@@ -38,12 +39,16 @@ interface MakeGraphInput {
 	pinHistory?: Record<number | string, number>;
 	/** Node sizes (NodeData.sizeBytes), keyed by generated index or explicit id. */
 	sizeBytes?: Record<number | string, number>;
+	/** Node weights (NodeData.weight), keyed by generated index or explicit id. */
+	weight?: Record<number | string, number>;
 	/** Optional explicit positions, keyed by node id. Defaults to (0, 0). */
 	posByNodeId?: Record<string, Point>;
 	/** Optional graph-level tag colors. Defaults to empty node/edge maps. */
 	tagColorConfig?: TagColorConfig;
 	/** Optional per-tag layout factors. Omitted from the graph unless given. */
 	tagPhysicsConfig?: TagPhysicsConfig;
+	/** Optional weight label (MultigraphData.weightConfig). Omitted from the graph unless given. */
+	weightConfig?: WeightConfig;
 }
 
 /**
@@ -66,12 +71,14 @@ export function makeGraph(input: MakeGraphInput = {}): MultigraphData {
 		);
 	const pinHistoryById = byNodeId(input.pinHistory);
 	const sizeBytesById = byNodeId(input.sizeBytes);
+	const weightById = byNodeId(input.weight);
 	const nodes = baseNodes.map((node) => ({
 		...node,
 		tags: node.tags ?? [],
 		...(pinnedIds.has(node.id) ? { pinned: true } : {}),
 		...(pinHistoryById.has(node.id) ? { lastPinnedSeq: pinHistoryById.get(node.id) } : {}),
-		...(sizeBytesById.has(node.id) ? { sizeBytes: sizeBytesById.get(node.id) } : {})
+		...(sizeBytesById.has(node.id) ? { sizeBytes: sizeBytesById.get(node.id) } : {}),
+		...(weightById.has(node.id) ? { weight: weightById.get(node.id) } : {})
 	}));
 
 	const edges: EdgeData[] = (input.edges ?? []).map((edge, i) => {
@@ -97,7 +104,8 @@ export function makeGraph(input: MakeGraphInput = {}): MultigraphData {
 			nodeTags: {},
 			edgeTags: {}
 		},
-		...(input.tagPhysicsConfig === undefined ? {} : { tagPhysicsConfig: input.tagPhysicsConfig })
+		...(input.tagPhysicsConfig === undefined ? {} : { tagPhysicsConfig: input.tagPhysicsConfig }),
+		...(input.weightConfig === undefined ? {} : { weightConfig: input.weightConfig })
 	};
 }
 

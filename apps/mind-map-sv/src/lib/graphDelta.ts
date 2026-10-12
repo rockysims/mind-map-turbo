@@ -26,7 +26,8 @@ import type {
 	MultigraphData,
 	Point,
 	TagColorConfig,
-	TagPhysicsConfig
+	TagPhysicsConfig,
+	WeightConfig
 } from './components/ui/types/multigraph';
 import type { NodeData } from './components/ui/types/node';
 
@@ -49,7 +50,7 @@ type ElementDelta<TElement> = {
  *
  * The graph-level fields appear only when they changed, and `null` is how the
  * format says "the target does not have this one at all" — `tagPhysicsConfig`,
- * `assets` and `pinSequence` are optional on `MultigraphData`, and a delta that could only
+ * `weightConfig`, `assets` and `pinSequence` are optional on `MultigraphData`, and a delta that could only
  * say "unchanged" or "here is a value" could never take one away.
  */
 export type GraphDelta = {
@@ -57,6 +58,7 @@ export type GraphDelta = {
 	edges: ElementDelta<EdgeData>;
 	tagColorConfig?: TagColorConfig;
 	tagPhysicsConfig?: TagPhysicsConfig | null;
+	weightConfig?: WeightConfig | null;
 	assets?: Record<string, GraphAssetMetadata> | null;
 	pinSequence?: number | null;
 	removedPositions: Record<string, Point>;
@@ -74,6 +76,8 @@ export function diffByReference(from: MultigraphData, to: MultigraphData): Graph
 	if (from.tagPhysicsConfig !== to.tagPhysicsConfig) {
 		delta.tagPhysicsConfig = to.tagPhysicsConfig ?? null;
 	}
+	// An import can add a weight label, and undoing it must take the label away.
+	if (from.weightConfig !== to.weightConfig) delta.weightConfig = to.weightConfig ?? null;
 	if (from.assets !== to.assets) delta.assets = to.assets ?? null;
 	if (from.pinSequence !== to.pinSequence) delta.pinSequence = to.pinSequence ?? null;
 
@@ -105,6 +109,10 @@ export function applyDelta(graph: MultigraphData, delta: GraphDelta): Multigraph
 	if (delta.tagPhysicsConfig !== undefined) {
 		if (delta.tagPhysicsConfig === null) delete next.tagPhysicsConfig;
 		else next.tagPhysicsConfig = delta.tagPhysicsConfig;
+	}
+	if (delta.weightConfig !== undefined) {
+		if (delta.weightConfig === null) delete next.weightConfig;
+		else next.weightConfig = delta.weightConfig;
 	}
 	if (delta.assets !== undefined) {
 		if (delta.assets === null) delete next.assets;
@@ -151,6 +159,7 @@ export function isEmptyDelta(delta: GraphDelta): boolean {
 		delta.edges.changed.length === 0 &&
 		delta.tagColorConfig === undefined &&
 		delta.tagPhysicsConfig === undefined &&
+		delta.weightConfig === undefined &&
 		delta.assets === undefined &&
 		delta.pinSequence === undefined
 	);

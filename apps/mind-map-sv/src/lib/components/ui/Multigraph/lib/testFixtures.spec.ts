@@ -107,6 +107,21 @@ describe('makeGraph', () => {
 		expect(g.nodes[3]).not.toHaveProperty('sizeBytes');
 	});
 
+	it('puts weights on nodes by generated index or id, keeping 0, and on no other node', () => {
+		const g = makeGraph({ nodeCount: 4, weight: { 0: 3, n2: 0 } });
+
+		expect(g.nodes.map((n) => n.weight)).toEqual([3, undefined, 0, undefined]);
+		expect(g.nodes[1]).not.toHaveProperty('weight');
+		expect(g.nodes[3]).not.toHaveProperty('weight');
+	});
+
+	it('passes a weight config through and omits it unless given', () => {
+		expect(makeGraph({ nodeCount: 1 })).not.toHaveProperty('weightConfig');
+		expect(
+			makeGraph({ nodeCount: 1, weightConfig: { label: 'Mass', unit: 'kg' } }).weightConfig
+		).toEqual({ label: 'Mass', unit: 'kg' });
+	});
+
 	it('marks generated nodes pinned by id', () => {
 		const g = makeGraph({ nodeCount: 2, pinned: ['n1'] });
 		expect(g.nodes.map((node) => node.pinned)).toEqual([undefined, true]);

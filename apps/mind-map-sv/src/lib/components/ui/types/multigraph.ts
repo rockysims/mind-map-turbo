@@ -25,6 +25,19 @@ export interface TagPhysicsConfig {
 	edgeTags: Record<string, number>;
 }
 
+/**
+ * What `NodeData.weight` means in this graph, written by the importer that
+ * wrote the weights: the details view reads "label value unit", e.g.
+ * "Word count 4,200" or "Mass 12.5 kg". The label and unit belong together, so
+ * the config is always replaced whole, never merged key by key.
+ */
+export interface WeightConfig {
+	/** Non-blank. A config without a usable label is dropped on load. */
+	label: string;
+	/** Non-blank when present. A blank unit is dropped on load by itself. */
+	unit?: string;
+}
+
 export interface GraphAssetMetadata {
 	id: string;
 	/**
@@ -50,6 +63,12 @@ export interface MultigraphData {
 	 * so a graph that never touched a slider serialises exactly as before.
 	 */
 	tagPhysicsConfig?: TagPhysicsConfig;
+	/**
+	 * Names `NodeData.weight` for this graph. Graph content, like
+	 * `tagColorConfig`: absent unless an importer writes it, and the details
+	 * view falls back to "Weight".
+	 */
+	weightConfig?: WeightConfig;
 	assets?: Record<string, GraphAssetMetadata>;
 	/** Highest pin-recency stamp issued so far (see NodeData.lastPinnedSeq). */
 	pinSequence?: number;
