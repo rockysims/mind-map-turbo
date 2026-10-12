@@ -5353,6 +5353,58 @@
 />
 
 <Story
+	name="UserCyclesNodeTagButtonIntoQuery"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'n0', title: 'Topic', description: '', tags: ['topic'] },
+				{ id: 'n1', title: 'Urgent', description: '', tags: ['urgent', 'topic'] },
+				{ id: 'n2', title: 'Plain', description: '', tags: [] }
+			],
+			pinned: ['n1'],
+			edges: [
+				{ source: 'n0', target: 'n1', tags: ['rel'] },
+				{ source: 'n1', target: 'n2', tags: [] }
+			],
+			posByNodeId: { n0: { x: -220, y: 0 }, n1: { x: 0, y: 0 }, n2: { x: 220, y: 0 } },
+			tagColorConfig: {
+				nodeTags: { topic: '#ff0000', urgent: '#00ff00' },
+				edgeTags: { rel: '#0000ff' }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { relaxIterations: 0 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const canvas = within(canvasElement);
+		canvas.getByRole('button', { name: 'Find / Filter' }).click();
+		await sleep();
+
+		const topicButton = () => canvas.getByRole('button', { name: /^Node tag topic,/ });
+		const input = canvas.getByLabelText('Graph query') as HTMLInputElement;
+
+		// One click puts the tag into the query, and the canvas focuses on it.
+		topicButton().click();
+		await sleep();
+		expect(input).toHaveValue('#topic');
+		expect(topicButton()).toHaveAttribute('data-mode', 'focus');
+		expect(getNodeWrapper(canvasElement, 'n0')).toHaveAttribute('data-query-role', 'focus');
+		expect(getNodeWrapper(canvasElement, 'n1')).toHaveAttribute('data-query-role', 'focus');
+		expect(getNodeWrapper(canvasElement, 'n2')).toHaveAttribute('data-query-role', 'background');
+
+		// A second click on the same button escalates the token to a spotlight.
+		// The story stops here: what exclude does to the layout is another plan's.
+		topicButton().click();
+		await sleep();
+		expect(input).toHaveValue('+#topic');
+		expect(topicButton()).toHaveAttribute('data-mode', 'spotlight');
+		expect(getNodeWrapper(canvasElement, 'n0')).toHaveAttribute('data-query-role', 'spotlight');
+		expect(getNodeWrapper(canvasElement, 'n1')).toHaveAttribute('data-query-role', 'spotlight');
+	}}
+/>
+
+<Story
 	name="UserFiltersGraphByNodeAddon"
 	args={{
 		multigraphData: makeGraph({

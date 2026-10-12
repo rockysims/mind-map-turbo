@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { APP_CONFIG } from '$lib/appConfig';
 	import type { LegendTag } from './lib/tagColors';
-	import type { GraphQueryResult, GraphQueryToken } from './lib/graphQuery';
+	import type { GraphQueryResult, GraphQueryToken, GraphQueryTokenMode } from './lib/graphQuery';
 	import { parseGraphQuery } from './lib/graphQuery';
+	import { cycleTagToken, tagTokenMode, tagTokenText } from './lib/queryTokenCycle';
 
 	let {
 		query = '',
@@ -36,12 +37,39 @@
 		onQueryChange?.(nextQuery);
 	}
 
-	function appendToken(token: string) {
-		updateQuery(`${query.trim()} ${token}`.trim());
+	type TagTarget = 'nodeTag' | 'edgeTag';
+
+	/**
+	 * Spoken after the tag's name. "Focused" is avoided on purpose: screen
+	 * readers already announce keyboard focus with that word.
+	 */
+	const TAG_STATE_NAME: Record<GraphQueryTokenMode | 'none', string> = {
+		none: 'not in query',
+		focus: 'in focus',
+		spotlight: 'spotlighted',
+		exclude: 'excluded'
+	};
+
+	function cycleTag(target: TagTarget, tag: string) {
+		updateQuery(cycleTagToken(query, target, tag, tagSyntax));
 	}
 
 	function previewToken(token: string | null) {
 		onPreviewQueryChange?.(token ? `${query.trim()} ${token}`.trim() : null);
+	}
+
+	/**
+	 * Hover and keyboard focus spotlight a tag only while the query does not
+	 * name it. Once the reader has chosen a state, previewing over it would
+	 * misreport that choice, and previewing an exclude would reflow the graph
+	 * under the pointer once excluded nodes leave the layout.
+	 */
+	function previewTag(target: TagTarget, tag: string) {
+		previewToken(
+			tagTokenMode(query, target, tag, tagSyntax) === null
+				? tagTokenText('spotlight', target, tag, tagSyntax)
+				: null
+		);
 	}
 
 	function tokenLabel(token: GraphQueryToken): string {
@@ -57,6 +85,26 @@
 		return `${prefix}${marker}${token.value}`;
 	}
 </script>
+
+{#snippet tagButton(target: TagTarget, tag: LegendTag)}
+	{@const mode = tagTokenMode(query, target, tag.tag, tagSyntax)}
+	<!-- The label is the token as it would be typed, so "none" and "focus" both
+	     read `#tag`; aria-pressed and the pressed styling tell them apart. -->
+	<button
+		type="button"
+		aria-pressed={mode !== null}
+		data-mode={mode ?? 'none'}
+		aria-label={`${target === 'nodeTag' ? 'Node' : 'Edge'} tag ${tag.tag}, ${TAG_STATE_NAME[mode ?? 'none']}`}
+		onclick={() => cycleTag(target, tag.tag)}
+		onmouseenter={() => previewTag(target, tag.tag)}
+		onmouseleave={() => previewToken(null)}
+		onfocus={() => previewTag(target, tag.tag)}
+		onblur={() => previewToken(null)}
+	>
+		<span class="swatch" style={`--tag-color: ${tag.color}`}></span>
+		<span class="tag-label">{tagTokenText(mode ?? 'focus', target, tag.tag, tagSyntax)}</span>
+	</button>
+{/snippet}
 
 <section class="graph-query-panel" aria-label="Find and filter graph">
 	<header>
@@ -115,17 +163,7 @@
 			{:else}
 				<div class="tag-list">
 					{#each nodeTags as tag (`node:${tag.tag}`)}
-						<button
-							type="button"
-							onclick={() => appendToken(`${nodeTagMarker}${tag.tag}`)}
-							onmouseenter={() => previewToken(`+${nodeTagMarker}${tag.tag}`)}
-							onmouseleave={() => previewToken(null)}
-							onfocus={() => previewToken(`+${nodeTagMarker}${tag.tag}`)}
-							onblur={() => previewToken(null)}
-						>
-							<span class="swatch" style={`--tag-color: ${tag.color}`}></span>
-							<span>{nodeTagMarker}{tag.tag}</span>
-						</button>
+						{@render tagButton('nodeTag', tag)}
 					{/each}
 				</div>
 			{/if}
@@ -138,17 +176,7 @@
 			{:else}
 				<div class="tag-list">
 					{#each edgeTags as tag (`edge:${tag.tag}`)}
-						<button
-							type="button"
-							onclick={() => appendToken(`${edgeTagMarker}${tag.tag}`)}
-							onmouseenter={() => previewToken(`+${edgeTagMarker}${tag.tag}`)}
-							onmouseleave={() => previewToken(null)}
-							onfocus={() => previewToken(`+${edgeTagMarker}${tag.tag}`)}
-							onblur={() => previewToken(null)}
-						>
-							<span class="swatch" style={`--tag-color: ${tag.color}`}></span>
-							<span>{edgeTagMarker}{tag.tag}</span>
-						</button>
+						{@render tagButton('edgeTag', tag)}
 					{/each}
 				</div>
 			{/if}
@@ -284,6 +312,32 @@
 		background: #f8fafc;
 		color: #0f172a;
 		border: 1px solid #cbd5e1;
+	}
+
+	/* A tag in the query reads as pressed without relying on hue: the border
+	   darkens and thickens (an inset ring, so the button does not grow) and the
+	   label goes semibold. The fill repeats the parsed-chip palette, and the
+	   label's own +/- prefix tells the pressed modes apart. */
+	.tag-list button[aria-pressed='true'] {
+		border-color: #0f172a;
+		box-shadow: inset 0 0 0 1px #0f172a;
+		font-weight: 600;
+	}
+
+	.tag-list button[data-mode='focus'] {
+		background: #e2e8f0;
+	}
+
+	.tag-list button[data-mode='spotlight'] {
+		background: #fef3c7;
+	}
+
+	.tag-list button[data-mode='exclude'] {
+		background: #fee2e2;
+	}
+
+	.tag-list button[data-mode='exclude'] .tag-label {
+		text-decoration: line-through;
 	}
 
 	.swatch {
