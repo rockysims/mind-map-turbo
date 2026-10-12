@@ -92,7 +92,7 @@ MAYBE:
 
 - Make power of physics reduce by an order of magnitude for each hop from pinned (instead of layer by layer layout process)?
 
-Planned 2026-10-11 as four standalone plans in
+Planned and executed 2026-10-11 as four standalone plans (all `done`) in
 `2026-05-07 mind-map-mvp/plans/` (execute in this order; the first two are
 disjoint and may run in parallel):
 
