@@ -117,6 +117,24 @@ Owner rulings of 2026-10-11 are marked _(ruling)_ and are not reopened here.
   now clamp into the new bounds with no code change there. The edge-length
   slider shares the range.
 
+  _Addendum 2026-10-12 (owner ruling):_ the floor rises to ×1 — the range is
+  now **`[1, 8]`** (`TAG_PHYSICS_MIN_FACTOR = 1`, max unchanged) and the slider
+  runs `min=0 max=3`, so ×1 sits at the **left end** rather than the centre;
+  step and readout format are unchanged. Why: factors below ×1 did little. An
+  edge length below the band is contested by hop-1 repulsion, which holds
+  adjacent nodes apart regardless of the shorter rest gap, and a node spacing
+  below ×1 cannot pull at all, since hop repulsion only pushes — so the lower
+  half of the track was mostly dead travel. Stored factors below 1 clamp to 1
+  on load and, since 1 is the default, are dropped from the sparse config by
+  the existing "clamped to exactly 1 → dropped" rule in
+  `sanitizeTagPhysicsFactors`; `setTagPhysicsFactor` with a value below 1
+  likewise removes the key. `sliderPositionForFactor` reads any factor below 1
+  as position 0. The per-element geometric-mean rule and the `max(fa, fb)` pair
+  rule are unchanged (with every factor ≥ 1, the pair rule's "below ×1 only
+  between two nodes that both ask for less" case no longer arises). The
+  "centre detent" named under Out of scope as a way back to ×1 is now the
+  left end (Home).
+
 - **Where the range lives.** **Module constants in `lib/tagPhysics.ts`
   (`TAG_PHYSICS_MIN_FACTOR = 0.25`, `TAG_PHYSICS_MAX_FACTOR = 4`), not
   `APP_CONFIG`.** The range is part of what a stored value _means_ — a tunable
@@ -787,3 +805,13 @@ modes.md` is disjoint and may run in parallel.
   `migrations.spec`, `TagColorLegend` stories); the logged ruling got the same
   addendum. The example-save-file prose now says "between 0.125 and 8"; the
   offline shell and example are rebuilt separately.
+- 2026-10-12: owner ruling — the range floor rises to ×1 (`[1, 8]`, slider
+  `0`…`3`, ×1 at the left end); see the 2026-10-12 addendum under "Range,
+  slider and readout". Specs pinning the ×0.125 end were updated
+  (`tagPhysics.spec`, `graph.spec`, `migrations.spec`, `graphDelta.spec`,
+  `graphImport.spec`, `tagColors.spec`, `TagColorLegend` stories), with new
+  cases for a stored `{ a: 0.5 }` loading as no entry and for
+  `setTagPhysicsFactor` below 1 removing the key. The example-save-file prose
+  now says "between 1 and 8"; the offline shell and example are rebuilt
+  separately, so the two deterministic `exampleSaveFile.spec.ts` cases fail
+  until then.

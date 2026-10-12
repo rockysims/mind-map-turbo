@@ -109,7 +109,7 @@ describe('tag color helpers', () => {
 		const graph = makeGraph({
 			nodeCount: 2,
 			edges: [{ source: 'n0', target: 'n1', tags: ['rel'] }],
-			tagPhysicsConfig: { nodeTags: {}, edgeTags: { gone: 0.5 } }
+			tagPhysicsConfig: { nodeTags: {}, edgeTags: { gone: 1.5 } }
 		});
 
 		expect(collectLegendTags(graph)).toEqual([
@@ -117,7 +117,7 @@ describe('tag color helpers', () => {
 				namespace: 'edgeTags',
 				tag: 'gone',
 				usageCount: 0,
-				physicsFactor: 0.5
+				physicsFactor: 1.5
 			}),
 			expect.objectContaining({
 				namespace: 'edgeTags',

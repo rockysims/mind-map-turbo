@@ -248,11 +248,11 @@ describe('diffByReference / applyDelta', () => {
 
 		it('round-trips changing the field', () => {
 			const before = tuned();
-			const after = setTagPhysicsFactor(before, 'edgeTags', 'rel', 0.5);
+			const after = setTagPhysicsFactor(before, 'edgeTags', 'rel', 3);
 
 			const applied = applyDelta(before, diffByReference(before, after));
 
-			expect(applied.tagPhysicsConfig).toEqual({ nodeTags: {}, edgeTags: { rel: 0.5 } });
+			expect(applied.tagPhysicsConfig).toEqual({ nodeTags: {}, edgeTags: { rel: 3 } });
 		});
 
 		it('round-trips removing the field, leaving no key behind', () => {

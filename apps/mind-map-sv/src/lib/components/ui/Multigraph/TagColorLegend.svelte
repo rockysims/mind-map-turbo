@@ -120,12 +120,13 @@
 								<div class="physics-control">
 									<label>
 										<span class="sr-only">{physicsNameFor(legendTag)}</span>
-										<!-- The track runs over log2(factor), so ×1 sits at the centre and
-										     ×0.5 and ×2 sit equally far either side; `aria-valuetext`
-										     announces the factor rather than the log position. -->
+										<!-- The track runs over log2(factor) from ×1 at the left end to ×8
+										     at the right, so every doubling is the same distance along it;
+										     `aria-valuetext` announces the factor rather than the log
+										     position. -->
 										<input
 											type="range"
-											min="-3"
+											min="0"
 											max="3"
 											step="0.05"
 											value={sliderPositionForFactor(legendTag.physicsFactor)}
