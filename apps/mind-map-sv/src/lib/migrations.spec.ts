@@ -293,6 +293,98 @@ describe('persisted graph migrations', () => {
 		});
 	});
 
+	describe('node sizes', () => {
+		it('round-trips valid sizes, including 0, through wrap, JSON and unwrap unchanged', () => {
+			const graph = makeGraph({
+				nodeCount: 3,
+				pinned: [0],
+				sizeBytes: { 0: 0, 1: 1536, 2: 41_943_040 }
+			});
+
+			const loaded = unwrapPersistedGraph(JSON.parse(JSON.stringify(wrapPersistedGraph(graph))));
+
+			expect(loaded).toEqual(graph);
+			expect(loaded.nodes.map((node) => node.sizeBytes)).toEqual([0, 1536, 41_943_040]);
+		});
+
+		it('drops invalid sizes and keeps every other field of those nodes', () => {
+			const graph = makeGraph({
+				nodes: [
+					{ id: 'neg', title: 'Negative', description: 'a', tags: ['file'] },
+					{ id: 'str', title: 'String', description: 'b', tags: [] },
+					{ id: 'nul', title: 'Null', description: 'c', tags: [] },
+					{ id: 'obj', title: 'Object', description: 'd', tags: [] },
+					{ id: 'ok', title: 'Valid', description: 'e', tags: [] }
+				],
+				pinned: ['neg'],
+				pinHistory: { neg: 1 }
+			});
+			const stored = {
+				...graph,
+				nodes: graph.nodes.map((node, index) => ({
+					...node,
+					sizeBytes: [-1, '12', null, { bytes: 12 }, 2048][index]
+				}))
+			};
+
+			const loaded = unwrapPersistedGraph(
+				JSON.parse(JSON.stringify({ schemaVersion: CURRENT_SCHEMA_VERSION, data: stored }))
+			);
+
+			expect(loaded.nodes.slice(0, 4)).toEqual(graph.nodes.slice(0, 4));
+			for (const node of loaded.nodes.slice(0, 4)) {
+				expect(node).not.toHaveProperty('sizeBytes');
+			}
+			expect(loaded.nodes[4]).toEqual({ ...graph.nodes[4], sizeBytes: 2048 });
+			expect(loaded.edges).toEqual(graph.edges);
+			expect(loaded.posByNodeId).toEqual(graph.posByNodeId);
+		});
+
+		it('rebuilds only the nodes it cleans', () => {
+			const graph = makeGraph({ nodeCount: 2, pinned: [0], sizeBytes: { 0: 10 } });
+			const data = { ...graph, nodes: [graph.nodes[0], { ...graph.nodes[1], sizeBytes: -5 }] };
+
+			const loaded = unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data });
+
+			expect(loaded).not.toBe(data);
+			expect(loaded.nodes[0]).toBe(data.nodes[0]);
+			expect(loaded.nodes[1]).not.toHaveProperty('sizeBytes');
+		});
+
+		it.each([
+			['NaN', Number.NaN],
+			['Infinity', Number.POSITIVE_INFINITY],
+			['-Infinity', Number.NEGATIVE_INFINITY],
+			['undefined', undefined]
+		])('drops a %s size handed over as an object', (_label, size) => {
+			const graph = makeGraph({ nodeCount: 1, pinned: [0] });
+
+			const loaded = unwrapPersistedGraph({
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				data: { ...graph, nodes: [{ ...graph.nodes[0], sizeBytes: size }] }
+			});
+
+			expect(loaded.nodes[0]).not.toHaveProperty('sizeBytes');
+			expect(loaded.nodes[0]).toEqual(graph.nodes[0]);
+		});
+
+		it('returns a graph with nothing to clean by identity', () => {
+			const sizeless = makeGraph({ nodeCount: 2, pinned: [0] });
+			const sized = makeGraph({ nodeCount: 2, pinned: [0], sizeBytes: { 0: 0, 1: 99 } });
+
+			expect(unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data: sizeless })).toBe(
+				sizeless
+			);
+			expect(unwrapPersistedGraph({ schemaVersion: CURRENT_SCHEMA_VERSION, data: sized })).toBe(
+				sized
+			);
+		});
+
+		it('needs no schema bump', () => {
+			expect(CURRENT_SCHEMA_VERSION).toBe(8);
+		});
+	});
+
 	it('parses serialized version 1 payloads', () => {
 		const graph = makeGraph({ nodeCount: 1, pinned: [0] });
 

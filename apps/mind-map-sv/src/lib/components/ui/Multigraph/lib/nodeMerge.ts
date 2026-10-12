@@ -87,7 +87,11 @@ function mergeNodeFields(survivor: NodeData, absorbed: NodeData): NodeData {
 		lastPinnedSeq: maxDefined(survivor.lastPinnedSeq, absorbed.lastPinnedSeq),
 		content: concatContent(survivor.content, absorbed.content),
 		inputs: unionDesignations(survivor.inputs, absorbed.inputs),
-		outputs: unionDesignations(survivor.outputs, absorbed.outputs)
+		outputs: unionDesignations(survivor.outputs, absorbed.outputs),
+		// The survivor's size wins; the absorbed one only fills a gap. A merge
+		// unites duplicates, and summing two scrapes of the same file would
+		// double it.
+		sizeBytes: survivor.sizeBytes ?? absorbed.sizeBytes
 	};
 }
 

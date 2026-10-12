@@ -239,6 +239,50 @@ export const CONFIG_SCHEMA: { [K in ConfigPath]: FieldSpec } = {
 		unit: 'px'
 	},
 
+	'multigraph.sizeBorder.referenceBytes': {
+		control: 'number',
+		label: 'Reference size',
+		help: 'A node of this many bytes draws the normal border.',
+		tier: 'basic',
+		preview: 'instant',
+		min: 1,
+		step: 1024,
+		integer: true,
+		unit: 'B'
+	},
+	'multigraph.sizeBorder.widthPerDoubling': {
+		control: 'range',
+		label: 'Width per doubling',
+		help: 'How much thicker the border gets each time the size doubles.',
+		tier: 'basic',
+		preview: 'instant',
+		min: 0,
+		max: 0.5,
+		step: 0.01
+	},
+	'multigraph.sizeBorder.minFactor': {
+		control: 'range',
+		label: 'Thinnest border',
+		help: 'The border of the smallest nodes, as a multiple of the normal border.',
+		tier: 'basic',
+		preview: 'instant',
+		min: 0.1,
+		max: 1,
+		step: 0.05,
+		unit: '×'
+	},
+	'multigraph.sizeBorder.maxFactor': {
+		control: 'range',
+		label: 'Thickest border',
+		help: 'The border of the largest nodes, as a multiple of the normal border.',
+		tier: 'basic',
+		preview: 'instant',
+		min: 1,
+		max: 4,
+		step: 0.1,
+		unit: '×'
+	},
+
 	'multigraph.edgeArrow.lengthPx': {
 		control: 'range',
 		label: 'Arrowhead length',
