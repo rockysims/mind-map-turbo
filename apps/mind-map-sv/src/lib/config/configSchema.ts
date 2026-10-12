@@ -509,7 +509,7 @@ export const CONFIG_SCHEMA: { [K in ConfigPath]: FieldSpec } = {
 	'multigraph.layout.edgeGapMinRadiusFactor': {
 		control: 'range',
 		label: 'Minimum edge gap',
-		help: 'As a fraction of node radius.',
+		help: "As a fraction of the two nodes' combined radius.",
 		tier: 'advanced',
 		preview: 'physics',
 		min: 0,
@@ -519,7 +519,7 @@ export const CONFIG_SCHEMA: { [K in ConfigPath]: FieldSpec } = {
 	'multigraph.layout.edgeGapMaxRadiusFactor': {
 		control: 'range',
 		label: 'Maximum edge gap',
-		help: 'As a fraction of node radius.',
+		help: "As a fraction of the two nodes' combined radius.",
 		tier: 'advanced',
 		preview: 'physics',
 		min: 0,
@@ -532,7 +532,9 @@ export const CONFIG_SCHEMA: { [K in ConfigPath]: FieldSpec } = {
 		tier: 'basic',
 		preview: 'physics',
 		min: 0,
-		max: 2,
+		// Physics clamps the strength to [0, 1] (`relaxEdgeDistancesStep`), so a
+		// slider past 1 would move the thumb and change nothing.
+		max: 1,
 		step: 0.05
 	},
 	'multigraph.layout.derivedEdgeSpringFactor': {
@@ -551,7 +553,9 @@ export const CONFIG_SCHEMA: { [K in ConfigPath]: FieldSpec } = {
 		tier: 'basic',
 		preview: 'physics',
 		min: 0,
-		max: 2,
+		// Physics clamps the strength to [0, 1] (`relaxHopRepulsionStep`), so a
+		// slider past 1 would move the thumb and change nothing.
+		max: 1,
 		step: 0.05
 	},
 	'multigraph.layout.hopRepulsionMinHops': {

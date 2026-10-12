@@ -124,8 +124,8 @@ export const APP_CONFIG = {
 			relaxIterations: 12, // physics relax iterations per layout pass
 			parallelEdgeMaxOffsetRadiusFactor: 0.5, // max parallel-edge offset as fraction of smaller endpoint radius
 			parallelEdgeClearancePx: 4, // extra gap between parallel edge strokes/arrowheads
-			edgeGapMinRadiusFactor: 0.42, // min edge gap as fraction of node radius
-			edgeGapMaxRadiusFactor: 0.84, // max edge gap as fraction of node radius
+			edgeGapMinRadiusFactor: 0.42, // min edge gap as fraction of the two nodes' combined radius
+			edgeGapMaxRadiusFactor: 0.84, // max edge gap as fraction of the two nodes' combined radius
 			edgeSpringStrength: 0.5, // how strongly edges pull nodes together
 			derivedEdgeSpringFactor: 1, // derived dataflow edges pull this much relative to authored ones
 			hopRepulsionStrength: 0.3, // repulsion strength between distant hops

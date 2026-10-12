@@ -92,6 +92,20 @@ describe('CONFIG_SCHEMA', () => {
 		expect(outOfRange).toEqual([]);
 	});
 
+	// Physics clamps both strengths to [0, 1] (`relaxEdgeDistancesStep` and
+	// `relaxHopRepulsionStep` in `Multigraph/lib/physics.ts`), so the upper half
+	// of a slider reaching 2 moved the thumb and changed nothing. Widening either
+	// again should fail here, not in a reader's hands.
+	it('stops both strength sliders at the physics clamp', () => {
+		const maxima = (
+			['multigraph.layout.edgeSpringStrength', 'multigraph.layout.hopRepulsionStrength'] as const
+		).map((path) => {
+			const spec = CONFIG_SCHEMA[path];
+			return spec.control === 'range' ? spec.max : undefined;
+		});
+		expect(maxima).toEqual([1, 1]);
+	});
+
 	it('gives every range a positive step', () => {
 		const badStep = Object.entries(CONFIG_SCHEMA)
 			.filter(([, spec]) => spec.control === 'range' && !(spec.step > 0))

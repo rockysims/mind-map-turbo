@@ -7598,7 +7598,7 @@
 		expect(nodePositions(canvasElement, nodeIds)).toEqual(before);
 
 		const slider = settingsSlider(canvasElement, 'Edge spring strength');
-		dragSettingsSlider(slider, [1, 2], false);
+		dragSettingsSlider(slider, [0.5, 1], false);
 
 		// The settle kick: `physics` fields are read per frame, so without the loop
 		// running a change to one of them would be invisible until the next drag.
