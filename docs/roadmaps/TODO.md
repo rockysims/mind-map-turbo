@@ -92,6 +92,22 @@ MAYBE:
 
 - Make power of physics reduce by an order of magnitude for each hop from pinned (instead of layer by layer layout process)?
 
+Planned 2026-10-11 as four standalone plans in
+`2026-05-07 mind-map-mvp/plans/` (execute in this order; the first two are
+disjoint and may run in parallel):
+
+- `2026-10-11 query tag buttons cycle modes.md` — a Find / Filter tag button
+  cycles its token none → `#tag` → `+#tag` → `-#tag` → none, editing the typed
+  query in place.
+- `2026-10-11 excluded elements leave the layout.md` — `-#tag` / `-@tag`
+  removes the matches from physics, hops, beacons, occlusion, focus and fit,
+  not just from the paint (reverses milestone 05's mask-only ruling).
+- `2026-10-11 per-tag edge length and node spacing.md` — a slider per tag in
+  the Tag colors legend: edge tags scale edge rest length, node tags scale hop
+  repulsion clearance; factors travel with the graph.
+- `2026-10-11 node size as border width.md` — optional `sizeBytes` on a node
+  (written by scrapers/importers) drawn as border width on a bounded log scale.
+
 UNSORTED TODO:
 open node/edges edit dialog (with edges pre-selected) when trying to add a second edge (instead of current confirm delete dialog)
 make status info (to the right of Download button) show part 1 and part 2 on 2 different lines
