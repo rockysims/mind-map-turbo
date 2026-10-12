@@ -3954,6 +3954,7 @@
 					<NodeDetailsLayer title={detailsNode.title} detailsTitleId={DETAILS_TITLE_ID} detailsMode>
 						<NodeDetailsContent
 							node={detailsNode}
+							weightConfig={graph.weightConfig}
 							assets={graph.assets ?? {}}
 							{assetStore}
 							{assetScope}

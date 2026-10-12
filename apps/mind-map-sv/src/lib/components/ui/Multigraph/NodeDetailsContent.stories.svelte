@@ -190,6 +190,18 @@
 		return sizeBytes === undefined ? node : { ...node, sizeBytes };
 	}
 
+	/** A described node carrying a stored weight (and a size, when one is given). */
+	function weightedNode(weight?: number, sizeBytes?: number): NodeData {
+		const node = sizedNode(sizeBytes);
+		return weight === undefined ? node : { ...node, weight };
+	}
+
+	function nodeWeightLine(canvasElement: HTMLElement): HTMLElement {
+		const found = canvasElement.querySelector('[data-node-weight]');
+		if (!(found instanceof HTMLElement)) throw new Error('no node weight line');
+		return found;
+	}
+
 	function nodeSizeLine(canvasElement: HTMLElement): HTMLElement {
 		const found = canvasElement.querySelector('[data-node-size]');
 		if (!(found instanceof HTMLElement)) throw new Error('no node size line');
@@ -2084,6 +2096,63 @@
 	args={{ node: sizedNode(0) }}
 	play={async ({ canvasElement }) => {
 		expect(nodeSizeLine(canvasElement)).toHaveTextContent('Size 0 B');
+	}}
+/>
+
+<Story
+	name="ShowsAWeightUnderTheGraphsLabel"
+	args={{ node: weightedNode(4200), weightConfig: { label: 'Word count' } }}
+	play={async ({ canvasElement }) => {
+		expect(nodeWeightLine(canvasElement)).toHaveTextContent('Word count 4,200');
+	}}
+/>
+
+<Story
+	name="ShowsAWeightWithItsUnit"
+	args={{ node: weightedNode(12.5), weightConfig: { label: 'Mass', unit: 'kg' } }}
+	play={async ({ canvasElement }) => {
+		expect(nodeWeightLine(canvasElement)).toHaveTextContent('Mass 12.5 kg');
+	}}
+/>
+
+<Story
+	name="ShowsAnUnlabelledWeightAsWeight"
+	args={{ node: weightedNode(7) }}
+	play={async ({ canvasElement }) => {
+		expect(nodeWeightLine(canvasElement)).toHaveTextContent('Weight 7');
+	}}
+/>
+
+<Story
+	name="ShowsAStoredZeroWeightAsZero"
+	args={{ node: weightedNode(0) }}
+	play={async ({ canvasElement }) => {
+		expect(nodeWeightLine(canvasElement)).toHaveTextContent('Weight 0');
+	}}
+/>
+
+<Story
+	name="ShowsNoWeightLineWhenNoWeightIsStored"
+	args={{ node: weightedNode(), weightConfig: { label: 'Word count' } }}
+	play={async ({ canvasElement }) => {
+		expect(focusContent(canvasElement).textContent).toContain('A page about kinematics.');
+		expect(canvasElement.querySelector('[data-node-weight]')).toBeNull();
+	}}
+/>
+
+<Story
+	name="ShowsTheWeightUnderTheSizeAndAboveTheDescription"
+	args={{ node: weightedNode(4200, 3_355_443), weightConfig: { label: 'Word count' } }}
+	play={async ({ canvasElement }) => {
+		const size = nodeSizeLine(canvasElement);
+		const weight = nodeWeightLine(canvasElement);
+		const description = focusContent(canvasElement).querySelector('.description');
+		if (!(description instanceof HTMLElement)) throw new Error('no description');
+
+		expect(size.compareDocumentPosition(weight) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		expect(
+			weight.compareDocumentPosition(description) & Node.DOCUMENT_POSITION_FOLLOWING
+		).toBeTruthy();
 	}}
 />
 

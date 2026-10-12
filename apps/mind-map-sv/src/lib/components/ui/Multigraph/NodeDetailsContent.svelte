@@ -2,7 +2,7 @@
 	import { SvelteMap } from 'svelte/reactivity';
 	import type { GraphAssetStore } from '$lib/assets/assetStore';
 	import MathText from '../MathText/MathText.svelte';
-	import type { GraphAssetMetadata } from '../types/multigraph';
+	import type { GraphAssetMetadata, WeightConfig } from '../types/multigraph';
 	import type {
 		NodeData,
 		NodeFileContent,
@@ -10,6 +10,7 @@
 		QuantityDesignation
 	} from '../types/node';
 	import { formatByteSize } from './lib/byteSize';
+	import { formatNodeWeight } from './lib/nodeWeight';
 	import type { NodeDiagnosticsView } from './lib/nodeDiagnosticsView';
 	import type { NodeQuantities } from './lib/nodeQuantities';
 	import type { QuantityIndexEntry } from './lib/quantityIndex';
@@ -79,6 +80,7 @@
 
 	let {
 		node,
+		weightConfig,
 		assets = {},
 		assetStore = null,
 		assetScope = '',
@@ -97,6 +99,8 @@
 		chipPeekHoldMs = APP_CONFIG.multigraph.dataflow.chipPeekLongPressMs
 	}: {
 		node: NodeData;
+		/** How the graph names its nodes' weight; absent reads as plain "Weight". */
+		weightConfig?: WeightConfig;
 		assets?: Record<string, GraphAssetMetadata>;
 		assetStore?: GraphAssetStore | null;
 		assetScope?: string;
@@ -487,9 +491,18 @@
 		border's drawing rule.
 	-->
 	{#if node.sizeBytes !== undefined}
-		<p class="node-size" data-node-size>
-			<span class="node-size-label">Size</span>
+		<p class="node-fact" data-node-size>
+			<span class="node-fact-label">Size</span>
 			{formatByteSize(node.sizeBytes)}
+		</p>
+	{/if}
+
+	<!-- Under the size, same reasoning: a stored 0 weight is shown as "0". -->
+	{#if node.weight !== undefined}
+		{@const weight = formatNodeWeight(node.weight, weightConfig)}
+		<p class="node-fact" data-node-weight>
+			<span class="node-fact-label">{weight.label}</span>
+			{weight.text}
 		</p>
 	{/if}
 
@@ -719,12 +732,12 @@
 	}
 
 	/* The file rows' muted slate for their size, at the details body size. */
-	.node-size {
+	.node-fact {
 		color: #64748b;
 		font-size: 1.125rem;
 	}
 
-	.node-size-label {
+	.node-fact-label {
 		font-weight: 600;
 	}
 
