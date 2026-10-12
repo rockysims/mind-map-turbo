@@ -182,3 +182,8 @@ query results and render-state semantics.
   result-region navigation. Validation passed locally.
 - 2026-06-22: Clarified and implemented positive-token dimming: exclude-only
   queries hide matches without dimming the rest of the rendered graph.
+- 2026-10-11: The owner reversed the render-only exclusion ruling: query-excluded
+  nodes and edges now leave the layout as well as the paint, and the rest of
+  the graph settles. The "Layout isolation mode" entry under Out of scope is
+  kept as the record of the original decision. See
+  [2026-10-11 excluded elements leave the layout.md](./2026-10-11%20excluded%20elements%20leave%20the%20layout.md).
