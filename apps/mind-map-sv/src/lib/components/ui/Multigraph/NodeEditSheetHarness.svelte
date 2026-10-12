@@ -10,7 +10,9 @@
 	 *
 	 * What the story asserts on comes back as `data-*` attributes beside the
 	 * sheet: `data-last-intent` is the label the commit would carry into the undo
-	 * list, and the node's title, tags and add-ons are the committed values.
+	 * list, and the node's title, tags, add-ons and weight are the committed
+	 * values. `data-node-weight` reads `absent` when the node has no `weight` key
+	 * at all, so a story can tell a removed weight from one left `undefined`.
 	 */
 	import { untrack } from 'svelte';
 	import NodeEditSheet from './NodeEditSheet.svelte';
@@ -85,6 +87,7 @@
 		tags: string[];
 		inputs: QuantityDesignation[];
 		outputs: QuantityDesignation[];
+		weight?: number | null;
 	}) {
 		const withFields = updateNodeContent(graph, nodeId, content);
 		commit(commitSheetTitleSyntax(withFields, nodeId, content.title, content.tags), 'edit node');
@@ -98,12 +101,14 @@
 		data-node-title={node.title}
 		data-node-tags={node.tags.join(' ')}
 		data-node-addons={Object.keys(node.addons ?? {}).join(' ')}
+		data-node-weight={'weight' in node ? String(node.weight) : 'absent'}
 	></div>
 	<NodeEditSheet
 		{node}
 		nodes={graph.nodes}
 		edges={graph.edges}
 		assets={graph.assets ?? {}}
+		weightConfig={graph.weightConfig}
 		{confirmAttachment}
 		{warnBytesPerFile}
 		onSave={save}

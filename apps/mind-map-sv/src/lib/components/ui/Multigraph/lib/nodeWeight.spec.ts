@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { authoredDegrees, formatNodeWeight, nodeBorderValue } from './nodeWeight';
+import {
+	authoredDegrees,
+	formatNodeWeight,
+	nodeBorderValue,
+	weightFromDraft,
+	weightName
+} from './nodeWeight';
 import { derivedEdgeId } from './derivedEdges';
 import { makeGraph } from './testFixtures';
 import type { NodeContentBlock, NodeData } from '../../types/node';
@@ -186,5 +192,50 @@ describe('formatNodeWeight', () => {
 
 	it('rounds to at most two decimals', () => {
 		expect(formatNodeWeight(1 / 3, undefined).text).toBe('0.33');
+	});
+});
+
+describe('weightName', () => {
+	it('uses the graph’s label and unit', () => {
+		expect(weightName({ label: 'Mass', unit: 'kg' })).toEqual({ label: 'Mass', unit: 'kg' });
+	});
+
+	it('has no unit when the graph gives only a label', () => {
+		expect(weightName({ label: 'Word count' })).toEqual({ label: 'Word count', unit: undefined });
+	});
+
+	it('falls back to "Weight" with no unit when the graph names nothing', () => {
+		expect(weightName(undefined)).toEqual({ label: 'Weight', unit: undefined });
+	});
+});
+
+describe('weightFromDraft', () => {
+	it('reads a number as the weight to set', () => {
+		expect(weightFromDraft('5')).toBe(5);
+		expect(weightFromDraft(' 12.5 ')).toBe(12.5);
+	});
+
+	it('keeps 0 as a real weight', () => {
+		expect(weightFromDraft('0')).toBe(0);
+	});
+
+	it('reads a blank field as "no weight"', () => {
+		expect(weightFromDraft('')).toBeNull();
+		expect(weightFromDraft('   ')).toBeNull();
+	});
+
+	it('clamps a negative number to 0', () => {
+		expect(weightFromDraft('-3')).toBe(0);
+	});
+
+	it('ignores text that is not a finite number', () => {
+		expect(weightFromDraft('abc')).toBeUndefined();
+		expect(weightFromDraft('Infinity')).toBeUndefined();
+		expect(weightFromDraft('NaN')).toBeUndefined();
+	});
+
+	it('ignores a field the browser could not read rather than clearing the weight', () => {
+		// A number field reports unreadable text such as "1e" as an empty value.
+		expect(weightFromDraft('', true)).toBeUndefined();
 	});
 });

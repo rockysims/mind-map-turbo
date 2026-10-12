@@ -2,7 +2,7 @@
 	import { tick, untrack } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import type { EdgeData } from '../types/edge';
-	import type { GraphAssetMetadata } from '../types/multigraph';
+	import type { GraphAssetMetadata, WeightConfig } from '../types/multigraph';
 	import type {
 		NodeContentBlock,
 		NodeData,
@@ -19,6 +19,7 @@
 	import { normalizeNodeTitle, type EdgePatch } from './lib/graph';
 	import { attachmentSizeWarning } from './lib/attachmentSizeWarning';
 	import { formatByteSize } from './lib/byteSize';
+	import { weightFromDraft, weightName } from './lib/nodeWeight';
 	import { isRegisteredAddon, NODE_ADDON_REGISTRY, type NodeAddonName } from './lib/nodeAddons';
 	import { normalizeTagList } from './lib/titleSyntax';
 	import { nodeQuantities } from './lib/nodeQuantities';
@@ -40,6 +41,7 @@
 		nodes,
 		edges,
 		assets = {},
+		weightConfig,
 		onSave,
 		onAddAttachment,
 		onSaveImage,
@@ -59,12 +61,16 @@
 		nodes: NodeData[];
 		edges: EdgeData[];
 		assets?: Record<string, GraphAssetMetadata>;
+		/** How the graph names its nodes' weight; absent labels the field "Weight". */
+		weightConfig?: WeightConfig;
 		onSave: (content: {
 			title: string;
 			description: string;
 			tags: string[];
 			inputs: QuantityDesignation[];
 			outputs: QuantityDesignation[];
+			/** A number sets it, `null` removes it, absent leaves it alone (see `weightFromDraft`). */
+			weight?: number | null;
 		}) => void;
 		/**
 		 * Store one picked file. The MIME type decides what it becomes, so both
@@ -106,6 +112,13 @@
 	let nodeTags = $state('');
 	let draftInputs = $state<QuantityDesignation[]>([]);
 	let draftOutputs = $state<QuantityDesignation[]>([]);
+	/**
+	 * The weight field as typed, kept as text rather than bound as a number: a
+	 * number binding reads blank and unreadable alike as `null`, and the save
+	 * has to tell "cleared" (remove the weight) from "could not read" (keep it).
+	 */
+	let weightText = $state('');
+	let weightBadInput = $state(false);
 	let edgeTagTextById = $state<Record<string, string>>({});
 	let attachmentDraftByAssetId = $state<Record<string, { alt: string; caption: string }>>({});
 	let attachmentStatus = $state('');
@@ -142,6 +155,7 @@
 	 */
 	let roleSettled = new SvelteSet<string>();
 	let reduceMotion = $derived(prefersReducedMotion());
+	const weightField = $derived(weightName(weightConfig));
 	// Only surface the preview once the draft actually contains math, so nodes
 	// without any keep the compact form the sheet has today.
 	const descriptionHasMath = $derived(hasMath(description));
@@ -186,6 +200,8 @@
 		nodeTags = node.tags.join(' ');
 		draftInputs = node.inputs ?? [];
 		draftOutputs = node.outputs ?? [];
+		weightText = node.weight === undefined ? '' : String(node.weight);
+		weightBadInput = false;
 		// `node.title`, never the `title` draft this effect just wrote: reading the
 		// draft would make the effect depend on it, so every keystroke would re-run
 		// the reset and throw the edit away.
@@ -230,13 +246,25 @@
 	});
 
 	function save() {
+		const weight = weightFromDraft(weightText, weightBadInput);
 		onSave({
 			title: normalizeNodeTitle(title),
 			description,
 			tags: normalizeTagList(nodeTags),
 			inputs: draftInputs,
-			outputs: draftOutputs
+			outputs: draftOutputs,
+			// Left out, not passed as `undefined`, when the field could not be read:
+			// the save then keeps the stored weight.
+			...(weight === undefined ? {} : { weight })
 		});
+	}
+
+	function editWeight(event: Event & { currentTarget: HTMLInputElement }) {
+		weightBadInput = event.currentTarget.validity.badInput;
+		// Unreadable text reports its value as `''`. Writing that back to the state
+		// the field's `value` follows would wipe what the reader is still typing
+		// ("1e" on the way to "1e3"), so the last readable text is kept instead.
+		if (!weightBadInput) weightText = event.currentTarget.value;
 	}
 
 	function cycle(symbol: QuantitySymbol, suggestedRole?: 'input' | 'output') {
@@ -669,6 +697,39 @@
 					<input bind:value={nodeTags} name="node-tags" placeholder="abc urgent" />
 				</label>
 
+				<!--
+					Last of the fields Done saves, so the drafted ones stay together above
+					the add-ons and attachments, which apply the moment they are touched.
+					The unit sits outside the label so the field's name is the graph's
+					label alone; it is read out as part of the description instead.
+				-->
+				<div class="weight-field" data-weight-field>
+					<label for="node-edit-weight">{weightField.label}</label>
+					<div class="weight-row">
+						<input
+							id="node-edit-weight"
+							name="weight"
+							type="number"
+							min="0"
+							step="any"
+							inputmode="decimal"
+							value={weightText}
+							oninput={editWeight}
+							aria-describedby={weightField.unit === undefined
+								? 'node-edit-weight-hint'
+								: 'node-edit-weight-unit node-edit-weight-hint'}
+						/>
+						{#if weightField.unit !== undefined}
+							<span id="node-edit-weight-unit" class="weight-unit" data-weight-unit
+								>{weightField.unit}</span
+							>
+						{/if}
+					</div>
+					<p id="node-edit-weight-hint" class="field-hint">
+						Drawn as border thickness when the graph's border source is Node weight.
+					</p>
+				</div>
+
 				<fieldset class="addons-group" data-addons-group>
 					<legend>Add-ons</legend>
 					{#each addonEntries as entry (entry.name)}
@@ -989,6 +1050,33 @@
 	.actions {
 		justify-content: flex-end;
 		flex-wrap: wrap;
+	}
+
+	.weight-field {
+		display: grid;
+		gap: 0.375rem;
+	}
+
+	.weight-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.weight-row input {
+		flex: 1;
+		min-width: 0;
+		min-height: 44px;
+	}
+
+	.weight-unit {
+		color: #475569;
+	}
+
+	.field-hint {
+		margin: 0;
+		color: #64748b;
+		font-size: 0.8125rem;
 	}
 
 	.math-preview {

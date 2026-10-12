@@ -232,20 +232,41 @@ export function setNodePinned(
 	};
 }
 
+/**
+ * `weight` is three-way, unlike the other optional fields: a number sets it,
+ * `null` removes the key (a blank field in the edit sheet, so a re-save writes
+ * nothing for it), and leaving it out keeps whatever the node has — which is
+ * what every caller other than the sheet does.
+ */
 export function updateNodeContent(
 	data: MultigraphData,
 	nodeId: string,
 	content: Pick<NodeData, 'title' | 'description'> &
-		Partial<Pick<NodeData, 'tags' | 'content' | 'inputs' | 'outputs'>>
+		Partial<Pick<NodeData, 'tags' | 'content' | 'inputs' | 'outputs'>> & {
+			weight?: number | null;
+		}
 ): MultigraphData {
 	if (!hasNode(data, nodeId)) return data;
 
+	const { weight, ...fields } = content;
 	return {
 		...data,
 		nodes: data.nodes.map((node) =>
-			node.id === nodeId ? { ...node, ...content, title: normalizeNodeTitle(content.title) } : node
+			node.id === nodeId
+				? withNodeWeight({ ...node, ...fields, title: normalizeNodeTitle(fields.title) }, weight)
+				: node
 		)
 	};
+}
+
+/** `node` is a fresh copy here, so removing the key in place mutates nothing shared. */
+function withNodeWeight(node: NodeData, weight: number | null | undefined): NodeData {
+	if (weight === undefined) return node;
+	if (weight === null) {
+		delete node.weight;
+		return node;
+	}
+	return { ...node, weight };
 }
 
 /**

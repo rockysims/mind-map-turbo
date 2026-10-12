@@ -42,11 +42,25 @@
 						tags: string[];
 						inputs: QuantityDesignation[];
 						outputs: QuantityDesignation[];
+						weight?: number | null;
 					}
 				]
 			>;
 		};
 	};
+
+	function weightInput(canvasElement: HTMLElement): HTMLInputElement {
+		const found = canvasElement.querySelector('input[name="weight"]');
+		if (!(found instanceof HTMLInputElement)) throw new Error('no weight field');
+		return found;
+	}
+
+	/** Type into the weight field the way a user would, so the sheet's draft updates. */
+	function typeWeight(canvasElement: HTMLElement, value: string): void {
+		const input = weightInput(canvasElement);
+		input.value = value;
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+	}
 
 	/** `$$w = m g$$`: one definition and two mentions, all with plain one-letter keys. */
 	const WEIGHT_EQUATION = 'Weight is $$w = m g$$.';
@@ -1088,3 +1102,143 @@
 		/>
 	{/snippet}
 </Story>
+
+<Story
+	name="UserGivesANodeWithNoWeightAWeight"
+	play={async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		expect(weightInput(canvasElement)).toHaveValue(null);
+		expect(harnessState(canvasElement)).toHaveAttribute('data-node-weight', 'absent');
+
+		typeWeight(canvasElement, '5');
+		await settle();
+		canvas.getByRole('button', { name: 'Done' }).click();
+
+		// Through the same commit as the title and tags, so one undo takes it back.
+		await waitFor(() =>
+			expect(harnessState(canvasElement)).toHaveAttribute('data-node-weight', '5')
+		);
+		expect(harnessState(canvasElement)).toHaveAttribute('data-last-intent', 'edit node');
+	}}
+>
+	{#snippet template()}
+		<NodeEditSheetHarness baseGraph={taggedGraph()} nodeId="node-1" />
+	{/snippet}
+</Story>
+
+<Story
+	name="ClearingTheWeightFieldRemovesTheWeight"
+	play={async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		expect(weightInput(canvasElement)).toHaveValue(3);
+
+		typeWeight(canvasElement, '');
+		await settle();
+		canvas.getByRole('button', { name: 'Done' }).click();
+
+		// Blank means "no weight": the key is gone, not kept as 0 or undefined.
+		await waitFor(() =>
+			expect(harnessState(canvasElement)).toHaveAttribute('data-node-weight', 'absent')
+		);
+	}}
+>
+	{#snippet template()}
+		<NodeEditSheetHarness baseGraph={taggedGraph({ weight: 3 })} nodeId="node-1" />
+	{/snippet}
+</Story>
+
+<Story
+	name="ANegativeWeightIsSavedAsZero"
+	play={async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+
+		typeWeight(canvasElement, '-2');
+		await settle();
+		canvas.getByRole('button', { name: 'Done' }).click();
+
+		// Clamped to the floor load enforces, and 0 is a real weight, not "none".
+		await waitFor(() =>
+			expect(harnessState(canvasElement)).toHaveAttribute('data-node-weight', '0')
+		);
+	}}
+>
+	{#snippet template()}
+		<NodeEditSheetHarness baseGraph={taggedGraph({ weight: 3 })} nodeId="node-1" />
+	{/snippet}
+</Story>
+
+<Story
+	name="TheWeightFieldUsesTheGraphsLabelAndUnit"
+	play={async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+
+		// The graph's label alone names the field; the unit sits beside it and is
+		// read out with the hint.
+		const field = canvas.getByLabelText('Mass');
+		expect(field).toBe(weightInput(canvasElement));
+		expect(field).toHaveValue(12.5);
+		expect(canvasElement.querySelector('[data-weight-unit]')?.textContent).toBe('kg');
+		expect(field).toHaveAccessibleDescription(
+			"kg Drawn as border thickness when the graph's border source is Node weight."
+		);
+		expect(canvas.queryByLabelText('Weight')).not.toBeInTheDocument();
+	}}
+>
+	{#snippet template()}
+		<NodeEditSheetHarness
+			baseGraph={{
+				...taggedGraph({ weight: 12.5 }),
+				weightConfig: { label: 'Mass', unit: 'kg' }
+			}}
+			nodeId="node-1"
+		/>
+	{/snippet}
+</Story>
+
+<Story
+	name="TheWeightFieldReadsWeightWhenTheGraphNamesNothing"
+	play={async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		const field = canvas.getByLabelText('Weight');
+
+		expect(field).toBe(weightInput(canvasElement));
+		expect(field).toHaveAttribute('type', 'number');
+		expect(field).toHaveAttribute('min', '0');
+		expect(field).toHaveAttribute('step', 'any');
+		expect(field).toHaveAttribute('inputmode', 'decimal');
+		expect(canvasElement.querySelector('[data-weight-unit]')).toBeNull();
+		expect(field).toHaveAccessibleDescription(
+			"Drawn as border thickness when the graph's border source is Node weight."
+		);
+	}}
+/>
+
+<Story
+	name="DoneCarriesTheTypedWeightInTheSave"
+	play={async ({ canvasElement, args }) => {
+		const canvas = within(canvasElement);
+
+		typeWeight(canvasElement, '5');
+		await settle();
+		canvas.getByRole('button', { name: 'Done' }).click();
+
+		const saveSpy = args.onSave as unknown as SaveSpy;
+		expect(saveSpy.mock.calls.at(-1)?.[0].weight).toBe(5);
+	}}
+/>
+
+<Story
+	name="EscapeInTheWeightFieldCancelsWithoutSaving"
+	play={async ({ canvasElement, args }) => {
+		const field = weightInput(canvasElement);
+		typeWeight(canvasElement, '9');
+		await settle();
+
+		field.focus();
+		await userEvent.keyboard('{Escape}');
+
+		// The sheet's one Escape handler, reached from this field like any other.
+		expect(args.onCancel).toHaveBeenCalled();
+		expect(args.onSave).not.toHaveBeenCalled();
+	}}
+/>

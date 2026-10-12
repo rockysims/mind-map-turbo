@@ -2668,6 +2668,7 @@
 			tags?: string[];
 			inputs?: QuantityDesignation[];
 			outputs?: QuantityDesignation[];
+			weight?: number | null;
 		}
 	) {
 		// Two passes rather than one: the first saves what the sheet's own fields
@@ -3813,12 +3814,14 @@
 			nodes={graph.nodes}
 			edges={graph.edges}
 			assets={graph.assets ?? {}}
+			weightConfig={graph.weightConfig}
 			onSave={(content: {
 				title: string;
 				description: string;
 				tags: string[];
 				inputs: QuantityDesignation[];
 				outputs: QuantityDesignation[];
+				weight?: number | null;
 			}) => saveNodeContent(editNode.id, content)}
 			onAddAttachment={(file) => addAttachmentToNode(editNode.id, file)}
 			onSaveImage={(assetId, details) => saveNodeImage(editNode.id, assetId, details)}

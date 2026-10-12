@@ -89,6 +89,18 @@ export function nodeBorderValue(
 const WEIGHT_NUMBER_FORMAT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
 
 /**
+ * What the graph calls its nodes' weight, and the unit it is counted in: the
+ * one rule both the details line and the edit sheet's field label follow.
+ * "Weight" with no unit when the graph names nothing.
+ */
+export function weightName(config: WeightConfig | undefined): {
+	label: string;
+	unit: string | undefined;
+} {
+	return { label: config?.label ?? 'Weight', unit: config?.unit };
+}
+
+/**
  * A node's weight as its details view reads it: "Word count 4,200",
  * "Mass 12.5 kg", or "Weight 7" when the graph names nothing.
  */
@@ -97,8 +109,27 @@ export function formatNodeWeight(
 	config: WeightConfig | undefined
 ): { label: string; text: string } {
 	const value = WEIGHT_NUMBER_FORMAT.format(weight);
-	return {
-		label: config?.label ?? 'Weight',
-		text: config?.unit === undefined ? value : `${value} ${config.unit}`
-	};
+	const { label, unit } = weightName(config);
+	return { label, text: unit === undefined ? value : `${value} ${unit}` };
+}
+
+/**
+ * What the edit sheet's weight field asks the save to do, in the shape
+ * `updateNodeContent` takes: a number sets the weight, `null` removes the key,
+ * and `undefined` leaves the stored weight alone.
+ *
+ * Blank means "no weight", so clearing the field is how a weight comes off. A
+ * negative number is clamped to 0 (the floor load cleaning enforces, and a real
+ * value) rather than refused. Anything that is not a finite number is ignored
+ * rather than turned into a guess. `badInput` is the browser's own flag for
+ * text a number field could not read: such a field reports its value as `''`,
+ * which would otherwise read as a deliberate clear.
+ */
+export function weightFromDraft(text: string, badInput = false): number | null | undefined {
+	if (badInput) return undefined;
+	const trimmed = text.trim();
+	if (trimmed === '') return null;
+	const value = Number(trimmed);
+	if (!Number.isFinite(value)) return undefined;
+	return Math.max(0, value);
 }
