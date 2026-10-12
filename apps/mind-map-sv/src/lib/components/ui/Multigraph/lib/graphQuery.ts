@@ -14,6 +14,14 @@ export interface GraphQueryToken {
 	mode: GraphQueryTokenMode;
 	target: GraphQueryTokenTarget;
 	value: string;
+	/**
+	 * Half-open `[start, end)` range of the token in the parsed input, covering
+	 * the `+`/`-` prefix, the marker or opening quote, the value and any closing
+	 * quote — so `input.slice(start, end)` is exactly what was typed. It lets a
+	 * caller rewrite one token in place without regenerating the whole query.
+	 */
+	start: number;
+	end: number;
 }
 
 export interface GraphQueryElementState {
@@ -58,6 +66,7 @@ export function parseGraphQuery(
 			continue;
 		}
 
+		const start = index;
 		let mode: GraphQueryTokenMode = 'focus';
 		if (
 			(current === '+' || current === '-') &&
@@ -72,7 +81,13 @@ export function parseGraphQuery(
 		if (marker === '"') {
 			const parsed = readQuoted(input, index + 1);
 			if (parsed.value.trim()) {
-				tokens.push({ mode, target: 'text', value: parsed.value.trim() });
+				tokens.push({
+					mode,
+					target: 'text',
+					value: parsed.value.trim(),
+					start,
+					end: parsed.nextIndex
+				});
 			}
 			index = parsed.nextIndex;
 			continue;
@@ -88,7 +103,9 @@ export function parseGraphQuery(
 				tokens.push({
 					mode,
 					target: targetForMarker(tagMarker, tagSyntax),
-					value: parsed.value
+					value: parsed.value,
+					start,
+					end: parsed.nextIndex
 				});
 			}
 			index = parsed.nextIndex;
@@ -97,7 +114,13 @@ export function parseGraphQuery(
 
 		const parsed = readText(input, index, tagSyntax);
 		if (parsed.value) {
-			tokens.push({ mode: 'focus', target: 'text', value: parsed.value });
+			tokens.push({
+				mode: 'focus',
+				target: 'text',
+				value: parsed.value,
+				start,
+				end: parsed.nextIndex
+			});
 		}
 		index = parsed.nextIndex;
 	}
@@ -328,8 +351,16 @@ function finalizeStates(
 }
 
 function matchingTag(tags: string[], queryTag: string): string | undefined {
-	const normalizedQuery = normalize(queryTag);
-	return tags.find((tag) => normalize(tag) === normalizedQuery);
+	return tags.find((tag) => tagNamesMatch(tag, queryTag));
+}
+
+/**
+ * Whether two tag names name the same tag. The one definition shared by query
+ * evaluation and anything that edits a query by tag, so a tag button can never
+ * disagree with the graph about whether `#Lab` is `lab`.
+ */
+export function tagNamesMatch(a: string, b: string): boolean {
+	return normalize(a) === normalize(b);
 }
 
 /**
