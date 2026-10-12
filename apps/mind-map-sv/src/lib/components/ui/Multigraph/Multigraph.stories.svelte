@@ -412,6 +412,39 @@
 		return edge;
 	}
 
+	/**
+	 * Open Find / Filter (unless it is already open) and type a whole query into
+	 * it, the way the reader does. Resolves once Svelte has flushed the change,
+	 * and before the next animation frame, so a caller sees the first render
+	 * under the new query.
+	 */
+	async function typeGraphQuery(el: HTMLElement, text: string): Promise<void> {
+		const canvas = within(el);
+		if (!canvas.queryByLabelText('Graph query')) {
+			canvas.getByRole('button', { name: 'Find / Filter' }).click();
+			await sleep();
+		}
+		const input = canvas.getByLabelText('Graph query');
+		if (!(input instanceof HTMLInputElement)) throw new Error('Graph query is not an input');
+		input.value = text;
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		await tick();
+	}
+
+	function nodeIsDrawn(el: HTMLElement, nodeId: string): boolean {
+		return el.querySelector(`[data-node-id="${nodeId}"].node-wrapper`) !== null;
+	}
+
+	/** Bare `F`, from nowhere a letter would be typed into. */
+	function pressFitKey(): void {
+		const active = document.activeElement;
+		if (active instanceof HTMLElement) active.blur();
+		dispatchKeydown(document.body, 'f');
+	}
+
+	/** Exclusions in these stories land at once: no exit fade to wait out. */
+	const EXCLUSION_STORY_LAYOUT = { relaxIterations: 0, enterExitDurationMs: 0 };
+
 	function expectParallelEdgeMetadata(edge: HTMLElement, groupCount: number, slot: number): void {
 		expect(edge).toHaveAttribute('data-edge-parallel-count', String(groupCount));
 		expect(Number(edge.dataset.edgeParallelSlot)).toBe(slot);
@@ -5565,6 +5598,487 @@
 		expect(nodeOpacity(canvasElement, 'n2')).toBe(1);
 		// Without n1 pulling and pushing on it, n2 settles somewhere else.
 		await waitFor(() => expect(getNodeWrapper(canvasElement, 'n2').dataset.x).not.toBe(n2XBefore));
+	}}
+/>
+
+<Story
+	name="UserExcludesAPinnedNodesTagAndABeaconTakesOver"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'hub', title: 'Hub', description: '', tags: ['hub'] },
+				{ id: 'a', title: 'Neighbour', description: '', tags: [] },
+				{ id: 'b', title: 'Past it, up', description: '', tags: [] },
+				{ id: 'c', title: 'Past it, down', description: '', tags: [] }
+			],
+			// `a` is reachable only through the hub, and has the most edges left once
+			// the hub goes, so it is the beacon the remaining component elects.
+			pinned: ['hub'],
+			edges: [
+				['hub', 'a'],
+				['a', 'b'],
+				['a', 'c']
+			],
+			posByNodeId: {
+				hub: { x: -400, y: 0 },
+				a: { x: 0, y: 0 },
+				b: { x: 400, y: -200 },
+				c: { x: 400, y: 200 }
+			},
+			tagColorConfig: { nodeTags: { hub: '#ff0000' }, edgeTags: {} }
+		}),
+		defaultPrimaryNodeId: 'hub',
+		layoutSettings: {
+			...EXCLUSION_STORY_LAYOUT,
+			displayedLayers: 2,
+			scaleFalloff: 0.5,
+			minScale: 0.1
+		}
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		// The hub anchors everything: `b` and `c` sit two hops out, on screen.
+		expect(nodeIsDrawn(canvasElement, 'b')).toBe(true);
+		expect(nodeIsDrawn(canvasElement, 'c')).toBe(true);
+
+		await typeGraphQuery(canvasElement, '-#hub');
+		await waitForLayout();
+
+		// What is left has no pin, so it collapses to its beacon...
+		const beacon = getNodeWrapper(canvasElement, 'a');
+		expect(Number(beacon.dataset.scale)).toBeCloseTo(0.5);
+		expect(canvasElement.querySelector('[data-node-id="a"] .node')).not.toHaveAttribute(
+			'data-pinned'
+		);
+		// ...and the nodes past it leave with the hub that was holding them up.
+		expect(nodeIsDrawn(canvasElement, 'b')).toBe(false);
+		expect(nodeIsDrawn(canvasElement, 'c')).toBe(false);
+		expect(nodeIsDrawn(canvasElement, 'hub')).toBe(false);
+	}}
+/>
+
+<Story
+	name="UserClearsAnExclusionAndTheNodeReturnsWhereItWas"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'n0', title: 'Keep', description: '', tags: [] },
+				{ id: 'pin', title: 'Hidden pin', description: '', tags: ['hide'] },
+				{ id: 'n2', title: 'Other', description: '', tags: [] },
+				{ id: 'leaf', title: 'Hidden leaf', description: '', tags: ['hide'] }
+			],
+			// `n2` is strung between two pins too far apart for both springs to rest,
+			// so it moves once the hidden pin goes and the settle has work to do.
+			// `leaf` is the one under test: unpinned, so it is only still where it
+			// was afterwards because the settle never touched it.
+			pinned: ['n0', 'pin'],
+			edges: [
+				['n0', 'n2'],
+				['pin', 'n2'],
+				['pin', 'leaf']
+			],
+			posByNodeId: {
+				n0: { x: -800, y: 0 },
+				pin: { x: 800, y: 0 },
+				n2: { x: 0, y: 0 },
+				leaf: { x: 800, y: 300 }
+			},
+			tagColorConfig: { nodeTags: { hide: '#ff0000' }, edgeTags: {} }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { ...EXCLUSION_STORY_LAYOUT, postDragSettleMaxFrames: 30 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const leafBefore = nodePosition(canvasElement, 'leaf');
+		const n2Before = nodePosition(canvasElement, 'n2');
+		// Control: nothing moves on its own, so a move below is the exclusion's.
+		await waitForFrames(5);
+		expect(nodePosition(canvasElement, 'leaf')).toEqual(leafBefore);
+		expect(nodePosition(canvasElement, 'n2')).toEqual(n2Before);
+
+		await typeGraphQuery(canvasElement, '-#hide');
+		await waitForLayout();
+		expect(nodeIsDrawn(canvasElement, 'leaf')).toBe(false);
+		expect(nodeIsDrawn(canvasElement, 'pin')).toBe(false);
+
+		// The rest settles without them, all the way to rest.
+		await waitFor(() => expect(nodePosition(canvasElement, 'n2')).not.toEqual(n2Before));
+		await waitFor(
+			() => expect(canvasElement.querySelector('.graph')).not.toHaveAttribute('data-settling'),
+			{ timeout: 3000 }
+		);
+
+		// The first frame it is drawn again, it is exactly where it left from.
+		await typeGraphQuery(canvasElement, '');
+		expect(nodeIsDrawn(canvasElement, 'leaf')).toBe(true);
+		expect(nodePosition(canvasElement, 'leaf')).toEqual(leafBefore);
+	}}
+/>
+
+<Story
+	name="UserHoversATagSuggestionWithAnExclusionActive"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'n0', title: 'Keep', description: '', tags: ['keep'] },
+				{ id: 'n1', title: 'Hide', description: '', tags: ['hide'] },
+				{ id: 'n2', title: 'Other', description: '', tags: [] }
+			],
+			pinned: ['n0', 'n1'],
+			edges: [
+				{ source: 'n0', target: 'n1', tags: ['rel'] },
+				{ source: 'n1', target: 'n2', tags: ['rel'] },
+				{ source: 'n0', target: 'n2', tags: ['rel'] }
+			],
+			posByNodeId: { n0: { x: -800, y: 0 }, n1: { x: 800, y: 0 }, n2: { x: 0, y: 0 } },
+			tagColorConfig: {
+				nodeTags: { hide: '#ff0000', keep: '#00ff00' },
+				edgeTags: { rel: '#0000ff' }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { ...EXCLUSION_STORY_LAYOUT, postDragSettleMaxFrames: 30 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		await typeGraphQuery(canvasElement, '-#hide');
+		await waitForLayout();
+		expect(nodeIsDrawn(canvasElement, 'n1')).toBe(false);
+		await waitFor(
+			() => expect(canvasElement.querySelector('.graph')).not.toHaveAttribute('data-settling'),
+			{ timeout: 3000 }
+		);
+		const restingPositions = nodePositions(canvasElement, ['n0', 'n2']);
+
+		const keepButton = within(canvasElement).getByRole('button', { name: /^Node tag keep,/ });
+		keepButton.dispatchEvent(new MouseEvent('mouseenter'));
+		await tick();
+		// The preview landed: the hovered tag is spotlighted...
+		expect(getNodeWrapper(canvasElement, 'n0')).toHaveAttribute('data-query-role', 'spotlight');
+		// ...and nothing reflows under the pointer.
+		expect(canvasElement.querySelector('.graph')).not.toHaveAttribute('data-settling');
+		await waitForFrames(5);
+		expect(canvasElement.querySelector('.graph')).not.toHaveAttribute('data-settling');
+		expect(nodePositions(canvasElement, ['n0', 'n2'])).toEqual(restingPositions);
+		expect(nodeIsDrawn(canvasElement, 'n1')).toBe(false);
+
+		keepButton.dispatchEvent(new MouseEvent('mouseleave'));
+		await tick();
+		await waitForFrames(3);
+		expect(canvasElement.querySelector('.graph')).not.toHaveAttribute('data-settling');
+		expect(nodePositions(canvasElement, ['n0', 'n2'])).toEqual(restingPositions);
+	}}
+/>
+
+<Story
+	name="UserExcludesTheOnlyRouteToANode"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'p', title: 'Pin', description: '', tags: [] },
+				{ id: 'a', title: 'Near', description: '', tags: [] },
+				{ id: 'b', title: 'Subtree root', description: '', tags: [] },
+				{ id: 'c', title: 'Far, up', description: '', tags: [] },
+				{ id: 'd', title: 'Far, down', description: '', tags: [] }
+			],
+			pinned: ['p'],
+			edges: [
+				{ source: 'p', target: 'a', tags: ['link'] },
+				{ source: 'a', target: 'b', tags: ['bridge'] },
+				{ source: 'b', target: 'c', tags: ['link'] },
+				{ source: 'b', target: 'd', tags: ['link'] }
+			],
+			posByNodeId: {
+				p: { x: -600, y: 0 },
+				a: { x: -200, y: 0 },
+				b: { x: 200, y: 0 },
+				c: { x: 600, y: -200 },
+				d: { x: 600, y: 200 }
+			},
+			tagColorConfig: { nodeTags: {}, edgeTags: { link: '#0000ff', bridge: '#ff0000' } }
+		}),
+		defaultPrimaryNodeId: 'p',
+		layoutSettings: {
+			...EXCLUSION_STORY_LAYOUT,
+			displayedLayers: 3,
+			scaleFalloff: 0.5,
+			minScale: 0.1
+		}
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		// Every node routes to the pin through the bridge: all on screen.
+		for (const nodeId of ['p', 'a', 'b', 'c', 'd']) {
+			expect(nodeIsDrawn(canvasElement, nodeId)).toBe(true);
+		}
+		expect(Number(getNodeWrapper(canvasElement, 'b').dataset.scale)).toBeCloseTo(0.25);
+
+		await typeGraphQuery(canvasElement, '-@bridge');
+		await waitForLayout();
+
+		// The subtree is cut off: it shrinks to its own beacon, and its far side
+		// leaves the canvas.
+		expect(Number(getNodeWrapper(canvasElement, 'b').dataset.scale)).toBeCloseTo(0.5);
+		expect(nodeIsDrawn(canvasElement, 'c')).toBe(false);
+		expect(nodeIsDrawn(canvasElement, 'd')).toBe(false);
+		// The pinned side is untouched.
+		expect(nodeIsDrawn(canvasElement, 'p')).toBe(true);
+		expect(nodeIsDrawn(canvasElement, 'a')).toBe(true);
+		expect(canvasElement.querySelector('[data-edge-id="e1"]')).not.toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="AnExcludedNodeStopsFadingTheEdgeItLiesAcross"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'n0', title: 'Left', description: '', tags: [] },
+				{ id: 'n1', title: 'Right', description: '', tags: [] },
+				{ id: 'n2', title: 'In the way', description: '', tags: ['hide'] }
+			],
+			pinned: ['n0', 'n1', 'n2'],
+			edges: [['n0', 'n1']],
+			posByNodeId: { n0: { x: -200, y: 0 }, n1: { x: 200, y: 0 }, n2: { x: 0, y: 0 } },
+			tagColorConfig: { nodeTags: { hide: '#ff0000' }, edgeTags: {} }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { ...EXCLUSION_STORY_LAYOUT, baseRadius: 20, edgeOcclusionFadeWidthPx: 12 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		expect(getEdge(canvasElement, 'e0')).toHaveAttribute('data-edge-occlusion-count', '1');
+
+		await typeGraphQuery(canvasElement, '-#hide');
+		await waitForLayout();
+
+		const edge = getEdge(canvasElement, 'e0');
+		expect(edge).toHaveAttribute('data-edge-occlusion-count', '0');
+		expect(edge.style.getPropertyValue('--edge-background')).not.toContain('linear-gradient');
+		expect(nodeIsDrawn(canvasElement, 'n2')).toBe(false);
+	}}
+/>
+
+<Story
+	name="ExcludingOneOfTwoParallelEdgesCentresTheOther"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'a', title: 'A', description: '', tags: [] },
+				{ id: 'b', title: 'B', description: '', tags: [] }
+			],
+			pinned: ['a', 'b'],
+			edges: [
+				{ id: 'kept', source: 'a', target: 'b', tags: ['main'], directed: true },
+				{ id: 'aside', source: 'a', target: 'b', tags: ['aside'], directed: true }
+			],
+			posByNodeId: { a: { x: -200, y: 0 }, b: { x: 200, y: 0 } },
+			tagColorConfig: { nodeTags: {}, edgeTags: { main: '#2563eb', aside: '#dc2626' } }
+		}),
+		defaultPrimaryNodeId: 'a',
+		layoutSettings: EXCLUSION_STORY_LAYOUT
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		expectParallelEdgeMetadata(getEdge(canvasElement, 'aside'), 2, -0.5);
+		expectParallelEdgeMetadata(getEdge(canvasElement, 'kept'), 2, 0.5);
+
+		await typeGraphQuery(canvasElement, '-@aside');
+		await waitForLayout();
+
+		expectParallelEdgeMetadata(getEdge(canvasElement, 'kept'), 1, 0);
+		expect(canvasElement.querySelector('[data-edge-id="aside"]')).not.toBeInTheDocument();
+		// Both endpoints stay: only the edge carried the tag.
+		expect(nodeIsDrawn(canvasElement, 'a')).toBe(true);
+		expect(nodeIsDrawn(canvasElement, 'b')).toBe(true);
+	}}
+/>
+
+<Story
+	name="ADeepZoomWhereAnExcludedNodeWasFocusesNothing"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'n0', title: 'Hide', description: '', tags: ['hide'] },
+				{ id: 'n1', title: 'Elsewhere', description: '', tags: [] }
+			],
+			pinned: ['n0', 'n1'],
+			posByNodeId: { n0: { x: 0, y: 0 }, n1: { x: 2000, y: 0 } },
+			tagColorConfig: { nodeTags: { hide: '#ff0000' }, edgeTags: {} }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: { panX: 0, panY: 0, scale: APP_CONFIG.multigraph.zoom.maxScale },
+		layoutSettings: EXCLUSION_STORY_LAYOUT
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		// Where it was: the same overzoom here would have opened it in focus.
+		const formerCenter = getCenter(getCircle(canvasElement, 'n0'));
+
+		await typeGraphQuery(canvasElement, '-#hide');
+		await waitForLayout();
+
+		dispatchWheel(stage, wheelFactor(2.6), formerCenter.x, formerCenter.y);
+		await sleep(APP_CONFIG.multigraph.focus.entryTransitionMs + 40);
+
+		expect(canvasElement.querySelector('[data-focus-subject-id="n0"]')).not.toBeInTheDocument();
+		expect(within(canvasElement).queryByRole('dialog')).not.toBeInTheDocument();
+		expect(canvasElement.querySelector('.graph')).not.toHaveClass('focus-active');
+		expect(nodeIsDrawn(canvasElement, 'n0')).toBe(false);
+	}}
+/>
+
+<Story
+	name="FitFramesOnlyWhatTheExclusionLeaves"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'n0', title: 'Left', description: '', tags: [] },
+				{ id: 'n1', title: 'Right', description: '', tags: [] },
+				{ id: 'far', title: 'Parked far away', description: '', tags: ['hide'] }
+			],
+			pinned: ['n0', 'n1', 'far'],
+			edges: [['n0', 'n1']],
+			posByNodeId: { n0: { x: -100, y: 0 }, n1: { x: 100, y: 0 }, far: { x: 4000, y: 0 } },
+			tagColorConfig: { nodeTags: { hide: '#ff0000' }, edgeTags: {} }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: EXCLUSION_STORY_LAYOUT,
+		onViewStateChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		pressFitKey();
+		await tick();
+		const scaleWithFarNode = lastViewState(args).scale;
+
+		await typeGraphQuery(canvasElement, '-#hide');
+		await waitForLayout();
+
+		pressFitKey();
+		await tick();
+		// Framing two nodes 200 apart, not a span of four thousand.
+		expect(lastViewState(args).scale).toBeGreaterThan(scaleWithFarNode * 4);
+		expect(nodeIsDrawn(canvasElement, 'far')).toBe(false);
+	}}
+/>
+
+<Story
+	name="PanningToWhereOnlyAnExcludedNodeWasShowsTheLostGraphHint"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'n0', title: 'Hide', description: '', tags: ['hide'] },
+				{ id: 'n1', title: 'Elsewhere', description: '', tags: [] }
+			],
+			pinned: ['n0', 'n1'],
+			posByNodeId: { n0: { x: 0, y: 0 }, n1: { x: 3000, y: 0 } },
+			tagColorConfig: { nodeTags: { hide: '#ff0000' }, edgeTags: {} }
+		}),
+		defaultPrimaryNodeId: 'n0',
+		// Centred on `n0`, with `n1` far off screen.
+		initialViewState: { panX: 0, panY: 0, scale: 1 },
+		layoutSettings: EXCLUSION_STORY_LAYOUT
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		expect(nodeIsDrawn(canvasElement, 'n0')).toBe(true);
+		expect(canvasElement.querySelector('.lost-graph-hint')).not.toBeInTheDocument();
+
+		await typeGraphQuery(canvasElement, '-#hide');
+		await waitForLayout();
+
+		// The only thing in view has left the graph, so the reader has lost it.
+		expect(canvasElement.querySelector('.lost-graph-hint')).toBeInTheDocument();
+		expect(nodeIsDrawn(canvasElement, 'n0')).toBe(false);
+	}}
+/>
+
+<Story
+	name="RightClickingWhereAnExcludedNodeWasOpensNoMenu"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{ id: 'n0', title: 'Hide', description: '', tags: ['hide'] },
+				{ id: 'n1', title: 'Keep', description: '', tags: [] }
+			],
+			pinned: ['n0', 'n1'],
+			// Stacked vertically so n1's pill (which floats above it) never covers n0.
+			posByNodeId: { n0: { x: 0, y: -100 }, n1: { x: 0, y: 140 } },
+			tagColorConfig: { nodeTags: { hide: '#ff0000' }, edgeTags: {} }
+		}),
+		defaultPrimaryNodeId: 'n1',
+		initialViewState: { panX: 0, panY: 0, scale: 1 },
+		layoutSettings: EXCLUSION_STORY_LAYOUT,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const formerCenter = getCenter(getCircle(canvasElement, 'n0'));
+		const keptCenter = getCenter(getCircle(canvasElement, 'n1'));
+
+		await typeGraphQuery(canvasElement, '-#hide');
+		await waitForLayout();
+
+		// Nothing is there to hit any more, so the right-click opens nothing.
+		const event = dispatchContextMenu(stage, formerCenter.x, formerCenter.y);
+		await tick();
+		expect(event.defaultPrevented).toBe(true);
+		expect(within(canvasElement).queryByRole('menu')).not.toBeInTheDocument();
+		expect(args.onMultigraphChange).not.toHaveBeenCalled();
+		expect(nodeIsDrawn(canvasElement, 'n0')).toBe(false);
+
+		// Control: the same gesture on a node that is still there does open one.
+		dispatchContextMenu(stage, keptCenter.x, keptCenter.y);
+		await tick();
+		expect(within(canvasElement).getByRole('menu')).toHaveAttribute(
+			'aria-label',
+			'Actions for Keep'
+		);
+	}}
+/>
+
+<Story
+	name="ExcludingOneEndOfAQuantityTakesItsDerivedEdgeAway"
+	args={{
+		multigraphData: makeGraph({
+			nodes: [
+				{
+					id: 'n0',
+					title: 'Gravity',
+					description: '$$g = 9.8$$',
+					tags: ['hide'],
+					outputs: designations('g')
+				},
+				{
+					id: 'n1',
+					title: 'Weight',
+					description: '$$w = m g$$',
+					inputs: designations('g'),
+					outputs: designations('w')
+				}
+			],
+			pinned: ['n0', 'n1'],
+			posByNodeId: { n0: { x: -200, y: 0 }, n1: { x: 200, y: 0 } },
+			tagColorConfig: { nodeTags: { hide: '#ff0000' }, edgeTags: {} }
+		}),
+		defaultPrimaryNodeId: 'n1',
+		layoutSettings: EXCLUSION_STORY_LAYOUT
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		expect(canvasElement.querySelector('[data-edge-id="dataflow:n0->n1"]')).toBeInTheDocument();
+
+		await typeGraphQuery(canvasElement, '-#hide');
+		await waitForLayout();
+
+		// An excluded node defines nothing, so no arrow is left pointing at nothing.
+		expect(canvasElement.querySelector('[data-edge-derived="true"]')).not.toBeInTheDocument();
+		expect(nodeIsDrawn(canvasElement, 'n0')).toBe(false);
+		expect(nodeIsDrawn(canvasElement, 'n1')).toBe(true);
 	}}
 />
 
