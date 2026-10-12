@@ -4,16 +4,17 @@
 **Depends on:** milestones 01 (graph data), 03 (editing UX provides
 title/description content), 04e (node/edge tags), and 04f (tag colors).
 **Plan:** [2026-06-22 05-filter-find-search.md](../plans/2026-06-22%2005-filter-find-search.md)
-**Follow-up plan:**
-[2026-10-11 query tag buttons cycle modes.md](../plans/2026-10-11%20query%20tag%20buttons%20cycle%20modes.md)
+**Follow-up plans:**
+[2026-10-11 query tag buttons cycle modes.md](../plans/2026-10-11%20query%20tag%20buttons%20cycle%20modes.md),
+[2026-10-11 excluded elements leave the layout.md](../plans/2026-10-11%20excluded%20elements%20leave%20the%20layout.md)
 
 ## Goal
 
 Help users find text, tags, and meaningful subsections in a large graph without
 losing spatial context. A filter/find panel lets users query node titles,
-descriptions, node tags, and edge tags; the graph responds with a visual mask
-that spotlights, focuses, dims, or hides rendered elements while preserving the
-underlying layout.
+descriptions, node tags, and edge tags; the graph spotlights, focuses, or dims
+matching elements while preserving the underlying layout, and takes excluded
+elements out of the graph entirely, letting the rest of it settle.
 
 ## Scope
 
@@ -45,17 +46,25 @@ The query model separates semantic role from layout participation:
 - `focus`: rendered full opacity.
 - `context`: rendered dimmed to orient the user.
 - `background`: rendered very dimmed.
-- `excluded`: not rendered, but still participates in layout.
+- `excluded`: not rendered and removed from layout: no physics, hop routing,
+  beacon election, occlusion, focus or fit.
 
 Dimmed `context` and `background` treatment only applies when the active query
 contains at least one positive token: text, `#tag`, `@tag`, `+#tag`, or `+@tag`.
 Exclude-only queries, such as `-#archived`, hide the excluded matches while
 leaving the rest of the rendered graph at normal opacity.
 
-This milestone implements a visual mask only. Querying must not cause layout
-reflow. A later isolation mode may let users remove non-matches from both
-rendering and layout influence, but that must be an explicit mode with its own
-transition and status indicator.
+Owner ruling, 2026-10-11: excluded elements are effectively gone from the
+graph while the exclusion lasts. Exclusion always isolates; there is no
+separate mode. The remaining graph reflows and settles, excluded nodes fade
+out, and their positions are kept, so clearing the exclusion brings them back
+where they were. This reverses the original "visual mask only" ruling. The
+earlier requirement that isolation be "an explicit mode with its own transition
+and status indicator" is dropped: the transition is the exclusion's own fade,
+and the missing status indicator is filed as debt
+(`docs/debt/2026-10-11-active-filter-has-no-indicator-once-the-panel-closes.md`).
+See
+[2026-10-11 excluded elements leave the layout.md](../plans/2026-10-11%20excluded%20elements%20leave%20the%20layout.md).
 
 ### Node and edge semantics
 
@@ -137,7 +146,7 @@ transition and status indicator.
   - A user adds a spotlight edge tag, and matching edges use that tag's color
     for the stroke and persistent halo while the query is active.
   - A user excludes a node tag and matching nodes plus incident edges stop
-    rendering without layout reflow.
+    rendering and leave the layout; the remaining graph settles.
   - Hovering or focusing a tag suggestion not already in the query spotlights
     matching graph locations, and clicking a tag suggestion cycles its token
     through focus, spotlight and exclude back to none.
@@ -149,14 +158,15 @@ transition and status indicator.
 
 ## Non-goals
 
-- **Layout isolation mode.** Query hiding is a visual mask only; non-rendered
-  query exclusions still influence layout until a later explicit isolation mode.
 - **Boolean query language.** No AND/grouping/parser precedence beyond the
   token modes described above.
 - **Server-side search.** Query evaluation is client-side only.
 - **Persisted/saved filters.** The filter is session UI state, not graph data.
 - **Tag rename/merge workflows.** Tag management stays with the tag/settings
   surfaces.
+
+Exclusion leaving the layout was added after this milestone shipped; see
+[2026-10-11 excluded elements leave the layout.md](../plans/2026-10-11%20excluded%20elements%20leave%20the%20layout.md).
 
 ## Risks and open questions
 

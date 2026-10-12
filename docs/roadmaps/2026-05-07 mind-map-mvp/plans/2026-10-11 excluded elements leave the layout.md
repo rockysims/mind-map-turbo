@@ -3,7 +3,7 @@
 **Created:** 2026-10-11
 **Author:** Claude agent
 **Milestone:** none — reverses a ruling in [milestone 05](../milestones/05-filter-find-search.md) and builds on [milestone 04b](../milestones/04b-bounded-pinned-neighborhood-visibility.md)
-**Status:** draft
+**Status:** done
 **Total estimated effort:** L
 
 ## Summary
@@ -536,3 +536,42 @@ touches the derived chain every frame reads.
 - 2026-10-11: The jump exemption was the one decision this plan added beyond
   the ruling; the owner confirmed it the same day (the jump wins while its nav
   entry holds the node).
+- 2026-10-11: executed. What landed:
+  - T01 — new pure `lib/excludedElements.ts` (`excludedGraphElements`,
+    `withoutExcludedElements`, and `createLayoutSourceReducer`, a memoized
+    reducer that returns the same `nodes`/`edges` arrays across
+    position-only frames and query edits that leave the excluded set alone,
+    and the input graph itself when nothing is excluded), with
+    `lib/excludedElements.spec.ts` covering the identity, idempotence,
+    exemption and preview-invariant cases.
+  - T02 — `LayoutRuntime` takes a `reduceLayoutSource` option (identity by
+    default) and applies it at `step`, `relaxAfterMutation`,
+    `beginScaleChange` and its reveal state, layered-relayout seeding,
+    `visibleGraphFor` and the hop map, merging positions back into the full
+    graph. `settleAfterVisibilityChange()` shares its top-up body with
+    `settleAfterSettingsChange()`. The renderer/runtime agreement block gained
+    the excluded fixtures.
+  - T03 — `Multigraph.svelte` derives `layoutSourceGraph` through the reducer
+    and re-points the layout chain at it; a second dataflow model serves the
+    layout source (the full-graph one keeps chips, diagnostics and the edit
+    sheet); an `$effect` keyed on the excluded set runs the enter/exit diff and
+    funds the settle; the render-mask guards are removed; a jump target held
+    by `transientReveal` is exempt from exclusion while its nav entry holds it.
+    `UserExcludesNodeTagWithoutRelayout` was flipped to
+    `UserExcludesNodeTagAndTheRestResettles`.
+  - The jump exemption is the owner-confirmed ruling recorded in the note
+    above: the jump wins while its nav entry holds the node.
+  - Orchestrator's browser smoke test: excluding a tag fades the matching nodes
+    out in about 200 ms and their neighbours settle; hovering tag suggestions
+    moves nothing. The desktop app's Browser pane throttles the frame loop
+    while the pane is hidden, which made the fade look stuck until the tab was
+    fronted. That is the environment, not the code.
+  - T04's stories are landing in parallel with this close-out (T05).
+  - T05 — milestone 05's Goal, `excluded` visual state, ruling paragraph,
+    acceptance line and non-goals now describe exclusion leaving the layout;
+    the 2026-06-22 plan points forward here; the missing active-filter
+    indicator (and the blank canvas when every node is excluded) is filed as
+    `docs/debt/2026-10-11-active-filter-has-no-indicator-once-the-panel-closes.md`.
+  - The offline shell was **not** regenerated: it will be rebuilt once, after
+    all four 2026-10-11 plans land, so `check:offline-shell` is still owed for
+    this plan's `src/**` changes.
