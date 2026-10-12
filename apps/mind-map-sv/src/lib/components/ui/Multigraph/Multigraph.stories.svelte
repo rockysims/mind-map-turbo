@@ -25,7 +25,7 @@
 		withRandomTagsAndDirections
 	} from './lib/testFixtures';
 	import type { MultigraphData, Point } from '../types/multigraph';
-	import type { AiRun, QuantityDesignation } from '../types/node';
+	import type { AiRun, NodeContentBlock, NodeData, QuantityDesignation } from '../types/node';
 	import type { GraphCommitIntent } from '../types/history';
 	import type { ViewState } from '$lib/migrations';
 	import type { ExitingBuffer } from './lib/elementTransitions';
@@ -1602,6 +1602,191 @@
 	function expectDrawnBorder(rendered: number, asked: number): void {
 		expect(rendered).toBeLessThanOrEqual(asked + 0.01);
 		expect(rendered).toBeGreaterThan(asked - 1 / window.devicePixelRatio - 0.01);
+	}
+
+	/** The settings key that picks what a node's border width shows. */
+	const BORDER_SOURCE = 'multigraph.borderWeight.source';
+
+	/**
+	 * The shipped curve with an 8 px base, written out independently of
+	 * `borderWidthFactorForValue` so the stories pin the numbers the plan
+	 * promises: `8 × (1 + 0.15 × log2(value / reference))`. Only called with
+	 * values whose factor lies inside the ×0.5..×3 clamp.
+	 */
+	function curveWidth(value: number, reference: number): number {
+		return 8 * (1 + 0.15 * Math.log2(value / reference));
+	}
+
+	/** A node with an empty description, so no source reads anything by accident. */
+	function bareNode(id: string): NodeData {
+		return { id, title: id, description: '', tags: [] };
+	}
+
+	/**
+	 * A pinned hub with one unpinned spoke per entry, each one hop out on its own
+	 * spot of a 480 px ring, so nothing overlaps and every spoke draws at one scale.
+	 */
+	function hubWithSpokes(
+		hub: NodeData,
+		spokes: NodeData[],
+		assets?: MultigraphData['assets']
+	): MultigraphData {
+		const posByNodeId: Record<string, Point> = { [hub.id]: { x: 0, y: 0 } };
+		spokes.forEach((spoke, i) => {
+			const angle = (2 * Math.PI * i) / spokes.length;
+			posByNodeId[spoke.id] = { x: 480 * Math.cos(angle), y: 480 * Math.sin(angle) };
+		});
+		const graph = makeGraph({
+			nodes: [hub, ...spokes],
+			pinned: [hub.id],
+			edges: spokes.map((spoke) => ({ source: hub.id, target: spoke.id })),
+			posByNodeId
+		});
+		return assets === undefined ? graph : { ...graph, assets };
+	}
+
+	/**
+	 * A pinned hub with five leaves, plus a pinned node with no edges far off to
+	 * one side. Under "Edge count" the hub (5) draws thicker than the reference
+	 * (3), each leaf (1) thinner, and the loner (0) on the ×0.5 floor.
+	 */
+	const DEGREE_HUB: MultigraphData = (() => {
+		const graph = hubWithSpokes(bareNode('hub'), ['a', 'b', 'c', 'd', 'e'].map(bareNode));
+		return {
+			...graph,
+			nodes: [...graph.nodes, { ...bareNode('loner'), pinned: true }],
+			posByNodeId: { ...graph.posByNodeId, loner: { x: 1400, y: 0 } }
+		};
+	})();
+
+	/** `count` file blocks for a node; the asset ids are what `ATTACHMENT_SPOKES` registers. */
+	function fileBlocks(nodeId: string, count: number): NodeContentBlock[] {
+		return Array.from({ length: count }, (_, i) => ({
+			type: 'file',
+			assetId: `${nodeId}-file-${i}`,
+			name: `${nodeId}-${i}.txt`
+		}));
+	}
+
+	const ATTACHMENT_COUNTS: Record<string, number> = { none: 0, one: 1, four: 4 };
+
+	/**
+	 * Spokes carrying 0, 1 (the reference) and 4 file blocks, with matching
+	 * `assets` metadata so the canvas renders them as it would a real graph.
+	 */
+	const ATTACHMENT_SPOKES: MultigraphData = hubWithSpokes(
+		bareNode('hub'),
+		Object.entries(ATTACHMENT_COUNTS).map(([id, count]) =>
+			count === 0 ? bareNode(id) : { ...bareNode(id), content: fileBlocks(id, count) }
+		),
+		Object.fromEntries(
+			Object.entries(ATTACHMENT_COUNTS).flatMap(([id, count]) =>
+				fileBlocks(id, count).map((block) => [
+					block.assetId,
+					{
+						id: block.assetId,
+						kind: 'file' as const,
+						mimeType: 'text/plain',
+						name: `${id}.txt`,
+						size: 16,
+						createdAt: 0
+					}
+				])
+			)
+		)
+	);
+
+	/** Spokes whose descriptions run 0, 50, 200 (the reference) and 800 characters. */
+	const DESCRIPTION_SPOKES: MultigraphData = hubWithSpokes(
+		bareNode('hub'),
+		[0, 50, 200, 800].map((length) => ({
+			...bareNode(`d${length}`),
+			description: 'x'.repeat(length)
+		}))
+	);
+
+	/** Spokes with no weight, and weights 0, 1 (the reference) and 8. */
+	const WEIGHT_SPOKES: MultigraphData = hubWithSpokes(bareNode('hub'), [
+		bareNode('absent'),
+		{ ...bareNode('w0'), weight: 0 },
+		{ ...bareNode('w1'), weight: 1 },
+		{ ...bareNode('w8'), weight: 8 }
+	]);
+
+	function borderSourceSelect(el: HTMLElement): HTMLSelectElement {
+		const select = within(el).getByRole('combobox', { name: 'Border shows' });
+		if (!(select instanceof HTMLSelectElement)) throw new Error('"Border shows" is not a select');
+		return select;
+	}
+
+	/**
+	 * Scrub into focus on `nodeId` and back to progress 0, then commit and flick
+	 * out to progress 0, and at both handoffs check that the morph surface starts
+	 * from the border the node itself draws. `aboveDefaultPx` is how far, in
+	 * on-screen pixels, that border must clear the default pinned border, so a
+	 * story cannot pass by the morph ignoring the weighting altogether.
+	 */
+	async function expectMorphStartsFromTheNodesBorder(
+		canvasElement: HTMLElement,
+		nodeId: string,
+		aboveDefaultPx: number
+	): Promise<void> {
+		const stage = getStage(canvasElement);
+		const center = getCenter(getCircle(canvasElement, nodeId));
+
+		const assertHandoff = () => {
+			const morph = morphRectOf(getFocusLayer(canvasElement));
+			expect(morph.progress).toBe(0);
+			const inStage = getCircle(canvasElement, nodeId);
+			const nodeRect = inStage.getBoundingClientRect();
+			expect(morph.width).toBeCloseTo(nodeRect.width, 0);
+			const visualScale = nodeRect.width / inStage.offsetWidth;
+			// Against the width the node was told to draw, so the comparison is
+			// exact rather than at the mercy of the browser's border snapping...
+			const asked = nodeBorderWidths(canvasElement, nodeId).pinned;
+			expect(asked * visualScale).toBeCloseTo(morph.borderWidth, 1);
+			// ...and against what it draws, the existing story's check, within the
+			// device pixel the browser's snapping takes off a fractional border.
+			const localBorder = parseFloat(getComputedStyle(inStage).borderTopWidth);
+			expectDrawnBorder(localBorder * visualScale, morph.borderWidth);
+			// Not the unweighted default: the story would pass vacuously otherwise.
+			expect(morph.borderWidth).toBeGreaterThan(
+				APP_CONFIG.multigraph.pinnedNodeBorderWidthPx * visualScale + aboveDefaultPx
+			);
+		};
+
+		// Entry: scrub in a little, then back to 0 while the surface is mounted.
+		dispatchWheel(stage, wheelFactor(1.16), center.x, center.y);
+		await waitFor(() => {
+			expect(morphRectOf(getFocusLayer(canvasElement)).progress).toBeGreaterThan(0);
+		});
+		dispatchWheel(stage, wheelFactor(0.6), center.x, center.y);
+		await waitFor(() => {
+			expect(morphRectOf(getFocusLayer(canvasElement)).progress).toBe(0);
+		});
+		assertHandoff();
+
+		await sleep(APP_CONFIG.multigraph.focus.entryGestureIdleMs + 40);
+		await waitFor(() => {
+			expect(canvasElement.querySelector('.deep-zoom-layer')).not.toBeInTheDocument();
+		});
+
+		// Exit: commit, then flick out to progress 0.
+		dispatchWheel(stage, wheelFactor(3), center.x, center.y);
+		await within(canvasElement).findByRole('dialog');
+		const world = canvasElement.querySelector('.zoom-world');
+		if (!(world instanceof HTMLElement)) throw new Error('Zoom world not found');
+		dispatchWheel(world, WHEEL_SLAM_OUT, center.x, center.y);
+		await waitFor(() => {
+			expect(morphRectOf(getFocusLayer(canvasElement)).progress).toBe(0);
+		});
+		assertHandoff();
+	}
+
+	/** What picking an option does to a native select: the value moves, then one `change`. */
+	function chooseOption(select: HTMLSelectElement, value: string): void {
+		select.value = value;
+		select.dispatchEvent(new Event('change', { bubbles: true }));
 	}
 	/* ---------------------------------------------------------------------- *
 	 * Follow-ups: composing one on the node the reader is reading, and the
@@ -8611,59 +8796,234 @@
 	}}
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
-		const stage = getStage(canvasElement);
-		const center = getCenter(getCircle(canvasElement, 'n0'));
 		expect(nodeBorderWidths(canvasElement, 'n0').pinned).toBeCloseTo(15.97, 1);
-
-		const assertHandoff = () => {
-			const morph = morphRectOf(getFocusLayer(canvasElement));
-			expect(morph.progress).toBe(0);
-			const inStage = getCircle(canvasElement, 'n0');
-			const nodeRect = inStage.getBoundingClientRect();
-			expect(morph.width).toBeCloseTo(nodeRect.width, 0);
-			const visualScale = nodeRect.width / inStage.offsetWidth;
-			// Against the width the node was told to draw, so the comparison is
-			// exact rather than at the mercy of the browser's border snapping...
-			const asked = nodeBorderWidths(canvasElement, 'n0').pinned;
-			expect(asked * visualScale).toBeCloseTo(morph.borderWidth, 1);
-			// ...and against what it draws, the existing story's check, within the
-			// device pixel the browser's snapping takes off a fractional border.
-			const localBorder = parseFloat(getComputedStyle(inStage).borderTopWidth);
-			expectDrawnBorder(localBorder * visualScale, morph.borderWidth);
-			// Not the unsized default: this story would pass vacuously otherwise.
-			expect(morph.borderWidth).toBeGreaterThan(
-				APP_CONFIG.multigraph.pinnedNodeBorderWidthPx * visualScale + 4
-			);
-		};
-
-		// Entry: scrub in a little, then back to 0 while the surface is mounted.
-		dispatchWheel(stage, wheelFactor(1.16), center.x, center.y);
-		await waitFor(() => {
-			expect(morphRectOf(getFocusLayer(canvasElement)).progress).toBeGreaterThan(0);
-		});
-		dispatchWheel(stage, wheelFactor(0.6), center.x, center.y);
-		await waitFor(() => {
-			expect(morphRectOf(getFocusLayer(canvasElement)).progress).toBe(0);
-		});
-		assertHandoff();
-
-		await sleep(APP_CONFIG.multigraph.focus.entryGestureIdleMs + 40);
-		await waitFor(() => {
-			expect(canvasElement.querySelector('.deep-zoom-layer')).not.toBeInTheDocument();
-		});
-
-		// Exit: commit, then flick out to progress 0.
-		dispatchWheel(stage, wheelFactor(3), center.x, center.y);
-		await within(canvasElement).findByRole('dialog');
-		const world = canvasElement.querySelector('.zoom-world');
-		if (!(world instanceof HTMLElement)) throw new Error('Zoom world not found');
-		dispatchWheel(world, WHEEL_SLAM_OUT, center.x, center.y);
-		await waitFor(() => {
-			expect(morphRectOf(getFocusLayer(canvasElement)).progress).toBe(0);
-		});
-		assertHandoff();
+		await expectMorphStartsFromTheNodesBorder(canvasElement, 'n0', 4);
 	}}
 />
+
+<!--
+	The morph reads the same per-node border as the canvas whatever the source:
+	under "Edge count" the five-edge hub's pinned border is
+	8 × (1 + 0.15 × log2(5/3)) ≈ 8.88 px, and the surface starts from that rather
+	than from the default 8 px.
+-->
+<Story
+	name="TheMorphStartsFromADegreeWeightedBorder"
+	args={{
+		multigraphData: DEGREE_HUB,
+		defaultPrimaryNodeId: 'hub',
+		initialViewState: { panX: 0, panY: 0, scale: 0.95 },
+		layoutSettings: { relaxIterations: 0 },
+		settings: { [BORDER_SOURCE]: 'degree' }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		expect(nodeBorderWidths(canvasElement, 'hub').pinned).toBeCloseTo(curveWidth(5, 3), 5);
+		// 0.88 px above the default before scaling; half a pixel clears it at any
+		// visual scale this story reaches, and still fails on the unweighted 8 px.
+		await expectMorphStartsFromTheNodesBorder(canvasElement, 'hub', 0.5);
+	}}
+/>
+
+<!--
+	Border width sources. Each story picks one through the graph's settings and
+	asserts both the width each `.circle` is told to draw and what it draws.
+	With the shipped curve (0.15 per doubling, ×0.5..×3) and an 8 px base.
+-->
+<Story
+	name="AHubDrawsAThickerBorderThanItsLeavesUnderEdgeCount"
+	args={{
+		multigraphData: DEGREE_HUB,
+		defaultPrimaryNodeId: 'hub',
+		layoutSettings: { relaxIterations: 0 },
+		settings: { [BORDER_SOURCE]: 'degree' }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		// Five edges against a reference of three: 8 × (1 + 0.15 × log2(5/3)) ≈ 8.88 px.
+		const hub = nodeBorderWidths(canvasElement, 'hub');
+		expect(hub.pinned).toBeCloseTo(curveWidth(5, 3), 5);
+		expect(hub.normal).toBeCloseTo(curveWidth(5, 3), 5);
+		expectDrawnBorder(hub.rendered, hub.pinned);
+
+		// One edge each: 8 × (1 + 0.15 × log2(1/3)) ≈ 6.10 px.
+		for (const id of ['a', 'b', 'c', 'd', 'e']) {
+			const leaf = nodeBorderWidths(canvasElement, id);
+			expect(leaf.normal).toBeCloseTo(curveWidth(1, 3), 5);
+			expectDrawnBorder(leaf.rendered, leaf.normal);
+			expect(leaf.rendered).toBeLessThan(hub.rendered);
+		}
+
+		// No edges is a real count of 0, so the loner sits on the ×0.5 floor rather
+		// than drawing the configured border a node with no value would.
+		const loner = nodeBorderWidths(canvasElement, 'loner');
+		expect(loner.pinned).toBeCloseTo(4, 5);
+		expect(loner.normal).toBeCloseTo(4, 5);
+		expectDrawnBorder(loner.rendered, 4);
+	}}
+/>
+
+<Story
+	name="NodesWithMoreAttachmentsDrawThickerBorders"
+	args={{
+		multigraphData: ATTACHMENT_SPOKES,
+		defaultPrimaryNodeId: 'hub',
+		layoutSettings: { relaxIterations: 0 },
+		settings: { [BORDER_SOURCE]: 'attachments' }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const none = nodeBorderWidths(canvasElement, 'none');
+		const one = nodeBorderWidths(canvasElement, 'one');
+		const four = nodeBorderWidths(canvasElement, 'four');
+
+		// 0 → the floor, 1 → the reference, 4 → 8 × (1 + 0.15 × 2) = 10.4 px.
+		expect(none.normal).toBeCloseTo(4, 5);
+		expect(one.normal).toBeCloseTo(8, 5);
+		expect(four.normal).toBeCloseTo(10.4, 5);
+		expectDrawnBorder(none.rendered, 4);
+		expectDrawnBorder(one.rendered, 8);
+		expectDrawnBorder(four.rendered, 10.4);
+		expect(none.rendered).toBeLessThan(one.rendered);
+		expect(one.rendered).toBeLessThan(four.rendered);
+		// The hub has nothing attached either.
+		expect(nodeBorderWidths(canvasElement, 'hub').pinned).toBeCloseTo(4, 5);
+	}}
+/>
+
+<Story
+	name="LongerDescriptionsDrawThickerBorders"
+	args={{
+		multigraphData: DESCRIPTION_SPOKES,
+		defaultPrimaryNodeId: 'hub',
+		layoutSettings: { relaxIterations: 0 },
+		settings: { [BORDER_SOURCE]: 'descriptionLength' }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		// Against a 200-character reference: 0 → floor, 50 → ×0.7, 200 → ×1, 800 → ×1.3.
+		const expected: Array<[string, number]> = [
+			['d0', 4],
+			['d50', 5.6],
+			['d200', 8],
+			['d800', 10.4]
+		];
+		let previous = 0;
+		for (const [id, width] of expected) {
+			const widths = nodeBorderWidths(canvasElement, id);
+			expect(widths.normal).toBeCloseTo(width, 5);
+			expectDrawnBorder(widths.rendered, width);
+			expect(widths.rendered).toBeGreaterThan(previous);
+			previous = widths.rendered;
+		}
+	}}
+/>
+
+<Story
+	name="NodeWeightDrawsTheBorderAndZeroIsTheThinnest"
+	args={{
+		multigraphData: WEIGHT_SPOKES,
+		defaultPrimaryNodeId: 'hub',
+		layoutSettings: { relaxIterations: 0 },
+		settings: { [BORDER_SOURCE]: 'weight' }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		// No weight is "unknown" and draws the configured border; 0 is a real
+		// weight and lands on the floor; 8 against a reference of 1 is ×1.45.
+		const expected: Array<[string, number]> = [
+			['absent', 8],
+			['w0', 4],
+			['w1', 8],
+			['w8', 11.6]
+		];
+		for (const [id, width] of expected) {
+			const widths = nodeBorderWidths(canvasElement, id);
+			expect(widths.normal).toBeCloseTo(width, 5);
+			expectDrawnBorder(widths.rendered, width);
+		}
+		// The hub has no weight, so it draws the configured pinned border.
+		expect(nodeBorderWidths(canvasElement, 'hub').pinned).toBeCloseTo(8, 5);
+	}}
+/>
+
+<Story
+	name="ChoosingNothingDrawsEveryBorderTheSame"
+	args={{
+		multigraphData: SIZED_SPOKES,
+		defaultPrimaryNodeId: 'n0',
+		layoutSettings: { relaxIterations: 0 },
+		settings: { [BORDER_SOURCE]: 'none' }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		// The same spokes that draw 4 / 8 / 15.97 / 8 px under "Size".
+		for (const id of ['n1', 'n2', 'n3', 'n4']) {
+			const widths = nodeBorderWidths(canvasElement, id);
+			expect(widths.normal).toBeCloseTo(8, 5);
+			expectDrawnBorder(widths.rendered, 8);
+		}
+		expect(nodeBorderWidths(canvasElement, 'n0').pinned).toBeCloseTo(8, 5);
+	}}
+/>
+
+<!--
+	The "Border shows" select commits on change, with no preview, and the canvas
+	redraws on that commit. On `SIZED_SPOKES` the 100 MiB spoke n3 draws ≈ 15.97 px
+	under "Size", 8 × (1 + 0.15 × log2(1/3)) ≈ 6.10 px under "Edge count" (it has
+	one edge), and 8 px under "Nothing"; the hub n0 has no size and four edges,
+	so 8 px, 8 × (1 + 0.15 × log2(4/3)) ≈ 8.50 px, then 8 px.
+-->
+<Story
+	name="ChoosingASourceInSettingsRedrawsBordersAtOnce"
+	play={async ({ canvasElement }: HarnessPlayContext) => {
+		await waitForLayout();
+		const harness = getSettingsHarness(canvasElement);
+		const sizeWidth = curveWidth(100 * MIB, MIB);
+		const select = borderSourceSelect(canvasElement);
+		expect(select.value).toBe('size');
+		expect(nodeBorderWidths(canvasElement, 'n3').normal).toBeCloseTo(sizeWidth, 5);
+		expect(nodeBorderWidths(canvasElement, 'n0').pinned).toBeCloseTo(8, 5);
+
+		chooseOption(select, 'degree');
+		await waitFor(() => expect(harness.dataset.settingsChangeCount).toBe('1'));
+		expect(harnessSettings(canvasElement)).toEqual({ [BORDER_SOURCE]: 'degree' });
+		await waitFor(() =>
+			expect(nodeBorderWidths(canvasElement, 'n3').normal).toBeCloseTo(curveWidth(1, 3), 5)
+		);
+		const leaf = nodeBorderWidths(canvasElement, 'n3');
+		expectDrawnBorder(leaf.rendered, leaf.normal);
+		const hub = nodeBorderWidths(canvasElement, 'n0');
+		expect(hub.pinned).toBeCloseTo(curveWidth(4, 3), 5);
+		expectDrawnBorder(hub.rendered, hub.pinned);
+
+		chooseOption(borderSourceSelect(canvasElement), 'none');
+		await waitFor(() => expect(harness.dataset.settingsChangeCount).toBe('2'));
+		expect(harnessSettings(canvasElement)).toEqual({ [BORDER_SOURCE]: 'none' });
+		await waitFor(() => expect(nodeBorderWidths(canvasElement, 'n3').normal).toBeCloseTo(8, 5));
+		expectDrawnBorder(nodeBorderWidths(canvasElement, 'n3').rendered, 8);
+		expect(nodeBorderWidths(canvasElement, 'n0').pinned).toBeCloseTo(8, 5);
+
+		// Back to the shipped source: the override is dropped, not stored as "size".
+		chooseOption(borderSourceSelect(canvasElement), 'size');
+		await waitFor(() => expect(harness.dataset.settingsChangeCount).toBe('3'));
+		expect(harnessSettings(canvasElement)).toEqual({});
+		await waitFor(() =>
+			expect(nodeBorderWidths(canvasElement, 'n3').normal).toBeCloseTo(sizeWidth, 5)
+		);
+		const sized = nodeBorderWidths(canvasElement, 'n3');
+		expectDrawnBorder(sized.rendered, sized.normal);
+	}}
+>
+	{#snippet template()}
+		<MultigraphSettingsHarness
+			multigraphData={SIZED_SPOKES}
+			defaultPrimaryNodeId="n0"
+			layoutSettings={SETTINGS_STILL_LAYOUT}
+			panelOpenAtMount
+		/>
+	{/snippet}
+</Story>
 
 <!--
 	Composing is not committing. The composer opens inside the workbench the
