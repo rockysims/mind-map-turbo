@@ -9,8 +9,10 @@ import {
 	type BoundedHopsOptions
 } from './boundedVisibility';
 import { derivedEdgeId } from './derivedEdges';
+import { createLayoutSourceReducer, excludedGraphElements } from './excludedElements';
 import { togglePinned } from './graph';
 import { deriveGraphLayout } from './graphLayout';
+import { evaluateGraphQuery } from './graphQuery';
 import type { LayoutRuntimeScheduler } from './layoutRuntime.svelte';
 import { LayoutRuntime } from './layoutRuntime.svelte';
 import { DEFAULT_LAYOUT_SETTINGS, type LayoutSettings } from './layoutSettings';
@@ -48,6 +50,29 @@ function hopsThrough(
 	return (graph) => computeBoundedHops(graph, derivedEdges, beaconNodeIds(graph), options);
 }
 
+/**
+ * The `reduceLayoutSource` the app hands the runtime, over one fixed query: the
+ * real memoized reducer, so these specs exercise the same identity and
+ * idempotence the app relies on rather than a stand-in for it.
+ */
+function reducerFor(queryText: string): (graph: MultigraphData) => MultigraphData {
+	const reduce = createLayoutSourceReducer();
+	return (graph) => reduce(graph, queryText);
+}
+
+/** A copy of `graph` with these tags on these nodes. */
+function withNodeTags(
+	graph: MultigraphData,
+	tagsByNodeId: Record<string, readonly string[]>
+): MultigraphData {
+	return {
+		...graph,
+		nodes: graph.nodes.map((node) =>
+			tagsByNodeId[node.id] ? { ...node, tags: [...tagsByNodeId[node.id]] } : node
+		)
+	};
+}
+
 interface RuntimeFixture {
 	runtime: LayoutRuntime;
 	scheduler: TestScheduler;
@@ -64,7 +89,8 @@ function createRuntimeFixture(
 			[1, 2]
 		]
 	}),
-	settings: Partial<LayoutSettings> = {}
+	settings: Partial<LayoutSettings> = {},
+	reduceLayoutSource?: (graph: MultigraphData) => MultigraphData
 ): RuntimeFixture {
 	let graph = initialGraph;
 	let activeDragNodeId: string | null = null;
@@ -87,6 +113,7 @@ function createRuntimeFixture(
 		applyGraph: (nextGraph) => {
 			graph = nextGraph;
 		},
+		reduceLayoutSource,
 		scheduler
 	});
 
@@ -383,6 +410,231 @@ describe('LayoutRuntime', () => {
 			expect(runtime.settleFramesRemaining).toBe(0);
 			// The loop was already scheduled, so no second frame is queued for it.
 			expect(scheduler.requests).toBe(1);
+		});
+	});
+
+	describe('settleAfterVisibilityChange', () => {
+		// The same three cases as `settleAfterSettingsChange`: the two share one
+		// budget rule, and a query typed a key at a time is the slider drag of
+		// visibility changes.
+		it('starts the frame loop from idle', () => {
+			// The exclusion changed under a graph at rest. The layout reads the new
+			// source per frame, so the settle only shows up if something asks for
+			// frames.
+			const { runtime, scheduler } = createRuntimeFixture(undefined, {
+				postDragSettleEpsilonPx: -1,
+				postDragSettleMaxFrames: 2
+			});
+			expect(scheduler.requests).toBe(0);
+
+			runtime.settleAfterVisibilityChange();
+
+			expect(scheduler.requests).toBe(1);
+			expect(runtime.settleFramesRemaining).toBe(2);
+			expect(runtime.isSettling).toBe(true);
+		});
+
+		it('tops the budget up instead of restarting or shortening it', () => {
+			const { runtime } = createRuntimeFixture(undefined, {
+				postDragSettleEpsilonPx: -1,
+				postDragSettleMaxFrames: 2
+			});
+
+			// Three keystrokes that each change the exclusion buy two frames, not six.
+			runtime.settleAfterVisibilityChange();
+			runtime.settleAfterVisibilityChange();
+			runtime.settleAfterVisibilityChange();
+			expect(runtime.settleFramesRemaining).toBe(2);
+
+			// Spent frames are refunded, and the count still counts down.
+			runtime.step(1);
+			expect(runtime.settleFramesRemaining).toBe(1);
+			runtime.settleAfterVisibilityChange();
+			expect(runtime.settleFramesRemaining).toBe(2);
+
+			// A longer settle already in flight is not cut short.
+			runtime.settleFramesRemaining = 5;
+			runtime.settleAfterVisibilityChange();
+			expect(runtime.settleFramesRemaining).toBe(5);
+		});
+
+		it('leaves the budget at zero while a node drag is active', () => {
+			const { runtime, scheduler, setActiveDragNodeId } = createRuntimeFixture(undefined, {
+				postDragSettleEpsilonPx: -1,
+				postDragSettleMaxFrames: 2
+			});
+			setActiveDragNodeId('n0');
+			runtime.beginDrag();
+			expect(runtime.settleFramesRemaining).toBe(0);
+			expect(scheduler.requests).toBe(1);
+
+			runtime.settleAfterVisibilityChange();
+
+			expect(runtime.settleFramesRemaining).toBe(0);
+			expect(scheduler.requests).toBe(1);
+		});
+	});
+
+	describe('reduceLayoutSource', () => {
+		// n3 is excluded by tag and sits right on top of the pinned n0, so physics
+		// would shove it clear if it were in the layout at all. e1 is excluded by
+		// tag too, which leaves n2 a component of its own and so its own beacon.
+		//
+		//   n0(pin) ── n1 ─[e1 #cut]─ n2        n0 ── n3(#hidden)
+		const QUERY = '-#hidden -@cut';
+		const graph = withNodeTags(
+			makeGraph({
+				nodeCount: 4,
+				pinned: [0],
+				edges: [[0, 1], { source: 1, target: 2, tags: ['cut'] }, [0, 3]],
+				posByNodeId: {
+					n0: { x: 0, y: 0 },
+					n1: { x: 400, y: 0 },
+					n2: { x: 800, y: 0 },
+					n3: { x: 3, y: 1 }
+				}
+			}),
+			{ n3: ['hidden'] }
+		);
+		const excluded = excludedGraphElements(evaluateGraphQuery(graph, QUERY));
+		const settings: Partial<LayoutSettings> = {
+			displayedLayers: 2,
+			postDragSettleEpsilonPx: -1,
+			postDragSettleMaxFrames: 5,
+			relaxIterations: 4
+		};
+
+		it('excludes what the fixture says it does', () => {
+			// Guards every spec below against a fixture that quietly excludes nothing.
+			expect([...excluded.nodeIds]).toEqual(['n3']);
+			expect([...excluded.edgeIds].sort()).toEqual(['e1', 'e2']);
+		});
+
+		it('leaves an excluded node exactly where it was across a run of frames', () => {
+			// Exclusion is UI state, not a graph edit: the node keeps its place in the
+			// stored graph so that it can come back to it when the token goes.
+			const { runtime, getGraph } = createRuntimeFixture(graph, settings, reducerFor(QUERY));
+			runtime.settleAfterVisibilityChange();
+			for (let frame = 1; frame <= 5; frame += 1) runtime.step(frame);
+
+			const settled = getGraph();
+			expect(settled.posByNodeId.n3).toStrictEqual(graph.posByNodeId.n3);
+			expect(settled.nodes).toBe(graph.nodes);
+			expect(settled.edges).toBe(graph.edges);
+			// Teeth: the frames did run, and moved what is still in the layout.
+			expect(settled.posByNodeId.n1).not.toEqual(graph.posByNodeId.n1);
+		});
+
+		it('would have shoved the same node clear without the reducer', () => {
+			// The other half of the spec above: n3 stays put because it is out of the
+			// layout, not because nothing pushes on it.
+			const { runtime, getGraph } = createRuntimeFixture(graph, settings);
+			runtime.settleAfterVisibilityChange();
+			for (let frame = 1; frame <= 5; frame += 1) runtime.step(frame);
+
+			expect(getGraph().posByNodeId.n3).not.toEqual(graph.posByNodeId.n3);
+		});
+
+		it('returns the whole graph from relaxAfterMutation, excluded elements kept in place', () => {
+			const { runtime } = createRuntimeFixture(graph, settings, reducerFor(QUERY));
+
+			const relaxed = runtime.relaxAfterMutation(graph);
+
+			expect(relaxed.nodes).toBe(graph.nodes);
+			expect(relaxed.edges).toBe(graph.edges);
+			expect(relaxed.posByNodeId.n3).toStrictEqual(graph.posByNodeId.n3);
+			expect(relaxed.posByNodeId.n1).not.toEqual(graph.posByNodeId.n1);
+		});
+
+		it('returns the whole graph from beginScaleChange and keeps excluded ids out of the wave', () => {
+			const { runtime } = createRuntimeFixture(graph, settings, reducerFor(QUERY));
+			const nextGraph = togglePinned(graph, 'n1');
+
+			const changed = runtime.beginScaleChange(nextGraph, 'n1');
+
+			expect(changed.nodes).toBe(nextGraph.nodes);
+			expect(changed.edges).toBe(nextGraph.edges);
+			expect(changed.posByNodeId.n3).toStrictEqual(graph.posByNodeId.n3);
+
+			const revealState = runtime.scaleChangeRevealState;
+			expect(revealState).not.toBeNull();
+			const waveNodeIds = [
+				...(revealState?.previousVisibleNodeIds ?? []),
+				...(revealState?.nextVisibleNodeIds ?? [])
+			];
+			const waveEdges = [
+				...(revealState?.previousRenderableEdges ?? []),
+				...(revealState?.nextRenderableEdges ?? [])
+			].map((visibility) => visibility.edge);
+			// Teeth: the wave is not empty, so "no excluded id" says something.
+			expect(waveNodeIds).toContain('n0');
+			expect(waveEdges.map((edge) => edge.id)).toContain('e0');
+			for (const nodeId of waveNodeIds) expect(excluded.nodeIds.has(nodeId)).toBe(false);
+			for (const edge of waveEdges) {
+				expect(excluded.edgeIds.has(edge.id)).toBe(false);
+				expect(excluded.nodeIds.has(edge.sourceNodeId)).toBe(false);
+				expect(excluded.nodeIds.has(edge.targetNodeId)).toBe(false);
+			}
+			for (const edgeId of revealState?.nextRenderableEdgeIds ?? []) {
+				expect(excluded.edgeIds.has(edgeId)).toBe(false);
+			}
+		});
+
+		it('puts the excluded node in the wave without the reducer', () => {
+			// Teeth for the spec above: n3 sits one hop from the pin on both sides.
+			const { runtime } = createRuntimeFixture(graph, settings);
+
+			runtime.beginScaleChange(togglePinned(graph, 'n1'), 'n1');
+
+			expect(runtime.scaleChangeRevealState?.previousVisibleNodeIds).toContain('n3');
+			expect(runtime.scaleChangeRevealState?.nextVisibleNodeIds).toContain('n3');
+		});
+
+		describe('layered relayout', () => {
+			// n0 is the only pin, and it is excluded.
+			const onlyPinExcluded = withNodeTags(
+				makeGraph({
+					nodeCount: 3,
+					pinned: [0],
+					edges: [
+						[0, 1],
+						[1, 2]
+					]
+				}),
+				{ n0: ['hidden'] }
+			);
+
+			it('seeds no layer from an excluded pin', () => {
+				const { runtime, getGraph } = createRuntimeFixture(
+					onlyPinExcluded,
+					{},
+					reducerFor('-#hidden')
+				);
+
+				runtime.startLayeredRelayout(getGraph(), 0);
+
+				expect(runtime.layeredRelayoutState?.pinnedNodeIds).toEqual(new Set());
+			});
+
+			it('seeds only the pins that remain when a scale change starts one', () => {
+				const { runtime, getGraph } = createRuntimeFixture(
+					onlyPinExcluded,
+					{},
+					reducerFor('-#hidden')
+				);
+
+				runtime.beginScaleChange(togglePinned(getGraph(), 'n2'), 'n2');
+
+				expect(runtime.layeredRelayoutState?.pinnedNodeIds).toEqual(new Set(['n2']));
+			});
+
+			it('seeds from the pin without the reducer', () => {
+				const { runtime, getGraph } = createRuntimeFixture(onlyPinExcluded);
+
+				runtime.startLayeredRelayout(getGraph(), 0);
+
+				expect(runtime.layeredRelayoutState?.pinnedNodeIds).toEqual(new Set(['n0']));
+			});
 		});
 	});
 
@@ -882,6 +1134,16 @@ describe('LayoutRuntime', () => {
 			graph: MultigraphData;
 			derivedEdges: readonly EdgeEndpointIds[];
 			displayedLayers: number;
+			/**
+			 * Query text whose exclusions leave the layout. Both sides reduce by it
+			 * first, as Multigraph does; absent means nothing is excluded.
+			 */
+			excluded?: string;
+			/**
+			 * Exactly who is on screen under the exclusion, and not without it — so
+			 * an exclusion fixture fails if the reduction stops reaching either side.
+			 */
+			onScreen?: readonly string[];
 		}[] = [
 			{
 				name: 'a pinned chain running past the displayed layers',
@@ -975,36 +1237,177 @@ describe('LayoutRuntime', () => {
 				}),
 				derivedEdges: [derived('n1', 'n5'), derived('n4', 'n6')],
 				displayedLayers: 2
+			},
+			{
+				// n2 is the only way from the pin to n3 and n4. With it gone they are a
+				// pinless component of their own: n3 is elected its beacon and stays,
+				// while the far end, n4, has no route left to it.
+				name: 'a pinned chain whose middle node is excluded',
+				graph: withNodeTags(
+					makeGraph({
+						nodeCount: 5,
+						pinned: [0],
+						edges: [
+							[0, 1],
+							[1, 2],
+							[2, 3],
+							[3, 4]
+						]
+					}),
+					{ n2: ['hidden'] }
+				),
+				derivedEdges: [],
+				displayedLayers: 4,
+				excluded: '-#hidden',
+				onScreen: ['n0', 'n1', 'n3']
+			},
+			{
+				// The pin itself is excluded, so its component has no pin left and
+				// elects a beacon: n1, its best-connected node, drawn alone.
+				name: 'an excluded pinned node whose neighbour becomes a beacon',
+				graph: withNodeTags(
+					makeGraph({
+						nodeCount: 4,
+						pinned: [0],
+						edges: [
+							[0, 1],
+							[1, 2],
+							[1, 3]
+						]
+					}),
+					{ n0: ['hidden'] }
+				),
+				derivedEdges: [],
+				displayedLayers: 2,
+				excluded: '-#hidden',
+				onScreen: ['n1']
+			},
+			{
+				// Only the edge goes; both its ends stay. n2 and n3 are cut off from the
+				// pin, n2 becomes their beacon, and n3 has no route left to it.
+				name: 'an edge excluded by tag that was the only route to a node',
+				graph: makeGraph({
+					nodeCount: 4,
+					pinned: [0],
+					edges: [[0, 1], { source: 1, target: 2, tags: ['bridge'] }, [2, 3]]
+				}),
+				derivedEdges: [],
+				displayedLayers: 3,
+				excluded: '-@bridge',
+				onScreen: ['n0', 'n1', 'n2']
+			},
+			{
+				// The equation reaches n4 past the layers. With n4 excluded it defines
+				// nothing, so there is no derived edge to it and nothing to reveal.
+				name: 'a derived edge into an excluded node',
+				graph: withNodeTags(
+					makeGraph({
+						nodeCount: 5,
+						pinned: [0],
+						edges: [
+							[0, 1],
+							[1, 2],
+							[2, 3],
+							[3, 4]
+						]
+					}),
+					{ n4: ['hidden'] }
+				),
+				derivedEdges: [derived('n0', 'n4')],
+				displayedLayers: 2,
+				excluded: '-#hidden',
+				onScreen: ['n0', 'n1', 'n2']
 			}
 		];
 
+		function derivedLayoutEdge({ sourceNodeId, targetNodeId }: EdgeEndpointIds): EdgeData {
+			return {
+				id: derivedEdgeId(sourceNodeId, targetNodeId),
+				sourceNodeId,
+				targetNodeId,
+				tags: [],
+				directed: true,
+				springFactor: 1
+			};
+		}
+
+		/**
+		 * The derived edges a graph has, standing in for the dataflow layer: in the
+		 * app it reads the layout source, so an excluded node defines nothing and
+		 * no equation reaches it.
+		 */
+		function derivedEdgesOf(
+			fixture: (typeof fixtures)[number],
+			graph: MultigraphData
+		): EdgeEndpointIds[] {
+			const nodeIds = new Set(graph.nodes.map((node) => node.id));
+			return fixture.derivedEdges.filter(
+				(edge) => nodeIds.has(edge.sourceNodeId) && nodeIds.has(edge.targetNodeId)
+			);
+		}
+
+		function onScreenWith(
+			fixture: (typeof fixtures)[number],
+			reduceLayoutSource?: (graph: MultigraphData) => MultigraphData
+		) {
+			const computeHops = (graph: MultigraphData) =>
+				hopsThrough(derivedEdgesOf(fixture, graph), {
+					displayedLayers: fixture.displayedLayers
+				})(graph);
+			const runtime = new LayoutRuntime({
+				getGraph: () => fixture.graph,
+				getLayoutSettings: () => ({ displayedLayers: fixture.displayedLayers }),
+				getActiveDragNodeId: () => null,
+				getPreferredBeaconNodeIds: () => [],
+				applyGraph: () => {},
+				computeHops,
+				composeDerivedEdges: (graph) => derivedEdgesOf(fixture, graph).map(derivedLayoutEdge),
+				reduceLayoutSource,
+				scheduler: new TestScheduler()
+			});
+
+			// The renderer's side, as Multigraph computes it: reduce, then measure.
+			const layoutSource = reduceLayoutSource?.(fixture.graph) ?? fixture.graph;
+			const drawnNodeIds = visibleNodeIdsForPinnedNeighborhood(
+				layoutSource,
+				computeHops(layoutSource),
+				{ displayedLayers: fixture.displayedLayers }
+			);
+			// The runtime is handed the whole graph and reduces it itself.
+			const physicsGraph = runtime.visibleGraphFor(fixture.graph);
+
+			return { runtime, layoutSource, drawnNodeIds, physicsGraph };
+		}
+
 		for (const fixture of fixtures) {
 			it(`draws exactly the nodes physics places: ${fixture.name}`, () => {
-				const computeHops = hopsThrough(fixture.derivedEdges, {
-					displayedLayers: fixture.displayedLayers
-				});
-				const runtime = new LayoutRuntime({
-					getGraph: () => fixture.graph,
-					getLayoutSettings: () => ({ displayedLayers: fixture.displayedLayers }),
-					getActiveDragNodeId: () => null,
-					getPreferredBeaconNodeIds: () => [],
-					applyGraph: () => {},
-					computeHops,
-					scheduler: new TestScheduler()
-				});
-
-				const drawnNodeIds = visibleNodeIdsForPinnedNeighborhood(
-					fixture.graph,
-					computeHops(fixture.graph),
-					{ displayedLayers: fixture.displayedLayers }
+				const { runtime, layoutSource, drawnNodeIds, physicsGraph } = onScreenWith(
+					fixture,
+					reducerFor(fixture.excluded ?? '')
 				);
-				const physicsNodeIds = new Set(
-					runtime.visibleGraphFor(fixture.graph).nodes.map((node) => node.id)
-				);
+				const physicsNodeIds = new Set(physicsGraph.nodes.map((node) => node.id));
 
 				expect([...physicsNodeIds].sort()).toEqual([...drawnNodeIds].sort());
 				// A fixture that shows everything would pass without saying anything.
 				expect(physicsNodeIds.size).toBeLessThan(fixture.graph.nodes.length);
+				// Handing the runtime the already-reduced graph changes nothing.
+				expect(runtime.visibleGraphFor(layoutSource)).toEqual(physicsGraph);
+
+				if (fixture.onScreen === undefined) return;
+				expect([...physicsNodeIds].sort()).toEqual([...fixture.onScreen].sort());
+				// Nothing in the physics graph touches an excluded element, derived
+				// edges included.
+				const excluded = excludedGraphElements(
+					evaluateGraphQuery(fixture.graph, fixture.excluded ?? '')
+				);
+				for (const edge of physicsGraph.edges) {
+					expect(excluded.edgeIds.has(edge.id)).toBe(false);
+					expect(excluded.nodeIds.has(edge.sourceNodeId)).toBe(false);
+					expect(excluded.nodeIds.has(edge.targetNodeId)).toBe(false);
+				}
+				// Teeth: without the exclusion a different set is on screen.
+				const unreduced = new Set(onScreenWith(fixture).drawnNodeIds);
+				expect([...unreduced].sort()).not.toEqual([...fixture.onScreen].sort());
 			});
 		}
 	});

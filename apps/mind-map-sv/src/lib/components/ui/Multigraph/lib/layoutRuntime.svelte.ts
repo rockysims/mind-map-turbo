@@ -86,6 +86,10 @@ interface LayoutRuntimeOptions {
 	 *
 	 * Defaults to authored hops plus beacons, which is every graph with no math
 	 * in it.
+	 *
+	 * Handed the layout source (`reduceLayoutSource` of the graph), not the
+	 * graph as stored: whatever the reducer drops routes no hops and anchors
+	 * nothing.
 	 */
 	computeHops?: (graph: MultigraphData) => Record<string, number>;
 	/**
@@ -95,8 +99,21 @@ interface LayoutRuntimeOptions {
 	 * it has; the composition drops the ones reaching off screen.
 	 *
 	 * Defaults to none, which is every graph with no math in it.
+	 *
+	 * Handed the layout source, like `computeHops`, so an element the reducer
+	 * drops defines no quantity and pulls on nothing.
 	 */
 	composeDerivedEdges?: (graph: MultigraphData) => readonly EdgeData[];
+	/**
+	 * The graph the layout actually runs over, given the whole one — in the app,
+	 * the graph minus whatever the query excludes. Positions come back into the
+	 * whole graph, so what this drops keeps its place. Defaults to identity.
+	 *
+	 * Must be idempotent and return its argument when it drops nothing: every
+	 * entry point reduces what it is handed, so a caller passing an
+	 * already-reduced graph gets it straight back.
+	 */
+	reduceLayoutSource?: (graph: MultigraphData) => MultigraphData;
 	scheduler?: LayoutRuntimeScheduler;
 	/** Returns true while enter/exit animations are active; keeps the frame loop running. */
 	getHasActiveTransitions?: () => boolean;
@@ -201,6 +218,26 @@ export class LayoutRuntime {
 	 * while the pointer was still holding the slider.
 	 */
 	settleAfterSettingsChange(): void {
+		this.#topUpSettle();
+	}
+
+	/**
+	 * What the layout runs over just changed without the graph changing — in the
+	 * app, the query now excludes a different set — so the nodes that remain have
+	 * new neighbours to settle against (or old ones back). Same budget and the
+	 * same top-up rule as `settleAfterSettingsChange`: a query typed one key at a
+	 * time must not stack a full budget per keystroke.
+	 */
+	settleAfterVisibilityChange(): void {
+		this.#topUpSettle();
+	}
+
+	/**
+	 * Tops the settle budget up to `postDragSettleMaxFrames` and makes sure the
+	 * loop is running. `Math.max`, not assignment, so a burst of calls buys one
+	 * budget and a longer settle already in flight is not cut short.
+	 */
+	#topUpSettle(): void {
 		// A drag owns the budget while it lasts: `beginDrag` zeroes it deliberately,
 		// keeping the loop alive off the drag itself so the settle only begins when
 		// the finger lifts. Funding a settle here would run one against a node the
@@ -219,8 +256,9 @@ export class LayoutRuntime {
 		dragNodeId: string | null = this.#options.getActiveDragNodeId(),
 		relaxIterations = this.#options.getLayoutSettings().relaxIterations
 	): MultigraphData {
-		const hopsByNodeId = this.#hopsFor(nextGraph);
-		const nextVisibleGraph = this.visibleGraphFor(nextGraph, hopsByNodeId);
+		const layoutSource = this.#layoutSourceFor(nextGraph);
+		const hopsByNodeId = this.#hopsFor(layoutSource);
+		const nextVisibleGraph = this.visibleGraphFor(layoutSource, hopsByNodeId);
 		const relaxedVisibleGraph = withRelaxedGraphPositions(
 			nextVisibleGraph,
 			this.layoutOptions(nextVisibleGraph, {
@@ -235,14 +273,18 @@ export class LayoutRuntime {
 
 	beginScaleChange(nextGraph: MultigraphData, focalNodeId: string): MultigraphData {
 		this.scaleChangeFocalNodeId = focalNodeId;
-		const currentGraph = this.#options.getGraph();
-		const currentHopsByNodeId = this.#hopsFor(currentGraph);
-		const nextHopsByNodeId = this.#hopsFor(nextGraph);
-		const currentVisibleGraph = this.visibleGraphFor(currentGraph, currentHopsByNodeId);
-		const nextVisibleGraph = this.visibleGraphFor(nextGraph, nextHopsByNodeId);
+		// Both sides of the wave are layout sources: what the reducer drops is not
+		// on the canvas before or after, so it neither fades nor anchors a layer.
+		// Positions still merge back into the whole `nextGraph` below.
+		const currentSource = this.#layoutSourceFor(this.#options.getGraph());
+		const nextSource = this.#layoutSourceFor(nextGraph);
+		const currentHopsByNodeId = this.#hopsFor(currentSource);
+		const nextHopsByNodeId = this.#hopsFor(nextSource);
+		const currentVisibleGraph = this.visibleGraphFor(currentSource, currentHopsByNodeId);
+		const nextVisibleGraph = this.visibleGraphFor(nextSource, nextHopsByNodeId);
 		this.scaleChangeRevealState = this.#createScaleChangeRevealState(
-			currentGraph,
-			nextGraph,
+			currentSource,
+			nextSource,
 			currentHopsByNodeId,
 			nextHopsByNodeId
 		);
@@ -284,7 +326,7 @@ export class LayoutRuntime {
 
 		this.scaleAnimations = nextAnimations;
 		this.animationNowMs = nowMs;
-		this.startLayeredRelayout(nextGraph, nowMs);
+		this.startLayeredRelayout(nextSource, nowMs);
 		const settleState = settleStateForScaleChange(
 			Object.keys(nextAnimations).length > 0,
 			this.#resolvedSettings().postScaleChangeSettleMaxFrames
@@ -313,8 +355,9 @@ export class LayoutRuntime {
 		return mergeVisiblePositions(nextGraph, relaxedVisibleGraph);
 	}
 
+	/** Seeds from the pins of the layout source: a pin the reducer drops anchors nothing. */
 	startLayeredRelayout(nextGraph: MultigraphData, nowMs: number): void {
-		const pinnedIds = pinnedNodeIds(nextGraph);
+		const pinnedIds = pinnedNodeIds(this.#layoutSourceFor(nextGraph));
 		this.layeredRelayoutState = initialLayeredRelayoutState(
 			pinnedIds,
 			this.#resolvedSettings().layeredRelayoutSettleMaxFrames
@@ -379,8 +422,9 @@ export class LayoutRuntime {
 
 		if (shouldRelax) {
 			const currentGraph = this.#options.getGraph();
-			const hopsByNodeId = this.#hopsFor(currentGraph);
-			const currentVisibleGraph = this.visibleGraphFor(currentGraph, hopsByNodeId);
+			const layoutSource = this.#layoutSourceFor(currentGraph);
+			const hopsByNodeId = this.#hopsFor(layoutSource);
+			const currentVisibleGraph = this.visibleGraphFor(layoutSource, hopsByNodeId);
 			const step = relaxGraphPositionsStep(
 				currentVisibleGraph,
 				this.layoutOptions(currentVisibleGraph, {
@@ -451,17 +495,21 @@ export class LayoutRuntime {
 
 	/**
 	 * The hop map for a whole graph. One call, one answer, read by visibility,
-	 * sizing, and the reveal wave alike.
+	 * sizing, and the reveal wave alike. Measured over the layout source, so a
+	 * dropped node or edge routes nothing and a dropped pin anchors nothing.
 	 */
 	#hopsFor(graph: MultigraphData): Record<string, number> {
+		const layoutSource = this.#layoutSourceFor(graph);
 		const computeHops = this.#options.computeHops;
-		if (computeHops) return computeHops(graph);
+		if (computeHops) return computeHops(layoutSource);
 
 		const settings = this.#resolvedSettings();
 		return computeBoundedHops(
-			graph,
+			layoutSource,
 			[],
-			beaconNodeIds(graph, { preferredNodeIds: this.#options.getPreferredBeaconNodeIds() }),
+			beaconNodeIds(layoutSource, {
+				preferredNodeIds: this.#options.getPreferredBeaconNodeIds()
+			}),
 			{
 				displayedLayers: settings.displayedLayers,
 				dataflowDisplayedLayers: settings.dataflowDisplayedLayers
@@ -480,19 +528,32 @@ export class LayoutRuntime {
 	 * through `layoutOptions`, the scale-change layouts — reads the composition
 	 * from here, so there is one place where a derived edge becomes a layout edge
 	 * and no way for two of them to disagree.
+	 *
+	 * Reduces its argument to the layout source first, so it may be handed the
+	 * whole graph or an already-reduced one with the same result.
 	 */
 	visibleGraphFor(
 		graph: MultigraphData,
 		hopsByNodeId: Record<string, number> = this.#hopsFor(graph)
 	): MultigraphData {
-		const visibleNodeIds = visibleNodeIdsForPinnedNeighborhood(graph, hopsByNodeId, {
+		const layoutSource = this.#layoutSourceFor(graph);
+		const visibleNodeIds = visibleNodeIdsForPinnedNeighborhood(layoutSource, hopsByNodeId, {
 			displayedLayers: this.#resolvedSettings().displayedLayers
 		});
 		return composeVisibleLayoutGraph(
-			graph,
+			layoutSource,
 			visibleNodeIds,
-			this.#options.composeDerivedEdges?.(graph)
+			this.#options.composeDerivedEdges?.(layoutSource)
 		);
+	}
+
+	/**
+	 * `reduceLayoutSource` of `graph`, or `graph` itself without one. Idempotent
+	 * by the option's contract, which is what lets every entry point call it on
+	 * whatever it was handed.
+	 */
+	#layoutSourceFor(graph: MultigraphData): MultigraphData {
+		return this.#options.reduceLayoutSource?.(graph) ?? graph;
 	}
 
 	get revealWaveProgress(): number {
@@ -637,6 +698,7 @@ export class LayoutRuntime {
 		return withDefaultLayoutSettings(this.#options.getLayoutSettings());
 	}
 
+	/** Both graphs are layout sources, already reduced by `beginScaleChange`. */
 	#createScaleChangeRevealState(
 		currentGraph: MultigraphData,
 		nextGraph: MultigraphData,
@@ -713,7 +775,8 @@ export class LayoutRuntime {
  * Positions and nothing else come back from the layout graph. That is what keeps
  * the composed derived edges out of the authored graph the app mutates, checks
  * for duplicates, and saves: the spread is over `graph`, so `visibleGraph`
- * contributes only coordinates.
+ * contributes only coordinates. `graph` is the whole graph, never the layout
+ * source, so whatever `reduceLayoutSource` dropped is still in it, untouched.
  */
 function mergeVisiblePositions(
 	graph: MultigraphData,
