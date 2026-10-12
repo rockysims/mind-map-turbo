@@ -13,6 +13,18 @@ export interface TagColorConfig {
 
 export type TagColorNamespace = keyof TagColorConfig;
 
+/**
+ * Per-tag layout factors, keyed exactly like `TagColorConfig`. An edge tag's
+ * factor scales the rest length of every edge that carries it; a node tag's
+ * scales the clearance hop repulsion holds open around every node that carries
+ * it. Sparse: only factors other than 1 are stored, and `Multigraph/lib/tagPhysics.ts`
+ * owns their range and how several tags on one element combine.
+ */
+export interface TagPhysicsConfig {
+	nodeTags: Record<string, number>;
+	edgeTags: Record<string, number>;
+}
+
 export interface GraphAssetMetadata {
 	id: string;
 	/**
@@ -33,6 +45,11 @@ export interface MultigraphData {
 	edges: EdgeData[];
 	posByNodeId: Record<string, Point>;
 	tagColorConfig: TagColorConfig;
+	/**
+	 * Absent until a factor is set, and removed again once both maps are empty,
+	 * so a graph that never touched a slider serialises exactly as before.
+	 */
+	tagPhysicsConfig?: TagPhysicsConfig;
 	assets?: Record<string, GraphAssetMetadata>;
 	/** Highest pin-recency stamp issued so far (see NodeData.lastPinnedSeq). */
 	pinSequence?: number;
