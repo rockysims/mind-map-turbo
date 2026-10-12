@@ -8,7 +8,12 @@
 
 import type { NodeData, QuantityDesignation } from '../../types/node';
 import type { EdgeData } from '../../types/edge';
-import type { MultigraphData, Point, TagColorConfig } from '../../types/multigraph';
+import type {
+	MultigraphData,
+	Point,
+	TagColorConfig,
+	TagPhysicsConfig
+} from '../../types/multigraph';
 import type { ParsedTitleDirection } from './titleSyntax';
 
 type MakeNodeInput = Omit<NodeData, 'tags'> & Partial<Pick<NodeData, 'tags'>>;
@@ -35,6 +40,8 @@ interface MakeGraphInput {
 	posByNodeId?: Record<string, Point>;
 	/** Optional graph-level tag colors. Defaults to empty node/edge maps. */
 	tagColorConfig?: TagColorConfig;
+	/** Optional per-tag layout factors. Omitted from the graph unless given. */
+	tagPhysicsConfig?: TagPhysicsConfig;
 }
 
 /**
@@ -82,7 +89,8 @@ export function makeGraph(input: MakeGraphInput = {}): MultigraphData {
 		tagColorConfig: input.tagColorConfig ?? {
 			nodeTags: {},
 			edgeTags: {}
-		}
+		},
+		...(input.tagPhysicsConfig === undefined ? {} : { tagPhysicsConfig: input.tagPhysicsConfig })
 	};
 }
 

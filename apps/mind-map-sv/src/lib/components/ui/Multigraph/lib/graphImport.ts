@@ -14,7 +14,7 @@
 
 import { APP_CONFIG } from '../../../../appConfig';
 import type { EdgeData } from '../../types/edge';
-import type { MultigraphData, Point } from '../../types/multigraph';
+import type { MultigraphData, Point, TagPhysicsConfig } from '../../types/multigraph';
 import type { NodeData } from '../../types/node';
 import { isDerivedEdgeId } from './derivedEdges';
 import type { GraphBounds } from './graphMath';
@@ -101,6 +101,8 @@ export function importGraphData(host: MultigraphData, incoming: MultigraphData):
 			: // Host last: an asset id already in the host is the host's.
 				{ ...(incoming.assets ?? {}), ...(host.assets ?? {}) };
 
+	const tagPhysicsConfig = mergedTagPhysicsConfig(host, incoming);
+
 	const pinSequence = mergedPinSequence(host, incoming, nodes, pinShift);
 
 	return {
@@ -116,12 +118,33 @@ export function importGraphData(host: MultigraphData, incoming: MultigraphData):
 				nodeTags: { ...incoming.tagColorConfig.nodeTags, ...host.tagColorConfig.nodeTags },
 				edgeTags: { ...incoming.tagColorConfig.edgeTags, ...host.tagColorConfig.edgeTags }
 			},
+			...(tagPhysicsConfig === undefined ? {} : { tagPhysicsConfig }),
 			...(assets === undefined ? {} : { assets }),
 			...(pinSequence === undefined ? {} : { pinSequence })
 		},
 		nodeIdMap,
 		edgeIdMap,
 		offset
+	};
+}
+
+/**
+ * Per-tag layout factors, merged per namespace with the host last, exactly as
+ * colours are: a tag the reader already tuned keeps its factor, and a tag only
+ * the import tuned brings its factor along. Absent on both sides stays absent,
+ * so importing into an untuned graph does not add an empty field.
+ */
+function mergedTagPhysicsConfig(
+	host: MultigraphData,
+	incoming: MultigraphData
+): TagPhysicsConfig | undefined {
+	if (host.tagPhysicsConfig === undefined && incoming.tagPhysicsConfig === undefined) {
+		return undefined;
+	}
+
+	return {
+		nodeTags: { ...incoming.tagPhysicsConfig?.nodeTags, ...host.tagPhysicsConfig?.nodeTags },
+		edgeTags: { ...incoming.tagPhysicsConfig?.edgeTags, ...host.tagPhysicsConfig?.edgeTags }
 	};
 }
 

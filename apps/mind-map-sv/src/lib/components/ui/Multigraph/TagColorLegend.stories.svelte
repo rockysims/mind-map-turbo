@@ -11,21 +11,24 @@
 			tag: 'topic',
 			color: '#ff0000',
 			usageCount: 2,
-			hasExplicitColor: true
+			hasExplicitColor: true,
+			physicsFactor: 1
 		},
 		{
 			namespace: 'nodeTags',
 			tag: 'fallback',
 			color: '#00ff00',
 			usageCount: 1,
-			hasExplicitColor: false
+			hasExplicitColor: false,
+			physicsFactor: 1
 		},
 		{
 			namespace: 'edgeTags',
 			tag: 'rel',
 			color: '#0000ff',
 			usageCount: 1,
-			hasExplicitColor: true
+			hasExplicitColor: true,
+			physicsFactor: 1
 		}
 	];
 

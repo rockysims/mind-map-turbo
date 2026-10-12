@@ -3,7 +3,8 @@ import type {
 	GraphAssetMetadata,
 	MultigraphData,
 	Point,
-	TagColorNamespace
+	TagColorNamespace,
+	TagPhysicsConfig
 } from '../../types/multigraph';
 import type {
 	NodeContentBlock,
@@ -17,6 +18,7 @@ import { withNodeAddon, type NodeAddonName } from './nodeAddons';
 import { mathPlainText } from '../../MathText/lib/mathPlainText';
 import { symbolFor } from '../../MathText/lib/mathSymbols';
 import { parseSheetTitleSyntax, parseTitleSyntax } from './titleSyntax';
+import { clampTagPhysicsFactor } from './tagPhysics';
 
 interface AddNodeInput {
 	id?: string;
@@ -595,6 +597,55 @@ export function setTagColor(
 	};
 }
 
+/**
+ * Stores a tag's layout factor (edge length for an edge tag, node spacing for a
+ * node tag). Clamped into the stored range; a factor of exactly 1 removes the
+ * key, and the whole field goes once both maps are empty, so an untuned graph
+ * serialises as it did before the sliders existed. A non-finite factor has no
+ * direction to clamp toward and is a no-op.
+ *
+ * Unlike `setTagColor`, hands back the same object when nothing changes: a
+ * slider fires on every frame of a drag, and a rebuilt-but-equal graph would
+ * look like an edit to the history's reference test.
+ */
+export function setTagPhysicsFactor(
+	data: MultigraphData,
+	namespace: TagColorNamespace,
+	tag: string,
+	factor: number
+): MultigraphData {
+	if (!Number.isFinite(factor)) return data;
+
+	const clamped = clampTagPhysicsFactor(factor);
+	const current = data.tagPhysicsConfig;
+	const factors = current?.[namespace];
+	const stored = factors && hasOwnKey(factors, tag) ? factors[tag] : undefined;
+	if (clamped === 1 ? stored === undefined : stored === clamped) return data;
+
+	const nextFactors = { ...factors };
+	if (clamped === 1) delete nextFactors[tag];
+	else nextFactors[tag] = clamped;
+
+	return withTagPhysicsConfig(data, {
+		nodeTags: current?.nodeTags ?? {},
+		edgeTags: current?.edgeTags ?? {},
+		[namespace]: nextFactors
+	});
+}
+
+function hasOwnKey(record: Readonly<Record<string, unknown>>, key: string): boolean {
+	return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+/** Sets the config, or removes the field when both maps are empty. */
+function withTagPhysicsConfig(data: MultigraphData, config: TagPhysicsConfig): MultigraphData {
+	const next: MultigraphData = { ...data, tagPhysicsConfig: config };
+	if (Object.keys(config.nodeTags).length === 0 && Object.keys(config.edgeTags).length === 0) {
+		delete next.tagPhysicsConfig;
+	}
+	return next;
+}
+
 export function deleteTagEverywhere(
 	data: MultigraphData,
 	namespace: TagColorNamespace,
@@ -603,8 +654,15 @@ export function deleteTagEverywhere(
 	const nextConfig = { ...data.tagColorConfig[namespace] };
 	delete nextConfig[tag];
 
+	// Drop the tag's layout factor too, so a tag deleted everywhere does not
+	// leave a factor behind to reshape whatever later reuses its name.
+	const withoutFactor =
+		data.tagPhysicsConfig && hasOwnKey(data.tagPhysicsConfig[namespace], tag)
+			? setTagPhysicsFactor(data, namespace, tag, 1)
+			: data;
+
 	return {
-		...data,
+		...withoutFactor,
 		nodes:
 			namespace === 'nodeTags'
 				? data.nodes.map((node) => ({

@@ -13,6 +13,7 @@ import {
 	setNodeDesignations,
 	setNodePinned,
 	setTagColor,
+	setTagPhysicsFactor,
 	togglePinned,
 	updateEdge,
 	updateNodeContent,
@@ -56,6 +57,7 @@ const document = (graph: MultigraphData) => ({
 	nodes: graph.nodes,
 	edges: graph.edges,
 	tagColorConfig: graph.tagColorConfig,
+	tagPhysicsConfig: graph.tagPhysicsConfig,
 	assets: graph.assets,
 	pinSequence: graph.pinSequence
 });
@@ -128,6 +130,7 @@ const MUTATIONS: Array<[string, (graph: MultigraphData) => MultigraphData]> = [
 	['removeNodeContentBlock (image)', () => removeNodeContentBlock(withImage(), 'n0', 'a1').graph],
 	['removeNodeContentBlock (file)', () => removeNodeContentBlock(withFile(), 'n0', 'f1').graph],
 	['setTagColor', (graph) => setTagColor(graph, 'nodeTags', 'physics', '#00ff00')],
+	['setTagPhysicsFactor', (graph) => setTagPhysicsFactor(graph, 'nodeTags', 'physics', 2)],
 	['deleteTagEverywhere', (graph) => deleteTagEverywhere(graph, 'nodeTags', 'physics')],
 	['commitInlineTitleSyntax', (graph) => commitInlineTitleSyntax(graph, 'n0', 'One #maths')],
 	['moveNode', (graph) => moveNode(graph, 'n0', { x: 42, y: 42 })],
@@ -219,6 +222,61 @@ describe('diffByReference / applyDelta', () => {
 		const restored = applyDelta(deleted, diffByReference(deleted, graph));
 
 		expect(restored.nodes.map((node) => node.id)).toEqual(['n0', 'n1', 'n2']);
+	});
+
+	describe('tag physics factors', () => {
+		const tuned = (): MultigraphData => setTagPhysicsFactor(baseGraph(), 'edgeTags', 'rel', 2);
+
+		it('round-trips adding the field', () => {
+			const before = baseGraph();
+			const after = tuned();
+
+			const applied = applyDelta(before, diffByReference(before, after));
+
+			expect(applied.tagPhysicsConfig).toEqual({ nodeTags: {}, edgeTags: { rel: 2 } });
+		});
+
+		it('round-trips changing the field', () => {
+			const before = tuned();
+			const after = setTagPhysicsFactor(before, 'edgeTags', 'rel', 0.5);
+
+			const applied = applyDelta(before, diffByReference(before, after));
+
+			expect(applied.tagPhysicsConfig).toEqual({ nodeTags: {}, edgeTags: { rel: 0.5 } });
+		});
+
+		it('round-trips removing the field, leaving no key behind', () => {
+			const before = tuned();
+			const after = setTagPhysicsFactor(before, 'edgeTags', 'rel', 1);
+
+			const delta = diffByReference(before, after);
+			const applied = applyDelta(before, delta);
+
+			expect(delta.tagPhysicsConfig).toBeNull();
+			expect('tagPhysicsConfig' in applied).toBe(false);
+		});
+
+		it('survives a JSON round trip, which is how the tail is stored', () => {
+			const before = tuned();
+			const delta = JSON.parse(JSON.stringify(diffByReference(before, baseGraph())));
+
+			expect('tagPhysicsConfig' in applyDelta(before, delta)).toBe(false);
+		});
+
+		it('does not call a physics-only delta empty', () => {
+			const before = baseGraph();
+
+			expect(isEmptyDelta(diffByReference(before, tuned()))).toBe(false);
+			expect(isEmptyDelta(diffByReference(tuned(), before))).toBe(false);
+		});
+
+		it('leaves the field alone when the delta does not mention it', () => {
+			const before = tuned();
+
+			const applied = applyDelta(before, diffByReference(before, removeNode(before, 'n1')));
+
+			expect(applied.tagPhysicsConfig).toBe(before.tagPhysicsConfig);
+		});
 	});
 
 	it('takes away an optional field the target does not have', () => {
