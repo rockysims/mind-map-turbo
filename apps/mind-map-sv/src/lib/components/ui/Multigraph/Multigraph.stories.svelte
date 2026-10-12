@@ -5824,8 +5824,7 @@
 		expect(getNodeWrapper(canvasElement, 'n0')).toHaveAttribute('data-query-role', 'focus');
 		expect(getNodeWrapper(canvasElement, 'n1')).toHaveAttribute('data-query-role', 'background');
 
-		const chips = within(canvas.getByLabelText('Parsed query tokens'));
-		expect(chips.getByText('!task')).toBeInTheDocument();
+		expect(canvas.getByLabelText('Query result counts')).toHaveTextContent('1 nodes');
 	}}
 />
 

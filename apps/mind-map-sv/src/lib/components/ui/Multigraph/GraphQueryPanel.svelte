@@ -1,8 +1,7 @@
 <script lang="ts">
 	import { APP_CONFIG } from '$lib/appConfig';
 	import type { LegendTag } from './lib/tagColors';
-	import type { GraphQueryResult, GraphQueryToken, GraphQueryTokenMode } from './lib/graphQuery';
-	import { parseGraphQuery } from './lib/graphQuery';
+	import type { GraphQueryResult, GraphQueryTokenMode } from './lib/graphQuery';
 	import { cycleTagToken, tagTokenMode, tagTokenText } from './lib/queryTokenCycle';
 
 	let {
@@ -29,7 +28,6 @@
 	const nodeTagMarker = tagSyntax.nodeTagMarker;
 	const edgeTagMarker = tagSyntax.edgeTagMarker;
 	const addonMarker = tagSyntax.addonMarker;
-	const tokens = $derived(parseGraphQuery(query, tagSyntax));
 	const nodeTags = $derived(tags.filter((tag) => tag.namespace === 'nodeTags'));
 	const edgeTags = $derived(tags.filter((tag) => tag.namespace === 'edgeTags'));
 
@@ -73,19 +71,6 @@
 	function previewTag(target: TagTarget, tag: string) {
 		previewQuery(cycleTagToken(query, target, tag, tagSyntax));
 	}
-
-	function tokenLabel(token: GraphQueryToken): string {
-		const prefix = token.mode === 'spotlight' ? '+' : token.mode === 'exclude' ? '-' : '';
-		const marker =
-			token.target === 'nodeTag'
-				? nodeTagMarker
-				: token.target === 'edgeTag'
-					? edgeTagMarker
-					: token.target === 'addon'
-						? addonMarker
-						: '';
-		return `${prefix}${marker}${token.value}`;
-	}
 </script>
 
 {#snippet tagButton(target: TagTarget, tag: LegendTag)}
@@ -124,14 +109,9 @@
 		/>
 	</label>
 
-	{#if tokens.length > 0}
-		<ul class="chips" aria-label="Parsed query tokens">
-			{#each tokens as token, index (`${index}:${token.target}:${token.mode}:${token.value}`)}
-				<li data-mode={token.mode} data-target={token.target}>{tokenLabel(token)}</li>
-			{/each}
-		</ul>
-	{/if}
-
+	<!-- No parsed-token chips here: they appeared and vanished as a tag button
+	     cycled to and from "not in query", jumping the layout. The input shows
+	     the text and each tag button shows its own state. -->
 	<div class="counts" aria-label="Query result counts">
 		<span>{result.focusedNodeIds.length} nodes</span>
 		<span>{result.focusedEdgeIds.length} edges</span>
@@ -215,8 +195,7 @@
 	header,
 	.counts,
 	.region-controls,
-	.tag-list,
-	.chips {
+	.tag-list {
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
@@ -250,28 +229,12 @@
 		font: inherit;
 	}
 
-	.chips {
-		flex-wrap: wrap;
-		padding: 0;
-		margin: 0;
-		list-style: none;
-	}
-
-	.chips li,
 	.counts span {
 		border-radius: 999px;
 		padding: 0.25rem 0.5rem;
 		background: #e2e8f0;
 		color: #0f172a;
 		font-size: 0.8rem;
-	}
-
-	.chips li[data-mode='spotlight'] {
-		background: #fef3c7;
-	}
-
-	.chips li[data-mode='exclude'] {
-		background: #fee2e2;
 	}
 
 	.region-controls {
@@ -319,7 +282,7 @@
 
 	/* A tag in the query reads as pressed without relying on hue: the border
 	   darkens and thickens (an inset ring, so the button does not grow) and the
-	   label goes semibold. The fill repeats the parsed-chip palette, and the
+	   label goes semibold. The fill tints by mode (slate, amber, rose), and the
 	   label's own +/- prefix tells the pressed modes apart. */
 	.tag-list button[aria-pressed='true'] {
 		border-color: #0f172a;

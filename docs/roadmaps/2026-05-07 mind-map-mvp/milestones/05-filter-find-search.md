@@ -97,7 +97,9 @@ See
 - A Find / Filter affordance opens from Cmd/Ctrl-K and a discoverable toolbar or
   graph control.
 - The panel includes:
-  - A token input that converts recognized text into chips.
+  - A token input that converts recognized text into chips. (2026-10-12: the
+    parsed-token chip row was removed; it made the panel jump as tag buttons
+    cycled. The input shows the text and each tag button shows its state.)
   - Node-tag and edge-tag suggestions sourced from the existing tag legend data.
     Each suggestion is a button that cycles its tag's query token none →
     spotlight (`+#tag`) → exclude (`-#tag`) → none, editing only that token in

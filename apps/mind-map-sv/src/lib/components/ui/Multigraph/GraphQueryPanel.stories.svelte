@@ -233,6 +233,28 @@
 </Story>
 
 <Story
+	name="PanelHeightHoldsStillAsATagCyclesInAndOut"
+	play={async ({ canvasElement }) => {
+		const panel = within(canvasElement).getByRole('region', { name: 'Find and filter graph' });
+		const height = () => panel.getBoundingClientRect().height;
+		const empty = height();
+		expect(empty).toBeGreaterThan(0);
+
+		// Empty query to a one-token query and back: nothing under the input
+		// appears or vanishes with the token, so the panel never changes height.
+		for (const query of ['+#lab', '-#lab', '']) {
+			tagButton(canvasElement, 'Node', 'lab').click();
+			await expectQuery(canvasElement, query);
+			expect(Math.abs(height() - empty)).toBeLessThanOrEqual(1);
+		}
+	}}
+>
+	{#snippet template()}
+		<GraphQueryPanelHarness graph={GRAPH} />
+	{/snippet}
+</Story>
+
+<Story
 	name="HoverPreviewsWhatTheNextClickWouldDo"
 	play={async ({ canvasElement }) => {
 		await expectPreview(canvasElement, '');

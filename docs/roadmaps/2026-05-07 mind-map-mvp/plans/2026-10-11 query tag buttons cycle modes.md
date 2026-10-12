@@ -494,3 +494,13 @@ agent can carry them as two commits in one session.
     which supersedes
     `docs/ui-decisions/2026-10-11--pointer--a-tag-button-cycles-its-token-and-hover-never-excludes.md`.
   - The offline shell is owed again for these `src/**` changes.
+- 2026-10-12: the owner removed the parsed-token chip list from the panel.
+  The `<ul aria-label="Parsed query tokens">` of `li[data-mode][data-target]`
+  chips appeared and vanished as a tag button cycled to and from none, so the
+  panel jumped; the tag buttons already show each tag's state and the input
+  shows the text. `tokenLabel` and the chip-only CSS went with it; the counts
+  row, Previous/Next and the tag buttons' mode fills are unchanged. New panel
+  story `PanelHeightHoldsStillAsATagCyclesInAndOut` asserts the panel's height
+  stays within 1 px across none → `+#lab` → `-#lab` → none, and
+  `UserFiltersGraphByNodeAddon` now checks the counts row instead of a chip.
+  The offline shell is owed again for this `src/**` change.
