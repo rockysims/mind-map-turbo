@@ -60,9 +60,6 @@ BUGS:
 
 - Edit dialog background (click to close) has very rounded edges and padding so it doesn't cover the full Stage.
 - Pinned node doesn't show description.
-- On a phone (375px) with enough tags to fill the Tags sheet, the sheet grows
-  to the top of the screen and the graph toolbar (z-index 40, over the legend's 35) covers its "Tags" heading and Close button. The backdrop still closes it.
-  Seen 2026-10-11 while changing the legend's row layout; not caused by it.
 - e2e `reload restores graph data and viewState from localStorage without file
 import` flakes under a full parallel run: the failure snapshot shows the title
   as `RootRefresh Test Node`, so `editFirstNodeTitle`'s `fill` landed before the

@@ -3,8 +3,13 @@
 	import { expect, fn, userEvent, waitFor, within } from 'storybook/test';
 	import NodeEditSheet from './NodeEditSheet.svelte';
 	import NodeEditSheetHarness from './NodeEditSheetHarness.svelte';
-	import type { NodeData, QuantityDesignation } from '../types/node';
-	import type { MultigraphData } from '../types/multigraph';
+	import ToolbarClearanceStage from './ToolbarClearanceStage.svelte';
+	import {
+		TOOLBAR_CLEARANCE_PROPERTY,
+		toolbarClearancePx
+	} from '../GraphToolbar/lib/toolbarClearance';
+	import type { NodeContentBlock, NodeData, QuantityDesignation } from '../types/node';
+	import type { GraphAssetMetadata, MultigraphData } from '../types/multigraph';
 	import { APP_CONFIG } from '$lib/appConfig';
 	import { makeGraph } from './lib/testFixtures';
 	import { symbolFor } from '../MathText/lib/mathSymbols';
@@ -302,6 +307,60 @@
 	 * nothing, and `scrollTop = n` works whatever the rule says. The computed value
 	 * is the assertion that actually means something here.
 	 */
+	/** A short phone: the toolbar wraps to its full height and the sheet overflows. */
+	const SHORT_PHONE_VIEWPORT = 'shortPhone';
+
+	const SHORT_PHONE_PARAMETERS = {
+		viewport: {
+			defaultViewport: SHORT_PHONE_VIEWPORT,
+			viewports: {
+				[SHORT_PHONE_VIEWPORT]: {
+					name: 'Short phone',
+					styles: { width: '375px', height: '600px' }
+				}
+			}
+		}
+	};
+
+	const ATTACHMENT_COUNT = 12;
+
+	/** One node carrying more attachments than a phone's sheet can show at once. */
+	function graphWithManyAttachments(): MultigraphData {
+		const ids = Array.from({ length: ATTACHMENT_COUNT }, (_, index) => `asset-${index + 1}`);
+		const content: NodeContentBlock[] = ids.map((assetId, index) => ({
+			type: 'file',
+			assetId,
+			name: `notes-${index + 1}.csv`
+		}));
+		const assets: Record<string, GraphAssetMetadata> = Object.fromEntries(
+			ids.map((assetId, index) => [
+				assetId,
+				{
+					id: assetId,
+					kind: 'file',
+					mimeType: 'text/csv',
+					name: `notes-${index + 1}.csv`,
+					size: 8,
+					createdAt: 1
+				}
+			])
+		);
+		return { ...taggedGraph({ content }), assets };
+	}
+
+	function elementIn(root: ParentNode, selector: string): HTMLElement {
+		const found = root.querySelector(selector);
+		if (!(found instanceof HTMLElement)) throw new Error(`no element for ${selector}`);
+		return found;
+	}
+
+	/** The topmost element at a control's centre is the control (or inside it). */
+	function hittable(control: HTMLElement): boolean {
+		const box = control.getBoundingClientRect();
+		const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+		return hit !== null && (hit === control || control.contains(hit));
+	}
+
 	function touchActionOf(canvasElement: HTMLElement, selector: string): string {
 		const found = canvasElement.querySelector(selector);
 		if (!(found instanceof HTMLElement)) {
@@ -1369,3 +1428,48 @@
 		expect(args.onSave).not.toHaveBeenCalled();
 	}}
 />
+
+<Story
+	name="KeepsALongSheetBelowTheToolbarAndScrollsInside"
+	parameters={SHORT_PHONE_PARAMETERS}
+	play={async ({ canvasElement }) => {
+		expect(window.innerWidth).toBe(375);
+		expect(window.innerHeight).toBe(600);
+
+		// The toolbar publishes its measured clearance; nothing here guesses it.
+		const toolbar = elementIn(canvasElement, '.toolbar-row');
+		await waitFor(() =>
+			expect(document.documentElement.style.getPropertyValue(TOOLBAR_CLEARANCE_PROPERTY)).toBe(
+				`${toolbarClearancePx(toolbar.getBoundingClientRect())}px`
+			)
+		);
+		await waitFor(() => expect(attachmentRows(canvasElement)).toHaveLength(ATTACHMENT_COUNT));
+
+		// The sheet stops below the toolbar's real box and scrolls inside itself.
+		const sheet = elementIn(canvasElement, '.node-edit-sheet');
+		expect(sheet.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+			toolbar.getBoundingClientRect().bottom
+		);
+		expect(sheet.scrollHeight).toBeGreaterThan(sheet.clientHeight);
+
+		// Halfway down the attachment list, the header is still pinned at the top
+		// and Save at the bottom, both under a finger.
+		sheet.scrollTop = sheet.scrollHeight / 2;
+		const header = elementIn(sheet, 'header');
+		expect(header.getBoundingClientRect().top).toBeCloseTo(sheet.getBoundingClientRect().top, 0);
+		// Scoped to the sheet: the toolbar above has a Save of its own.
+		const inSheet = within(sheet);
+		const save = inSheet.getByRole('button', { name: 'Save' });
+		expect(hittable(inSheet.getByRole('button', { name: 'Close' }))).toBe(true);
+		expect(hittable(save)).toBe(true);
+		expect(save.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+			sheet.getBoundingClientRect().bottom
+		);
+	}}
+>
+	{#snippet template()}
+		<ToolbarClearanceStage>
+			<NodeEditSheetHarness baseGraph={graphWithManyAttachments()} nodeId="node-1" />
+		</ToolbarClearanceStage>
+	{/snippet}
+</Story>

@@ -960,10 +960,19 @@
 </div>
 
 <style>
+	/*
+	 * Stops below the graph toolbar, which sits above this layer in z-order: its
+	 * measured clearance is published by GraphToolbar as
+	 * `--graph-toolbar-clearance`, and a sheet taller than what is left scrolls
+	 * inside itself. The fallback is the old 1rem margin, for a canvas shown
+	 * without a toolbar.
+	 */
 	.sheet-layer {
 		position: absolute;
 		inset: 0;
 		z-index: 30;
+		box-sizing: border-box;
+		padding-top: var(--graph-toolbar-clearance, 1rem);
 		display: flex;
 		align-items: flex-end;
 		justify-content: center;
@@ -983,10 +992,12 @@
 		z-index: 1;
 		box-sizing: border-box;
 		width: min(100%, 34rem);
-		max-height: calc(100% - 2rem);
+		max-height: 100%;
 		overflow: auto;
 		border-radius: 1rem 1rem 0 0;
-		padding: 1rem;
+		/* No top padding: the pinned header carries its own, so nothing scrolls
+		   into a gap above it. */
+		padding: 0 1rem 1rem;
 		background: #ffffff;
 		box-shadow: 0 -12px 40px rgb(0 0 0 / 22%);
 		animation: sheet-in 160ms ease-out;
@@ -1007,9 +1018,16 @@
 		gap: 0.75rem;
 	}
 
+	/* Pinned while the sheet scrolls, full-bleed over its side padding so the
+	   fields scroll under it: the title and Close stay in reach at any depth. */
 	header {
+		position: sticky;
+		top: 0;
+		z-index: 2;
 		justify-content: space-between;
-		margin-bottom: 1rem;
+		margin: 0 -1rem 0.25rem;
+		padding: 1rem 1rem 0.75rem;
+		background: #ffffff;
 	}
 
 	h2,
@@ -1067,9 +1085,17 @@
 		font: inherit;
 	}
 
+	/* Pinned to the bottom of the sheet while any of the details tab is in view,
+	   so Save is never below the fold of a long attachment list. */
 	.actions {
+		position: sticky;
+		bottom: 0;
+		z-index: 2;
 		justify-content: flex-end;
 		flex-wrap: wrap;
+		margin: 0 -1rem -1rem;
+		padding: 0.75rem 1rem 1rem;
+		background: #ffffff;
 	}
 
 	.weight-field {
@@ -1302,6 +1328,10 @@
 	@media (min-width: 640px) {
 		.sheet-layer {
 			align-items: center;
+		}
+
+		.sheet-layer {
+			padding-bottom: 1rem;
 		}
 
 		.node-edit-sheet {

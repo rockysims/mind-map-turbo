@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { resetFileInput } from '$lib/browserGraphFile';
 	import { noticeLines } from './lib/noticeLines';
+	import { TOOLBAR_CLEARANCE_PROPERTY, toolbarClearancePx } from './lib/toolbarClearance';
 
 	let {
 		notice = '',
@@ -52,6 +53,31 @@
 	} = $props();
 
 	let importInput = $state<HTMLInputElement | null>(null);
+	let toolbarRow = $state<HTMLDivElement | null>(null);
+
+	/**
+	 * Publishes how far down the screen this toolbar reaches, as
+	 * `--graph-toolbar-clearance` on `<html>`, so the canvas's sheets and dialogs
+	 * (which sit under it in z-order) can cap their height to stop short of it.
+	 * Measured, not guessed: on a phone the row wraps to two or three lines as its
+	 * notice changes, and a ResizeObserver follows every one of those.
+	 */
+	$effect(() => {
+		const row = toolbarRow;
+		if (row === null || typeof ResizeObserver === 'undefined') return;
+		const root = document.documentElement;
+		const publish = () => {
+			const clearance = toolbarClearancePx(row.getBoundingClientRect());
+			root.style.setProperty(TOOLBAR_CLEARANCE_PROPERTY, `${clearance}px`);
+		};
+		publish();
+		const observer = new ResizeObserver(publish);
+		observer.observe(row);
+		return () => {
+			observer.disconnect();
+			root.style.removeProperty(TOOLBAR_CLEARANCE_PROPERTY);
+		};
+	});
 
 	const lines = $derived(noticeLines(notice));
 
@@ -106,7 +132,7 @@
 	keeps the pair adjacent: each pill keeps its own chrome, and neither can drift
 	from the other as the toolbar's contents change.
 -->
-<div class="toolbar-row">
+<div class="toolbar-row" bind:this={toolbarRow}>
 	<div class="graph-toolbar" aria-label="Graph persistence controls">
 		<button type="button" title="Start a blank graph in a new tab" onclick={() => onNewGraph?.()}
 			>New</button

@@ -4131,6 +4131,7 @@
 			onPhysicsChange={updateTagPhysics}
 			onDelete={deleteLegendTag}
 			onClose={() => (tagColorLegendOpen = false)}
+			{reduceMotion}
 		/>
 	{/if}
 
