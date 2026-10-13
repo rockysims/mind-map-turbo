@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { pinScrollToOrigin } from '../Multigraph/lib/pinScroll';
-	import { ringOverlapsContent } from './lib/ringLayers';
+	import { boxOverlapsRing, ringOverlapsContent } from './lib/ringLayers';
 
 	let {
 		diameterPx,
@@ -39,8 +39,104 @@
 	} = $props();
 
 	const contentInsetPx = $derived(baseBorderWidthPx ?? borderWidthPx);
-	/** The content reaches over the ring's inner part, so it gets its backdrop. */
-	const ringOverBase = $derived(ringOverlapsContent(borderWidthPx, contentInsetPx));
+
+	let circleEl = $state<HTMLDivElement | null>(null);
+
+	/**
+	 * The readable parts of the content that get a backdrop where they sit on
+	 * the ring: the title's words (their own box, not the fitted square) and the
+	 * badge and chip rows, as `NodeCompactContent` draws them.
+	 */
+	const BACKDROP_TARGETS =
+		'.title > .squareTextBody, [data-node-addon-badges], [data-node-quantities]';
+	const OVER_RING = 'data-over-ring';
+
+	/**
+	 * Mark each backdrop target whose box actually overlaps the ring with
+	 * `data-over-ring`, and clear it from the rest; `NodeCompactContent` fades
+	 * the backdrop in and out on that attribute.
+	 *
+	 * Boxes come from `getBoundingClientRect`, relative to the circle's and
+	 * divided by the circle's own on-screen scale (its rect width over its
+	 * layout width). That is transform-safe both ways the content is scaled:
+	 * the stage's zoom transforms the whole circle (divided out), and the
+	 * deep-zoom frame scales the compact layer inside an unscaled circle (kept,
+	 * since the layer is drawn at that size in the circle). Offsets from
+	 * `offsetLeft` would see neither.
+	 */
+	function markBackdrops(circle: HTMLElement, ringWidthPx: number, baseWidthPx: number) {
+		const circleRect = circle.getBoundingClientRect();
+		const layoutWidth = circle.offsetWidth;
+		const layoutHeight = circle.offsetHeight;
+		const scale = layoutWidth > 0 ? circleRect.width / layoutWidth : 0;
+		const geometry = {
+			radiusPx: Math.min(layoutWidth, layoutHeight) / 2,
+			ringWidthPx,
+			baseWidthPx,
+			centerXPx: layoutWidth / 2,
+			centerYPx: layoutHeight / 2
+		};
+		for (const target of circle.querySelectorAll<HTMLElement>(BACKDROP_TARGETS)) {
+			const rect = target.getBoundingClientRect();
+			const over =
+				scale > 0 &&
+				boxOverlapsRing(
+					{
+						left: (rect.left - circleRect.left) / scale,
+						top: (rect.top - circleRect.top) / scale,
+						width: rect.width / scale,
+						height: rect.height / scale
+					},
+					geometry
+				);
+			if (over) target.setAttribute(OVER_RING, 'true');
+			else target.removeAttribute(OVER_RING);
+		}
+	}
+
+	/**
+	 * Re-measured when the ring, the inset or the node's size changes (this
+	 * effect), when a target or the circle is resized (`ResizeObserver`: a
+	 * retitle re-fits the words), and when a target appears or goes (a
+	 * `MutationObserver` on the content's children: a badge row added, the
+	 * title swapped for its input). None of it runs while the ring is at the
+	 * base, which is every node with no weight: the guard clears any flags left
+	 * from a thicker ring and stops there, so a plain node does no work at all.
+	 */
+	$effect(() => {
+		const circle = circleEl;
+		const ringWidthPx = borderWidthPx;
+		const baseWidthPx = contentInsetPx;
+		// Tracked so a resize or morph re-measures; the values are read from layout.
+		void diameterPx;
+		void borderRadiusPx;
+		if (!circle) return;
+		if (!ringOverlapsContent(ringWidthPx, baseWidthPx)) {
+			for (const marked of circle.querySelectorAll(`[${OVER_RING}]`)) {
+				marked.removeAttribute(OVER_RING);
+			}
+			return;
+		}
+
+		const resizes = new ResizeObserver(() => markBackdrops(circle, ringWidthPx, baseWidthPx));
+		const observeTargets = () => {
+			resizes.disconnect();
+			resizes.observe(circle);
+			for (const target of circle.querySelectorAll(BACKDROP_TARGETS)) resizes.observe(target);
+		};
+		const mutations = new MutationObserver(() => {
+			observeTargets();
+			markBackdrops(circle, ringWidthPx, baseWidthPx);
+		});
+		observeTargets();
+		mutations.observe(circle, { childList: true, subtree: true });
+		markBackdrops(circle, ringWidthPx, baseWidthPx);
+
+		return () => {
+			resizes.disconnect();
+			mutations.disconnect();
+		};
+	});
 </script>
 
 <!--
@@ -53,8 +149,9 @@
 	2. `.ring` — the border, drawn inward from the outer edge at `borderWidthPx`.
 	3. `.content` — the title, badges and chips, inset by `baseBorderWidthPx`
 	   whatever the ring is, so its size never changes. Over a ring wider than
-	   that it overlaps the ring's inner part, and `data-ring-over-base` gives
-	   it a backdrop (`NodeCompactContent`).
+	   that it may overlap the ring's inner part; each title, badge row or chip
+	   row that does is marked `data-over-ring`, and fades in a backdrop
+	   (`NodeCompactContent`).
 
 	`onscroll` puts each clipping box straight back: neither is ever a scroller,
 	in the stage or as deep zoom's frame, but `overflow: hidden` only stops the
@@ -65,13 +162,13 @@
 	`Multigraph/lib/pinScroll.ts`.
 -->
 <div
+	bind:this={circleEl}
 	class="circle"
 	onscroll={(event) => pinScrollToOrigin(event.currentTarget)}
 	data-pinned={pinned ? 'true' : undefined}
 	data-tag-border={hasTagBorder ? 'true' : undefined}
 	data-details-mode={detailsMode ? 'true' : undefined}
 	data-spotlight={spotlight ? 'true' : undefined}
-	data-ring-over-base={ringOverBase ? 'true' : undefined}
 	style="--node-diameter: {diameterPx}px; --node-border-radius: {borderRadiusPx}px; --node-border-width: {borderWidthPx}px; --node-base-border-width: {contentInsetPx}px; --node-tag-border: {tagBorderBackground}; --node-spotlight-color: {spotlightColor};{surfaceBackground
 		? ` --node-surface-background: ${surfaceBackground};`
 		: ''}"

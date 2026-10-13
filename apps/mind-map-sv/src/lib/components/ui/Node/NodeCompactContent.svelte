@@ -234,21 +234,49 @@
 	}
 
 	/*
-	 * Over a ring wider than the base border (`NodeChrome` sets
-	 * `data-ring-over-base`), the title and the badge and chip rows may sit on
-	 * the coloured ring's inner part. A soft white backdrop behind each keeps
-	 * dark text readable there. On the title it is the words' own box, not the
-	 * fitted square, which spans the interior and would wash out the ring; the
-	 * spread shadow pads it without moving layout, so the fit is unchanged.
-	 * Absent at the base width, where none of this overlaps the ring and the
-	 * node draws exactly as before.
+	 * Over a ring wider than the base border, the title and the badge and chip
+	 * rows may sit on the coloured ring's inner part. Each one whose own box
+	 * actually overlaps the ring (`NodeChrome` measures it and sets
+	 * `data-over-ring`) gets a soft white backdrop that keeps dark text readable
+	 * there; one that sits inside the ring's inner edge gets nothing. On the
+	 * title it is the words' own box, not the fitted square, which spans the
+	 * interior and would wash out the ring; the spread shadow pads it without
+	 * moving layout, so the fit is unchanged.
+	 *
+	 * It fades in and out: the same background and spread shadow are always
+	 * there, fully transparent until the element is over the ring, and only
+	 * their colour transitions. Colour rather than a `::before` with opacity
+	 * because an absolutely placed pseudo-element bleeding past the words would
+	 * count as overflow in `SquareText`'s fit and change it. A transparent
+	 * background and shadow paint nothing, so at the base width the node draws
+	 * exactly as before.
 	 */
-	:global([data-ring-over-base='true']) .compact-layer :global(.title > .squareTextBody),
-	:global([data-ring-over-base='true']) .addon-badges,
-	:global([data-ring-over-base='true']) .quantities {
-		background: rgb(255 255 255 / 0.72);
-		box-shadow: 0 0 0 0.2em rgb(255 255 255 / 0.72);
+	.compact-layer :global(.title > .squareTextBody),
+	.addon-badges,
+	.quantities {
+		background-color: rgb(255 255 255 / 0);
+		box-shadow: 0 0 0 0.2em rgb(255 255 255 / 0);
 		border-radius: 0.3em;
+		transition:
+			background-color 150ms ease,
+			box-shadow 150ms ease;
+	}
+
+	/* `:global` on the attribute: `NodeChrome` sets it from script, never this
+	   template, so Svelte would prune a scoped `[data-over-ring]` as unused. */
+	.compact-layer :global(.title > .squareTextBody[data-over-ring='true']),
+	.addon-badges:global([data-over-ring='true']),
+	.quantities:global([data-over-ring='true']) {
+		background-color: rgb(255 255 255 / 0.72);
+		box-shadow: 0 0 0 0.2em rgb(255 255 255 / 0.72);
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.compact-layer :global(.title > .squareTextBody),
+		.addon-badges,
+		.quantities {
+			transition: none;
+		}
 	}
 
 	.title-input {
