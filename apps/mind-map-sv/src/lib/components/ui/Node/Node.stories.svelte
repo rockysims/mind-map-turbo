@@ -136,10 +136,8 @@
 		expect(BASE_BORDER_PX).toBe(8);
 		expect(squareRect.width).toBeCloseTo(282.8, 1);
 		expectContentInsetBy(canvasElement, BASE_BORDER_PX);
-		expect(circle).not.toHaveAttribute('data-ring-over-base');
-		const titleBody = nodePart(canvasElement, '.node .title > .squareTextBody');
-		expect(window.getComputedStyle(titleBody).backgroundColor).toBe('rgba(0, 0, 0, 0)');
-		expect(window.getComputedStyle(titleBody).boxShadow).toBe('none');
+		await settleBackdrops(canvasElement);
+		expect(backdropOf(canvasElement, TITLE_WORDS)).toEqual(NO_BACKDROP);
 	}
 
 	/** The content box is the circle inset by `insetPx` on every side. */
@@ -204,6 +202,12 @@
 
 	const SHORT_TITLE = 'Short node title goes here.';
 	const LONG_TITLE = 'Really long node title goes here. '.repeat(40);
+	/**
+	 * Short enough that its words sit well inside the inner edge of the thickest
+	 * ring. `SHORT_TITLE` is not: at the shipped 38 px font its fitted words
+	 * reach about 10 px onto an 80 px ring, and rightly get the backdrop.
+	 */
+	const CENTRED_TITLE = 'Short title';
 
 	/**
 	 * The thickest ring the shipped settings draw: the base width times
@@ -232,7 +236,7 @@
 	async function measureNode<T>(
 		canvasElement: HTMLElement,
 		props: { nodeData: NodeData; borderWidthPx?: number; quantityLabels?: string[] },
-		measure: (host: HTMLElement) => T
+		measure: (host: HTMLElement) => T | Promise<T>
 	): Promise<T> {
 		const host = document.createElement('div');
 		canvasElement.appendChild(host);
@@ -241,7 +245,7 @@
 			flushSync();
 			// SquareText fits the title in an effect; let it settle before measuring.
 			await new Promise((resolve) => requestAnimationFrame(resolve));
-			return measure(host);
+			return await measure(host);
 		} finally {
 			await unmount(instance);
 			host.remove();
@@ -281,51 +285,193 @@
 		expect(atThickest.top).toBeCloseTo(atBase.top, 1);
 		expect(atThickest.width).toBeCloseTo(atBase.width, 1);
 		expect(atThickest.height).toBeCloseTo(atBase.height, 1);
-
-		// Over the ring, the title's words get their backdrop.
-		expect(nodePart(canvasElement, '.node .circle')).toHaveAttribute('data-ring-over-base', 'true');
-		const titleBody = nodePart(canvasElement, '.node .title > .squareTextBody');
-		expect(window.getComputedStyle(titleBody).backgroundColor).toBe(BACKDROP);
 	}
 
-	const BACKDROP = 'rgba(255, 255, 255, 0.72)';
-	const NO_BACKGROUND = 'rgba(0, 0, 0, 0)';
+	/** The title's words, their own box rather than the fitted square. */
+	const TITLE_WORDS = '.node .title > .squareTextBody';
+	const BADGE_ROW = '[data-node-addon-badges]';
+	const CHIP_ROW = '[data-node-quantities]';
 
-	/** Background colour of the title's words and of the badge and chip rows. */
-	function contentBackgrounds(root: ParentNode): string[] {
-		return [
-			'.node .title > .squareTextBody',
-			'[data-node-addon-badges]',
-			'[data-node-quantities]'
-		].map((selector) => window.getComputedStyle(nodePart(root, selector)).backgroundColor);
+	const BACKDROP = 'rgba(255, 255, 255, 0.72)';
+	/** The backdrop's resting colour: present, fully transparent, painting nothing. */
+	const CLEAR = 'rgba(255, 255, 255, 0)';
+	const NO_BACKGROUND = 'rgba(0, 0, 0, 0)';
+	const ON_THE_RING = { overRing: 'true', background: BACKDROP };
+	const NO_BACKDROP = { overRing: null, background: CLEAR };
+
+	function nextFrame(): Promise<void> {
+		return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 	}
 
 	/**
-	 * The backdrop exists only where the content overlaps the ring: present on
-	 * the title, badge row and chip row of this story's thick-ringed node, and
-	 * absent from the same node drawn at the base width.
+	 * Let `NodeChrome`'s observers mark the content (they report after layout),
+	 * then let any backdrop fade they started run to its end, so the colours
+	 * read are the settled ones rather than a frame of the transition.
+	 */
+	async function settleBackdrops(root: ParentNode) {
+		await nextFrame();
+		await nextFrame();
+		const targets = [...root.querySelectorAll(`${TITLE_WORDS}, ${BADGE_ROW}, ${CHIP_ROW}`)];
+		await Promise.all(
+			targets.flatMap((el) => el.getAnimations().map((a) => a.finished.catch(() => undefined)))
+		);
+	}
+
+	/** Whether `selector` is marked as over the ring, and the backdrop colour it shows. */
+	function backdropOf(root: ParentNode, selector: string) {
+		const el = nodePart(root, selector);
+		return {
+			overRing: el.getAttribute('data-over-ring'),
+			background: window.getComputedStyle(el).backgroundColor
+		};
+	}
+
+	/**
+	 * How far the farthest corner of `selector`'s box lies from the circle's
+	 * centre, against the ring's inner edge: an independent check that each
+	 * story's case really is the one it claims, words inside the inner edge or
+	 * reaching past it.
+	 */
+	function reachPastInnerEdge(root: ParentNode, selector: string): number {
+		const circleRect = nodePart(root, '.node .circle').getBoundingClientRect();
+		const rect = nodePart(root, selector).getBoundingClientRect();
+		const cx = circleRect.left + circleRect.width / 2;
+		const cy = circleRect.top + circleRect.height / 2;
+		const farthest = Math.hypot(
+			Math.max(Math.abs(rect.left - cx), Math.abs(rect.right - cx)),
+			Math.max(Math.abs(rect.top - cy), Math.abs(rect.bottom - cy))
+		);
+		return farthest - (circleRect.width / 2 - ringWidth(root));
+	}
+
+	/**
+	 * A title short enough that its words sit well inside the inner edge of the
+	 * thickest ring: no backdrop, though the ring is far wider than the base.
+	 */
+	async function shortTitleClearOfTheRingPlayHandler(ctx: PlayArgs) {
+		await titleKeepsTheBaseInteriorPlayHandler(ctx);
+		await settleBackdrops(ctx.canvasElement);
+		expect(reachPastInnerEdge(ctx.canvasElement, TITLE_WORDS)).toBeLessThan(0);
+		expect(backdropOf(ctx.canvasElement, TITLE_WORDS)).toEqual(NO_BACKDROP);
+	}
+
+	/** A title long enough to fill the square reaches the ring, and gets the backdrop. */
+	async function longTitleOverTheRingPlayHandler(ctx: PlayArgs) {
+		await titleKeepsTheBaseInteriorPlayHandler(ctx);
+		await settleBackdrops(ctx.canvasElement);
+		expect(reachPastInnerEdge(ctx.canvasElement, TITLE_WORDS)).toBeGreaterThan(0);
+		expect(backdropOf(ctx.canvasElement, TITLE_WORDS)).toEqual(ON_THE_RING);
+	}
+
+	/**
+	 * The backdrop exists only where an element overlaps the ring: under the
+	 * thickest ring the badge and chip rows, out in the bands above and below
+	 * the title square, reach it and get one; the short title's words, near the
+	 * centre, do not. The same node at the base width shows none at all.
 	 */
 	async function backdropOnlyOverTheRingPlayHandler({ canvasElement, args }: PlayArgs) {
 		expect(ringWidth(canvasElement)).toBeCloseTo(THICKEST_BORDER_PX, 0);
-		expect(nodePart(canvasElement, '.node .circle')).toHaveAttribute('data-ring-over-base', 'true');
-		expect(contentBackgrounds(canvasElement)).toEqual([BACKDROP, BACKDROP, BACKDROP]);
+		await settleBackdrops(canvasElement);
+		expect(reachPastInnerEdge(canvasElement, TITLE_WORDS)).toBeLessThan(0);
+		expect(reachPastInnerEdge(canvasElement, BADGE_ROW)).toBeGreaterThan(0);
+		expect(reachPastInnerEdge(canvasElement, CHIP_ROW)).toBeGreaterThan(0);
+		expect(backdropOf(canvasElement, TITLE_WORDS)).toEqual(NO_BACKDROP);
+		expect(backdropOf(canvasElement, BADGE_ROW)).toEqual(ON_THE_RING);
+		expect(backdropOf(canvasElement, CHIP_ROW)).toEqual(ON_THE_RING);
 
 		const atBase = await measureNode(
 			canvasElement,
 			{ nodeData: args.nodeData, borderWidthPx: BASE_BORDER_PX, quantityLabels: QUANTITY_LABELS },
-			(host) => ({
-				overBase: nodePart(host, '.node .circle').getAttribute('data-ring-over-base'),
-				backgrounds: contentBackgrounds(host),
-				titleShadow: window.getComputedStyle(nodePart(host, '.node .title > .squareTextBody'))
-					.boxShadow
-			})
+			async (host) => {
+				await settleBackdrops(host);
+				return [TITLE_WORDS, BADGE_ROW, CHIP_ROW].map((selector) => backdropOf(host, selector));
+			}
 		);
-		expect(atBase.overBase).toBeNull();
-		expect(atBase.backgrounds).toEqual([NO_BACKGROUND, NO_BACKGROUND, NO_BACKGROUND]);
-		expect(atBase.titleShadow).toBe('none');
+		expect(atBase).toEqual([NO_BACKDROP, NO_BACKDROP, NO_BACKDROP]);
+	}
+
+	/**
+	 * A ring only a little wider than the base: the measurement runs (the ring
+	 * is past the base) but finds the badge and chip rows inside its inner edge,
+	 * so nothing gets a backdrop.
+	 */
+	async function badgesClearOfAModerateRingPlayHandler({ canvasElement }: PlayArgs) {
+		expect(ringWidth(canvasElement)).toBeCloseTo(MODERATE_BORDER_PX, 0);
+		expect(MODERATE_BORDER_PX).toBeGreaterThan(BASE_BORDER_PX);
+		await settleBackdrops(canvasElement);
+		for (const selector of [TITLE_WORDS, BADGE_ROW, CHIP_ROW]) {
+			expect(reachPastInnerEdge(canvasElement, selector)).toBeLessThan(0);
+			expect(backdropOf(canvasElement, selector)).toEqual(NO_BACKDROP);
+		}
+	}
+
+	/** Whether a `prefers-reduced-motion: reduce` rule turns `el`'s transition off. */
+	function reducedMotionDropsTransition(el: Element): boolean {
+		for (const sheet of document.styleSheets) {
+			for (const rule of sheet.cssRules) {
+				if (!(rule instanceof CSSMediaRule)) continue;
+				if (!rule.media.mediaText.includes('prefers-reduced-motion: reduce')) continue;
+				for (const inner of rule.cssRules) {
+					if (
+						inner instanceof CSSStyleRule &&
+						el.matches(inner.selectorText) &&
+						inner.style.getPropertyValue('transition-property') === 'none'
+					) {
+						return true;
+					}
+				}
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * The backdrop fades: its colour transitions over 150 ms, and a node that
+	 * mounts with its badge row on the ring runs that transition rather than
+	 * snapping. Under reduced motion a rule drops the transition.
+	 */
+	async function backdropFadesPlayHandler({ canvasElement, args }: PlayArgs) {
+		const row = nodePart(canvasElement, BADGE_ROW);
+		const style = window.getComputedStyle(row);
+		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+			expect(style.transitionProperty).toBe('none');
+		} else {
+			expect(style.transitionProperty).toBe('background-color, box-shadow');
+			expect(style.transitionDuration).toBe('0.15s, 0.15s');
+		}
+		for (const selector of [TITLE_WORDS, BADGE_ROW]) {
+			expect(reducedMotionDropsTransition(nodePart(canvasElement, selector))).toBe(true);
+		}
+
+		// A fresh node: the moment its row is marked, a colour transition runs.
+		const fading = await measureNode(
+			canvasElement,
+			{ nodeData: args.nodeData, borderWidthPx: THICKEST_BORDER_PX },
+			async (host) => {
+				const freshRow = nodePart(host, BADGE_ROW);
+				for (let i = 0; i < 10 && !freshRow.hasAttribute('data-over-ring'); i++) {
+					await nextFrame();
+				}
+				return {
+					overRing: freshRow.getAttribute('data-over-ring'),
+					transitions: freshRow
+						.getAnimations()
+						.filter((a): a is CSSTransition => a instanceof CSSTransition)
+						.map((a) => a.transitionProperty)
+						.sort()
+				};
+			}
+		);
+		expect(fading.overRing).toBe('true');
+		if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+			expect(fading.transitions).toEqual(['background-color', 'box-shadow']);
+		}
 	}
 
 	const QUANTITY_LABELS = ['k'];
+
+	/** A ring past the base whose inner edge still clears the badge and chip rows. */
+	const MODERATE_BORDER_PX = BASE_BORDER_PX * 1.5;
 
 	/**
 	 * Fill, then ring, then content: the fill is `.circle`'s own background
@@ -422,13 +568,13 @@
 	args={{
 		nodeData: {
 			id: 'node id short title thickest border',
-			title: SHORT_TITLE,
+			title: CENTRED_TITLE,
 			description: '',
 			tags: []
 		},
 		borderWidthPx: THICKEST_BORDER_PX
 	}}
-	play={titleKeepsTheBaseInteriorPlayHandler}
+	play={shortTitleClearOfTheRingPlayHandler}
 />
 
 <Story
@@ -442,15 +588,15 @@
 		},
 		borderWidthPx: THICKEST_BORDER_PX
 	}}
-	play={titleKeepsTheBaseInteriorPlayHandler}
+	play={longTitleOverTheRingPlayHandler}
 />
 
 <Story
-	name="ContentGetsABackdropOnlyOverAThickRing"
+	name="ContentGetsABackdropOnlyWhereItOverlapsAThickRing"
 	args={{
 		nodeData: {
 			id: 'node id backdrop over ring',
-			title: 'Rig measurements',
+			title: 'Rig',
 			description: '',
 			tags: [],
 			addons: { task: { done: false } }
@@ -459,6 +605,37 @@
 		quantityLabels: QUANTITY_LABELS
 	}}
 	play={backdropOnlyOverTheRingPlayHandler}
+/>
+
+<Story
+	name="BadgesInsideAModerateRingGetNoBackdrop"
+	args={{
+		nodeData: {
+			id: 'node id moderate ring',
+			title: 'Rig',
+			description: '',
+			tags: [],
+			addons: { task: { done: false } }
+		},
+		borderWidthPx: MODERATE_BORDER_PX,
+		quantityLabels: QUANTITY_LABELS
+	}}
+	play={badgesClearOfAModerateRingPlayHandler}
+/>
+
+<Story
+	name="TheBackdropFadesInAndReducedMotionDropsTheFade"
+	args={{
+		nodeData: {
+			id: 'node id backdrop fade',
+			title: 'Rig',
+			description: '',
+			tags: [],
+			addons: { task: { done: false } }
+		},
+		borderWidthPx: THICKEST_BORDER_PX
+	}}
+	play={backdropFadesPlayHandler}
 />
 
 <Story

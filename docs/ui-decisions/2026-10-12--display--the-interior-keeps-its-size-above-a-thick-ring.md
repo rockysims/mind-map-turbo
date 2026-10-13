@@ -12,3 +12,12 @@
 - Why: the ring is a reading of the node's weight and the content is the node itself; the weight should not cost the reader the title. Growing inward keeps layout, physics and hit testing untouched.
 - Pattern: none
 - Status: ruling
+
+## Addendum, 2026-10-12: the backdrop only where the words touch the ring, and it fades
+
+- Situation: point 3 shipped as "ring wider than the base → every content element gets the backdrop", so a short title whose words sat well inside the ring's inner edge still wore a white patch over plain fill.
+- Chosen (owner ruling, later the same day): the backdrop appears **only on an element whose own box actually overlaps the ring**, and it **fades in and out** (~150 ms) rather than snapping.
+  - Overlap is geometry (`Node/lib/ringLayers.ts`, `boxOverlapsRing`): the element's box, in the circle's unscaled coordinates, overlaps the band between the ring's inner edge (`radius − ring`) and the content clip (`radius − base`) — its farthest corner is past the inner edge and its nearest point is inside the clip. Never at or below the base width. The deep-zoom morph's rounded rectangle is treated as a circle of the node's radius.
+  - `NodeChrome` measures the title's words and the badge and chip rows only while the ring is wider than the base (otherwise it clears the marks and does nothing), re-measuring on ring, inset or size changes, on a resize of any of them, and when one appears or goes; each overlapping element gets `data-over-ring`. Boxes are `getBoundingClientRect` relative to the circle, divided by the circle's own on-screen scale, which holds under both the stage zoom and the deep-zoom frame's scaled compact layer.
+  - The fade is a colour transition on the element's own background and spread shadow (transparent ↔ `rgb(255 255 255 / 0.72)`), not a pseudo-element, so `SquareText`'s fit never sees new overflow. `prefers-reduced-motion: reduce` drops the transition.
+- Consequence: at the shipped 38 px font, a title of a few words (the stories' `'Short node title goes here.'`) already reaches about 10 px onto an 80 px ring and gets the backdrop; a one- or two-word title does not. At ×10 the badge and chip rows, out in the bands beyond the title square, always reach the ring; at ×1.5 they clear it.
