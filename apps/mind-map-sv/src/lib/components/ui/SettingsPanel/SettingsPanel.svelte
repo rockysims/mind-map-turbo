@@ -336,7 +336,7 @@
 		{/if}
 
 		{#if seedSaved}
-			<p class="footer-message" data-seed-saved="true">Saved as the seed for new graphs.</p>
+			<p class="footer-message" data-seed-saved="true">Saved as the settings for new graphs.</p>
 		{/if}
 	</footer>
 </section>
