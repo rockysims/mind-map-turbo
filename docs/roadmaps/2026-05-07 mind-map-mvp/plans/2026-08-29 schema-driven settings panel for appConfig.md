@@ -107,7 +107,7 @@ zero UI work — enforced by the type system, not by discipline.
 
 - **The new-graph seed is still needed.** A file only helps if the user remembers
   to load it, and graph creation has no file picker in it. So a one-click "use as
-  seed for new graphs" still writes a single sparse blob to `localStorage`.
+  settings for new graphs" still writes a single sparse blob to `localStorage`.
   Resolution order is `APP_CONFIG` → this graph's overrides. The seed is
   **stamped at creation** into a new graph's overrides rather than acting as a
   live layer, so changing it never retroactively retunes existing graphs.
@@ -506,7 +506,7 @@ every graph export already carries its settings, so the save side is free.
   of keys), _the file parsed but carried no custom settings_ (an older or
   untuned graph — this is the common confusing case, not an error), and
   unreadable. Any keys dropped by `sanitizeOverrides` are named inline.
-- **Use as seed for new graphs** — writes the current sparse overrides to a
+- **Use as settings for new graphs** — writes the current sparse overrides to a
   single `localStorage` key. `createDefaultGraph` stamps that blob into a new
   graph's overrides at creation. Sparse in, sparse out.
 

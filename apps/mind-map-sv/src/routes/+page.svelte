@@ -213,7 +213,7 @@
 				// Read once per `createGraph` call, never stored: the seed is stamped
 				// into a new graph's own overrides and never consulted again, so
 				// changing or clearing it later cannot retune a graph that already
-				// exists ("Use as seed for new graphs" writes this same key).
+				// exists ("Use as settings for new graphs" writes this same key).
 				createSettingsSeed: () =>
 					readSettingsSeed(localStorage, APP_CONFIG.persistence.storageNamespace),
 				confirmGraphImportReplace: ({ loadedGraphId }) =>

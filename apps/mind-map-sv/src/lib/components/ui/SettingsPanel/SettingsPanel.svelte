@@ -300,9 +300,11 @@
 	<footer class="footer">
 		<div class="footer-actions">
 			<button type="button" class="quiet" onclick={openImportPicker}>
-				Import from graph file…
+				Import settings from graph file…
 			</button>
-			<button type="button" class="quiet" onclick={saveSeed}> Use as seed for new graphs </button>
+			<button type="button" class="quiet" onclick={saveSeed}>
+				Use as settings for new graphs
+			</button>
 		</div>
 		<input
 			bind:this={importInputEl}

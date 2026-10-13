@@ -187,7 +187,7 @@ export type SettingsImportOutcome =
 
 /**
  * Lifts just the `settings` blob out of a `.html` or `.json` graph file's
- * text, for the settings panel's "Import from graph file…" action. There is
+ * text, for the settings panel's "Import settings from graph file…" action. There is
  * no settings file format of its own — every exported graph already carries
  * its own tuning (see the plan's "Reusing tuning across graphs" decision), so
  * this is the only way settings move between graphs.

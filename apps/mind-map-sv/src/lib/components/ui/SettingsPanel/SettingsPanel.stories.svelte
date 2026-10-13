@@ -324,7 +324,7 @@
 		const fileInput = canvasElement.querySelector('input[type="file"]');
 		if (!(fileInput instanceof HTMLInputElement)) throw new Error('File input not found');
 
-		await userEvent.click(canvas.getByRole('button', { name: 'Import from graph file…' }));
+		await userEvent.click(canvas.getByRole('button', { name: 'Import settings from graph file…' }));
 		await userEvent.upload(
 			fileInput,
 			new File(['{"settings":{}}'], 'graph.json', { type: 'application/json' })
@@ -353,7 +353,7 @@
 		const fileInput = canvasElement.querySelector('input[type="file"]');
 		if (!(fileInput instanceof HTMLInputElement)) throw new Error('File input not found');
 
-		await userEvent.click(canvas.getByRole('button', { name: 'Import from graph file…' }));
+		await userEvent.click(canvas.getByRole('button', { name: 'Import settings from graph file…' }));
 		await userEvent.upload(
 			fileInput,
 			new File(['<!doctype html>'], 'graph.html', { type: 'text/html' })
@@ -373,7 +373,7 @@
 	play={async ({ canvasElement }: PlayContext) => {
 		const canvas = within(canvasElement);
 
-		await userEvent.click(canvas.getByRole('button', { name: 'Use as seed for new graphs' }));
+		await userEvent.click(canvas.getByRole('button', { name: 'Use as settings for new graphs' }));
 
 		await expectHarnessData(canvasElement, 'saveSeedCount', '1');
 		const harness = getHarness(canvasElement);

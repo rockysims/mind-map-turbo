@@ -2,7 +2,7 @@ import type { StorageLike } from '../persistence';
 import { sanitizeOverrides, type ConfigOverrides } from './configOverrides';
 
 /**
- * The "use as seed for new graphs" feature, backed by a single sparse blob in
+ * The "use as settings for new graphs" feature, backed by a single sparse blob in
  * `localStorage`. A new graph starts untuned; if a seed exists, it is stamped
  * into that graph's overrides **at creation only** — the seed is not a live
  * layer, so writing or clearing it later never retunes a graph that already
