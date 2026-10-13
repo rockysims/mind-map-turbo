@@ -142,6 +142,16 @@
 		return circle as HTMLElement;
 	}
 
+	/**
+	 * The ring layer inside a node's `.circle`: the border is drawn here, over
+	 * the circle's fill and under its content, so its width is read here.
+	 */
+	function ringIn(circle: HTMLElement): HTMLElement {
+		const ring = circle.querySelector(':scope > .ring');
+		if (!(ring instanceof HTMLElement)) throw new Error('Ring not found');
+		return ring;
+	}
+
 	function getNodeWrapper(el: HTMLElement, nodeId: string): HTMLElement {
 		const wrapper = el.querySelector(`[data-node-id="${nodeId}"].node-wrapper`);
 		if (!wrapper) throw new Error(`Node wrapper not found for ${nodeId}`);
@@ -1583,13 +1593,13 @@
 	/**
 	 * What a node's `.circle` was told to draw and what it draws: the width set
 	 * inline by `NodeChrome` (pinned or not, there is only one), and the computed
-	 * border it actually renders.
+	 * border its ring layer actually renders.
 	 */
 	function nodeBorderWidths(el: HTMLElement, nodeId: string): { asked: number; rendered: number } {
 		const circle = getCircle(el, nodeId);
 		return {
 			asked: parseFloat(circle.style.getPropertyValue('--node-border-width')),
-			rendered: parseFloat(getComputedStyle(circle).borderTopWidth)
+			rendered: parseFloat(getComputedStyle(ringIn(circle)).borderTopWidth)
 		};
 	}
 
@@ -1766,12 +1776,33 @@
 			expect(asked * visualScale).toBeCloseTo(morph.borderWidth, 1);
 			// ...and against what it draws, the existing story's check, within the
 			// device pixel the browser's snapping takes off a fractional border.
-			const localBorder = parseFloat(getComputedStyle(inStage).borderTopWidth);
+			const localBorder = parseFloat(getComputedStyle(ringIn(inStage)).borderTopWidth);
 			expectDrawnBorder(localBorder * visualScale, morph.borderWidth);
 			// Not the unweighted default: the story would pass vacuously otherwise.
 			expect(morph.borderWidth).toBeGreaterThan(
 				APP_CONFIG.multigraph.nodeBorderWidthPx * visualScale + aboveDefaultPx
 			);
+			// The content keeps the base-width interior under the weighted ring, in
+			// the frame as on the canvas, so the handoff does not crop it.
+			const layer = getFocusLayer(canvasElement);
+			const frameContent = layer.querySelector('.circle > .content');
+			const stageContent = inStage.querySelector(':scope > .content');
+			if (!(frameContent instanceof HTMLElement) || !(stageContent instanceof HTMLElement)) {
+				throw new Error('Content box not found');
+			}
+			const frameContentRect = frameContent.getBoundingClientRect();
+			const stageContentRect = stageContent.getBoundingClientRect();
+			// Within the couple of sub-pixel px the two transform chains round apart.
+			expect(Math.abs(frameContentRect.left - stageContentRect.left)).toBeLessThan(1.5);
+			expect(Math.abs(frameContentRect.top - stageContentRect.top)).toBeLessThan(1.5);
+			expect(Math.abs(frameContentRect.width - stageContentRect.width)).toBeLessThan(1.5);
+			expect(
+				Math.abs(
+					stageContentRect.left -
+						nodeRect.left -
+						APP_CONFIG.multigraph.nodeBorderWidthPx * visualScale
+				)
+			).toBeLessThan(1);
 		};
 
 		// Entry: scrub in a little, then back to 0 while the surface is mounted.
@@ -2559,7 +2590,7 @@
 		const focusedCircleRect = focusedCircle.getBoundingClientRect();
 		expect(focusedCircleRect.width).toBeCloseTo(layerRect.width, 0);
 		expect(focusedCircleRect.height).toBeCloseTo(layerRect.height, 0);
-		expect(parseFloat(window.getComputedStyle(focusedCircle).borderWidth)).toBeCloseTo(
+		expect(parseFloat(window.getComputedStyle(ringIn(focusedCircle)).borderTopWidth)).toBeCloseTo(
 			committed.borderWidth,
 			0
 		);
@@ -2780,7 +2811,7 @@
 			expect(morph.radius).toBeCloseTo(nodeRect.width / 2, 0);
 			// Border width: compare the node's VISUAL (transform-scaled) border to
 			// the surface's derived border width.
-			const localBorder = parseFloat(window.getComputedStyle(inStage).borderTopWidth);
+			const localBorder = parseFloat(window.getComputedStyle(ringIn(inStage)).borderTopWidth);
 			const visualScale = nodeRect.width / inStage.offsetWidth;
 			expect(localBorder * visualScale).toBeCloseTo(morph.borderWidth, 0);
 			// Title text must land close to where the in-stage node drew it — a
@@ -8497,19 +8528,22 @@
 	play={async ({ canvasElement }: PlayContext) => {
 		await waitForLayout();
 		const dialog = await enterFocusOn(canvasElement, 'ai');
-		// The frame is `NodeChrome`'s `.circle`, the one bordered box of the level.
-		const frame = dialog.querySelector('.deep-zoom-layer .circle') as HTMLElement;
+		// The frame is `NodeChrome`'s `.circle`, the one bordered box of the level;
+		// the box that clips the content layers is its `.content`, inside the ring.
+		const circle = dialog.querySelector('.deep-zoom-layer .circle') as HTMLElement;
+		const frame = circle.querySelector(':scope > .content') as HTMLElement;
 		const layer = dialog.querySelector('[data-morph-layer="details"]') as HTMLElement;
 		await waitFor(() => {
 			expect(dialog.querySelector('[data-ai-workbench]')).toBeInTheDocument();
 		});
 
 		// Scroll anchoring is the other thing that moves a box nobody scrolled.
+		expect(getComputedStyle(circle).overflowAnchor).toBe('none');
 		expect(getComputedStyle(frame).overflowAnchor).toBe('none');
 
-		/** How far the content layer sits from the top of the frame that clips it. */
+		/** How far the content layer sits from the top of the frame's outer edge. */
 		const contentOffset = (): number =>
-			layer.getBoundingClientRect().top - frame.getBoundingClientRect().top;
+			layer.getBoundingClientRect().top - circle.getBoundingClientRect().top;
 		expect(contentOffset()).toBeCloseTo(0, 0);
 
 		// "It does not scroll" says nothing until there is somewhere to scroll to:
@@ -8823,7 +8857,7 @@
 		expect(widths.asked).toBeCloseTo(16, 5);
 		expectDrawnBorder(widths.rendered, widths.asked);
 		// The pin still reads as a pin: darker border, white halo.
-		expect(getComputedStyle(circle).borderTopColor).toBe('rgb(85, 85, 85)');
+		expect(getComputedStyle(ringIn(circle)).borderTopColor).toBe('rgb(85, 85, 85)');
 		expect(getComputedStyle(circle).boxShadow).toContain('rgb(255, 255, 255)');
 	}}
 />
@@ -8855,9 +8889,9 @@
 		const widths = nodeBorderWidths(canvasElement, 'big');
 		expect(widths.asked).toBeCloseTo(16, 5);
 		expectDrawnBorder(widths.rendered, widths.asked);
-		// The colour is painted into the border box, so a wider border is a wider
-		// ring: the border itself stays transparent over the gradient.
-		expect(getComputedStyle(circle).borderTopColor).toBe('rgba(0, 0, 0, 0)');
+		// The colour is painted into the ring's border box, so a wider border is a
+		// wider ring: the border itself stays transparent over the gradient.
+		expect(getComputedStyle(ringIn(circle)).borderTopColor).toBe('rgba(0, 0, 0, 0)');
 	}}
 />
 

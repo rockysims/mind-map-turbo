@@ -15,6 +15,8 @@
 		level: FocusLevel;
 		borderRadiusPx: number;
 		borderWidthPx: number;
+		/** See `FrameSnippetArgs.contentInsetPx`. */
+		contentInsetPx: number;
 		content: Snippet;
 	};
 </script>
@@ -78,6 +80,7 @@
 				level,
 				borderRadiusPx: args.borderRadiusPx,
 				borderWidthPx: args.borderWidthPx,
+				contentInsetPx: args.contentInsetPx,
 				content: args.content
 			})}
 		{/snippet}

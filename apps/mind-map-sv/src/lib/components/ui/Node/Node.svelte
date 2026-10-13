@@ -25,10 +25,11 @@
 		onTitleCommit,
 		// Chrome measurements default to the shipped constants so a story can mount
 		// a node with none of them. A parent that owns a live config (Multigraph)
-		// passes all three explicitly — a prop default is evaluated once, so it must
+		// passes all four explicitly — a prop default is evaluated once, so it must
 		// never be the path a changing value takes.
 		radiusPx = NODE_RADIUS,
 		borderWidthPx = NODE_BORDER_WIDTH,
+		baseBorderWidthPx = NODE_BORDER_WIDTH,
 		fontSizePx = NODE_TEXT_FONT_SIZE
 	}: {
 		nodeData: NodeData;
@@ -43,8 +44,13 @@
 		onTitleCommit?: (title: string) => void;
 		/** Node radius in logical pixels; the circle is drawn at twice this. */
 		radiusPx?: number;
-		/** Border width, pinned or not. */
+		/** Ring width as drawn, pinned or not: the node border width times its weight factor. */
 		borderWidthPx?: number;
+		/**
+		 * The graph's own node border width, unweighted. The content keeps the
+		 * interior this leaves, so a thicker ring grows inward underneath it.
+		 */
+		baseBorderWidthPx?: number;
 		/** Title font size inside the compact circle. */
 		fontSizePx?: number;
 	} = $props();
@@ -73,6 +79,7 @@
 		diameterPx={radiusPx * 2}
 		borderRadiusPx={radiusPx}
 		{borderWidthPx}
+		{baseBorderWidthPx}
 		pinned={nodeData.pinned ?? false}
 		hasTagBorder={borderSegments.length > 0}
 		tagBorderBackground={borderBackground}

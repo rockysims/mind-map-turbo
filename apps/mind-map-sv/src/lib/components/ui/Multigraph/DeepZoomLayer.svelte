@@ -11,6 +11,12 @@
 	export type FrameSnippetArgs = {
 		borderRadiusPx: number;
 		borderWidthPx: number;
+		/**
+		 * Where the frame must inset `content` from its outer edge: the geometry's
+		 * `contentInsetPx`, else the border width. The content layers are offset
+		 * by exactly this, so a frame that insets by anything else misplaces them.
+		 */
+		contentInsetPx: number;
 		content: Snippet;
 	};
 </script>
@@ -66,6 +72,7 @@
 
 	const geo = $derived<FrameGeometry>(geometry);
 	const borderWidthPx = $derived(geo.borderWidthPx ?? 0);
+	const contentInsetPx = $derived(geo.contentInsetPx ?? borderWidthPx);
 
 	// pointer-events: none while morphing so the underlying stage keeps getting
 	// wheel/pinch input driving the scrub; interactive only once committed —
@@ -84,7 +91,8 @@
 
 	const layerStyle = $derived(
 		`left: ${geo.x}px; top: ${geo.y}px; width: ${geo.width}px; height: ${geo.height}px;` +
-			` --deep-zoom-border-radius: ${geo.borderRadiusPx}px; --deep-zoom-border-width: ${borderWidthPx}px;`
+			` --deep-zoom-border-radius: ${geo.borderRadiusPx}px; --deep-zoom-border-width: ${borderWidthPx}px;` +
+			` --deep-zoom-content-inset: ${contentInsetPx}px;`
 	);
 </script>
 
@@ -119,9 +127,11 @@
 	<!-- `onscroll` because this box clips and must never be anywhere but its
 	     origin: see `lib/pinScroll.ts` for the blank frame that taught us an
 	     `overflow: hidden` box is still scrollable from script and from focus. -->
+	<!-- The default frame's content sits inside its own border, so the layers'
+	     offset is that border whatever the geometry says. -->
 	<div
 		class="deep-zoom-default-frame"
-		style={`border-radius: ${args.borderRadiusPx}px; border-width: ${args.borderWidthPx}px;`}
+		style={`border-radius: ${args.borderRadiusPx}px; border-width: ${args.borderWidthPx}px; --deep-zoom-content-inset: ${args.borderWidthPx}px;`}
 		onscroll={(event) => pinScrollToOrigin(event.currentTarget)}
 	>
 		{@render args.content()}
@@ -143,11 +153,17 @@
 	onwheel={(event) => onFrameWheel?.(event)}
 >
 	{#if frame}
-		{@render frame({ borderRadiusPx: geo.borderRadiusPx, borderWidthPx, content: contentLayers })}
+		{@render frame({
+			borderRadiusPx: geo.borderRadiusPx,
+			borderWidthPx,
+			contentInsetPx,
+			content: contentLayers
+		})}
 	{:else}
 		{@render defaultFrame({
 			borderRadiusPx: geo.borderRadiusPx,
 			borderWidthPx,
+			contentInsetPx,
 			content: contentLayers
 		})}
 	{/if}
@@ -185,13 +201,14 @@
 		position: absolute;
 		/* Content layers are laid out at the frame's OUTER (border-box) size —
 		   compactBasePx/detailsBaseWidthPx mirror the in-stage node's full
-		   diameter, border included — but they mount inside the bordered frame
-		   element, whose (0, 0) is the INNER padding-box corner, inset by the
-		   live border width. Without this offset the scaled layer's visual
-		   center drifts border-width px down-right of the frame's true center
-		   (and the node's on-screen title), growing as the border scales up. */
-		top: calc(-1 * var(--deep-zoom-border-width, 0px));
-		left: calc(-1 * var(--deep-zoom-border-width, 0px));
+		   diameter, border included — but they mount inside the frame's content
+		   box, whose (0, 0) is inset from the outer corner by the live content
+		   inset (the border width, or a node's base border width under a
+		   weighted ring). Without this offset the scaled layer's visual center
+		   drifts that many px down-right of the frame's true center (and the
+		   node's on-screen title), growing as the inset scales up. */
+		top: calc(-1 * var(--deep-zoom-content-inset, 0px));
+		left: calc(-1 * var(--deep-zoom-content-inset, 0px));
 		transform-origin: top left;
 		will-change: transform, opacity;
 	}

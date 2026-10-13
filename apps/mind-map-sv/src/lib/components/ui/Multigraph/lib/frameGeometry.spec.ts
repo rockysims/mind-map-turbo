@@ -92,7 +92,8 @@ describe('frameGeometry', () => {
 			width: fillRect.width,
 			height: fillRect.height,
 			borderRadiusPx: DETAILS_RADIUS,
-			borderWidthPx: DETAILS_BORDER
+			borderWidthPx: DETAILS_BORDER,
+			contentInsetPx: DETAILS_BORDER
 		});
 	});
 
@@ -117,5 +118,35 @@ describe('frameGeometry', () => {
 		const geometry = frameGeometry(layout, view, fillRect, 0, { nodeBorderWidthPx: 12 });
 
 		expect(geometry.borderWidthPx).toBeCloseTo(12 * 0.5);
+	});
+
+	describe('content inset under a weighted ring', () => {
+		const view: FrameViewState = { pan: { x: 0, y: 0 }, scale: 1, stageRect };
+		const layout: NodeFrameLayout = { center: { x: 0, y: 0 }, radius: 100, nodeScale: 0.5 };
+		// A ×10 ring on an 8 px base: the content keeps the 8 px interior.
+		const options = { nodeBorderWidthPx: 80, nodeBaseBorderWidthPx: 8 };
+
+		it('starts at the base width while the ring starts at the weighted width', () => {
+			const geometry = frameGeometry(layout, view, fillRect, 0, options);
+			expect(geometry.borderWidthPx).toBeCloseTo(80 * 0.5);
+			expect(geometry.contentInsetPx).toBeCloseTo(8 * 0.5);
+		});
+
+		it('meets the ring at the details border at progress 1', () => {
+			const geometry = frameGeometry(layout, view, fillRect, 1, options);
+			expect(geometry.borderWidthPx).toBeCloseTo(DETAILS_BORDER);
+			expect(geometry.contentInsetPx).toBeCloseTo(DETAILS_BORDER);
+		});
+
+		it('interpolates on the same curve as the ring', () => {
+			const geometry = frameGeometry(layout, view, fillRect, 0.5, options);
+			expect(geometry.borderWidthPx).toBeCloseTo((80 * 0.5 + DETAILS_BORDER) / 2);
+			expect(geometry.contentInsetPx).toBeCloseTo((8 * 0.5 + DETAILS_BORDER) / 2);
+		});
+
+		it('equals the ring when no base is passed', () => {
+			const geometry = frameGeometry(layout, view, fillRect, 0.3, { nodeBorderWidthPx: 12 });
+			expect(geometry.contentInsetPx).toBeCloseTo(geometry.borderWidthPx);
+		});
 	});
 });

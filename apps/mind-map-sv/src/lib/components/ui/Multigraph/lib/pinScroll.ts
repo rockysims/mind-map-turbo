@@ -2,7 +2,8 @@
  * Keeping a clipping box at its origin.
  *
  * The deep-zoom frame clips: `.deep-zoom-default-frame`, `NodeChrome`'s
- * `.circle` when it is the frame, the image frame beside it, and the frozen
+ * `.circle` and the `.content` box inside its ring when it is the frame, the
+ * image frame beside it, and the frozen
  * level under the active one are all `overflow: hidden` boxes whose content
  * layers are absolutely positioned inside them and scaled by a transform. None
  * of them is a scroller, and none of them has a scrollbar — but

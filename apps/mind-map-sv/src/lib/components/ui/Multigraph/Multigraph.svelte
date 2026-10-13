@@ -544,6 +544,8 @@
 	const nodeChromeTunables = $derived({
 		radiusPx: nodeRadiusPx,
 		borderWidthPx: nodeBorderWidthPx,
+		/** Never weighted: the content keeps this interior under any ring. */
+		baseBorderWidthPx: nodeBorderWidthPx,
 		fontSizePx: nodeTextFontSizePx
 	});
 	/**
@@ -2277,7 +2279,8 @@
 		return frameGeometry(layout, view, fill, level.morphProgress, {
 			targetRadiusPx: focusDetailsCornerRadiusPx,
 			targetBorderWidthPx: focusDetailsBorderWidthPx,
-			nodeBorderWidthPx: chrome.borderWidthPx
+			nodeBorderWidthPx: chrome.borderWidthPx,
+			nodeBaseBorderWidthPx: chrome.baseBorderWidthPx
 		});
 	}
 
@@ -3851,7 +3854,13 @@
 		/>
 	{/if}
 
-	{#snippet focusFrame({ level, borderRadiusPx, borderWidthPx, content }: StackFrameArgs)}
+	{#snippet focusFrame({
+		level,
+		borderRadiusPx,
+		borderWidthPx,
+		contentInsetPx,
+		content
+	}: StackFrameArgs)}
 		{#if level.subjectKind === 'image'}
 			<!-- Pinned like the node frame beside it: a clipping box that is scrolled
 			     takes the whole level off screen (`lib/pinScroll.ts`). -->
@@ -3870,6 +3879,7 @@
 					diameterPx={nodeDiameterPx}
 					{borderRadiusPx}
 					{borderWidthPx}
+					baseBorderWidthPx={contentInsetPx}
 					pinned={frameNode.pinned ?? false}
 					hasTagBorder={segments.length > 0}
 					tagBorderBackground={tagBorderBackground(segments)}
@@ -4214,7 +4224,8 @@
 	}
 
 	/* NodeChrome's `.circle` is the single bordered box; its absolutely
-	   positioned content layers anchor to it. */
+	   positioned content layers anchor to its `.content` box, inset by the
+	   frame's content inset. */
 	.focus-root :global(.deep-zoom-layer .circle) {
 		position: relative;
 		box-shadow: none;

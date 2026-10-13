@@ -130,8 +130,14 @@
 
 <div class="squareTextContainer">
 	<div bind:this={squareTextRef} class={['squareText', ...classList]}>
+		<!--
+			`.squareTextBody` is the text's own box, the flex item either way (a
+			bare text node was an anonymous one, so the fit is unchanged). It is
+			what a caller styles to put something tight behind the words alone —
+			the node's backdrop over a thick ring — rather than the fitted square.
+		-->
 		<!-- prettier-ignore -->
-		{#if hasMath}<MathText {text} singleLine />{:else}{plainText}{/if}
+		{#if hasMath}<MathText {text} singleLine classList={['squareTextBody']} />{:else}<span class="squareTextBody">{plainText}</span>{/if}
 	</div>
 </div>
 

@@ -36,13 +36,24 @@ export interface FrameGeometry {
 	height: number;
 	borderRadiusPx: number;
 	borderWidthPx: number;
+	/**
+	 * How far the frame insets its content from the outer edge, when that is not
+	 * `borderWidthPx`. A node's content keeps the interior at the graph's base
+	 * border width while a weighted ring grows inward under it, so the two differ
+	 * until they meet at the details border. Absent means "the border width",
+	 * which is what a frame with no weighted ring (an image) does.
+	 */
+	contentInsetPx?: number;
 }
 
 interface FrameGeometryOptions {
 	ease?: (progress: number) => number;
 	targetRadiusPx?: number;
 	targetBorderWidthPx?: number;
+	/** The node's ring as drawn: the base width times its border-weight factor. */
 	nodeBorderWidthPx?: number;
+	/** The unweighted node border width the content is inset by; defaults to the ring. */
+	nodeBaseBorderWidthPx?: number;
 }
 
 /**
@@ -50,8 +61,9 @@ interface FrameGeometryOptions {
  * never measured) through `interpolateMorph` toward `fillRect`.
  *
  * At progress 0 the result equals the node's derived on-screen rect, its
- * source circle radius, and its on-screen border width. At progress 1 it
- * equals `fillRect` with the details corner radius and details border width.
+ * source circle radius, its on-screen border width and its on-screen content
+ * inset. At progress 1 it equals `fillRect` with the details corner radius,
+ * and both the border and the content inset at the details border width.
  */
 export function frameGeometry(
 	nodeLayout: NodeFrameLayout,
@@ -90,6 +102,17 @@ export function frameGeometry(
 		sourceBorderWidthPx,
 		targetBorderWidthPx
 	});
+	// The content inset rides the same curve from the node's base width to the
+	// same details border, so it meets the ring exactly where the ring stops
+	// being weighted.
+	const sourceContentInsetPx =
+		(options.nodeBaseBorderWidthPx ?? baseBorderWidthPx) * sourceVisualScale;
+	const insetMorph = interpolateMorph(sourceRect, fillRect, progress, {
+		ease: options.ease,
+		targetRadiusPx: options.targetRadiusPx,
+		sourceBorderWidthPx: sourceContentInsetPx,
+		targetBorderWidthPx
+	});
 
 	return {
 		x: morph.x,
@@ -99,6 +122,7 @@ export function frameGeometry(
 		borderRadiusPx: morph.borderRadiusPx,
 		// interpolateMorph always returns borderWidthPx here since both ends are
 		// supplied; the fallback only satisfies the optional type.
-		borderWidthPx: morph.borderWidthPx ?? sourceBorderWidthPx
+		borderWidthPx: morph.borderWidthPx ?? sourceBorderWidthPx,
+		contentInsetPx: insetMorph.borderWidthPx ?? sourceContentInsetPx
 	};
 }

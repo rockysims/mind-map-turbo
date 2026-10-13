@@ -1,5 +1,6 @@
 <script module lang="ts">
 	import { defineMeta } from '@storybook/addon-svelte-csf';
+	import { flushSync, mount, unmount } from 'svelte';
 	import { expect } from 'storybook/test';
 
 	import { APP_CONFIG } from '$lib/appConfig';
@@ -29,6 +30,24 @@
 		canvasElement: HTMLElement;
 		args: { nodeData: NodeData };
 	};
+
+	/** The graph's own node border width: the ring a node with no weight draws. */
+	const BASE_BORDER_PX = APP_CONFIG.multigraph.nodeBorderWidthPx;
+
+	function nodePart(root: ParentNode, selector: string): HTMLElement {
+		const el = root.querySelector(selector);
+		if (!(el instanceof HTMLElement)) throw new Error(`${selector} not found`);
+		return el;
+	}
+
+	/** The ring is its own layer inside `.circle`, so its width is read there. */
+	function ringOf(root: ParentNode): HTMLElement {
+		return nodePart(root, '.node .circle > .ring');
+	}
+
+	function ringWidth(root: ParentNode): number {
+		return parseFloat(window.getComputedStyle(ringOf(root)).borderTopWidth);
+	}
 
 	async function playHandler({ canvasElement, args }: PlayArgs) {
 		// Get the node element and its children
@@ -108,8 +127,29 @@
 		const radiusValue = parseFloat(borderRadius);
 		const radiusPercent = radiusValue / width;
 		// Pinned or not, a node draws the one configured border width.
-		expect(parseFloat(circleStyles.borderWidth)).toBe(APP_CONFIG.multigraph.nodeBorderWidthPx);
+		expect(ringWidth(canvasElement)).toBe(BASE_BORDER_PX);
 		expect(radiusPercent).toBeGreaterThanOrEqual(0.5);
+
+		// Test 5: at the base width the layered chrome draws what the single
+		// bordered box did — an 8 px ring, the content in the 8 px interior, the
+		// title square at the outer diameter over √2, and no backdrop.
+		expect(BASE_BORDER_PX).toBe(8);
+		expect(squareRect.width).toBeCloseTo(282.8, 1);
+		expectContentInsetBy(canvasElement, BASE_BORDER_PX);
+		expect(circle).not.toHaveAttribute('data-ring-over-base');
+		const titleBody = nodePart(canvasElement, '.node .title > .squareTextBody');
+		expect(window.getComputedStyle(titleBody).backgroundColor).toBe('rgba(0, 0, 0, 0)');
+		expect(window.getComputedStyle(titleBody).boxShadow).toBe('none');
+	}
+
+	/** The content box is the circle inset by `insetPx` on every side. */
+	function expectContentInsetBy(root: ParentNode, insetPx: number) {
+		const circleRect = nodePart(root, '.node .circle').getBoundingClientRect();
+		const contentRect = nodePart(root, '.node .circle > .content').getBoundingClientRect();
+		expect(contentRect.left - circleRect.left).toBeCloseTo(insetPx, 1);
+		expect(contentRect.top - circleRect.top).toBeCloseTo(insetPx, 1);
+		expect(contentRect.width).toBeCloseTo(circleRect.width - 2 * insetPx, 1);
+		expect(contentRect.height).toBeCloseTo(circleRect.height - 2 * insetPx, 1);
 	}
 
 	function badges(canvasElement: HTMLElement): HTMLElement[] {
@@ -166,39 +206,155 @@
 	const LONG_TITLE = 'Really long node title goes here. '.repeat(40);
 
 	/**
-	 * The thickest border factor these stories promise stays readable. It does
-	 * not track `borderWeight.maxFactor`: the shipped cap is higher (×10 since the
-	 * 2026-10-12 defaults ruling, 80 px a side on a 200 px radius), so a node at
-	 * the cap is mostly border and its content cannot fit. Past roughly ×2.2 the
-	 * badge rows already clip; ×3 is where the title alone still fits.
+	 * The thickest ring the shipped settings draw: the base width times
+	 * `borderWeight.maxFactor` (×10, 80 px a side on a 200 px radius). The ring
+	 * grows inward under the content, which keeps the base-width interior, so
+	 * the title is as readable here as on a plain node.
 	 */
-	const READABLE_BORDER_FACTOR = 3;
-	const READABLE_BORDER_PX = APP_CONFIG.multigraph.nodeBorderWidthPx * READABLE_BORDER_FACTOR;
+	const THICKEST_BORDER_PX = BASE_BORDER_PX * APP_CONFIG.multigraph.borderWeight.maxFactor;
+
+	/** The rect of `selector`, relative to its node's circle. */
+	function rectInCircle(root: ParentNode, selector: string) {
+		const circleRect = nodePart(root, '.node .circle').getBoundingClientRect();
+		const rect = nodePart(root, selector).getBoundingClientRect();
+		return {
+			left: rect.left - circleRect.left,
+			top: rect.top - circleRect.top,
+			width: rect.width,
+			height: rect.height
+		};
+	}
 
 	/**
-	 * A border drawn inside the circle eats into the content area, so at the
-	 * readable border the title must still sit wholly inside the padding box:
-	 * the circle's rect inset by the rendered border on every side.
+	 * Mount a second node beside the story's own, measure it, and remove it, so
+	 * one play function can compare two border widths side by side.
 	 */
-	async function titleInsideReadableBorderPlayHandler({ canvasElement, args }: PlayArgs) {
-		const circle = canvasElement.querySelector('.node .circle');
-		const titleEl = canvasElement.querySelector('.node .title');
-		if (!(circle instanceof HTMLElement)) throw new Error('Circle not found');
-		if (!(titleEl instanceof HTMLElement)) throw new Error('Title not found');
+	async function measureNode<T>(
+		canvasElement: HTMLElement,
+		props: { nodeData: NodeData; borderWidthPx?: number; quantityLabels?: string[] },
+		measure: (host: HTMLElement) => T
+	): Promise<T> {
+		const host = document.createElement('div');
+		canvasElement.appendChild(host);
+		const instance = mount(Node, { target: host, props });
+		try {
+			flushSync();
+			// SquareText fits the title in an effect; let it settle before measuring.
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+			return measure(host);
+		} finally {
+			await unmount(instance);
+			host.remove();
+		}
+	}
 
-		const border = parseFloat(window.getComputedStyle(circle).borderTopWidth);
-		expect(border).toBeCloseTo(READABLE_BORDER_PX, 0);
+	/**
+	 * At the thickest ring the title is still wholly visible inside the
+	 * base-width interior, and its box is exactly the box it has on a node with
+	 * the base ring: the ring took nothing from it.
+	 */
+	async function titleKeepsTheBaseInteriorPlayHandler({ canvasElement, args }: PlayArgs) {
+		expect(ringWidth(canvasElement)).toBeCloseTo(THICKEST_BORDER_PX, 0);
 
+		const titleEl = nodePart(canvasElement, '.node .title');
 		expect(titleEl).toBeVisible();
 		expect(titleEl.textContent).toBe(args.nodeData.title);
 
-		const circleRect = circle.getBoundingClientRect();
+		// The content keeps the interior at the base width, not the ring's.
+		expectContentInsetBy(canvasElement, BASE_BORDER_PX);
+		const contentRect = nodePart(canvasElement, '.node .circle > .content').getBoundingClientRect();
 		const titleRect = titleEl.getBoundingClientRect();
 		const tolerance = 1;
-		expect(titleRect.left).toBeGreaterThanOrEqual(circleRect.left + border - tolerance);
-		expect(titleRect.right).toBeLessThanOrEqual(circleRect.right - border + tolerance);
-		expect(titleRect.top).toBeGreaterThanOrEqual(circleRect.top + border - tolerance);
-		expect(titleRect.bottom).toBeLessThanOrEqual(circleRect.bottom - border + tolerance);
+		expect(titleRect.left).toBeGreaterThanOrEqual(contentRect.left - tolerance);
+		expect(titleRect.right).toBeLessThanOrEqual(contentRect.right + tolerance);
+		expect(titleRect.top).toBeGreaterThanOrEqual(contentRect.top - tolerance);
+		expect(titleRect.bottom).toBeLessThanOrEqual(contentRect.bottom + tolerance);
+
+		// Unchanged from the base ring, to the sub-pixel.
+		const atThickest = rectInCircle(canvasElement, '.node .title');
+		const atBase = await measureNode(
+			canvasElement,
+			{ nodeData: args.nodeData, borderWidthPx: BASE_BORDER_PX },
+			(host) => rectInCircle(host, '.node .title')
+		);
+		expect(atThickest.left).toBeCloseTo(atBase.left, 1);
+		expect(atThickest.top).toBeCloseTo(atBase.top, 1);
+		expect(atThickest.width).toBeCloseTo(atBase.width, 1);
+		expect(atThickest.height).toBeCloseTo(atBase.height, 1);
+
+		// Over the ring, the title's words get their backdrop.
+		expect(nodePart(canvasElement, '.node .circle')).toHaveAttribute('data-ring-over-base', 'true');
+		const titleBody = nodePart(canvasElement, '.node .title > .squareTextBody');
+		expect(window.getComputedStyle(titleBody).backgroundColor).toBe(BACKDROP);
+	}
+
+	const BACKDROP = 'rgba(255, 255, 255, 0.72)';
+	const NO_BACKGROUND = 'rgba(0, 0, 0, 0)';
+
+	/** Background colour of the title's words and of the badge and chip rows. */
+	function contentBackgrounds(root: ParentNode): string[] {
+		return [
+			'.node .title > .squareTextBody',
+			'[data-node-addon-badges]',
+			'[data-node-quantities]'
+		].map((selector) => window.getComputedStyle(nodePart(root, selector)).backgroundColor);
+	}
+
+	/**
+	 * The backdrop exists only where the content overlaps the ring: present on
+	 * the title, badge row and chip row of this story's thick-ringed node, and
+	 * absent from the same node drawn at the base width.
+	 */
+	async function backdropOnlyOverTheRingPlayHandler({ canvasElement, args }: PlayArgs) {
+		expect(ringWidth(canvasElement)).toBeCloseTo(THICKEST_BORDER_PX, 0);
+		expect(nodePart(canvasElement, '.node .circle')).toHaveAttribute('data-ring-over-base', 'true');
+		expect(contentBackgrounds(canvasElement)).toEqual([BACKDROP, BACKDROP, BACKDROP]);
+
+		const atBase = await measureNode(
+			canvasElement,
+			{ nodeData: args.nodeData, borderWidthPx: BASE_BORDER_PX, quantityLabels: QUANTITY_LABELS },
+			(host) => ({
+				overBase: nodePart(host, '.node .circle').getAttribute('data-ring-over-base'),
+				backgrounds: contentBackgrounds(host),
+				titleShadow: window.getComputedStyle(nodePart(host, '.node .title > .squareTextBody'))
+					.boxShadow
+			})
+		);
+		expect(atBase.overBase).toBeNull();
+		expect(atBase.backgrounds).toEqual([NO_BACKGROUND, NO_BACKGROUND, NO_BACKGROUND]);
+		expect(atBase.titleShadow).toBe('none');
+	}
+
+	const QUANTITY_LABELS = ['k'];
+
+	/**
+	 * Fill, then ring, then content: the fill is `.circle`'s own background
+	 * under everything (where a picture background would go), the ring is a
+	 * see-through-centred layer above it, and the content is stacked above the
+	 * ring so a thick ring runs underneath the title rather than over it.
+	 */
+	async function layerOrderPlayHandler({ canvasElement }: PlayArgs) {
+		const circle = nodePart(canvasElement, '.node .circle');
+		const ring = ringOf(canvasElement);
+		const content = nodePart(canvasElement, '.node .circle > .content');
+		expect([...circle.children]).toEqual([ring, content]);
+
+		const circleStyle = window.getComputedStyle(circle);
+		const ringStyle = window.getComputedStyle(ring);
+		const contentStyle = window.getComputedStyle(content);
+		// The fill paints the whole circle, the ring's band included.
+		expect(circleStyle.backgroundColor).toBe('rgb(204, 204, 204)');
+		expect(circleStyle.backgroundClip).toBe('border-box');
+		expect(parseFloat(circleStyle.borderTopWidth)).toBe(0);
+		expect(circleStyle.isolation).toBe('isolate');
+		// The ring covers the whole circle and is see-through inside its band.
+		expect(ringStyle.backgroundColor).toBe(NO_BACKGROUND);
+		expect(ringStyle.position).toBe('absolute');
+		expect(ring.getBoundingClientRect().width).toBeCloseTo(circle.getBoundingClientRect().width, 1);
+		expect(ringStyle.pointerEvents).toBe('none');
+		// The content is above the ring, by DOM order and by z-index.
+		expect(contentStyle.position).toBe('absolute');
+		expect(Number(contentStyle.zIndex)).toBeGreaterThan(Number(ringStyle.zIndex));
 	}
 
 	async function pinnedClosedPlayHandler(ctx: PlayArgs) {
@@ -207,10 +363,7 @@
 		const node = ctx.canvasElement.querySelector('.node');
 		expect(node).toHaveAttribute('data-pinned', 'true');
 
-		const circle = ctx.canvasElement.querySelector('.node .circle');
-		expect(circle).toBeInTheDocument();
-		const circleStyles = window.getComputedStyle(circle as HTMLElement);
-		expect(parseFloat(circleStyles.borderWidth)).toBe(APP_CONFIG.multigraph.nodeBorderWidthPx);
+		expect(ringWidth(ctx.canvasElement)).toBe(BASE_BORDER_PX);
 	}
 
 	/** The width a pinned node is handed, distinct from the shipped default. */
@@ -227,10 +380,10 @@
 		expect(circle.style.getPropertyValue('--node-border-width')).toBe(
 			`${PINNED_CUSTOM_BORDER_PX}px`
 		);
-		const styles = window.getComputedStyle(circle);
-		expect(parseFloat(styles.borderTopWidth)).toBe(PINNED_CUSTOM_BORDER_PX);
-		expect(styles.borderTopColor).toBe('rgb(85, 85, 85)');
-		expect(styles.boxShadow).toContain('rgb(255, 255, 255)');
+		const ringStyles = window.getComputedStyle(ringOf(canvasElement));
+		expect(parseFloat(ringStyles.borderTopWidth)).toBe(PINNED_CUSTOM_BORDER_PX);
+		expect(ringStyles.borderTopColor).toBe('rgb(85, 85, 85)');
+		expect(window.getComputedStyle(circle).boxShadow).toContain('rgb(255, 255, 255)');
 	}
 </script>
 
@@ -265,31 +418,61 @@
 />
 
 <Story
-	name="ShortTitleStaysInsideTheCircleAtAReadableBorder"
+	name="ShortTitleStaysInsideTheCircleAtTheThickestBorder"
 	args={{
 		nodeData: {
-			id: 'node id short title readable border',
+			id: 'node id short title thickest border',
 			title: SHORT_TITLE,
 			description: '',
 			tags: []
 		},
-		borderWidthPx: READABLE_BORDER_PX
+		borderWidthPx: THICKEST_BORDER_PX
 	}}
-	play={titleInsideReadableBorderPlayHandler}
+	play={titleKeepsTheBaseInteriorPlayHandler}
 />
 
 <Story
-	name="LongTitleStaysInsideTheCircleAtAReadableBorder"
+	name="LongTitleStaysInsideTheCircleAtTheThickestBorder"
 	args={{
 		nodeData: {
-			id: 'node id long title readable border',
+			id: 'node id long title thickest border',
 			title: LONG_TITLE,
 			description: '',
 			tags: []
 		},
-		borderWidthPx: READABLE_BORDER_PX
+		borderWidthPx: THICKEST_BORDER_PX
 	}}
-	play={titleInsideReadableBorderPlayHandler}
+	play={titleKeepsTheBaseInteriorPlayHandler}
+/>
+
+<Story
+	name="ContentGetsABackdropOnlyOverAThickRing"
+	args={{
+		nodeData: {
+			id: 'node id backdrop over ring',
+			title: 'Rig measurements',
+			description: '',
+			tags: [],
+			addons: { task: { done: false } }
+		},
+		borderWidthPx: THICKEST_BORDER_PX,
+		quantityLabels: QUANTITY_LABELS
+	}}
+	play={backdropOnlyOverTheRingPlayHandler}
+/>
+
+<Story
+	name="TheFillLiesUnderTheRingAndTheRingUnderTheContent"
+	args={{
+		nodeData: {
+			id: 'node id layer order',
+			title: 'Layered node',
+			description: '',
+			tags: []
+		},
+		borderWidthPx: THICKEST_BORDER_PX
+	}}
+	play={layerOrderPlayHandler}
 />
 
 <Story

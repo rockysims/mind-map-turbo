@@ -233,6 +233,24 @@
 		color: #64748b;
 	}
 
+	/*
+	 * Over a ring wider than the base border (`NodeChrome` sets
+	 * `data-ring-over-base`), the title and the badge and chip rows may sit on
+	 * the coloured ring's inner part. A soft white backdrop behind each keeps
+	 * dark text readable there. On the title it is the words' own box, not the
+	 * fitted square, which spans the interior and would wash out the ring; the
+	 * spread shadow pads it without moving layout, so the fit is unchanged.
+	 * Absent at the base width, where none of this overlaps the ring and the
+	 * node draws exactly as before.
+	 */
+	:global([data-ring-over-base='true']) .compact-layer :global(.title > .squareTextBody),
+	:global([data-ring-over-base='true']) .addon-badges,
+	:global([data-ring-over-base='true']) .quantities {
+		background: rgb(255 255 255 / 0.72);
+		box-shadow: 0 0 0 0.2em rgb(255 255 255 / 0.72);
+		border-radius: 0.3em;
+	}
+
 	.title-input {
 		width: 100%;
 		font-weight: bold;
