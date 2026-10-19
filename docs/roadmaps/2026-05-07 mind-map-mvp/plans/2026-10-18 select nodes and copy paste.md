@@ -7,9 +7,10 @@
 mutations), [milestone 12](../milestones/12-undo-and-redo.md) (history) and the
 [import-and-merge plan](2026-08-29%20import%20a%20graph%20and%20merge%20nodes%20by%20hand.md)
 (folding one graph into another).
-**Status:** executing — the owner ruled on every open question on 2026-10-18;
-the four rulings that changed or added UI behaviour are filed as
-`docs/ui-decisions/2026-10-18--*.md`.
+**Status:** done — all nine tasks landed on `feature/node-selection-copy-paste`
+on 2026-10-18 with the full gates green on each; the four rulings that
+changed or added UI behaviour are filed as `docs/ui-decisions/2026-10-18--*.md`.
+Still open: the phone check and a Safari check (see Notes).
 **Total estimated effort:** L
 
 ## Summary
@@ -659,3 +660,23 @@ T09 all edit `Multigraph.svelte` and are strictly sequential for that reason.
   box (over centre-inside), warn-on-paste-above-threshold with every
   attachment carried (over a copy-side cap), group drag in scope (over a
   follow-up). Everything else as recommended.
+- 2026-10-18 (close-out): desktop smoke test in the in-app browser against
+  the dev server, with real pointer input where the tool allows it. A
+  double-click-drag on empty canvas boxed exactly the two nodes under it (count
+  "2 selected", names ", selected", no pan); "Paste here" from the background
+  menu, opened by a real right-click, landed two new nodes centred on the
+  press, the pinless copy arrived pinned, the arrivals became the selection and
+  the toolbar read "Undo paste 2 nodes"; the same menu with nothing copied said
+  "Nothing to paste."; a real drag of one pasted node carried both by the same
+  delta and left history alone; the Delete key removed both ("Undo delete 2
+  nodes") and a real click on Undo brought them back; Escape cleared. The
+  keyboard copy fired through a dispatched `copy` event, because the browser
+  pane delivers Cmd+C over the debugging protocol without the browser's own
+  copy command, so no real-key copy or paste could be exercised there; the T05
+  agent's Playwright probe did see real Cmd/Ctrl+C and X fire the events in
+  headless Chromium. Not done: a real phone (double-tap-drag, hold menus) and
+  Safari (`beforecopy`/`beforecut`/`beforepaste`, the activation rule for the
+  menu's async write). Both are the owner's to run; nothing else is pending.
+- 2026-10-18 (close-out): what the work found and left is in `docs/debt/`
+  under this date — the outcome notice overwritten by the save status half a
+  second after an edit is the one most worth paying first.
