@@ -76,6 +76,16 @@
 	 */
 	const COPY_FAILED_NOTICE = 'Copy failed. Try again.';
 
+	/**
+	 * What "Paste here" says when the clipboard holds no nodes it can paste. The
+	 * second sentence also covers the case the canvas cannot tell apart from an
+	 * empty clipboard: a browser that refused the menu's read, where the keyboard
+	 * paste still goes through. Measured to fit the toolbar's 12rem notice column
+	 * on one line (185px of 192px); "Copy nodes first, or press Cmd/Ctrl+V." ran
+	 * to 233px and would have wrapped.
+	 */
+	const NOTHING_TO_PASTE_NOTICE = 'Nothing to paste. Copy nodes or try Cmd/Ctrl+V.';
+
 	/** "1 node", "3 nodes": a count as the notices say it. */
 	function nodeCountText(count: number): string {
 		return count === 1 ? '1 node' : `${count} nodes`;
@@ -91,9 +101,11 @@
 	import DuplicateEdgeDialog from './DuplicateEdgeDialog.svelte';
 	import GraphQueryPanel from './GraphQueryPanel.svelte';
 	import MergeConfirmDialog from './MergeConfirmDialog.svelte';
+	import PasteSizeConfirmDialog from './PasteSizeConfirmDialog.svelte';
 	import NodeDetailsContent from './NodeDetailsContent.svelte';
 	import AiNodeContent from './AiNodeContent.svelte';
 	import NodeActionMenu from './NodeActionMenu.svelte';
+	import BackgroundActionMenu from './BackgroundActionMenu.svelte';
 	import NavBreadcrumbs from './NavBreadcrumbs.svelte';
 	import { mathPlainText } from '../MathText/lib/mathPlainText';
 	import type { QuantitySymbol } from '../MathText/lib/mathSymbols';
@@ -109,7 +121,8 @@
 	import type { PyExecutor } from '$lib/ai/pyExecutor';
 	import type { GraphAssetStore } from '$lib/assets/assetStore';
 	import { tombstoneAsset } from '$lib/assets/assetTrash';
-	import type { GraphFileEmbeddedAsset } from '$lib/graphFile';
+	import { base64ToBlob } from '$lib/assets/assetEncoding';
+	import type { GraphFileDocument, GraphFileEmbeddedAsset } from '$lib/graphFile';
 	import { prefersReducedMotion } from '$lib/reducedMotion';
 	import { collectAiAncestors } from './lib/aiAncestry';
 	import { collectAiInputs } from './lib/aiInputs';
@@ -213,13 +226,22 @@
 	import { LayoutRuntime } from './lib/layoutRuntime.svelte.js';
 	import { TransientRevealController } from './lib/transientReveal.svelte.js';
 	import { SelectionController } from './lib/selectionController.svelte.js';
-	import { inducedSubgraph, nodeIdsInScreenRect } from './lib/selection.js';
 	import {
+		inducedSubgraph,
+		nodeIdsInScreenRect,
+		pastePlacement,
+		withSeededPinIfPinless
+	} from './lib/selection.js';
+	import {
+		decodeNodeClipboard,
 		embeddedAssetsForGraph,
 		encodeNodeClipboard,
+		newAttachmentBytes,
 		systemClipboard,
 		type ClipboardPort
 	} from './lib/nodeClipboard.js';
+	import { importGraphData } from './lib/graphImport.js';
+	import { formatByteSize } from './lib/byteSize.js';
 	import { navBreadcrumbs } from './lib/navStack.js';
 	import { externalGraphSyncToken } from './lib/graphSync.js';
 	import type { EntryGestureDirection } from './lib/entryGestureGate.js';
@@ -293,7 +315,7 @@
 	import { DEFAULT_MAX_SCALE, DEFAULT_MIN_SCALE } from './lib/graphMath.js';
 	import type { Rect } from './lib/zoomBoundary.js';
 	import type { StageRect } from './lib/stageCoordinates.js';
-	import { hasSize, usableStageRect } from './lib/stageCoordinates.js';
+	import { clientPointToGraphPoint, hasSize, usableStageRect } from './lib/stageCoordinates.js';
 
 	const CENTERED_POSITION: Point = { x: 0, y: 0 };
 
@@ -304,6 +326,25 @@
 	type ImportRevealPursuit = RevealPursuit & {
 		nodeId: string;
 		lastTarget: RevealCircle;
+	};
+
+	/**
+	 * Everything a paste commits, worked out before anything is written: the
+	 * incoming graph and where it lands, and the attachments the store lacks.
+	 * The store and scope are the ones the size check read, so a confirmed paste
+	 * writes where the check looked.
+	 */
+	type PastePlan = {
+		/** The pasted graph, pin-seeded, in its own coordinates. */
+		incoming: MultigraphData;
+		/** The one translation that centres it on the anchor. */
+		offset: Point;
+		/** Embedded attachments not stored under `scope` yet, one per id. */
+		newAssets: readonly GraphFileEmbeddedAsset[];
+		/** Their bytes, counted the way `newAttachmentBytes` counts them. */
+		newBytes: number;
+		store: GraphAssetStore | null;
+		scope: string;
 	};
 
 	/**
@@ -651,6 +692,12 @@
 	let activeDragNodeId = $state<string | null>(null);
 	let editNodeId = $state<string | null>(null);
 	let actionMenu = $state<{ nodeId: string; position: Point } | null>(null);
+	/**
+	 * The background menu, open at the client point of the hold or right-click
+	 * on empty canvas. At most one of it and `actionMenu` is open: each opener
+	 * closes the other.
+	 */
+	let backgroundMenu = $state<{ position: Point } | null>(null);
 	let creationPreview = $state<CreationPreviewState | null>(null);
 	let creationArmRequest = $state<{
 		id: number;
@@ -670,6 +717,14 @@
 		absorbedId: string;
 		survivorId: string;
 	} | null>(null);
+	/**
+	 * A paste held on the size question, and whether its "Paste anyway" is
+	 * already storing the attachments. Holding the whole plan is what makes the
+	 * size the dialog named the size that lands, as `pendingNodeMerge` does for
+	 * its count. Raw: a plan can carry megabytes of base64 nothing reads
+	 * reactively, and a deep proxy over it would be pure cost.
+	 */
+	let pendingPaste = $state.raw<{ plan: PastePlan; pasting: boolean } | null>(null);
 	let titleEditContext = $state<{
 		nodeId: string;
 		edgeId?: string;
@@ -2015,10 +2070,12 @@
 		}
 		return (
 			actionMenu === null &&
+			backgroundMenu === null &&
 			editNodeId === null &&
 			titleEditContext === null &&
 			duplicateEdgeConfirm === null &&
 			pendingNodeMerge === null &&
+			pendingPaste === null &&
 			!tagColorLegendOpen &&
 			!graphQueryPanelOpen &&
 			!settingsPanelOpen
@@ -2125,13 +2182,96 @@
 			const removed = removeNodes(copiedIds, 'cut');
 			onNotice?.(`Cut ${nodeCountText(removed)}.`);
 		};
+		// Safari enables Copy and Cut on a page with nothing editable only when a
+		// `beforecopy` / `beforecut` handler cancels, and otherwise never fires the
+		// two events above. So each cancels exactly when its event's handler would
+		// take the event, and stays out of the way otherwise.
+		const onBeforeCopy = (event: Event) => {
+			if (selectionCopyable()) event.preventDefault();
+		};
+		const onBeforeCut = (event: Event) => {
+			if (selectionCopyable() && selectionCanBeRemoved(event)) event.preventDefault();
+		};
 		window.addEventListener('copy', onCopy);
 		window.addEventListener('cut', onCut);
+		window.addEventListener('beforecopy', onBeforeCopy);
+		window.addEventListener('beforecut', onBeforeCut);
 		return () => {
 			window.removeEventListener('copy', onCopy);
 			window.removeEventListener('cut', onCut);
+			window.removeEventListener('beforecopy', onBeforeCopy);
+			window.removeEventListener('beforecut', onBeforeCut);
 		};
 	});
+
+	/**
+	 * The keyboard paste, answered through the DOM `paste` event, which carries
+	 * the clipboard's text with no permission prompt in any browser.
+	 *
+	 * Text that is not a graph file is not the canvas's: the default is left
+	 * alone, so whatever else wants a pasted sentence still gets it. The steps
+	 * aside are the copy's, less the selection, since a paste needs none — plus a
+	 * paste already waiting on its size question, which the dialog owns.
+	 */
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		const onPaste = (event: ClipboardEvent) => {
+			if (event.clipboardData === null || !canvasTakesPaste()) return;
+			const doc = decodeNodeClipboard(event.clipboardData.getData('text/plain'));
+			if (doc === null) return;
+			const anchor = keyboardPasteAnchor();
+			if (anchor === null) return;
+			event.preventDefault();
+			void pasteDocumentAt(anchor, doc);
+		};
+		// Safari's Paste is enabled by the same cancel as its Copy. The clipboard
+		// cannot be read this early, so this enables the command whenever the
+		// canvas would look at what it brings.
+		const onBeforePaste = (event: Event) => {
+			if (canvasTakesPaste()) event.preventDefault();
+		};
+		window.addEventListener('paste', onPaste);
+		window.addEventListener('beforepaste', onBeforePaste);
+		return () => {
+			window.removeEventListener('paste', onPaste);
+			window.removeEventListener('beforepaste', onBeforePaste);
+		};
+	});
+
+	/**
+	 * Where the pointer last was over the canvas, in client coordinates, so a
+	 * keyboard paste lands where the reader is looking. Plain, not reactive: only
+	 * the paste reads it. Cleared when the pointer leaves, which a touch does
+	 * after every lift, so a phone with a keyboard pastes mid-stage.
+	 */
+	let lastCanvasPointer: Point | null = null;
+
+	// Listened for on the canvas's own element and passive: it only reads
+	// coordinates, so the Stage's pointer capture and gestures never notice it.
+	$effect(() => {
+		const element = graphRef;
+		if (element === null) return;
+		const onPointerMove = (event: PointerEvent) => {
+			lastCanvasPointer = { x: event.clientX, y: event.clientY };
+		};
+		const onPointerLeave = () => {
+			lastCanvasPointer = null;
+		};
+		element.addEventListener('pointermove', onPointerMove, { passive: true });
+		element.addEventListener('pointerleave', onPointerLeave, { passive: true });
+		return () => {
+			element.removeEventListener('pointermove', onPointerMove);
+			element.removeEventListener('pointerleave', onPointerLeave);
+		};
+	});
+
+	/** The pointer's last spot over the canvas, else the middle of the stage. */
+	function keyboardPasteAnchor(): Point | null {
+		if (lastCanvasPointer !== null) return lastCanvasPointer;
+		const rect = stageRect;
+		if (rect === null) return null;
+		return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+	}
 
 	/**
 	 * The nodes a keyboard copy or cut takes, or `null` when the event is not the
@@ -2145,10 +2285,31 @@
 	 * copy.
 	 */
 	function clipboardEventNodeIds(event: ClipboardEvent): ReadonlySet<string> | null {
-		if (event.clipboardData === null || selection.size === 0) return null;
-		if (keyboardIsInTextEntry() || focus.isFocused) return null;
-		if ((window.getSelection()?.toString() ?? '') !== '') return null;
+		if (event.clipboardData === null || !selectionCopyable()) return null;
 		return new Set(selection.ids);
+	}
+
+	/** Whether a keyboard copy would take the selection, by the guards below. */
+	function selectionCopyable(): boolean {
+		return selection.size > 0 && canvasOwnsClipboardEvent();
+	}
+
+	/**
+	 * Whether a keyboard paste is the canvas's to read: by the copy's guards, and
+	 * not while an earlier paste is waiting on its size question.
+	 */
+	function canvasTakesPaste(): boolean {
+		return pendingPaste === null && canvasOwnsClipboardEvent();
+	}
+
+	/**
+	 * The steps aside every clipboard event shares: a text field, the details
+	 * view, and highlighted text anywhere on the page all keep the browser's own
+	 * copy, cut and paste.
+	 */
+	function canvasOwnsClipboardEvent(): boolean {
+		if (keyboardIsInTextEntry() || focus.isFocused) return false;
+		return (window.getSelection()?.toString() ?? '') === '';
 	}
 
 	/**
@@ -2211,6 +2372,167 @@
 		}
 		const written = await clipboard.writeText(nodeClipboardText(subgraph, copyAssetCache));
 		onNotice?.(written ? `Copied ${nodeCountText(subgraph.nodes.length)}.` : COPY_FAILED_NOTICE);
+	}
+
+	/**
+	 * Paste the graph file in `text`, centred on `anchorClient` (client
+	 * coordinates). Resolves `false`, having touched nothing, when the text holds
+	 * no nodes to paste; the caller decides whether that deserves a word.
+	 */
+	async function pasteAt(anchorClient: Point, text: string): Promise<boolean> {
+		const doc = decodeNodeClipboard(text);
+		if (doc === null) return false;
+		return await pasteDocumentAt(anchorClient, doc);
+	}
+
+	/**
+	 * Paste an already decoded graph file: the existing import, aimed at a point.
+	 *
+	 * The document's own view state, settings, id and export stamp are dropped,
+	 * as an Import… drops them — this document is still the document. Its graph
+	 * keeps its layout and moves by one translation, so hand-arranged geometry
+	 * survives. Attachments this document already holds add nothing and are kept
+	 * as stored; when the rest add more than the configured bytes, the paste asks
+	 * once, naming the total, before anything is written
+	 * (`docs/ui-decisions/2026-10-18--editing--a-large-paste-asks-once-and-then-brings-every-attachment.md`).
+	 */
+	async function pasteDocumentAt(anchorClient: Point, doc: GraphFileDocument): Promise<boolean> {
+		const rect = stageRect;
+		// A no-op on a decoded clipboard, whose parser already seeded the pins; kept
+		// so no route into a paste can land a pinless component that draws as one
+		// beacon.
+		const incoming = withSeededPinIfPinless(doc.data);
+		if (rect === null || incoming.nodes.length === 0) return false;
+		const anchor = clientPointToGraphPoint(
+			anchorClient,
+			rect,
+			{ x: stageViewState.panX, y: stageViewState.panY },
+			stageViewState.scale
+		);
+		// Read once: the check and the writes it licenses go to the same place.
+		const store = assetStore;
+		const scope = assetScope;
+		const attachments =
+			store === null
+				? // Nothing can be stored, so there is nothing to ask about or write.
+					{ newAssets: [], newBytes: 0 }
+				: await unstoredAttachments(doc, store, scope);
+		const plan: PastePlan = {
+			incoming,
+			offset: pastePlacement(incoming, anchor),
+			...attachments,
+			store,
+			scope
+		};
+		if (plan.newBytes > cfg.clipboard.pasteAttachmentWarnBytes) {
+			pendingPaste = { plan, pasting: false };
+			return true;
+		}
+		await commitPaste(plan);
+		return true;
+	}
+
+	/**
+	 * The embedded attachments `scope` does not hold yet, and the bytes they add.
+	 * An id already stored is skipped rather than overwritten, the rule an
+	 * Import… follows, so this document's copy stays the one it uses.
+	 */
+	async function unstoredAttachments(
+		doc: GraphFileDocument,
+		store: GraphAssetStore,
+		scope: string
+	): Promise<{ newAssets: GraphFileEmbeddedAsset[]; newBytes: number }> {
+		// One look per id: a file can embed an id twice, and it is stored once.
+		const embedded = (doc.embeddedAssets ?? []).filter(
+			(asset, index, all) => all.findIndex((other) => other.assetId === asset.assetId) === index
+		);
+		const stored = await Promise.all(
+			embedded.map(async (asset) => (await store.get(scope, asset.assetId)).ok)
+		);
+		const storedIds = new Set(
+			embedded.filter((_, index) => stored[index]).map((asset) => asset.assetId)
+		);
+		return {
+			newAssets: embedded.filter((_, index) => !stored[index]),
+			newBytes: newAttachmentBytes(doc, storedIds)
+		};
+	}
+
+	/** "Paste anyway": store every attachment the question named, then land the paste. */
+	async function confirmPendingPaste(): Promise<void> {
+		const held = pendingPaste;
+		if (held === null || held.pasting) return;
+		pendingPaste = { ...held, pasting: true };
+		await commitPaste(held.plan);
+		// Only if it is still this paste's: `closeOverlays` (an undo, say) may have
+		// dropped it meanwhile, and a newer paste must not lose its question.
+		if (pendingPaste?.plan === held.plan) pendingPaste = null;
+	}
+
+	/**
+	 * Write a planned paste: attachments into the store, then one commit, then
+	 * the arrivals grow in and become the selection.
+	 */
+	async function commitPaste(plan: PastePlan): Promise<void> {
+		// Before the commit, so a pasted image never draws as missing in the moment
+		// between its node arriving and its bytes being stored.
+		const store = plan.store;
+		if (store !== null) {
+			for (const asset of plan.newAssets) {
+				await store.put({
+					scope: plan.scope,
+					assetId: asset.assetId,
+					blob: base64ToBlob(asset.base64, asset.mimeType),
+					mimeType: asset.mimeType,
+					name: asset.name,
+					size: asset.size,
+					updatedAt: Date.now()
+				});
+			}
+		}
+
+		// Folded into the graph as it stands now, not as it stood when the paste
+		// began: the writes and the question can give the reader time to edit, and
+		// the incoming ids are minted against whatever the host holds.
+		const { next, nodeIdMap, edgeIdMap } = importGraphData(graph, plan.incoming, {
+			offset: plan.offset
+		});
+		const count = nodeIdMap.size;
+		const label = count === 1 ? 'paste node' : `paste ${nodeCountText(count)}`;
+		commitUserGraph(layoutRuntime.relaxAfterMutation(next), editIntent(label));
+		// Per-tag factors that came along reshape the host's layout too, which the
+		// relax alone would leave part-way to its new rest — as for an import.
+		if (plan.incoming.tagPhysicsConfig !== undefined) layoutRuntime.settleAfterSettingsChange();
+
+		const arrivedNodeIds = [...nodeIdMap.values()];
+		// `graphLayout` is derived, so the scales read here are the post-commit ones.
+		animateMembershipChange({
+			enteringNodes: arrivedNodeIds.map((nodeId) => ({
+				nodeId,
+				targetScale: graphLayout.scaleByNodeId[nodeId] ?? 1
+			})),
+			enteringEdgeIds: [...edgeIdMap.values()],
+			leavingNodes: [],
+			leavingEdges: []
+		});
+		// What arrived is what the reader will want to move or undo next.
+		selection.replace(arrivedNodeIds);
+		onNotice?.(`Pasted ${nodeCountText(count)}.`);
+	}
+
+	/**
+	 * "Paste here" from the background menu. The read is the first thing the tap
+	 * does, before anything is awaited, because a browser honours a clipboard
+	 * read only inside the activation that asked for it.
+	 *
+	 * An empty read and text that is not a graph both say so: the reader asked
+	 * for a paste by name, and a menu item that silently does nothing reads as
+	 * broken.
+	 */
+	async function pasteFromMenu(point: Point): Promise<void> {
+		const text = await clipboard.readText();
+		const pasted = text !== null && text !== '' && (await pasteAt(point, text));
+		if (!pasted) onNotice?.(NOTHING_TO_PASTE_NOTICE);
 	}
 
 	$effect(() => {
@@ -2385,7 +2707,29 @@
 
 	function openNodeActionMenu(node: NodeData, point: Point) {
 		editNodeId = null;
+		backgroundMenu = null;
 		actionMenu = { nodeId: node.id, position: point };
+	}
+
+	/** Hold (touch) or right-click on empty canvas: the background menu, at the point. */
+	function openBackgroundMenu(point: Point) {
+		editNodeId = null;
+		actionMenu = null;
+		backgroundMenu = { position: point };
+	}
+
+	/**
+	 * A right-click that landed on the open background menu's layer: the node
+	 * menu when it hit a node, else this menu again at the new point — so the
+	 * reader can aim "Paste here" without closing the menu first.
+	 */
+	function retargetBackgroundMenu(point: Point) {
+		const node = getNodeAt(point.x, point.y);
+		if (node) {
+			openNodeActionMenu(node, point);
+			return;
+		}
+		openBackgroundMenu(point);
 	}
 
 	/**
@@ -2544,11 +2888,15 @@
 
 	function closeOverlays() {
 		actionMenu = null;
+		backgroundMenu = null;
 		editNodeId = null;
 		creationPreview = null;
 		duplicateEdgeConfirm = null;
-		// Dropping the plan is the whole cancel: nothing was mutated to undo.
+		// Dropping the plan is the whole cancel: nothing was mutated to undo. The
+		// same holds for a paste held on its size question; one already storing
+		// its attachments goes on to land, only without its dialog.
 		pendingNodeMerge = null;
+		pendingPaste = null;
 		titleEditContext = null;
 		tagColorLegendOpen = false;
 		graphQueryPanelOpen = false;
@@ -3869,6 +4217,8 @@
 		onSelectionBoxEnd={handleSelectionBoxEnd}
 		onSelectionBoxCancel={handleSelectionBoxCancel}
 		onBackgroundClick={handleBackgroundClick}
+		onBackgroundLongPress={openBackgroundMenu}
+		onBackgroundContextMenu={openBackgroundMenu}
 		onViewStateLiveChange={(state) => {
 			stageViewState = state;
 		}}
@@ -4273,6 +4623,24 @@
 		/>
 	{/if}
 
+	{#if backgroundMenu}
+		<!-- Read before the menu closes itself, which every item does once it has run. -->
+		{@const menuPoint = backgroundMenu.position}
+		<!-- Paste is always offered: no port can know what another tab or app put on
+		     the system clipboard, so the tap reads it and says when it held nothing. -->
+		<BackgroundActionMenu
+			position={menuPoint}
+			selectionCount={selection.size}
+			canPaste={true}
+			onPaste={() => void pasteFromMenu(menuPoint)}
+			onSelectAll={() => selection.replace(visibleNodeIds)}
+			onClearSelection={() => selection.clear()}
+			onClose={() => (backgroundMenu = null)}
+			onRetarget={retargetBackgroundMenu}
+			onExplainDisabled={(reason) => onNotice?.(reason)}
+		/>
+	{/if}
+
 	{#if editNode}
 		<NodeEditSheet
 			node={editNode}
@@ -4570,6 +4938,16 @@
 				pendingNodeMerge = null;
 				applyNodeMerge(merge.plan, merge.absorbedId, merge.survivorId);
 			}}
+		/>
+	{/if}
+
+	{#if pendingPaste}
+		<!-- Cancel is the whole cancel: nothing has been written yet. -->
+		<PasteSizeConfirmDialog
+			sizeText={formatByteSize(pendingPaste.plan.newBytes)}
+			pasting={pendingPaste.pasting}
+			onCancel={() => (pendingPaste = null)}
+			onConfirm={() => void confirmPendingPaste()}
 		/>
 	{/if}
 

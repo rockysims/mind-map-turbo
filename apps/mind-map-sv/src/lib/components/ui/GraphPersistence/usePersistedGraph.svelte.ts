@@ -52,6 +52,7 @@ export type PersistedGraph = {
 	undo: GraphPersistenceController['undo'];
 	redo: GraphPersistenceController['redo'];
 	reportBlockedAction: GraphPersistenceController['reportBlockedAction'];
+	reportNotice: GraphPersistenceController['reportNotice'];
 	revertToSnapshot: GraphPersistenceController['revertToSnapshot'];
 	dismissSnapshot: GraphPersistenceController['dismissSnapshot'];
 	selectGraph: GraphPersistenceController['selectGraph'];
@@ -135,6 +136,7 @@ export function usePersistedGraph(deps: GraphPersistenceControllerDeps): Persist
 		undo: controller.undo.bind(controller),
 		redo: controller.redo.bind(controller),
 		reportBlockedAction: controller.reportBlockedAction.bind(controller),
+		reportNotice: controller.reportNotice.bind(controller),
 		revertToSnapshot: controller.revertToSnapshot.bind(controller),
 		dismissSnapshot: controller.dismissSnapshot.bind(controller),
 		selectGraph: controller.selectGraph.bind(controller),

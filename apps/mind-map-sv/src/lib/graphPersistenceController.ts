@@ -654,6 +654,14 @@ export class GraphPersistenceController {
 		this.update({ status: { state: 'notice', sticky: true, message: reason } });
 	}
 
+	/**
+	 * Say what an action the reader just took did — "Pasted 3 nodes." — in the
+	 * same sticky notice a blocked action uses, with the same lifetime.
+	 */
+	reportNotice(message: string): void {
+		this.update({ status: { state: 'notice', sticky: true, message } });
+	}
+
 	/** Put the document forward one state. Returns whether there was one to go to. */
 	redo(): boolean {
 		if (!canRedo(this.history)) return false;

@@ -15,7 +15,16 @@
 		NODE_RADIUS
 	} from '$lib/constants';
 	import { wheelDeltaForZoomFactor } from './lib/graphMath';
-	import { decodeNodeClipboard, memoryClipboard } from './lib/nodeClipboard';
+	import {
+		decodeNodeClipboard,
+		embeddedAssetsForGraph,
+		encodeNodeClipboard,
+		memoryClipboard
+	} from './lib/nodeClipboard';
+	import { inducedSubgraph } from './lib/selection';
+	import { clientPointToGraphPoint } from './lib/stageCoordinates';
+	import { serializeGraphFile } from '$lib/graphFile';
+	import ToolbarClearanceStage from './ToolbarClearanceStage.svelte';
 	import {
 		designations,
 		makeClusteredRandomEdges,
@@ -30,6 +39,7 @@
 	import type { AiRun, NodeContentBlock, NodeData, QuantityDesignation } from '../types/node';
 	import type { GraphCommitIntent } from '../types/history';
 	import type { ViewState } from '$lib/migrations';
+	import type { ConfigOverrides } from '$lib/config/configOverrides';
 	import type { ExitingBuffer } from './lib/elementTransitions';
 	import type Anthropic from '@anthropic-ai/sdk';
 	import type { AiClient, AiTurn } from '$lib/ai/aiClient';
@@ -78,6 +88,7 @@
 			) => void;
 			onViewStateChange?: (state: ViewState) => void;
 			onNotice?: (message: string) => void;
+			onSettingsChange?: (next: ConfigOverrides) => void;
 		};
 	};
 
@@ -2465,6 +2476,262 @@
 	const IMAGE_COPY_CLIPBOARD = memoryClipboard();
 	/** What a clipboard holds before a story copies anything into it. */
 	const UNTOUCHED_CLIPBOARD = 'nothing copied yet';
+
+	/**
+	 * A paste as Cmd/Ctrl+V fires it, carrying `text` the way the browser hands
+	 * the clipboard to the event. A synthetic key press has no default action,
+	 * so the stories fire the event the key would have.
+	 */
+	function dispatchPaste(target: EventTarget, text: string): ClipboardEvent {
+		const clipboardData = new DataTransfer();
+		clipboardData.setData('text/plain', text);
+		const event = new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true });
+		target.dispatchEvent(event);
+		return event;
+	}
+
+	/** Safari's `beforecopy` / `beforecut` / `beforepaste`, which carry nothing but the question. */
+	function dispatchBeforeClipboardEvent(
+		target: EventTarget,
+		type: 'beforecopy' | 'beforecut' | 'beforepaste'
+	): Event {
+		const event = new Event(type, { bubbles: true, cancelable: true });
+		target.dispatchEvent(event);
+		return event;
+	}
+
+	/** The pointer left resting over the canvas at `point`, as a mouse moved there leaves it. */
+	function hoverStage(stage: HTMLElement, point: Point): void {
+		dispatchPointer(stage, 'pointermove', point.x, point.y);
+	}
+
+	/** A spot on the stage at fractions of its box, in client coordinates. */
+	function stagePoint(stage: HTMLElement, fx: number, fy: number): Point {
+		const rect = stage.getBoundingClientRect();
+		// Whole pixels, because a mouse event's client coordinates are whole pixels.
+		return {
+			x: Math.round(rect.left + rect.width * fx),
+			y: Math.round(rect.top + rect.height * fy)
+		};
+	}
+
+	/** Where a client point sits in graph coordinates under `view`. */
+	function graphPointAt(stage: HTMLElement, point: Point, view: ViewState): Point {
+		return clientPointToGraphPoint(
+			point,
+			stage.getBoundingClientRect(),
+			{ x: view.panX, y: view.panY },
+			view.scale
+		);
+	}
+
+	/** Centre of the bounding box over the named nodes' positions. */
+	function boundsCentre(graph: MultigraphData, nodeIds: readonly string[]): Point {
+		const points = nodeIds.map((nodeId) => {
+			const point = graph.posByNodeId[nodeId];
+			if (!point) throw new Error(`No position for ${nodeId}`);
+			return point;
+		});
+		const xs = points.map((point) => point.x);
+		const ys = points.map((point) => point.y);
+		return {
+			x: (Math.min(...xs) + Math.max(...xs)) / 2,
+			y: (Math.min(...ys) + Math.max(...ys)) / 2
+		};
+	}
+
+	/**
+	 * Each node's offset from the first, so one layout moved as a whole compares
+	 * equal. Rounded to a thousandth: `(a + o) - (b + o)` need not be `a - b` in
+	 * floating point.
+	 */
+	function relativeLayout(graph: MultigraphData, nodeIds: readonly string[]): Point[] {
+		const origin = graph.posByNodeId[nodeIds[0]];
+		if (!origin) throw new Error(`No position for ${nodeIds[0]}`);
+		const round = (value: number) => Math.round(value * 1000) / 1000;
+		return nodeIds.map((nodeId) => {
+			const point = graph.posByNodeId[nodeId];
+			if (!point) throw new Error(`No position for ${nodeId}`);
+			return { x: round(point.x - origin.x), y: round(point.y - origin.y) };
+		});
+	}
+
+	/** The nodes in `graph` whose ids are not in `before`, in graph order. */
+	function arrivedNodes(graph: MultigraphData, before: readonly string[]): NodeData[] {
+		const known = new Set(before);
+		return graph.nodes.filter((node) => !known.has(node.id));
+	}
+
+	/** The id of the one node in `nodes` titled `title`. */
+	function idTitled(nodes: readonly NodeData[], title: string): string {
+		const matches = nodes.filter((node) => node.title === title);
+		if (matches.length !== 1) throw new Error(`Expected one node titled ${title}`);
+		return matches[0].id;
+	}
+
+	/** The canvas's own stage, which a story wrapping the canvas in another `.stage` cannot confuse. */
+	function getCanvasStage(el: HTMLElement): HTMLElement {
+		const stage = el.querySelector('.graph .stage');
+		if (!(stage instanceof HTMLElement)) throw new Error('Canvas stage not found');
+		return stage;
+	}
+
+	/** What a store holds under `scope`, as `assetId → text`, for the bytes a paste wrote. */
+	async function storedTexts(
+		store: GraphAssetStore,
+		scope: string
+	): Promise<Record<string, string>> {
+		const listed = await store.list(scope);
+		if (!listed.ok) throw new Error(`Could not list ${scope}`);
+		const entries = await Promise.all(
+			listed.value.map(async (asset) => [asset.assetId, await asset.blob.text()] as const)
+		);
+		return Object.fromEntries(entries);
+	}
+
+	/**
+	 * A memory store that also logs each write into `log`, so a story can see
+	 * the order of store writes against the commit that follows them.
+	 */
+	function loggingAssetStore(log: string[]): GraphAssetStore {
+		const inner = new MemoryGraphAssetStore();
+		return {
+			async put(asset) {
+				log.push(`put ${asset.scope} ${asset.assetId}`);
+				return await inner.put(asset);
+			},
+			get: (scope, assetId) => inner.get(scope, assetId),
+			delete: (scope, assetId) => inner.delete(scope, assetId),
+			deleteUnreferenced: (scope, keep) => inner.deleteUnreferenced(scope, keep),
+			list: (scope) => inner.list(scope)
+		};
+	}
+
+	/**
+	 * A memory store whose writes wait while `hold()` is in force, so a story can
+	 * look at the canvas while a paste is still storing its attachments.
+	 */
+	function gatedAssetStore(): GraphAssetStore & { hold(): void; release(): void } {
+		const inner = new MemoryGraphAssetStore();
+		let gate: Promise<void> | null = null;
+		let open = () => {};
+		return {
+			hold() {
+				gate = new Promise((resolve) => (open = resolve));
+			},
+			release() {
+				gate = null;
+				open();
+			},
+			async put(asset) {
+				if (gate !== null) await gate;
+				return await inner.put(asset);
+			},
+			get: (scope, assetId) => inner.get(scope, assetId),
+			delete: (scope, assetId) => inner.delete(scope, assetId),
+			deleteUnreferenced: (scope, keep) => inner.deleteUnreferenced(scope, keep),
+			list: (scope) => inner.list(scope)
+		};
+	}
+
+	/** Put each `assetId → body` into `store` under `scope`, as the image a node references. */
+	async function storeImages(
+		store: GraphAssetStore,
+		scope: string,
+		bodies: Readonly<Record<string, string>>
+	): Promise<void> {
+		for (const [assetId, body] of Object.entries(bodies)) {
+			await store.put({
+				scope,
+				assetId,
+				blob: new Blob([body], { type: 'image/png' }),
+				mimeType: 'image/png',
+				name: `${assetId}.png`,
+				size: body.length,
+				updatedAt: 0
+			});
+		}
+	}
+
+	/** The clipboard text a copy of `nodeIds` out of `graph` writes, attachments read from `scope`. */
+	async function copiedText(
+		graph: MultigraphData,
+		nodeIds: readonly string[],
+		store: GraphAssetStore,
+		scope: string
+	): Promise<string> {
+		const subgraph = inducedSubgraph(graph, new Set(nodeIds));
+		return encodeNodeClipboard(subgraph, await embeddedAssetsForGraph(subgraph, store, [scope]));
+	}
+
+	/** The scope a cross-document paste lands in: another document's, holding nothing yet. */
+	const PASTE_TARGET_SCOPE = 'paste-target';
+	/** Two attachments of 3 KB each, so a pair of them is "about 6 KB". */
+	const LARGE_IMAGE_BYTES = { 'left-photo': 'L'.repeat(3072), 'below-photo': 'B'.repeat(3072) };
+	/** The size question's threshold for the large-paste story: under the pair, over either one. */
+	const PASTE_WARN_SETTINGS = { 'clipboard.pasteAttachmentWarnBytes': 4096 } as const;
+	/** A threshold every attachment exceeds, so a paste that never asks proves it added nothing. */
+	const PASTE_ALWAYS_WARN_SETTINGS = { 'clipboard.pasteAttachmentWarnBytes': 1 } as const;
+
+	/** Three unpinned nodes in a chain, as a copy of a pinless corner of another graph carries them. */
+	const PINLESS_CHAIN = makeGraph({
+		nodes: [
+			{ id: 'n0', title: 'First', description: '', tags: [] },
+			{ id: 'n1', title: 'Hub', description: '', tags: [] },
+			{ id: 'n2', title: 'Last', description: '', tags: [] }
+		],
+		edges: [
+			[0, 1],
+			[1, 2]
+		],
+		posByNodeId: { n0: { x: -240, y: 0 }, n1: { x: 0, y: 0 }, n2: { x: 240, y: 0 } }
+	});
+
+	/** An `!ai` node whose figure was promoted to the node beside it. */
+	const AI_BINDING_GRAPH = makeGraph({
+		nodes: [
+			{
+				id: 'n0',
+				title: 'Analysis',
+				description: '',
+				tags: [],
+				addons: { ai: { prompt: 'Plot it.', runs: [], promoted: { 'figure.png': 'n1' } } }
+			},
+			{ id: 'n1', title: 'Figure', description: '', tags: [] }
+		],
+		pinned: ['n0', 'n1'],
+		edges: [[0, 1]],
+		posByNodeId: { n0: { x: -240, y: -600 }, n1: { x: 240, y: -600 } }
+	});
+
+	/** Five in a chain from one pin, two layers shown: n3 and n4 are not drawn. */
+	const HOP_LIMITED_CHAIN = makeGraph({
+		nodeCount: 5,
+		pinned: [0],
+		edges: chainEdges(5),
+		posByNodeId: {
+			n0: { x: -480, y: 0 },
+			n1: { x: -240, y: 0 },
+			n2: { x: 0, y: 0 },
+			n3: { x: 240, y: 0 },
+			n4: { x: 480, y: 0 }
+		}
+	});
+
+	/** The background menu's items with nothing selected, in order. */
+	const BACKGROUND_MENU_ITEMS = ['Paste here', 'Select all'];
+	const NOTHING_TO_PASTE = 'Nothing to paste. Copy nodes or try Cmd/Ctrl+V.';
+
+	// One clipboard per story, so no story reads what another copied.
+	const PASTE_AFTER_COPY_CLIPBOARD = memoryClipboard();
+	const SAVED_FILE_CLIPBOARD = memoryClipboard();
+	const NON_GRAPH_CLIPBOARD = memoryClipboard('hello');
+	const BACKGROUND_MENU_CLIPBOARD = memoryClipboard();
+	/** Every write and commit the cross-document stories make, in order. */
+	const CROSS_DOCUMENT_LOG: string[] = [];
+	const CROSS_DOCUMENT_STORE = loggingAssetStore(CROSS_DOCUMENT_LOG);
+	const LARGE_PASTE_STORE = gatedAssetStore();
+	const SAME_DOCUMENT_STORE = copyImageAssetStore();
 </script>
 
 <Story
@@ -6833,7 +7100,7 @@
 />
 
 <Story
-	name="RightClickingWhereAnExcludedNodeWasOpensNoMenu"
+	name="RightClickingWhereAnExcludedNodeWasOpensTheBackgroundMenuNotTheNodes"
 	args={{
 		multigraphData: makeGraph({
 			nodes: [
@@ -6859,13 +7126,17 @@
 		await typeGraphQuery(canvasElement, '-#hide');
 		await waitForLayout();
 
-		// Nothing is there to hit any more, so the right-click opens nothing.
+		// No node is there to hit any more, so the right-click lands on empty
+		// canvas: the canvas's own menu, not the excluded node's.
 		const event = dispatchContextMenu(stage, formerCenter.x, formerCenter.y);
 		await tick();
 		expect(event.defaultPrevented).toBe(true);
-		expect(within(canvasElement).queryByRole('menu')).not.toBeInTheDocument();
+		expect(within(canvasElement).getByRole('menu')).toHaveAttribute('aria-label', 'Canvas actions');
 		expect(args.onMultigraphChange).not.toHaveBeenCalled();
 		expect(nodeIsDrawn(canvasElement, 'n0')).toBe(false);
+		dispatchKeydown(document.activeElement, 'Escape');
+		await tick();
+		expect(within(canvasElement).queryByRole('menu')).not.toBeInTheDocument();
 
 		// Control: the same gesture on a node that is still there does open one.
 		dispatchContextMenu(stage, keptCenter.x, keptCenter.y);
@@ -10893,5 +11164,651 @@
 		const menuDoc = decodeNodeClipboard(IMAGE_COPY_CLIPBOARD.text ?? '');
 		expect(menuDoc?.embeddedAssets?.map((asset) => asset.assetId)).toEqual(['below-photo']);
 		expect(atob(menuDoc?.embeddedAssets?.[0]?.base64 ?? '')).toBe('below photo bytes');
+	}}
+/>
+
+<Story
+	name="PasteAfterCopyLandsThreeNewNodesCentredOnTheAnchorWithFreshIdsTheSameTwoEdgesAndTheSameRelativeLayout"
+	args={{
+		multigraphData: COPY_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		clipboard: PASTE_AFTER_COPY_CLIPBOARD,
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		await selectTopRow(canvasElement);
+		blurActiveElement();
+		const copy = dispatchClipboardEvent(document.body, 'copy');
+		const text = copy.clipboardData?.getData('text/plain') ?? '';
+
+		// The pointer rests below the graph; Cmd/Ctrl+V lands the copy there.
+		const anchor = stagePoint(stage, 0.5, 0.75);
+		hoverStage(stage, anchor);
+		const paste = dispatchPaste(document.body, text);
+		expect(paste.defaultPrevented).toBe(true);
+		await waitFor(() =>
+			expect(postedNotices(args)).toEqual(['Copied 3 nodes.', 'Pasted 3 nodes.'])
+		);
+
+		const pasted = lastChangedGraph(args);
+		const arrived = arrivedNodes(pasted, ['n0', 'n1', 'n2', 'n3']);
+		// Fresh ids, the copied titles, and the originals left where they were.
+		expect(arrived.map((node) => node.title)).toEqual(['Left', 'Middle', 'Right']);
+		expect(pasted.nodes.slice(0, 4).map((node) => node.title)).toEqual([
+			'Left',
+			'Middle',
+			'Right',
+			'Below'
+		]);
+		const twin = (title: string) => idTitled(arrived, title);
+		const twinIds = [twin('Left'), twin('Middle'), twin('Right')];
+		// The two edges inside the row, between the twins, direction kept.
+		const pastedEdges = pasted.edges.slice(COPY_GRAPH.edges.length);
+		expect(
+			pastedEdges.map((edge) => [edge.sourceNodeId, edge.targetNodeId, edge.directed === true])
+		).toEqual([
+			[twinIds[0], twinIds[1], false],
+			[twinIds[1], twinIds[2], true]
+		]);
+		expect(pastedEdges.every((edge) => !COPY_GRAPH.edges.some(({ id }) => id === edge.id))).toBe(
+			true
+		);
+		// Moved as one: the same shape, centred on the point under the pointer.
+		expect(relativeLayout(pasted, twinIds)).toEqual(relativeLayout(COPY_GRAPH, ['n0', 'n1', 'n2']));
+		const centre = boundsCentre(pasted, twinIds);
+		const anchorInGraph = graphPointAt(stage, anchor, SELECTION_VIEW);
+		expect(centre.x).toBeCloseTo(anchorInGraph.x, 3);
+		expect(centre.y).toBeCloseTo(anchorInGraph.y, 3);
+
+		// One edit, named for Undo, and the paste is now the selection.
+		expect(commitsLabelled(args, 'paste 3 nodes')).toHaveLength(1);
+		expect(commitCount(args)).toBe(1);
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual(twinIds);
+		for (const nodeId of twinIds) expect(nodeIsDrawn(canvasElement, nodeId)).toBe(true);
+	}}
+/>
+
+<Story
+	name="UndoRemovesAllPastedNodesInOneStepAndTheSelectionIsEmpty"
+	play={async ({ canvasElement }: HarnessPlayContext) => {
+		const harness = canvasElement.querySelector('.harness');
+		if (!(harness instanceof HTMLElement)) throw new Error('Persisted harness not found');
+		await waitFor(() => expect(harness.dataset.loadedGraphId).toBe('paste-undo'));
+		await waitForLayout();
+		const canvas = within(canvasElement);
+		const stage = getStage(canvasElement);
+		blurActiveElement();
+
+		dispatchShortcut(document.body, 'a', { metaKey: true });
+		await tick();
+		const copy = dispatchClipboardEvent(document.body, 'copy');
+		hoverStage(stage, stagePoint(stage, 0.5, 0.75));
+		const paste = dispatchPaste(document.body, copy.clipboardData?.getData('text/plain') ?? '');
+		expect(paste.defaultPrevented).toBe(true);
+		await waitFor(() => expect(harness.dataset.nodeCount).toBe('8'));
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('4 selected');
+		expect(canvas.getByRole('button', { name: 'Undo paste 4 nodes' })).toBeInTheDocument();
+
+		dispatchShortcut(stage, 'z', { metaKey: true });
+		await waitFor(() => expect(harness.dataset.nodeCount).toBe('4'));
+		await waitForLayout();
+		for (const nodeId of ['n0', 'n1', 'n2', 'n3']) {
+			expect(nodeIsDrawn(canvasElement, nodeId), nodeId).toBe(true);
+		}
+		expect(canvasElement.querySelectorAll('.node-wrapper')).toHaveLength(4);
+		// The selection held only what the paste brought, and that is gone.
+		expect(selectionCountLabel(canvasElement)).toBeNull();
+		expect(canvas.getByRole('button', { name: 'Redo paste 4 nodes' })).toBeInTheDocument();
+	}}
+>
+	{#snippet template()}
+		<PersistedGraphHarness
+			initialGraphId="paste-undo"
+			graphs={{ 'paste-undo': DELETE_UNDO_GRAPH }}
+			layoutSettings={{ ...SELECTION_LAYOUT, baseRadius: 40 }}
+		/>
+	{/snippet}
+</Story>
+
+<Story
+	name="PasteOfASubgraphWithNoPinnedNodeArrivesPinnedAndVisible"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: { ...SELECTION_LAYOUT, displayedLayers: 1 },
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		blurActiveElement();
+		hoverStage(stage, stagePoint(stage, 0.5, 0.75));
+		const paste = dispatchPaste(document.body, encodeNodeClipboard(PINLESS_CHAIN, []));
+		expect(paste.defaultPrevented).toBe(true);
+		await waitFor(() => expect(postedNotices(args)).toEqual(['Pasted 3 nodes.']));
+
+		const arrived = arrivedNodes(lastChangedGraph(args), ['n0', 'n1', 'n2', 'n3']);
+		// The component's hub carries the pin a load would have given it...
+		expect(arrived.filter((node) => node.pinned).map((node) => node.title)).toEqual(['Hub']);
+		// ...so even one layer out from it, every pasted node is drawn, not one beacon.
+		await tick();
+		for (const node of arrived) expect(nodeIsDrawn(canvasElement, node.id), node.title).toBe(true);
+	}}
+/>
+
+<Story
+	name="PasteOfASavedGraphFilesTextImportsItAtTheAnchor"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		clipboard: SAVED_FILE_CLIPBOARD,
+		onMultigraphChange: fn(),
+		onSettingsChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const canvas = within(canvasElement);
+		// A whole saved document: its own camera, settings, id and export stamp.
+		SAVED_FILE_CLIPBOARD.mirror(
+			serializeGraphFile({
+				data: makeGraph({
+					nodes: [
+						{ id: 'n0', title: 'Saved root', description: '', tags: [] },
+						{ id: 'n1', title: 'Saved leaf', description: '', tags: [] }
+					],
+					pinned: [0],
+					edges: [[0, 1]],
+					posByNodeId: { n0: { x: 1000, y: 1000 }, n1: { x: 1400, y: 1000 } }
+				}),
+				viewState: { panX: 900, panY: -400, scale: 2 },
+				settings: { [BORDER_SOURCE]: 'none' },
+				documentId: 'another-document',
+				exportedAt: 1
+			})
+		);
+		const transformBefore = getStageTransform(canvasElement);
+
+		const point = stagePoint(stage, 0.5, 0.8);
+		dispatchContextMenu(stage, point.x, point.y);
+		await tick();
+		canvas.getByRole('menuitem', { name: 'Paste here' }).click();
+		await waitFor(() => expect(postedNotices(args)).toEqual(['Pasted 2 nodes.']));
+
+		const pasted = lastChangedGraph(args);
+		const arrived = arrivedNodes(pasted, ['n0', 'n1', 'n2', 'n3']);
+		expect(arrived.map((node) => node.title)).toEqual(['Saved root', 'Saved leaf']);
+		const centre = boundsCentre(
+			pasted,
+			arrived.map((node) => node.id)
+		);
+		const pointInGraph = graphPointAt(stage, point, SELECTION_VIEW);
+		expect(centre.x).toBeCloseTo(pointInGraph.x, 3);
+		expect(centre.y).toBeCloseTo(pointInGraph.y, 3);
+		// The file's own camera and settings stay behind: this is still this document.
+		await waitForLayout();
+		expect(getStageTransform(canvasElement)).toBe(transformBefore);
+		expect(args.onSettingsChange).not.toHaveBeenCalled();
+	}}
+/>
+
+<Story
+	name="PasteWithANonGraphClipboardDoesNothingAndLeavesTheBrowsersDefault"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		clipboard: NON_GRAPH_CLIPBOARD,
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		blurActiveElement();
+		hoverStage(stage, stagePoint(stage, 0.5, 0.75));
+
+		// A sentence, and JSON that is not a graph: neither is the canvas's.
+		for (const text of ['hello', '{"a":1}']) {
+			const paste = dispatchPaste(document.body, text);
+			expect(paste.defaultPrevented, text).toBe(false);
+		}
+		await sleep();
+		expect(commitCount(args)).toBe(0);
+		expect(postedNotices(args)).toEqual([]);
+		expect(canvasElement.querySelectorAll('.node-wrapper')).toHaveLength(4);
+
+		// Asked for by name from the menu, the same clipboard says why nothing came.
+		const point = stagePoint(stage, 0.5, 0.8);
+		dispatchContextMenu(stage, point.x, point.y);
+		await tick();
+		within(canvasElement).getByRole('menuitem', { name: 'Paste here' }).click();
+		await waitFor(() => expect(postedNotices(args)).toEqual([NOTHING_TO_PASTE]));
+		expect(commitCount(args)).toBe(0);
+	}}
+/>
+
+<Story
+	name="CrossDocumentPasteStoresTheEmbeddedImageUnderThisDocumentsScopeAndTheNodeShowsIt"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		assetStore: CROSS_DOCUMENT_STORE,
+		assetScope: PASTE_TARGET_SCOPE,
+		onMultigraphChange: fn(
+			(_graph: MultigraphData, _generation: number, intent: GraphCommitIntent) =>
+				CROSS_DOCUMENT_LOG.push(`commit ${intent.label}`)
+		),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		// The other document's copy: its image stored under its own scope only.
+		await storeImages(CROSS_DOCUMENT_STORE, COPY_ASSET_SCOPE, COPY_IMAGE_BYTES);
+		const text = await copiedText(
+			COPY_IMAGE_GRAPH,
+			['n0', 'n1'],
+			CROSS_DOCUMENT_STORE,
+			COPY_ASSET_SCOPE
+		);
+		expect(await storedTexts(CROSS_DOCUMENT_STORE, PASTE_TARGET_SCOPE)).toEqual({});
+		CROSS_DOCUMENT_LOG.length = 0;
+
+		blurActiveElement();
+		hoverStage(stage, stagePoint(stage, 0.5, 0.75));
+		dispatchPaste(document.body, text);
+		await waitFor(() => expect(postedNotices(args)).toEqual(['Pasted 2 nodes.']));
+
+		// Small enough not to ask; written under this document's scope, before the
+		// commit that lands the node pointing at it.
+		expect(canvasElement.querySelector('[role="dialog"]')).toBeNull();
+		expect(CROSS_DOCUMENT_LOG).toEqual([
+			`put ${PASTE_TARGET_SCOPE} left-photo`,
+			'commit paste 2 nodes'
+		]);
+		expect(await storedTexts(CROSS_DOCUMENT_STORE, PASTE_TARGET_SCOPE)).toEqual({
+			'left-photo': COPY_IMAGE_BYTES['left-photo']
+		});
+		const pasted = lastChangedGraph(args);
+		expect(pasted.assets?.['left-photo']).toEqual(COPY_IMAGE_GRAPH.assets?.['left-photo']);
+
+		// And the pasted twin of the left node draws its image, not a missing one.
+		const twinId = idTitled(arrivedNodes(pasted, ['n0', 'n1', 'n2', 'n3']), 'Left');
+		const dialog = await enterFocusOn(canvasElement, twinId);
+		await waitFor(() => {
+			const image = dialog.querySelector('img.focus-image[data-asset-id="left-photo"]');
+			expect(image?.getAttribute('src') ?? '').toMatch(/^blob:/u);
+		});
+		expect(dialog.querySelector('.missing-image')).toBeNull();
+	}}
+/>
+
+<Story
+	name="ACrossDocumentPasteWhoseNewAttachmentsExceedTheThresholdAsksOnceNamingTheSizeCancelLeavesTheGraphUntouchedAndPasteAnywayBringsEveryAttachment"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		assetStore: LARGE_PASTE_STORE,
+		assetScope: PASTE_TARGET_SCOPE,
+		settings: PASTE_WARN_SETTINGS,
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		expect(window.innerWidth).toBe(390);
+		const canvas = within(canvasElement);
+		const stage = getCanvasStage(canvasElement);
+		await storeImages(LARGE_PASTE_STORE, COPY_ASSET_SCOPE, LARGE_IMAGE_BYTES);
+		const text = await copiedText(
+			COPY_IMAGE_GRAPH,
+			['n0', 'n1', 'n2', 'n3'],
+			LARGE_PASTE_STORE,
+			COPY_ASSET_SCOPE
+		);
+		blurActiveElement();
+		dispatchShortcut(document.body, 'a', { metaKey: true });
+		await tick();
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('4 selected');
+		hoverStage(stage, stagePoint(stage, 0.5, 0.75));
+
+		const ask = async (): Promise<HTMLElement> => {
+			const paste = dispatchPaste(document.body, text);
+			expect(paste.defaultPrevented).toBe(true);
+			return await waitFor(() => {
+				const dialogs = canvas.getAllByRole('dialog');
+				// Once: one question for the whole paste, however many attachments.
+				expect(dialogs).toHaveLength(1);
+				return dialogs[0];
+			});
+		};
+
+		// The question names the total the paste would add, and nothing is written yet.
+		let dialog = await ask();
+		expect(dialog).toHaveAccessibleName(
+			'This paste adds about 6 KB of attachments to this document. Paste anyway?'
+		);
+		expect(commitCount(args)).toBe(0);
+		expect(await storedTexts(LARGE_PASTE_STORE, PASTE_TARGET_SCOPE)).toEqual({});
+		// It opens on its answer, below the toolbar's real box, both answers hittable.
+		const confirm = within(dialog).getByRole('button', { name: 'Paste anyway' });
+		expect(document.activeElement).toBe(confirm);
+		const toolbar = canvasElement.querySelector('.toolbar-row');
+		if (!(toolbar instanceof HTMLElement)) throw new Error('Toolbar not found');
+		expect(dialog.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+			toolbar.getBoundingClientRect().bottom
+		);
+		for (const button of within(dialog).getAllByRole('button')) {
+			const rect = button.getBoundingClientRect();
+			expect(rect.height, button.textContent ?? '').toBeGreaterThanOrEqual(44);
+			// The label inside is what the point lands on; it has to be this button's.
+			const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+			expect(hit !== null && button.contains(hit), button.textContent ?? '').toBe(true);
+		}
+
+		// Escape is a cancel, and the selection behind the dialog survives it.
+		dispatchKeydown(document.activeElement, 'Escape');
+		await tick();
+		expect(canvas.queryByRole('dialog')).toBeNull();
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('4 selected');
+
+		// While it asks, a second Cmd/Ctrl+V is the dialog's, not another paste.
+		dialog = await ask();
+		expect(dispatchPaste(document.body, text).defaultPrevented).toBe(false);
+		expect(canvas.getAllByRole('dialog')).toHaveLength(1);
+		within(dialog).getByRole('button', { name: 'Cancel' }).click();
+		await sleep();
+		expect(canvas.queryByRole('dialog')).toBeNull();
+		expect(commitCount(args)).toBe(0);
+		expect(postedNotices(args)).toEqual([]);
+		expect(await storedTexts(LARGE_PASTE_STORE, PASTE_TARGET_SCOPE)).toEqual({});
+		expect(canvasElement.querySelectorAll('.node-wrapper')).toHaveLength(4);
+
+		// Paste anyway says it is at work while the bytes are written, and takes no
+		// second answer meanwhile.
+		dialog = await ask();
+		LARGE_PASTE_STORE.hold();
+		within(dialog).getByRole('button', { name: 'Paste anyway' }).click();
+		await tick();
+		expect(within(dialog).getByRole('button', { name: 'Pasting…' })).toBeDisabled();
+		expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeDisabled();
+		dispatchKeydown(document.body, 'Escape');
+		await tick();
+		expect(canvas.getAllByRole('dialog')).toHaveLength(1);
+		expect(commitCount(args)).toBe(0);
+
+		// Then it brings every attachment, whatever its size, in one edit.
+		LARGE_PASTE_STORE.release();
+		await waitFor(() => expect(postedNotices(args)).toEqual(['Pasted 4 nodes.']));
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('4 selected');
+		expect(canvas.queryByRole('dialog')).toBeNull();
+		expect(commitCount(args)).toBe(1);
+		expect(commitsLabelled(args, 'paste 4 nodes')).toHaveLength(1);
+		expect(await storedTexts(LARGE_PASTE_STORE, PASTE_TARGET_SCOPE)).toEqual(LARGE_IMAGE_BYTES);
+		expect(lastChangedGraph(args).nodes).toHaveLength(8);
+	}}
+>
+	{#snippet template(args)}
+		<ToolbarClearanceStage>
+			<Multigraph {...args} />
+		</ToolbarClearanceStage>
+	{/snippet}
+</Story>
+
+<Story
+	name="ASameDocumentPasteOfTheSameNodesNeverAsks"
+	args={{
+		multigraphData: COPY_IMAGE_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		assetStore: SAME_DOCUMENT_STORE,
+		assetScope: COPY_ASSET_SCOPE,
+		settings: PASTE_ALWAYS_WARN_SETTINGS,
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const storedBefore = await storedTexts(SAME_DOCUMENT_STORE, COPY_ASSET_SCOPE);
+		await selectTopRow(canvasElement);
+		blurActiveElement();
+		// The copy carries the left node's image, as a copy always does...
+		const text = await waitFor(() => {
+			const copy = dispatchClipboardEvent(document.body, 'copy');
+			const written = copy.clipboardData?.getData('text/plain') ?? '';
+			expect(decodeNodeClipboard(written)?.embeddedAssets?.map((asset) => asset.assetId)).toEqual([
+				'left-photo'
+			]);
+			return written;
+		});
+
+		// ...and pasting it back adds no bytes, so even a one-byte threshold never asks.
+		hoverStage(stage, stagePoint(stage, 0.5, 0.75));
+		dispatchPaste(document.body, text);
+		await waitFor(() => expect(postedNotices(args).at(-1)).toBe('Pasted 3 nodes.'));
+		expect(within(canvasElement).queryByRole('dialog')).toBeNull();
+		// The twin points at the very asset the original does, which stays as stored.
+		const twinId = idTitled(arrivedNodes(lastChangedGraph(args), ['n0', 'n1', 'n2', 'n3']), 'Left');
+		expect(lastChangedGraph(args).nodes.find((node) => node.id === twinId)?.content).toEqual(
+			COPY_IMAGE_GRAPH.nodes[0].content
+		);
+		expect(await storedTexts(SAME_DOCUMENT_STORE, COPY_ASSET_SCOPE)).toEqual(storedBefore);
+	}}
+/>
+
+<Story
+	name="APromotedAiBindingInsideTheSelectionPointsAtThePastedTwin"
+	args={{
+		multigraphData: AI_BINDING_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		blurActiveElement();
+		dispatchShortcut(document.body, 'a', { metaKey: true });
+		await tick();
+		const copy = dispatchClipboardEvent(document.body, 'copy');
+		hoverStage(stage, stagePoint(stage, 0.5, 0.75));
+		dispatchPaste(document.body, copy.clipboardData?.getData('text/plain') ?? '');
+		await waitFor(() => expect(postedNotices(args).at(-1)).toBe('Pasted 2 nodes.'));
+
+		const pasted = lastChangedGraph(args);
+		const arrived = arrivedNodes(pasted, ['n0', 'n1']);
+		const analysisTwin = arrived.find((node) => node.title === 'Analysis');
+		const figureTwinId = idTitled(arrived, 'Figure');
+		// The twin's figure is the pasted figure, not the original it was copied from.
+		expect(analysisTwin?.addons?.ai?.promoted).toEqual({ 'figure.png': figureTwinId });
+		expect(pasted.nodes[0].addons?.ai?.promoted).toEqual({ 'figure.png': 'n1' });
+	}}
+/>
+
+<Story
+	name="TheBackgroundMenuOpensOnRightClickAndOnATouchHoldPasteHerePastesAtThePointSelectAllSelectsTheDrawnNodesClearSelectionClears"
+	args={{
+		multigraphData: HOP_LIMITED_CHAIN,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: { ...SELECTION_LAYOUT, displayedLayers: 2 },
+		clipboard: BACKGROUND_MENU_CLIPBOARD,
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const canvas = within(canvasElement);
+		const stage = getStage(canvasElement);
+		const menuItems = () =>
+			canvas.getAllByRole('menuitem').map((item) => item.textContent?.trim() ?? '');
+
+		// Right-click on empty canvas: the background menu, and only it.
+		const empty = stagePoint(stage, 0.5, 0.8);
+		const rightClick = dispatchContextMenu(stage, empty.x, empty.y);
+		await tick();
+		expect(rightClick.defaultPrevented).toBe(true);
+		expect(canvas.getAllByRole('menu')).toHaveLength(1);
+		expect(canvas.getByRole('menu', { name: 'Canvas actions' })).toBeInTheDocument();
+		expect(menuItems()).toEqual(BACKGROUND_MENU_ITEMS);
+
+		// Select all takes the drawn three, not the two past the hop limit.
+		canvas.getByRole('menuitem', { name: 'Select all' }).click();
+		await tick();
+		expect(canvas.queryByRole('menu')).toBeNull();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2']);
+
+		// A touch hold opens it too, now offering to clear what is selected.
+		dispatchPointer(stage, 'pointerdown', empty.x, empty.y, 1, 'touch');
+		await sleep(LONG_PRESS_MS + 20);
+		dispatchPointer(stage, 'pointerup', empty.x, empty.y, 1, 'touch');
+		await tick();
+		expect(menuItems()).toEqual([...BACKGROUND_MENU_ITEMS, 'Clear selection']);
+		canvas.getByRole('menuitem', { name: 'Clear selection' }).click();
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual([]);
+		expect(canvas.queryByRole('menu')).toBeNull();
+
+		// With nothing on the clipboard, Paste here says what to do instead.
+		BACKGROUND_MENU_CLIPBOARD.mirror('');
+		dispatchContextMenu(stage, empty.x, empty.y);
+		await tick();
+		canvas.getByRole('menuitem', { name: 'Paste here' }).click();
+		await waitFor(() => expect(postedNotices(args)).toEqual([NOTHING_TO_PASTE]));
+		expect(commitCount(args)).toBe(0);
+
+		// A right-click on a node with the menu open moves to that node's menu.
+		dispatchContextMenu(stage, empty.x, empty.y);
+		await tick();
+		const nodeCentre = getCenter(getCircle(canvasElement, 'n1'));
+		dispatchContextMenuAt(nodeCentre.x, nodeCentre.y);
+		await tick();
+		expect(canvas.getAllByRole('menu')).toHaveLength(1);
+		expect(canvas.getByRole('menu', { name: 'Actions for Node 1' })).toBeInTheDocument();
+		dispatchKeydown(document.activeElement, 'Escape');
+		await tick();
+
+		// Copy the drawn three, then Paste here puts them at the point pressed.
+		blurActiveElement();
+		dispatchShortcut(document.body, 'a', { metaKey: true });
+		await tick();
+		dispatchClipboardEvent(document.body, 'copy');
+		const point = stagePoint(stage, 0.5, 0.25);
+		dispatchContextMenu(stage, point.x, point.y);
+		await tick();
+		canvas.getByRole('menuitem', { name: 'Paste here' }).click();
+		await waitFor(() => expect(postedNotices(args).at(-1)).toBe('Pasted 3 nodes.'));
+		const pasted = lastChangedGraph(args);
+		const arrivedIds = arrivedNodes(pasted, ['n0', 'n1', 'n2', 'n3', 'n4']).map((node) => node.id);
+		expect(arrivedIds).toHaveLength(3);
+		const centre = boundsCentre(pasted, arrivedIds);
+		const pointInGraph = graphPointAt(stage, point, SELECTION_VIEW);
+		expect(centre.x).toBeCloseTo(pointInGraph.x, 3);
+		expect(centre.y).toBeCloseTo(pointInGraph.y, 3);
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual(arrivedIds);
+	}}
+/>
+
+<Story
+	name="CmdOrCtrlVInsideATextFieldLeavesTheCanvasAlone"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const text = encodeNodeClipboard(PINLESS_CHAIN, []);
+		await typeGraphQuery(canvasElement, 'Middle');
+		const input = within(canvasElement).getByLabelText('Graph query');
+		input.focus();
+
+		// The field's paste, even of a graph file, and Safari's paste command with it.
+		expect(dispatchBeforeClipboardEvent(input, 'beforepaste').defaultPrevented).toBe(false);
+		const paste = dispatchPaste(input, text);
+		await sleep();
+		expect(paste.defaultPrevented).toBe(false);
+		expect(commitCount(args)).toBe(0);
+		expect(postedNotices(args)).toEqual([]);
+
+		// Highlighted text anywhere on the page keeps the browser's paste too.
+		input.blur();
+		const sentence = document.createElement('p');
+		sentence.textContent = 'A sentence the reader highlighted.';
+		document.body.append(sentence);
+		selectTextOf(sentence);
+		expect(dispatchPaste(document.body, text).defaultPrevented).toBe(false);
+		window.getSelection()?.removeAllRanges();
+		sentence.remove();
+		await sleep();
+		expect(commitCount(args)).toBe(0);
+
+		// Off the field, with nothing highlighted, the same paste is the canvas's.
+		expect(dispatchPaste(document.body, text).defaultPrevented).toBe(true);
+		await waitFor(() => expect(postedNotices(args)).toEqual(['Pasted 3 nodes.']));
+	}}
+/>
+
+<Story
+	name="SafarisBeforeCopyCutAndPasteAreCancelledExactlyWhenTheCanvasWouldTakeTheEvent"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const canvas = within(canvasElement);
+		blurActiveElement();
+		const cancelled = () =>
+			(['beforecopy', 'beforecut', 'beforepaste'] as const).map(
+				(type) => dispatchBeforeClipboardEvent(document.body, type).defaultPrevented
+			);
+
+		// Nothing selected: only a paste is the canvas's to take.
+		expect(cancelled()).toEqual([false, false, true]);
+
+		await selectTopRow(canvasElement);
+		blurActiveElement();
+		expect(cancelled()).toEqual([true, true, true]);
+
+		// With Tags open, a cut would be half a cut and steps aside; copy and paste do not.
+		canvas.getByRole('button', { name: 'Tags' }).click();
+		await sleep();
+		blurActiveElement();
+		expect(cancelled()).toEqual([true, false, true]);
+		canvas.getByRole('button', { name: 'Tags' }).click();
+		await sleep();
+
+		// In the details view all three are the browser's.
+		await enterFocusOn(canvasElement, 'n1');
+		blurActiveElement();
+		expect(cancelled()).toEqual([false, false, false]);
 	}}
 />
