@@ -157,6 +157,20 @@ export const CONFIG_SCHEMA: { [K in ConfigPath]: FieldSpec } = {
 		unit: 'px'
 	},
 
+	// A `number`, like the attachment-size reference below: a byte count has no
+	// natural slider ceiling, and a negative one means nothing, so 0 is a hard floor.
+	'clipboard.pasteAttachmentWarnBytes': {
+		control: 'number',
+		label: 'Ask before a paste adds',
+		help: 'A paste that would add more attachment data than this to the document asks first. Attachments the document already holds do not count.',
+		tier: 'advanced',
+		preview: 'none',
+		min: 0,
+		step: 1024 * 1024,
+		integer: true,
+		unit: 'B'
+	},
+
 	'persistence.storageNamespace': { control: 'hidden', reason: PERSISTENCE_REASON },
 	'persistence.saveDebounceMs': { control: 'hidden', reason: PERSISTENCE_REASON },
 	'persistence.quotaBudgetBytes': { control: 'hidden', reason: PERSISTENCE_REASON },

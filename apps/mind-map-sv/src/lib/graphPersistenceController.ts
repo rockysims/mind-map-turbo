@@ -1,6 +1,6 @@
 import type { GraphCommitIntent } from './components/ui/types/history';
 import type { MultigraphData } from './components/ui/types/multigraph';
-import { base64ToBlob, blobToBase64 } from './assets/assetEncoding';
+import { base64ToBlob } from './assets/assetEncoding';
 import type { GraphAssetStore, StoredGraphAsset } from './assets/assetStore';
 import { sweepAssetTrash } from './assets/assetTrash';
 import { referencedAssetIds } from './components/ui/Multigraph/lib/graph';
@@ -10,6 +10,7 @@ import {
 	semanticallyUnchanged
 } from './components/ui/Multigraph/lib/graphIdentity';
 import { importGraphData } from './components/ui/Multigraph/lib/graphImport';
+import { embeddedAssetsForGraph } from './components/ui/Multigraph/lib/nodeClipboard';
 import { newerAppNotice } from './buildInfo';
 import type { ConfigOverrides } from './config/configOverrides';
 import {
@@ -1324,23 +1325,7 @@ export class GraphPersistenceController {
 	): Promise<NonNullable<GraphFileDocument['embeddedAssets']>> {
 		const store = this.deps.assetStore;
 		if (!store) return [];
-		const embeddedAssets: NonNullable<GraphFileDocument['embeddedAssets']> = [];
-		for (const assetId of referencedAssetIds(graph)) {
-			let storedAsset: Awaited<ReturnType<GraphAssetStore['get']>> | null = null;
-			for (const scope of [...new Set(scopes)]) {
-				storedAsset = await store.get(scope, assetId);
-				if (storedAsset.ok) break;
-			}
-			if (!storedAsset?.ok) continue;
-			embeddedAssets.push({
-				assetId,
-				mimeType: storedAsset.value.mimeType,
-				name: storedAsset.value.name,
-				size: storedAsset.value.size,
-				base64: await blobToBase64(storedAsset.value.blob)
-			});
-		}
-		return embeddedAssets;
+		return embeddedAssetsForGraph(graph, store, scopes);
 	}
 
 	/** Replace a scope's assets with the document's, sweeping whatever it no longer references. */

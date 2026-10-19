@@ -44,6 +44,9 @@ export const APP_CONFIG = {
 		longPressMs: 1000, // hold duration before long-press triggers
 		longPressDistancePx: 8 // max movement allowed during long-press
 	},
+	clipboard: {
+		pasteAttachmentWarnBytes: 5 * 1024 * 1024 // new attachment bytes a paste may add before it asks
+	},
 	persistence: {
 		storageNamespace: 'mind-map', // localStorage key prefix for saved graphs
 		saveDebounceMs: 500, // delay before persisting graph changes
