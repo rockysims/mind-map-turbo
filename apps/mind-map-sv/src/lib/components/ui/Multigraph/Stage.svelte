@@ -139,8 +139,12 @@
 		 * double-click-drag (double-tap-drag) that started on empty canvas. The
 		 * rect is in client coordinates, like `onStageRectChange`'s, so a consumer
 		 * can test it against on-screen node geometry without the view transform.
+		 * `additive` is Shift as held right now — read from each move, and
+		 * reported again when Shift alone goes down or up — so a consumer that
+		 * previews the box's result can follow it mid-drag. Release still decides
+		 * with its own Shift (`onSelectionBoxEnd`).
 		 */
-		onSelectionBoxUpdate?: (rect: StageRect) => void;
+		onSelectionBoxUpdate?: (rect: StageRect, options: { additive: boolean }) => void;
 		/** Fired when an open box is released; `additive` is Shift held at release. */
 		onSelectionBoxEnd?: (rect: StageRect, options: { additive: boolean }) => void;
 		/** Fired when an open box is abandoned: a second pointer, pointercancel, Escape or a right-click. */
@@ -381,7 +385,10 @@
 	//    selection box instead.
 	// 3. The box is drawn here, in stage space beside `.stage-content` and not
 	//    inside it, because the content layer carries the pan/zoom transform.
-	//    `onSelectionBoxUpdate` fires on every move while it is open.
+	//    `onSelectionBoxUpdate` fires on every move while it is open, with
+	//    `additive: e.shiftKey` from that move, and again when Shift alone is
+	//    pressed or let go, so a preview of the box's result follows Shift
+	//    without waiting for the pointer to move.
 	// 4. Release closes an open box with `additive: e.shiftKey`. With no box, a
 	//    press that never crossed `dragThreshold`, was not a double and was not
 	//    held is a click (`onBackgroundClick`). A double that never moved is
@@ -421,11 +428,30 @@
 	$effect(() => {
 		if (typeof window === 'undefined' || !selectionBoxOpen) return;
 		const onKeyDown = (e: KeyboardEvent) => {
-			if (e.key === 'Escape') cancelBackgroundGesture();
+			if (e.key === 'Escape') {
+				cancelBackgroundGesture();
+				return;
+			}
+			followShift(e);
 		};
 		window.addEventListener('keydown', onKeyDown);
-		return () => window.removeEventListener('keydown', onKeyDown);
+		window.addEventListener('keyup', followShift);
+		return () => {
+			window.removeEventListener('keydown', onKeyDown);
+			window.removeEventListener('keyup', followShift);
+		};
 	});
+
+	/**
+	 * Shift pressed or let go while the pointer holds still. Moves alone would
+	 * leave the last update's `additive` stale until the next one, and a
+	 * preview built from it would show one result while release committed the
+	 * other. Key repeat changes nothing, so it reports nothing.
+	 */
+	function followShift(e: KeyboardEvent) {
+		if (e.key !== 'Shift' || e.repeat || !backgroundPress || !selectionBox) return;
+		updateSelectionBox(backgroundPress, e.shiftKey);
+	}
 
 	function beginBackgroundPress(e: PointerEvent) {
 		const previous = lastBackgroundClick;
@@ -486,7 +512,7 @@
 		}
 	}
 
-	function updateSelectionBox(press: BackgroundPress) {
+	function updateSelectionBox(press: BackgroundPress, additive: boolean) {
 		const rect = rectFromCorners({ x: press.clientX, y: press.clientY }, press.current);
 		const stageBounds = stageRef?.getBoundingClientRect();
 		selectionBox = {
@@ -495,7 +521,7 @@
 			width: rect.width,
 			height: rect.height
 		};
-		onSelectionBoxUpdate?.(rect);
+		onSelectionBoxUpdate?.(rect, { additive });
 	}
 
 	function cancelSelectionBox() {
@@ -717,7 +743,7 @@
 			if (backgroundPress) trackBackgroundPress(backgroundPress, e);
 		} else if (backgroundPress?.isDouble) {
 			trackBackgroundPress(backgroundPress, e);
-			if (backgroundPress.dragged) updateSelectionBox(backgroundPress);
+			if (backgroundPress.dragged) updateSelectionBox(backgroundPress, e.shiftKey);
 		} else if (dragNode && dragStartPos && isDoubleClickSession) {
 			dragCurrentPos = { x: e.clientX, y: e.clientY };
 			const dist = pointerDistance(dragStartPos.x, dragStartPos.y, e.clientX, e.clientY);

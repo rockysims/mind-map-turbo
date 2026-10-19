@@ -77,12 +77,12 @@
 	const COPY_FAILED_NOTICE = 'Copy failed. Try again.';
 
 	/**
-	 * What "Paste here" says when the clipboard holds no nodes it can paste. The
-	 * second sentence also covers the case the canvas cannot tell apart from an
-	 * empty clipboard: a browser that refused the menu's read, where the keyboard
-	 * paste still goes through. Measured to fit the toolbar's 12rem notice column
-	 * on one line (185px of 192px); "Copy nodes first, or press Cmd/Ctrl+V." ran
-	 * to 233px and would have wrapped.
+	 * What the background menu's Paste says when the clipboard holds no nodes it
+	 * can paste. The second sentence also covers the case the canvas cannot tell
+	 * apart from an empty clipboard: a browser that refused the menu's read, where
+	 * the keyboard paste still goes through. Measured to fit the toolbar's 12rem
+	 * notice column on one line (185px of 192px); "Copy nodes first, or press
+	 * Cmd/Ctrl+V." ran to 233px and would have wrapped.
 	 */
 	const NOTHING_TO_PASTE_NOTICE = 'Nothing to paste. Copy nodes or try Cmd/Ctrl+V.';
 
@@ -873,12 +873,31 @@
 	 */
 	const selection = new SelectionController();
 	/**
-	 * True from a box's first update until it ends or is cancelled. Plain, not
-	 * reactive: only the window Escape handler reads it, and it has to, because
-	 * the Stage's own Escape listener (which cancels the box) is added after that
-	 * handler and so hears the press second.
+	 * What the box in flight would select if it were released now; null when no
+	 * box is open. Set from a box's first update until it ends or is cancelled.
+	 *
+	 * While it is held, everything that says "selected" — the ring,
+	 * `data-selected`, the accessible name and the visible count — reads it in
+	 * place of `selection` (`shownSelected`), per
+	 * `docs/ui-decisions/2026-10-19--pointer--a-selection-box-previews-its-result-while-dragging.md`.
+	 * `selection` itself is left alone until release, so the copy cache's
+	 * read-ahead and the live announcement do not run on every pointer move.
+	 *
+	 * Raw, and reassigned only when the ids it holds change, so a move that takes
+	 * and drops nothing re-renders nothing. `selectionOwnsKeyPress` reads it too,
+	 * so Escape cancels an open box rather than clearing the selection: the
+	 * Stage's own Escape listener (which cancels the box) is added after the
+	 * window handler and so hears the press second.
 	 */
-	let selectionBoxOpen = false;
+	let selectionPreview = $state.raw<ReadonlySet<string> | null>(null);
+
+	/** Whether the canvas draws `nodeId` as selected: the box's preview while one is open. */
+	function shownSelected(nodeId: string): boolean {
+		return selectionPreview === null ? selection.has(nodeId) : selectionPreview.has(nodeId);
+	}
+
+	/** The count the pill shows, which follows the preview as the rings do. */
+	const shownSelectionCount = $derived(selectionPreview?.size ?? selection.size);
 
 	/**
 	 * The node list, held on its own for the prune below: a relax frame
@@ -2079,10 +2098,10 @@
 	 * closed here; they are found from the press's own target instead, and a
 	 * press any surface marked handled is left alone. The box and the drag belong
 	 * to the Stage, whose listeners hear the press after this one — hence
-	 * `selectionBoxOpen` rather than asking the Stage.
+	 * `selectionPreview` rather than asking the Stage.
 	 */
 	function selectionOwnsKeyPress(event: Event): boolean {
-		if (event.defaultPrevented || selectionBoxOpen) return false;
+		if (event.defaultPrevented || selectionPreview !== null) return false;
 		if (creationPreview !== null && !creationPreview.ending) return false;
 		// A field's Escape is the field's, as it is for the focus overlay above.
 		if (keyboardIsInTextEntry()) return false;
@@ -2543,7 +2562,7 @@
 	}
 
 	/**
-	 * "Paste here" from the background menu. The read is the first thing the tap
+	 * Paste from the background menu. The read is the first thing the tap
 	 * does, before anything is awaited, because a browser honours a clipboard
 	 * read only inside the activation that asked for it.
 	 *
@@ -2803,7 +2822,7 @@
 	/**
 	 * A right-click that landed on the open background menu's layer: the node
 	 * menu when it hit a node, else this menu again at the new point — so the
-	 * reader can aim "Paste here" without closing the menu first.
+	 * reader can aim Paste without closing the menu first.
 	 */
 	function retargetBackgroundMenu(point: Point) {
 		const node = getNodeAt(point.x, point.y);
@@ -2841,29 +2860,58 @@
 		return 1 / Math.max(nodeScale * stageScale, 0.01);
 	}
 
-	function handleSelectionBoxUpdate() {
-		selectionBoxOpen = true;
+	/**
+	 * The selection a box over `rect` would leave. It takes every drawn node its
+	 * on-screen circle overlaps, by the same projection hit testing uses, so what
+	 * the box covers on screen is what it takes: those nodes alone, or with
+	 * `additive` (Shift), the committed selection followed by them. Null without
+	 * a measured stage, when there is nothing to test the box against and the
+	 * selection stands.
+	 *
+	 * The preview and the release both go through here, so the rings a reader
+	 * saw while dragging are the selection the release commits.
+	 */
+	function boxedSelection(rect: StageRect, additive: boolean): readonly string[] | null {
+		const stage = stageRect;
+		if (!stage) return null;
+		const boxed = nodeIdsInScreenRect(focusCandidates(), rect, stage, stageViewState);
+		if (!additive) return boxed;
+		const committed = selection.ids;
+		const kept = new Set(committed);
+		return [...committed, ...boxed.filter((id) => !kept.has(id))];
 	}
 
 	/**
-	 * A released box takes every drawn node its on-screen circle overlaps, by the
-	 * same projection hit testing uses, so what the box covers on screen is what
-	 * it takes. No modifier replaces the selection; Shift held at release adds.
+	 * Every move of an open box, and every Shift press or release during one:
+	 * show what releasing now would select. The hit test is one pass over the
+	 * drawn nodes; the preview is replaced only when its ids change, which is
+	 * what keeps the per-node rings from re-evaluating on a move that changes
+	 * nothing.
 	 */
-	function handleSelectionBoxEnd(rect: StageRect, options: { additive: boolean }) {
-		selectionBoxOpen = false;
-		const stage = stageRect;
-		if (!stage) return;
-		const ids = nodeIdsInScreenRect(focusCandidates(), rect, stage, stageViewState);
-		if (options.additive) {
-			selection.add(ids);
-			return;
-		}
-		selection.replace(ids);
+	function handleSelectionBoxUpdate(rect: StageRect, options: { additive: boolean }) {
+		const next = boxedSelection(rect, options.additive) ?? selection.ids;
+		if (selectionPreview !== null && holdsExactly(selectionPreview, next)) return;
+		selectionPreview = new Set(next);
 	}
 
+	/** Release: commit what the box covers now, through the preview's own path. */
+	function handleSelectionBoxEnd(rect: StageRect, options: { additive: boolean }) {
+		selectionPreview = null;
+		const next = boxedSelection(rect, options.additive);
+		if (next !== null) selection.replace(next);
+	}
+
+	/** An abandoned box drops its preview, and the committed selection shows again. */
 	function handleSelectionBoxCancel() {
-		selectionBoxOpen = false;
+		selectionPreview = null;
+	}
+
+	/**
+	 * Set equality, given that `ids` never repeats an id: the box's hits, the
+	 * selection's ids and `boxedSelection`'s merge of the two are all distinct.
+	 */
+	function holdsExactly(set: ReadonlySet<string>, ids: readonly string[]): boolean {
+		return set.size === ids.length && ids.every((id) => set.has(id));
 	}
 
 	/**
@@ -3288,13 +3336,15 @@
 	 * same projection the details heading and the breadcrumbs use — plus the one
 	 * piece of state that changes what the node is doing to the layout around it.
 	 */
-	function nodeAccessibleName(node: NodeData): string {
+	function nodeAccessibleName(node: NodeData, selected: boolean): string {
 		const title = mathPlainText(node.title);
 		const pinned = node.pinned === true ? ', pinned' : '';
 		// The ring is drawn, so the name says it too: a selection a screen reader
-		// cannot hear about is one its user could copy or delete unawares.
-		const selected = selection.has(node.id) ? ', selected' : '';
-		return `${title}${pinned}${selected}`;
+		// cannot hear about is one its user could copy or delete unawares. Passed
+		// in as the ring's own flag (`shownSelected`), so the two cannot disagree
+		// and a preview change re-runs only the nodes whose flag moved.
+		const selectedText = selected ? ', selected' : '';
+		return `${title}${pinned}${selectedText}`;
 	}
 
 	/**
@@ -4260,15 +4310,30 @@
 	{/if}
 
 	<!--
+		State, not an outcome, so it is drawn on the canvas rather than in the
+		toolbar's notice. Two copies of one count: the pill is what the eye reads,
+		and while a box is dragged it follows the preview, changing on any move
+		that takes or drops a node; the live region holds the committed count, so a
+		screen reader hears where a box landed rather than every node it brushed on
+		the way. The pill is hidden from assistive tech so the count is not read
+		twice; the nodes' names carry the preview.
+
 		The live region stays mounted while the count inside it comes and goes: a
 		region inserted together with its first words is one most screen readers
-		never announce, so the first selection would pass in silence. State, not an
-		outcome, so it is drawn on the canvas rather than in the toolbar's notice.
+		never announce, so the first selection would pass in silence.
 	-->
-	<div class="selection-count-region" aria-live="polite" aria-atomic="true">
-		{#if selection.size > 0}
-			<p class="selection-count" data-selection-count={selection.size}>
-				{selection.size} selected
+	<div class="selection-count-region">
+		<p
+			class="selection-count-announcement"
+			aria-live="polite"
+			aria-atomic="true"
+			data-selection-announcement
+		>
+			{selection.size > 0 ? `${selection.size} selected` : ''}
+		</p>
+		{#if shownSelectionCount > 0}
+			<p class="selection-count" aria-hidden="true" data-selection-count={shownSelectionCount}>
+				{shownSelectionCount} selected
 			</p>
 		{/if}
 	</div>
@@ -4559,7 +4624,7 @@
 				baseNodeOpacity *
 				(revealWaveNodeOpacityByNodeId[node.id] ?? 1) *
 				queryOpacity(queryNodeState)}
-			{@const nodeSelected = selection.has(node.id)}
+			{@const nodeSelected = shownSelected(node.id)}
 			{@const nodeChips = shouldShowQuantityChips(nodeDiameterPx, nodeScale, stageScale, {
 				minOnScreenDiameterPx: dataflowCfg.chipMinOnScreenDiameterPx
 			})
@@ -4582,7 +4647,7 @@
 				class:selected={nodeSelected}
 				role="button"
 				tabindex="0"
-				aria-label={nodeAccessibleName(node)}
+				aria-label={nodeAccessibleName(node, nodeSelected)}
 				data-node-id={node.id}
 				data-merge-target={mergeTargetNodeId === node.id ? 'true' : undefined}
 				data-selected={nodeSelected ? 'true' : undefined}
@@ -4715,8 +4780,11 @@
 			selectionCount={selection.size}
 			canPaste={true}
 			onPaste={() => void pasteFromMenu(menuPoint)}
-			onSelectAll={() => selection.replace(visibleNodeIds)}
-			onClearSelection={() => selection.clear()}
+			onCopy={() => {
+				// Started here, before the menu closes itself, so the clipboard write is
+				// made inside the tap that asked for it.
+				void copyNodes(new Set(selection.ids));
+			}}
 			onClose={() => (backgroundMenu = null)}
 			onRetarget={retargetBackgroundMenu}
 			onExplainDisabled={(reason) => onNotice?.(reason)}
@@ -5268,6 +5336,19 @@
 		top: var(--graph-toolbar-clearance, 0.75rem);
 		right: 0.75rem;
 		pointer-events: none;
+	}
+
+	/* Read by assistive tech only; the pill beside it is what the eye reads. */
+	.selection-count-announcement {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
 	}
 
 	/* The teal inset is the ring's colour, so the count reads as the ring's key. */

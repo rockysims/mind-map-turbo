@@ -7,8 +7,10 @@
  * longer names a node is dropped the moment the graph changes, so a deletion, an
  * undo or a restore never leaves the canvas claiming a selection it cannot draw.
  *
- * Reactive per id: `has` reads one entry of a `SvelteSet`, so toggling one node
- * re-renders that node's ring and nothing else.
+ * Reactive through a `SvelteSet`: a `has` on a present id watches that entry,
+ * while one on an absent id watches the whole set, so every unselected node
+ * re-checks on any add or delete. Cheap — one lookup each — and the canvas
+ * passes each node's flag down rather than reading the set in every child.
  */
 
 import { SvelteSet } from 'svelte/reactivity';

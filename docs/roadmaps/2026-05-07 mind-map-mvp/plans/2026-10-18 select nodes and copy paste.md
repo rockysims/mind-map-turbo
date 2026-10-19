@@ -680,3 +680,14 @@ T09 all edit `Multigraph.svelte` and are strictly sequential for that reason.
 - 2026-10-18 (close-out): what the work found and left is in `docs/debt/`
   under this date — the outcome notice overwritten by the save status half a
   second after an edit is the one most worth paying first.
+- 2026-10-19: two amendments on the owner's rulings, filed as
+  `docs/ui-decisions/2026-10-19--*.md`. The background menu now offers
+  "Paste" and, with more than one node selected, "Copy N" — "Select all" and
+  "Clear selection" are gone from it (Cmd/Ctrl+A, a background click and
+  Escape keep those jobs), which supersedes what T06 and T07 above describe.
+  And the box previews its result while it is dragged: every node it would
+  take shows as selected (Shift adds the committed selection to the preview,
+  even when pressed with the pointer still), the release commits exactly what
+  was shown, and the live region announces only the committed count. The
+  preview is recomputed on a move or a Shift change, not when the layout
+  settles under a still box — filed as debt.

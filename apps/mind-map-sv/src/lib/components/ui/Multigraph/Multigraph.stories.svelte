@@ -2202,8 +2202,16 @@
 		);
 	}
 
+	/** The visible count pill, which follows a box's preview as the rings do. */
 	function selectionCountLabel(el: HTMLElement): HTMLElement | null {
 		return el.querySelector('[data-selection-count]');
+	}
+
+	/** The live region's words: the committed count only, never a box's preview. */
+	function selectionAnnouncement(el: HTMLElement): HTMLElement {
+		const region = el.querySelector('[data-selection-announcement]');
+		if (!(region instanceof HTMLElement)) throw new Error('Selection live region not mounted');
+		return region;
 	}
 
 	/** The client rect around the named nodes' circles, `marginPx` out on every side. */
@@ -2267,6 +2275,30 @@
 		if (options.release === false) return;
 		dispatchShiftablePointer(stage, 'pointerup', to, shiftKey);
 		await tick();
+	}
+
+	/** Carry an open box's far corner to `to`, Shift as held, and let the canvas redraw. */
+	async function dragSelectionBoxTo(stage: HTMLElement, to: Point, shiftKey = false) {
+		dispatchShiftablePointer(stage, 'pointermove', to, shiftKey);
+		await tick();
+	}
+
+	/** Shift alone going down or up, with the pointer held still. */
+	async function pressShiftKey(type: 'keydown' | 'keyup'): Promise<void> {
+		window.dispatchEvent(
+			new KeyboardEvent(type, { key: 'Shift', shiftKey: type === 'keydown', bubbles: true })
+		);
+		await tick();
+	}
+
+	/**
+	 * Client x halfway across the gap between two circles side by side, so a box
+	 * edge there takes the left one and not the right.
+	 */
+	function gapBetween(el: HTMLElement, leftId: string, rightId: string): number {
+		const left = getCircle(el, leftId).getBoundingClientRect();
+		const right = getCircle(el, rightId).getBoundingClientRect();
+		return (left.right + right.left) / 2;
 	}
 
 	function dispatchShortcut(
@@ -2808,8 +2840,8 @@
 		}
 	});
 
-	/** The background menu's items with nothing selected, in order. */
-	const BACKGROUND_MENU_ITEMS = ['Paste here', 'Select all'];
+	/** The background menu's items with at most one node selected. */
+	const BACKGROUND_MENU_ITEMS = ['Paste'];
 	const NOTHING_TO_PASTE = 'Nothing to paste. Copy nodes or try Cmd/Ctrl+V.';
 
 	// One clipboard per story, so no story reads what another copied.
@@ -10361,12 +10393,16 @@
 		expect(stage.querySelector('.selection-box')).toBeNull();
 		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2']);
 
-		// The count says it, and says it to a screen reader: the live region is
-		// the label's container, mounted before the first selection.
+		// The count says it, and says it to a screen reader: the pill is for the
+		// eye, and the live region, mounted before the first selection, carries
+		// the same words to assistive tech.
 		const count = selectionCountLabel(canvasElement);
 		expect(count).toHaveTextContent('3 selected');
 		expect(count).toHaveAttribute('data-selection-count', '3');
-		expect(count?.closest('[aria-live="polite"]')).not.toBeNull();
+		expect(count).toHaveAttribute('aria-hidden', 'true');
+		const announcement = selectionAnnouncement(canvasElement);
+		expect(announcement).toHaveAttribute('aria-live', 'polite');
+		expect(announcement).toHaveTextContent('3 selected');
 
 		// The name says it after "pinned", and only on the nodes the box took.
 		expect(getNodeWrapper(canvasElement, 'n0')).toHaveAccessibleName('Left, pinned, selected');
@@ -10513,6 +10549,190 @@
 		await tick();
 		expect(selectedNodeIds(canvasElement)).toEqual([]);
 		expect(selectionCountLabel(canvasElement)).toBeNull();
+	}}
+/>
+
+<Story
+	name="WhileTheBoxIsDraggedTheNodesItCoversShowAsSelectedAndTheCountFollows"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const row = boxAround(canvasElement, ['n0', 'n1', 'n2']);
+		// Far corners along the row's bottom edge: past one, two, then all three.
+		const overLeft = { x: gapBetween(canvasElement, 'n0', 'n1'), y: row.to.y };
+		const overLeftAndMiddle = { x: gapBetween(canvasElement, 'n1', 'n2'), y: row.to.y };
+		// A sliver at the start corner, which reaches no circle.
+		const overNothing = { x: row.from.x + 4, y: row.from.y + 4 };
+
+		// Before any release, each move shows what releasing there would select:
+		// the ring, the flag, the name and the count.
+		await dispatchSelectionBox(stage, row.from, overLeft, { release: false });
+		expect(stage.querySelector('.selection-box')).not.toBeNull();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0']);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('1 selected');
+		expect(getNodeWrapper(canvasElement, 'n0')).toHaveAccessibleName('Left, pinned, selected');
+		expect(getComputedStyle(getCircle(canvasElement, 'n0')).boxShadow).toContain(
+			SELECTION_RING_RGB
+		);
+
+		await dragSelectionBoxTo(stage, overLeftAndMiddle);
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1']);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('2 selected');
+
+		await dragSelectionBoxTo(stage, row.to);
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2']);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('3 selected');
+
+		// Moving the box back off a node unselects it, still before any release.
+		await dragSelectionBoxTo(stage, overLeft);
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0']);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('1 selected');
+		expect(getNodeWrapper(canvasElement, 'n1')).toHaveAccessibleName('Middle, pinned');
+		expect(getComputedStyle(getCircle(canvasElement, 'n1')).boxShadow).not.toContain(
+			SELECTION_RING_RGB
+		);
+
+		// Off every node: nothing shows selected, and the pill goes with it.
+		await dragSelectionBoxTo(stage, overNothing);
+		expect(selectedNodeIds(canvasElement)).toEqual([]);
+		expect(selectionCountLabel(canvasElement)).toBeNull();
+
+		// The live region heard none of it: it holds the committed count, and
+		// nothing has been committed.
+		expect(selectionAnnouncement(canvasElement).textContent?.trim()).toBe('');
+
+		// Release commits exactly what the last move showed, and only then is it
+		// announced.
+		await dragSelectionBoxTo(stage, overLeftAndMiddle);
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1']);
+		dispatchShiftablePointer(stage, 'pointerup', overLeftAndMiddle, false);
+		await tick();
+		expect(stage.querySelector('.selection-box')).toBeNull();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1']);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('2 selected');
+		expect(selectionAnnouncement(canvasElement)).toHaveTextContent('2 selected');
+	}}
+/>
+
+<Story
+	name="ShiftPressedMidDragAddsThePreviousSelectionToThePreviewAndReleasingWithShiftCommitsIt"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const left = boxAround(canvasElement, ['n0']);
+		await dispatchSelectionBox(stage, left.from, left.to);
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0']);
+
+		// Shift on the double's first click keeps n0; the drag that follows
+		// starts without it, so the preview is what a plain release would leave:
+		// the box's node alone, n0's ring gone for now.
+		const right = boxAround(canvasElement, ['n2']);
+		const farCorner = { x: right.to.x + 2, y: right.to.y };
+		dispatchShiftablePointer(stage, 'pointerdown', right.from, true);
+		dispatchShiftablePointer(stage, 'pointerup', right.from, true);
+		await sleep(DBL_CLICK_MS * 0.2);
+		dispatchShiftablePointer(stage, 'pointerdown', right.from, false);
+		await dragSelectionBoxTo(stage, right.to);
+		expect(selectedNodeIds(canvasElement)).toEqual(['n2']);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('1 selected');
+
+		// Shift held on the next move: the preview becomes the add.
+		await dragSelectionBoxTo(stage, farCorner, true);
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n2']);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('2 selected');
+		expect(getNodeWrapper(canvasElement, 'n0')).toHaveAccessibleName('Left, pinned, selected');
+
+		// Shift let go and pressed again with the pointer still: the key alone
+		// moves the preview.
+		await pressShiftKey('keyup');
+		expect(selectedNodeIds(canvasElement)).toEqual(['n2']);
+		await pressShiftKey('keydown');
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n2']);
+		// Nothing new is committed, so nothing new is announced.
+		expect(selectionAnnouncement(canvasElement)).toHaveTextContent('1 selected');
+
+		// Release with Shift commits the add, exactly as shown.
+		dispatchShiftablePointer(stage, 'pointerup', farCorner, true);
+		await tick();
+		await pressShiftKey('keyup');
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n2']);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('2 selected');
+		expect(selectionAnnouncement(canvasElement)).toHaveTextContent('2 selected');
+
+		// A plain double clears on its first click, so Shift pressed later in its
+		// drag has nothing to add to: the preview is the box's node alone, and so
+		// is what the Shift release commits.
+		const below = boxAround(canvasElement, ['n3']);
+		await dispatchSelectionBox(stage, below.from, below.to, { release: false });
+		expect(selectedNodeIds(canvasElement)).toEqual(['n3']);
+		await dragSelectionBoxTo(stage, below.to, true);
+		expect(selectedNodeIds(canvasElement)).toEqual(['n3']);
+		dispatchShiftablePointer(stage, 'pointerup', below.to, true);
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n3']);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('1 selected');
+	}}
+/>
+
+<Story
+	name="CancellingTheBoxWithEscapeRestoresThePreviousSelectionAndRings"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		await selectTopRow(canvasElement);
+
+		// Shift through the double keeps the row past its first click and adds
+		// the box's node to the preview; let go mid-drag, the preview is the box's
+		// node alone and the row's rings drop while the box is open.
+		const below = boxAround(canvasElement, ['n3']);
+		await dispatchSelectionBox(stage, below.from, below.to, { shiftKey: true, release: false });
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2', 'n3']);
+		await dragSelectionBoxTo(stage, below.to);
+		expect(selectedNodeIds(canvasElement)).toEqual(['n3']);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('1 selected');
+		expect(getComputedStyle(getCircle(canvasElement, 'n0')).boxShadow).not.toContain(
+			SELECTION_RING_RGB
+		);
+
+		// Escape abandons the box, and the committed selection shows again.
+		dispatchShortcut(window, 'Escape');
+		await tick();
+		expect(stage.querySelector('.selection-box')).toBeNull();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2']);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('3 selected');
+		expect(selectionAnnouncement(canvasElement)).toHaveTextContent('3 selected');
+		for (const nodeId of ['n0', 'n1', 'n2']) {
+			expect(getComputedStyle(getCircle(canvasElement, nodeId)).boxShadow, nodeId).toContain(
+				SELECTION_RING_RGB
+			);
+		}
+		expect(getComputedStyle(getCircle(canvasElement, 'n3')).boxShadow).not.toContain(
+			SELECTION_RING_RGB
+		);
+		expect(getNodeWrapper(canvasElement, 'n3')).toHaveAccessibleName('Below, pinned');
+
+		// The abandoned box's release commits nothing.
+		dispatchShiftablePointer(stage, 'pointerup', below.to, false);
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2']);
 	}}
 />
 
@@ -11433,7 +11653,7 @@
 		const point = stagePoint(stage, 0.5, 0.8);
 		dispatchContextMenu(stage, point.x, point.y);
 		await tick();
-		canvas.getByRole('menuitem', { name: 'Paste here' }).click();
+		canvas.getByRole('menuitem', { name: 'Paste' }).click();
 		await waitFor(() => expect(postedNotices(args)).toEqual(['Pasted 2 nodes.']));
 
 		const pasted = lastChangedGraph(args);
@@ -11484,7 +11704,7 @@
 		const point = stagePoint(stage, 0.5, 0.8);
 		dispatchContextMenu(stage, point.x, point.y);
 		await tick();
-		within(canvasElement).getByRole('menuitem', { name: 'Paste here' }).click();
+		within(canvasElement).getByRole('menuitem', { name: 'Paste' }).click();
 		await waitFor(() => expect(postedNotices(args)).toEqual([NOTHING_TO_PASTE]));
 		expect(commitCount(args)).toBe(0);
 	}}
@@ -11737,7 +11957,7 @@
 />
 
 <Story
-	name="TheBackgroundMenuOpensOnRightClickAndOnATouchHoldPasteHerePastesAtThePointSelectAllSelectsTheDrawnNodesClearSelectionClears"
+	name="TheBackgroundMenuOpensOnRightClickAndOnATouchHoldCopyNCopiesTheSelectionAndPastePastesAtThePoint"
 	args={{
 		multigraphData: HOP_LIMITED_CHAIN,
 		defaultPrimaryNodeId: 'n0',
@@ -11754,7 +11974,9 @@
 		const menuItems = () =>
 			canvas.getAllByRole('menuitem').map((item) => item.textContent?.trim() ?? '');
 
-		// Right-click on empty canvas: the background menu, and only it.
+		// Right-click on empty canvas: the background menu, and only it. With
+		// nothing selected it holds Paste alone; selecting all and clearing are
+		// the keyboard's and the background click's, never this menu's.
 		const empty = stagePoint(stage, 0.5, 0.8);
 		const rightClick = dispatchContextMenu(stage, empty.x, empty.y);
 		await tick();
@@ -11763,30 +11985,48 @@
 		expect(canvas.getByRole('menu', { name: 'Canvas actions' })).toBeInTheDocument();
 		expect(menuItems()).toEqual(BACKGROUND_MENU_ITEMS);
 
-		// Select all takes the drawn three, not the two past the hop limit.
-		canvas.getByRole('menuitem', { name: 'Select all' }).click();
+		// With nothing on the clipboard, Paste says what to do instead.
+		BACKGROUND_MENU_CLIPBOARD.mirror('');
+		canvas.getByRole('menuitem', { name: 'Paste' }).click();
+		await waitFor(() => expect(postedNotices(args)).toEqual([NOTHING_TO_PASTE]));
+		expect(commitCount(args)).toBe(0);
+		expect(canvas.queryByRole('menu')).toBeNull();
+
+		// One selected node still gets Paste alone: "Copy N" waits for two.
+		await openNodeMenu(canvasElement, 'n0');
+		canvas.getByRole('menuitem', { name: 'Select' }).click();
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0']);
+		dispatchContextMenu(stage, empty.x, empty.y);
+		await tick();
+		expect(menuItems()).toEqual(BACKGROUND_MENU_ITEMS);
+		dispatchKeydown(document.activeElement, 'Escape');
 		await tick();
 		expect(canvas.queryByRole('menu')).toBeNull();
-		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2']);
 
-		// A touch hold opens it too, now offering to clear what is selected.
+		// Cmd/Ctrl+A takes the drawn three, not the two past the hop limit, and a
+		// touch hold now offers to copy them, the count in the label.
+		blurActiveElement();
+		dispatchShortcut(document.body, 'a', { metaKey: true });
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2']);
 		dispatchPointer(stage, 'pointerdown', empty.x, empty.y, 1, 'touch');
 		await sleep(LONG_PRESS_MS + 20);
 		dispatchPointer(stage, 'pointerup', empty.x, empty.y, 1, 'touch');
 		await tick();
-		expect(menuItems()).toEqual([...BACKGROUND_MENU_ITEMS, 'Clear selection']);
-		canvas.getByRole('menuitem', { name: 'Clear selection' }).click();
-		await tick();
-		expect(selectedNodeIds(canvasElement)).toEqual([]);
+		expect(menuItems()).toEqual([...BACKGROUND_MENU_ITEMS, 'Copy 3']);
+		const copy = canvas.getByRole('menuitem', { name: 'Copy 3' });
+		expect(copy).toHaveAttribute('title', 'Copy the selected nodes and the edges between them');
+		copy.click();
+		await waitFor(() => expect(postedNotices(args).at(-1)).toBe('Copied 3 nodes.'));
 		expect(canvas.queryByRole('menu')).toBeNull();
-
-		// With nothing on the clipboard, Paste here says what to do instead.
-		BACKGROUND_MENU_CLIPBOARD.mirror('');
-		dispatchContextMenu(stage, empty.x, empty.y);
-		await tick();
-		canvas.getByRole('menuitem', { name: 'Paste here' }).click();
-		await waitFor(() => expect(postedNotices(args)).toEqual([NOTHING_TO_PASTE]));
+		const copied = decodedCopy(BACKGROUND_MENU_CLIPBOARD.text);
+		expect(copiedNodes(copied).map(([id]) => id)).toEqual(['n0', 'n1', 'n2']);
+		// The edges inside the three, and not the one out to the hidden n3.
+		expect(copied.edges).toHaveLength(2);
+		// A copy is not an edit, and it leaves the selection where it was.
 		expect(commitCount(args)).toBe(0);
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2']);
 
 		// A right-click on a node with the menu open moves to that node's menu.
 		dispatchContextMenu(stage, empty.x, empty.y);
@@ -11799,15 +12039,11 @@
 		dispatchKeydown(document.activeElement, 'Escape');
 		await tick();
 
-		// Copy the drawn three, then Paste here puts them at the point pressed.
-		blurActiveElement();
-		dispatchShortcut(document.body, 'a', { metaKey: true });
-		await tick();
-		dispatchClipboardEvent(document.body, 'copy');
+		// Paste puts what "Copy 3" copied at the point pressed.
 		const point = stagePoint(stage, 0.5, 0.25);
 		dispatchContextMenu(stage, point.x, point.y);
 		await tick();
-		canvas.getByRole('menuitem', { name: 'Paste here' }).click();
+		canvas.getByRole('menuitem', { name: 'Paste' }).click();
 		await waitFor(() => expect(postedNotices(args).at(-1)).toBe('Pasted 3 nodes.'));
 		const pasted = lastChangedGraph(args);
 		const arrivedIds = arrivedNodes(pasted, ['n0', 'n1', 'n2', 'n3', 'n4']).map((node) => node.id);

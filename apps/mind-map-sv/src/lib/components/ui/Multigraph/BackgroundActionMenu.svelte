@@ -7,25 +7,25 @@
 		selectionCount,
 		canPaste,
 		onPaste,
-		onSelectAll,
-		onClearSelection,
+		onCopy,
 		onClose,
 		onRetarget,
 		onExplainDisabled
 	}: {
 		/** Client coordinates of the hold or right-click on empty canvas. */
 		position: Point;
+		/** How many nodes are selected; above one, the menu offers to copy them. */
 		selectionCount: number;
 		/**
-		 * Whether a paste is known to be available. When it is not, "Paste here"
-		 * still shows, so the reader learns the action exists, but says why it
-		 * cannot act instead of acting.
+		 * Whether a paste is known to be available. When it is not, "Paste" still
+		 * shows, so the reader learns the action exists, but says why it cannot
+		 * act instead of acting.
 		 */
 		canPaste: boolean;
 		/** Paste at `position`; called inside the tap, so the clipboard read has its activation. */
 		onPaste: () => void;
-		onSelectAll: () => void;
-		onClearSelection: () => void;
+		/** Copy the selection; called inside the tap, so the clipboard write has its activation. */
+		onCopy: () => void;
 		onClose: () => void;
 		/**
 		 * Hit-test a right-click that landed on the open menu's layer — onto a
@@ -33,7 +33,7 @@
 		 * just closes the menu.
 		 */
 		onRetarget?: (point: Point) => void;
-		/** A tap on unavailable "Paste here" hands its reason here for the notice line. */
+		/** A tap on unavailable "Paste" hands its reason here for the notice line. */
 		onExplainDisabled?: (reason: string) => void;
 	} = $props();
 
@@ -52,30 +52,31 @@
 	}
 
 	/**
+	 * Two items at most, per the owner's ruling
+	 * (`docs/ui-decisions/2026-10-19--copy--the-background-menu-offers-paste-and-copy-n-only.md`):
+	 * selecting all and clearing are left to Cmd/Ctrl+A, a click on empty
+	 * canvas and Escape, and "Paste" needs no "here", since it lands where the
+	 * menu opened.
+	 *
 	 * Hints follow the node menu's rule: the label names the action, the native
 	 * `title` says what happens, and hover-only is the same debt
 	 * (`docs/debt/2026-08-30-tooltips-are-hover-only.md`).
 	 */
 	const items = $derived<ActionMenuItem[]>([
 		{
-			label: 'Paste here',
+			label: 'Paste',
 			hint: 'Put the copied nodes here',
 			activate: thenClose(onPaste),
 			disabledReason: canPaste ? undefined : NOTHING_TO_PASTE
 		},
-		{
-			label: 'Select all',
-			hint: 'Select every node on the canvas',
-			activate: thenClose(onSelectAll)
-		},
-		// Only offered when there is something to clear, so the menu never shows
-		// an action that would do nothing.
-		...(selectionCount > 0
+		// Only above one, as the ruling has it; a single selected node's own menu
+		// has Copy.
+		...(selectionCount > 1
 			? [
 					{
-						label: 'Clear selection',
-						hint: 'Deselect every node',
-						activate: thenClose(onClearSelection)
+						label: `Copy ${selectionCount}`,
+						hint: 'Copy the selected nodes and the edges between them',
+						activate: thenClose(onCopy)
 					}
 				]
 			: [])

@@ -16,8 +16,7 @@
 			selectionCount: 0,
 			canPaste: true,
 			onPaste: fn(),
-			onSelectAll: fn(),
-			onClearSelection: fn(),
+			onCopy: fn(),
 			onClose: fn()
 		},
 		parameters: {
@@ -84,8 +83,7 @@
 	function openMenu(host: HTMLElement, props: Partial<MenuProps> = {}) {
 		const spies = {
 			onPaste: fn(),
-			onSelectAll: fn(),
-			onClearSelection: fn(),
+			onCopy: fn(),
 			onClose: fn()
 		};
 		const instance = mount(BackgroundActionMenu, {
@@ -112,24 +110,26 @@
 
 <Story
 	name="OpensWithFocusOnTheFirstItem"
+	args={{ selectionCount: 3 }}
 	play={async ({ canvasElement }) => {
 		const menu = within(canvasElement).getByRole('menu', { name: 'Canvas actions' });
 		expect(menu).toBeInTheDocument();
-		expect(itemNames(canvasElement)).toEqual(['Paste here', 'Select all']);
+		expect(itemNames(canvasElement)).toEqual(['Paste', 'Copy 3']);
 
 		// Focus moves in on open, or the menu's own keys would never fire.
-		expect(document.activeElement).toBe(item(canvasElement, 'Paste here'));
+		expect(document.activeElement).toBe(item(canvasElement, 'Paste'));
 		// Roving tabindex: only the active item is a tab stop.
-		expect(item(canvasElement, 'Paste here')).toHaveAttribute('tabindex', '0');
-		expect(item(canvasElement, 'Select all')).toHaveAttribute('tabindex', '-1');
+		expect(item(canvasElement, 'Paste')).toHaveAttribute('tabindex', '0');
+		expect(item(canvasElement, 'Copy 3')).toHaveAttribute('tabindex', '-1');
 
 		// Every item explains itself beyond its label, and the label still names it.
-		expect(item(canvasElement, 'Paste here')).toHaveAttribute('title', 'Put the copied nodes here');
-		expect(item(canvasElement, 'Select all')).toHaveAttribute(
+		expect(item(canvasElement, 'Paste')).toHaveAttribute('title', 'Put the copied nodes here');
+		expect(item(canvasElement, 'Paste')).toHaveAccessibleDescription('Put the copied nodes here');
+		expect(item(canvasElement, 'Copy 3')).toHaveAttribute(
 			'title',
-			'Select every node on the canvas'
+			'Copy the selected nodes and the edges between them'
 		);
-		expect(item(canvasElement, 'Paste here')).not.toHaveAttribute('aria-disabled');
+		expect(item(canvasElement, 'Paste')).not.toHaveAttribute('aria-disabled');
 	}}
 />
 
@@ -137,33 +137,34 @@
 	name="ArrowsMoveBetweenItemsAndWrap"
 	args={{ selectionCount: 2 }}
 	play={async ({ canvasElement }) => {
-		expect(activeElementText()).toBe('Paste here');
+		expect(activeElementText()).toBe('Paste');
 
 		// Horizontal pill, but the vertical arrows work too, as on the node menu.
 		dispatchKeydown(document.activeElement, 'ArrowRight');
-		expect(activeElementText()).toBe('Select all');
-		dispatchKeydown(document.activeElement, 'ArrowDown');
-		expect(activeElementText()).toBe('Clear selection');
+		expect(activeElementText()).toBe('Copy 2');
 		dispatchKeydown(document.activeElement, 'ArrowUp');
-		expect(activeElementText()).toBe('Select all');
-		dispatchKeydown(document.activeElement, 'ArrowLeft');
-		expect(activeElementText()).toBe('Paste here');
+		expect(activeElementText()).toBe('Paste');
+		dispatchKeydown(document.activeElement, 'ArrowDown');
+		expect(activeElementText()).toBe('Copy 2');
 
-		// Wraps backwards off the first item onto the last, and forwards back round.
-		const wrapped = dispatchKeydown(document.activeElement, 'ArrowLeft');
-		expect(wrapped.defaultPrevented).toBe(true);
-		expect(activeElementText()).toBe('Clear selection');
-		dispatchKeydown(document.activeElement, 'ArrowRight');
-		expect(activeElementText()).toBe('Paste here');
+		// Wraps forwards off the last item onto the first, and backwards round again.
+		const forwards = dispatchKeydown(document.activeElement, 'ArrowRight');
+		expect(forwards.defaultPrevented).toBe(true);
+		expect(activeElementText()).toBe('Paste');
+		const backwards = dispatchKeydown(document.activeElement, 'ArrowLeft');
+		expect(backwards.defaultPrevented).toBe(true);
+		expect(activeElementText()).toBe('Copy 2');
 
-		dispatchKeydown(document.activeElement, 'End');
-		expect(activeElementText()).toBe('Clear selection');
 		dispatchKeydown(document.activeElement, 'Home');
-		expect(activeElementText()).toBe('Paste here');
+		expect(activeElementText()).toBe('Paste');
+		dispatchKeydown(document.activeElement, 'End');
+		expect(activeElementText()).toBe('Copy 2');
+		dispatchKeydown(document.activeElement, 'Home');
+		expect(activeElementText()).toBe('Paste');
 
 		flushSync();
-		expect(item(canvasElement, 'Paste here')).toHaveAttribute('tabindex', '0');
-		expect(item(canvasElement, 'Clear selection')).toHaveAttribute('tabindex', '-1');
+		expect(item(canvasElement, 'Paste')).toHaveAttribute('tabindex', '0');
+		expect(item(canvasElement, 'Copy 2')).toHaveAttribute('tabindex', '-1');
 	}}
 />
 
@@ -175,7 +176,7 @@
 		const menu = openMenu(canvasElement);
 		try {
 			expect(document.activeElement).toBe(
-				within(canvasElement).getByRole('menuitem', { name: 'Paste here' })
+				within(canvasElement).getByRole('menuitem', { name: 'Paste' })
 			);
 
 			const event = dispatchKeydown(document.activeElement, 'Escape');
@@ -205,14 +206,14 @@
 		const menu = openMenu(canvasElement, { selectionCount: 2 });
 		try {
 			dispatchKeydown(document.activeElement, 'ArrowRight');
-			expect(activeElementText()).toBe('Select all');
+			expect(activeElementText()).toBe('Copy 2');
 
 			// Roving tabindex would otherwise let the browser tab clean out of the
 			// page with the menu layer still up: Tab must close the menu itself.
 			const event = dispatchKeydown(document.activeElement, 'Tab');
 			expect(event.defaultPrevented).toBe(true);
 			expect(menu.spies.onClose).toHaveBeenCalledOnce();
-			expect(menu.spies.onSelectAll).not.toHaveBeenCalled();
+			expect(menu.spies.onCopy).not.toHaveBeenCalled();
 
 			menu.close();
 			expect(document.activeElement).toBe(before);
@@ -227,33 +228,53 @@
 </Story>
 
 <Story
-	name="HidesClearSelectionWithoutASelection"
-	args={{ selectionCount: 0 }}
+	name="OffersCopyNOnlyWhenMoreThanOneNodeIsSelected"
 	play={async ({ canvasElement }) => {
-		expect(itemNames(canvasElement)).toEqual(['Paste here', 'Select all']);
-		expect(
-			within(canvasElement).queryByRole('menuitem', { name: 'Clear selection' })
-		).not.toBeInTheDocument();
-	}}
-/>
+		// None or one selected: Paste alone. Select all and Clear selection are
+		// never here; their keys and the background click keep those jobs.
+		for (const selectionCount of [0, 1]) {
+			const menu = openMenu(canvasElement, { selectionCount });
+			try {
+				expect(itemNames(canvasElement), String(selectionCount)).toEqual(['Paste']);
+				expect(
+					within(canvasElement).queryByRole('menuitem', { name: /^Copy/ })
+				).not.toBeInTheDocument();
+			} finally {
+				menu.close();
+			}
+		}
 
-<Story
-	name="OffersClearSelectionWithASelection"
-	args={{ selectionCount: 2 }}
-	play={async ({ canvasElement }) => {
-		expect(itemNames(canvasElement)).toEqual(['Paste here', 'Select all', 'Clear selection']);
-		expect(item(canvasElement, 'Clear selection')).toHaveAttribute('title', 'Deselect every node');
+		// Two or more: "Copy N", with the count in its name as well as its label.
+		for (const selectionCount of [2, 7]) {
+			const menu = openMenu(canvasElement, { selectionCount });
+			try {
+				const name = `Copy ${selectionCount}`;
+				expect(itemNames(canvasElement)).toEqual(['Paste', name]);
+				const copy = item(canvasElement, name);
+				expect(copy).toHaveAccessibleName(name);
+				expect(copy).toHaveAccessibleDescription(
+					'Copy the selected nodes and the edges between them'
+				);
+				expect(copy).not.toHaveAttribute('aria-disabled');
+				expect(within(canvasElement).getByRole('menu')).toHaveAccessibleName('Canvas actions');
+			} finally {
+				menu.close();
+			}
+		}
 	}}
-/>
+>
+	{#snippet template()}
+		<div></div>
+	{/snippet}
+</Story>
 
 <Story
 	name="EachItemRunsItsActionAndThenCloses"
 	play={async ({ canvasElement }) => {
 		// One fresh menu per item, as the page opens one per hold.
 		const cases = [
-			{ name: 'Paste here', spy: 'onPaste' },
-			{ name: 'Select all', spy: 'onSelectAll' },
-			{ name: 'Clear selection', spy: 'onClearSelection' }
+			{ name: 'Paste', spy: 'onPaste' },
+			{ name: 'Copy 2', spy: 'onCopy' }
 		] as const;
 		for (const { name, spy } of cases) {
 			const menu = openMenu(canvasElement, { selectionCount: 2 });
@@ -263,8 +284,8 @@
 				const action = menu.spies[spy];
 				expect(action).toHaveBeenCalledOnce();
 				expect(menu.spies.onClose).toHaveBeenCalledOnce();
-				// The action runs first, inside the tap — which is what lets "Paste
-				// here" read the clipboard — and the close follows it.
+				// The action runs first, inside the tap — which is what lets Paste read
+				// the clipboard and Copy write it — and the close follows it.
 				expect(action.mock.invocationCallOrder[0]).toBeLessThan(
 					menu.spies.onClose.mock.invocationCallOrder[0]
 				);
@@ -287,9 +308,9 @@
 	name="UnavailablePasteSaysWhyAndDoesNotPaste"
 	play={async ({ canvasElement }) => {
 		const onExplainDisabled = fn<(reason: string) => void>();
-		const menu = openMenu(canvasElement, { canPaste: false, onExplainDisabled });
+		const menu = openMenu(canvasElement, { canPaste: false, selectionCount: 2, onExplainDisabled });
 		try {
-			const paste = within(canvasElement).getByRole('menuitem', { name: 'Paste here' });
+			const paste = within(canvasElement).getByRole('menuitem', { name: 'Paste' });
 
 			// Still there and still focusable, so the reader learns the action
 			// exists; the reason replaces the hint as its description.
@@ -309,10 +330,10 @@
 			expect(onExplainDisabled).toHaveBeenCalledWith('Nothing copied yet');
 
 			// The rest of the menu is unaffected.
-			const selectAll = within(canvasElement).getByRole('menuitem', { name: 'Select all' });
-			expect(selectAll).not.toHaveAttribute('aria-disabled');
-			selectAll.click();
-			expect(menu.spies.onSelectAll).toHaveBeenCalledOnce();
+			const copy = within(canvasElement).getByRole('menuitem', { name: 'Copy 2' });
+			expect(copy).not.toHaveAttribute('aria-disabled');
+			copy.click();
+			expect(menu.spies.onCopy).toHaveBeenCalledOnce();
 		} finally {
 			menu.close();
 		}
@@ -330,7 +351,7 @@
 		// The phone viewport from the meta's parameters, not the runner's default.
 		expect(window.innerWidth).toBe(390);
 		const items = within(canvasElement).getAllByRole('menuitem');
-		expect(items).toHaveLength(3);
+		expect(items).toHaveLength(2);
 		for (const element of items) {
 			expect(element.getBoundingClientRect().height).toBeGreaterThanOrEqual(TOUCH_TARGET_PX);
 		}

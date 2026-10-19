@@ -1009,12 +1009,15 @@
 			center.y - 30
 		);
 
-		expectRectCloseTo(parseRectCallback(wrapper.dataset.lastSelectionBoxUpdate ?? ''), {
+		const firstUpdate = parseRectCallback(wrapper.dataset.lastSelectionBoxUpdate ?? '');
+		expectRectCloseTo(firstUpdate, {
 			left: center.x - 60,
 			top: center.y - 30,
 			width: 60,
 			height: 30
 		});
+		// An update carries Shift as the move held it, the way the end does.
+		expect(firstUpdate.flag).toBe('false');
 
 		// Drawn by the stage in its own pixels, beside the panned and scaled
 		// content layer, where the reported client rect is exactly where it sits.
@@ -1128,6 +1131,82 @@
 		const end = parseRectCallback(wrapper.dataset.lastSelectionBoxEnd ?? '');
 		expectRectCloseTo(end, { left: center.x, top: center.y, width: 40, height: 20 });
 		expect(end.flag).toBe('true');
+	}}
+/>
+
+<Story
+	name="EveryUpdateCarriesShiftAsHeldOnAMoveOrAShiftKeyAlone"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+		const lastUpdate = () => parseRectCallback(wrapper.dataset.lastSelectionBoxUpdate ?? '');
+		const pressShift = (type: 'keydown' | 'keyup', options: { repeat?: boolean } = {}) =>
+			window.dispatchEvent(
+				new KeyboardEvent(type, {
+					key: 'Shift',
+					shiftKey: type === 'keydown',
+					repeat: options.repeat ?? false,
+					bubbles: true
+				})
+			);
+
+		await waitForLayout();
+
+		const center = getCenter(stage);
+		await dispatchBackgroundDoubleClickDrag(
+			stage,
+			center.x,
+			center.y,
+			center.x + 40,
+			center.y + 20
+		);
+		expect(lastUpdate().flag).toBe('false');
+
+		// Shift is read from each move, so it can come and go mid-drag.
+		dispatchPointer(stage, 'pointermove', center.x + 50, center.y + 30, 1, '', 0, {
+			shiftKey: true
+		});
+		await sleep();
+		expectRectCloseTo(lastUpdate(), { left: center.x, top: center.y, width: 50, height: 30 });
+		expect(lastUpdate().flag).toBe('true');
+		dispatchPointer(stage, 'pointermove', center.x + 60, center.y + 30);
+		await sleep();
+		expectRectCloseTo(lastUpdate(), { left: center.x, top: center.y, width: 60, height: 30 });
+		expect(lastUpdate().flag).toBe('false');
+
+		// Shift alone, with the pointer still: the same box, reported again with
+		// the new flag, so nothing has to wait for a move to see it.
+		pressShift('keydown');
+		await sleep();
+		expectRectCloseTo(lastUpdate(), { left: center.x, top: center.y, width: 60, height: 30 });
+		expect(lastUpdate().flag).toBe('true');
+		pressShift('keyup');
+		await sleep();
+		expect(lastUpdate().flag).toBe('false');
+
+		// A held key's repeats are not news.
+		pressShift('keydown');
+		await sleep();
+		const beforeRepeat = wrapper.dataset.lastSelectionBoxUpdate;
+		pressShift('keydown', { repeat: true });
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxUpdate).toBe(beforeRepeat);
+
+		// Release decides with its own Shift, as before.
+		dispatchPointer(stage, 'pointerup', center.x + 60, center.y + 30, 1, '', 0, {
+			shiftKey: true
+		});
+		await sleep();
+		expect(parseRectCallback(wrapper.dataset.lastSelectionBoxEnd ?? '').flag).toBe('true');
+
+		// With the box closed, Shift reports nothing.
+		const afterEnd = wrapper.dataset.lastSelectionBoxUpdate;
+		pressShift('keyup');
+		pressShift('keydown');
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxUpdate).toBe(afterEnd);
+		pressShift('keyup');
 	}}
 />
 

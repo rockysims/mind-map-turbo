@@ -76,7 +76,7 @@
 	let lastViewState = $state<{ panX: number; panY: number; scale: number } | null>(null);
 	let lastLiveViewState = $state<{ panX: number; panY: number; scale: number } | null>(null);
 	let lastBlockedZoom = $state<string>('');
-	let lastSelectionBoxUpdate = $state<StageRect | null>(null);
+	let lastSelectionBoxUpdate = $state<{ rect: StageRect; additive: boolean } | null>(null);
 	let lastSelectionBoxEnd = $state<{ rect: StageRect; additive: boolean } | null>(null);
 	/** A count rather than a flag, so a story can tell one cancel from two. */
 	let selectionBoxCancelCount = $state(0);
@@ -121,7 +121,9 @@
 		? `${lastLiveViewState.panX},${lastLiveViewState.panY},${lastLiveViewState.scale}`
 		: ''}
 	data-last-blocked-zoom={lastBlockedZoom}
-	data-last-selection-box-update={lastSelectionBoxUpdate ? formatRect(lastSelectionBoxUpdate) : ''}
+	data-last-selection-box-update={lastSelectionBoxUpdate
+		? `${formatRect(lastSelectionBoxUpdate.rect)},${lastSelectionBoxUpdate.additive}`
+		: ''}
 	data-last-selection-box-end={lastSelectionBoxEnd
 		? `${formatRect(lastSelectionBoxEnd.rect)},${lastSelectionBoxEnd.additive}`
 		: ''}
@@ -185,8 +187,8 @@
 		onBlockedZoom={(input) => {
 			lastBlockedZoom = `${input.direction},${input.focalPoint.x},${input.focalPoint.y}`;
 		}}
-		onSelectionBoxUpdate={(rect) => {
-			lastSelectionBoxUpdate = rect;
+		onSelectionBoxUpdate={(rect, { additive }) => {
+			lastSelectionBoxUpdate = { rect, additive };
 		}}
 		onSelectionBoxEnd={(rect, { additive }) => {
 			lastSelectionBoxEnd = { rect, additive };
