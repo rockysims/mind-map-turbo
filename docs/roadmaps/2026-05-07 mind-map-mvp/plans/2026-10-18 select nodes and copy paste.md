@@ -592,6 +592,51 @@ behaviour identical to the node menu.
   "dragging an unselected node moves only it and the selection is unchanged";
   "dragging a selected pinned node keeps it pinned".
 
+### T10 — Cut edges with a menu-armed dashed line (added 2026-10-19)
+
+|                |                                                                                                                                                                                                                                |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Depends on** | T06                                                                                                                                                                                                                            |
+| **Wave**       | 7                                                                                                                                                                                                                              |
+| **Agent**      | high-reasoning (a new armed session in the Stage's pointer machine)                                                                                                                                                            |
+| **Effort**     | L                                                                                                                                                                                                                              |
+| **Files**      | new `components/ui/Multigraph/lib/edgeCut.ts` + `.spec.ts`; `Stage.svelte`, `StageHarness.svelte`, `Stage.stories.svelte`; `Multigraph.svelte`, `Multigraph.stories.svelte`; `BackgroundActionMenu.svelte` + `.stories.svelte` |
+| **PR title**   | `feat(multigraph): cut edges with a dashed line armed from the background menu`                                                                                                                                                |
+
+Ruling: `docs/ui-decisions/2026-10-19--pointer--cut-edges-is-armed-from-the-background-menu.md`.
+
+- `edgeCut.ts`: `segmentsIntersect(a1, a2, b1, b2)` (touching counts; collinear
+  overlap counts) and `edgeIdsCrossedBySegment(edges: readonly { id; source: Point; target: Point }[], a: Point, b: Point): string[]`
+  in input order. Pure, with a spec covering a crossing, a miss, a touch at an
+  endpoint, a collinear overlap and a zero-length line.
+- Stage: an armed knife session shaped like the menu-armed creation session
+  (`via: 'menu'`, no button held, Escape / second pointer / press outside the
+  stage cancel it, the stage swallows the press): a one-shot
+  `edgeCutArmRequest?: { id; anchor: Point }` (client coordinates) draws a
+  dashed line from the anchor to the pointer as the stage's own
+  `aria-hidden` element beside `.stage-content`, fires
+  `onEdgeCutUpdate?(a, b)` on every move and `onEdgeCutEnd?(a, b)` on the
+  click or release that ends it, `onEdgeCutCancel?()` otherwise.
+- Multigraph: "Cut edges" in the background menu (hint names the drag) arms it
+  at the menu's press; on each update convert both points to graph space and
+  run the hit test over the drawn authored edges' render points
+  (`edgeRenderPoints` for visible and boundary edges; never a derived edge),
+  marking the would-be cuts (`data-cut-target`, a red dashed stroke); on end
+  remove them as one commit (`editIntent('delete N edges')`, "delete edge"
+  for one) with the edges' exit fade and the severed-beacon handling the single
+  edge removal has, then notice "Cut N edges." (measured).
+
+**Acceptance**
+
+- Stage stories: arming draws the line from the anchor and updates on hover;
+  a click ends it with both points; Escape, a second pointer and a press
+  outside the stage cancel; a touch-drag ends on release.
+- Multigraph stories: a line across two of three edges cuts exactly those,
+  one undo restores both; a derived edge under the line is untouched; a
+  boundary half-edge is cut; the would-be cuts show while the line moves and
+  clear on cancel; the touch route (hold → "Cut edges" → drag) works; the
+  notice string fits the phone column.
+
 ## Wave plan
 
 ```
@@ -601,6 +646,7 @@ Wave 3   T05                     copy / cut / delete (Multigraph.svelte, after T
 Wave 4   T06                     paste, size warning, menu wiring (after T05 and T07)
 Wave 5   T09                     group drag (Multigraph.svelte, after T06)
 Wave 6   T08                     docs
+Wave 7   T10                     cut edges (added 2026-10-19)
 ```
 
 Total: 9 tasks, 6 gates. Nothing in a wave shares a file. T04, T05, T06 and
