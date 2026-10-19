@@ -2,6 +2,7 @@
 	import type { NodeData } from '../types/node';
 	import type { Point } from '../types/multigraph';
 	import { mathPlainText } from '../MathText/lib/mathPlainText';
+	import ActionMenuPill, { type ActionMenuItem } from './ActionMenuPill.svelte';
 
 	let {
 		node,
@@ -30,24 +31,6 @@
 	} = $props();
 
 	/**
-	 * Where focus sat before the menu took it. Captured while the component is
-	 * created — i.e. before the open effect focuses the first item — and kept
-	 * across re-targets so the whole menu session restores to one place.
-	 */
-	const focusBeforeOpen =
-		typeof document === 'undefined' ? null : (document.activeElement as HTMLElement | null);
-
-	let menuRef = $state<HTMLElement | null>(null);
-	/** Roving-tabindex cursor: only this item is in the tab order. */
-	let activeIndex = $state(0);
-	let lastFocusedOpenKey = $state('');
-	// Reactive because `bind:this` writes into it: Svelte's dev-mode binding
-	// check reads the bound property back and warns `binding_property_non_reactive`
-	// when that read registers no dependency, which a plain array never does — and
-	// it warned on every open. A `$state` array is one proxy and the same writes.
-	const itemRefs = $state<Array<HTMLButtonElement | null>>([]);
-
-	/**
 	 * Labels stay one or two words; the `hint` carries what they cannot say.
 	 * Native `title`, so the browser exposes it as each button's accessible
 	 * description and the label still names it — hover only, which is logged as
@@ -55,8 +38,11 @@
 	 *
 	 * The two gesture items describe what to do next, because activating them
 	 * arms a drag rather than changing anything; the rest describe what happens.
+	 *
+	 * Activation only calls the callback; each of the page's handlers closes the
+	 * menu itself, as it did before the pill was shared.
 	 */
-	const items = $derived([
+	const items = $derived<ActionMenuItem[]>([
 		{
 			label: 'Add node/edge',
 			hint: 'Drag to empty space to add a node, or onto another node to connect',
@@ -84,162 +70,15 @@
 			activate: onDelete
 		}
 	]);
-	/** Changes on open and on every re-target onto another node/point. */
-	const openKey = $derived(`${node.id}:${position.x}:${position.y}`);
-
-	// Opening (or re-targeting) moves focus into the menu, per the WAI-ARIA menu
-	// pattern — without it the keydown handler below never fires.
-	$effect(() => {
-		if (openKey === lastFocusedOpenKey) return;
-		lastFocusedOpenKey = openKey;
-		activeIndex = 0;
-		itemRefs[0]?.focus();
-	});
-
-	/**
-	 * Every close path (Escape, item activation, dismiss, re-target onto empty
-	 * background) tears the component down, so restoring here covers them all.
-	 * Focus that has already moved somewhere outside the menu — an edit sheet
-	 * claiming its input, say — is left alone.
-	 */
-	$effect(() => {
-		return () => {
-			if (typeof document === 'undefined') return;
-			const active = document.activeElement;
-			const movedElsewhere =
-				active !== null && active !== document.body && menuRef?.contains(active) !== true;
-			if (movedElsewhere) return;
-			if (!focusBeforeOpen || !focusBeforeOpen.isConnected) return;
-			if (focusBeforeOpen === document.body) return;
-			focusBeforeOpen.focus();
-		};
-	});
-
-	function focusItem(index: number) {
-		const count = items.length;
-		const next = ((index % count) + count) % count;
-		activeIndex = next;
-		itemRefs[next]?.focus();
-	}
-
-	function handleKeydown(event: KeyboardEvent) {
-		switch (event.key) {
-			case 'Escape':
-				event.preventDefault();
-				onClose();
-				return;
-			// Roving tabindex leaves the other items out of the tab order, so an
-			// unhandled Tab walks straight past the menu — out of the page and into
-			// the browser chrome, with this viewport-covering layer still up. Per the
-			// menu pattern Tab leaves the menu: close it and let the teardown effect
-			// put focus back where it was, so the tab sequence resumes from there.
-			case 'Tab':
-				event.preventDefault();
-				onClose();
-				return;
-			// Horizontal pill, but the vertical arrows are accepted too so the menu
-			// answers to whichever pair the user reaches for.
-			case 'ArrowRight':
-			case 'ArrowDown':
-				event.preventDefault();
-				focusItem(activeIndex + 1);
-				return;
-			case 'ArrowLeft':
-			case 'ArrowUp':
-				event.preventDefault();
-				focusItem(activeIndex - 1);
-				return;
-			case 'Home':
-				event.preventDefault();
-				focusItem(0);
-				return;
-			case 'End':
-				event.preventDefault();
-				focusItem(items.length - 1);
-		}
-	}
-
-	/**
-	 * The layer covers the viewport, so while the menu is open every right-click
-	 * lands here instead of on the stage: never leak the native menu, and hand the
-	 * point back for hit-testing rather than stranding the menu on the old node.
-	 */
-	function handleContextMenu(event: MouseEvent) {
-		event.preventDefault();
-		onRetarget({ x: event.clientX, y: event.clientY });
-	}
 </script>
 
-<div
-	class="menu-layer"
-	role="presentation"
-	onpointercancel={onClose}
-	oncontextmenu={handleContextMenu}
->
-	<!-- Pointer-only escape hatch: Escape and the re-target handler already give
-	     keyboard and right-click users the same way out, so it stays out of the
-	     tab order and out of the accessibility tree. -->
-	<button class="menu-dismiss" type="button" tabindex="-1" aria-hidden="true" onclick={onClose}
-	></button>
-	<div
-		bind:this={menuRef}
-		class="node-action-menu"
-		role="menu"
-		aria-label={`Actions for ${mathPlainText(node.title)}`}
-		style={`left: ${position.x}px; top: ${position.y}px;`}
-		tabindex="-1"
-		onkeydown={handleKeydown}
-	>
-		{#each items as item, index (index)}
-			<button
-				bind:this={itemRefs[index]}
-				type="button"
-				role="menuitem"
-				tabindex={index === activeIndex ? 0 : -1}
-				onfocus={() => (activeIndex = index)}
-				onclick={item.activate}
-				title={item.hint}
-			>
-				{item.label}
-			</button>
-		{/each}
-	</div>
-</div>
-
-<style>
-	.menu-layer {
-		position: absolute;
-		inset: 0;
-		z-index: 20;
-	}
-
-	.menu-dismiss {
-		position: absolute;
-		inset: 0;
-		border: 0;
-		background: transparent;
-		touch-action: none;
-	}
-
-	.node-action-menu {
-		position: fixed;
-		display: flex;
-		gap: 0.375rem;
-		padding: 0.5rem;
-		border: 1px solid #d4d4d4;
-		border-radius: 999px;
-		background: #ffffff;
-		box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
-		transform: translate(-50%, calc(-100% - 12px));
-		touch-action: none;
-	}
-
-	.node-action-menu button {
-		border: 0;
-		border-radius: 999px;
-		padding: 0.5rem 0.75rem;
-		background: #f1f5f9;
-		color: #0f172a;
-		font: inherit;
-	}
-</style>
+<!-- The node id rides along as the target key, so a re-target onto another node
+     re-focuses the first item even if it lands on the same point. -->
+<ActionMenuPill
+	{items}
+	label={`Actions for ${mathPlainText(node.title)}`}
+	{position}
+	targetKey={node.id}
+	{onClose}
+	{onRetarget}
+/>
