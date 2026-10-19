@@ -520,7 +520,7 @@ function migrateGraphDataToV8(data: MultigraphData): MultigraphData {
  * Only runs here, on data entering the app: a user who deliberately unpins
  * their last pin during a session keeps the beacon view they asked for.
  */
-function withSeededComponentPins(data: MultigraphData): MultigraphData {
+export function withSeededComponentPins(data: MultigraphData): MultigraphData {
 	if (data.nodes.some((node) => node.pinned)) return data;
 
 	const seedNodeIds = beaconNodeIds(data);

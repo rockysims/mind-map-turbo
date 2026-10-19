@@ -264,6 +264,46 @@ describe('importGraphData', () => {
 			expect(Object.values(next.posByNodeId)).not.toContainEqual({ x: 999, y: 999 });
 		});
 
+		it('applies a given offset verbatim instead of parking the import beside the host', () => {
+			const host = makeGraph({
+				nodeCount: 2,
+				posByNodeId: { n0: { x: 0, y: 0 }, n1: { x: 300, y: 100 } }
+			});
+			const incoming = makeGraph({
+				nodeCount: 2,
+				posByNodeId: { n0: { x: -50, y: 10 }, n1: { x: 50, y: 70 } }
+			});
+			const given = { x: -400, y: 25 };
+
+			const { next, nodeIdMap, offset } = importGraphData(host, incoming, { offset: given });
+
+			expect(offset).toEqual(given);
+			expect(next.posByNodeId[nodeIdMap.get('n0') ?? '']).toEqual({ x: -450, y: 35 });
+			expect(next.posByNodeId[nodeIdMap.get('n1') ?? '']).toEqual({ x: -350, y: 95 });
+		});
+
+		it('applies a zero offset as given, landing the import on its own coordinates', () => {
+			const host = makeGraph({ nodeCount: 1, posByNodeId: { n0: { x: 0, y: 0 } } });
+			const incoming = makeGraph({ nodeCount: 1, posByNodeId: { n0: { x: 20, y: 30 } } });
+
+			const { next, nodeIdMap, offset } = importGraphData(host, incoming, {
+				offset: { x: 0, y: 0 }
+			});
+
+			expect(offset).toEqual({ x: 0, y: 0 });
+			expect(next.posByNodeId[nodeIdMap.get('n0') ?? '']).toEqual({ x: 20, y: 30 });
+		});
+
+		it('returns its own copy of a given offset', () => {
+			const given = { x: 1, y: 2 };
+
+			const { offset } = importGraphData(makeGraph({ nodeCount: 1 }), makeGraph({ nodeCount: 1 }), {
+				offset: given
+			});
+
+			expect(offset).not.toBe(given);
+		});
+
 		it('leaves the host positions untouched', () => {
 			const host = makeGraph({
 				nodeCount: 2,
@@ -545,6 +585,64 @@ describe('importGraphData', () => {
 			const imported = next.nodes.find((node) => node.id === nodeIdMap.get('n0'));
 			expect(imported?.content).toEqual([{ type: 'image', assetId: 'uuid-1', alt: 'A picture' }]);
 			expect(next.assets?.['uuid-1']).toBeDefined();
+		});
+	});
+
+	describe('ai output bindings', () => {
+		/** An incoming `!ai` node at n0 promoting to the named incoming node ids. */
+		function incomingWithBindings(promoted: Record<string, string>): MultigraphData {
+			return makeGraph({
+				nodes: [
+					{
+						id: 'n0',
+						title: 'Analysis',
+						description: '',
+						addons: { ai: { prompt: 'plot it', runs: [], promoted } }
+					},
+					{ id: 'n1', title: 'Plot', description: '' }
+				]
+			});
+		}
+
+		it('points a promoted binding at the id its target was minted', () => {
+			// The host already has n0 and n1, so the incoming ids are reminted and an
+			// untouched binding would point at the host's n1.
+			const host = makeGraph({ nodeCount: 2 });
+			const incoming = incomingWithBindings({ 'plot.png': 'n1' });
+
+			const { next, nodeIdMap } = importGraphData(host, incoming);
+
+			const analysis = next.nodes.find((node) => node.id === nodeIdMap.get('n0'));
+			expect(nodeIdMap.get('n1')).toBe('n3');
+			expect(analysis?.addons?.ai?.promoted).toEqual({ 'plot.png': 'n3' });
+		});
+
+		it('drops a binding whose target is not in the import', () => {
+			const host = makeGraph({ nodeCount: 2 });
+			const incoming = incomingWithBindings({ 'plot.png': 'n1', 'table.csv': 'n9' });
+
+			const { next, nodeIdMap } = importGraphData(host, incoming);
+
+			const analysis = next.nodes.find((node) => node.id === nodeIdMap.get('n0'));
+			expect(analysis?.addons?.ai?.promoted).toEqual({ 'plot.png': nodeIdMap.get('n1') });
+		});
+
+		it('keeps the rest of the add-on as it was', () => {
+			const incoming = incomingWithBindings({ 'plot.png': 'n1' });
+
+			const { next, nodeIdMap } = importGraphData(makeGraph({ nodeCount: 1 }), incoming);
+
+			const analysis = next.nodes.find((node) => node.id === nodeIdMap.get('n0'));
+			expect(analysis?.addons?.ai).toMatchObject({ prompt: 'plot it', runs: [] });
+		});
+
+		it('leaves the incoming bindings untouched', () => {
+			const incoming = incomingWithBindings({ 'plot.png': 'n1', 'table.csv': 'n9' });
+			const snapshot = structuredClone(incoming);
+
+			importGraphData(makeGraph({ nodeCount: 2 }), incoming);
+
+			expect(incoming).toEqual(snapshot);
 		});
 	});
 

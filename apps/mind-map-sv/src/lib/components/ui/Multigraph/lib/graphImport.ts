@@ -10,6 +10,9 @@
  *
  * Purely additive: nothing in the host is dropped, rewritten, or merged. Node
  * merging is a separate, deliberate gesture.
+ *
+ * Import… and paste both come through here; the only difference between them
+ * is where the incoming component lands, which is why the offset can be given.
  */
 
 import { APP_CONFIG } from '../../../../appConfig';
@@ -44,13 +47,26 @@ interface GraphImportResult {
 	offset: Point;
 }
 
+interface GraphImportOptions {
+	/**
+	 * Translation for every incoming position, used as given. Absent, the import
+	 * is parked beside the host's bounding box; a paste passes the translation
+	 * that lands it on the point the reader chose.
+	 */
+	offset?: Point;
+}
+
 /**
  * Fold `incoming` into `host`, returning a new graph plus the id maps.
  *
  * Neither argument is mutated. Nodes and edges are shallow-copied, so the
  * result shares the immutable-by-convention arrays inside them with `incoming`.
  */
-export function importGraphData(host: MultigraphData, incoming: MultigraphData): GraphImportResult {
+export function importGraphData(
+	host: MultigraphData,
+	incoming: MultigraphData,
+	options: GraphImportOptions = {}
+): GraphImportResult {
 	const nodeIdMap = mintIds(
 		NODE_ID_PREFIX,
 		incoming.nodes.map((node) => node.id),
@@ -67,11 +83,13 @@ export function importGraphData(host: MultigraphData, incoming: MultigraphData):
 		host.edges.map((edge) => edge.id)
 	);
 
-	const offset = importOffset(host, incoming);
+	const offset =
+		options.offset === undefined ? importOffset(host, incoming) : { ...options.offset };
 	const pinShift = pinSequenceShift(host, incoming);
 
-	const nodes: NodeData[] = incoming.nodes.map((node) => {
-		const id = nodeIdMap.get(node.id) as string;
+	const nodes: NodeData[] = incoming.nodes.map((source) => {
+		const id = nodeIdMap.get(source.id) as string;
+		const node = withRemappedPromotedBindings(source, nodeIdMap);
 		return node.lastPinnedSeq === undefined
 			? { ...node, id }
 			: { ...node, id, lastPinnedSeq: node.lastPinnedSeq + pinShift };
@@ -135,6 +153,28 @@ export function importGraphData(host: MultigraphData, incoming: MultigraphData):
 }
 
 /**
+ * The node with every `!ai` output binding pointed at its target's minted id.
+ *
+ * A binding names its node by id, and incoming ids are exactly the ones that
+ * collide with the host's, so a binding left alone would quietly point at
+ * whichever host node happens to share the id. A binding whose target did not
+ * come along has no node to point at in the result, and is dropped the way
+ * `removeNode` drops a binding to a deleted node.
+ */
+function withRemappedPromotedBindings(node: NodeData, nodeIdMap: Map<string, string>): NodeData {
+	const ai = node.addons?.ai;
+	if (ai === undefined) return node;
+
+	const promoted: Record<string, string> = {};
+	for (const [outputName, targetId] of Object.entries(ai.promoted)) {
+		const minted = nodeIdMap.get(targetId);
+		if (minted !== undefined) promoted[outputName] = minted;
+	}
+
+	return { ...node, addons: { ...node.addons, ai: { ...ai, promoted } } };
+}
+
+/**
  * Per-tag layout factors, merged per namespace with the host last, exactly as
  * colours are: a tag the reader already tuned keeps its factor, and a tag only
  * the import tuned brings its factor along. Absent on both sides stays absent,
@@ -189,8 +229,12 @@ function importOffset(host: MultigraphData, incoming: MultigraphData): Point {
 	};
 }
 
-/** Bounding box over node positions, or undefined when there are no nodes. */
-function boundsOf(data: MultigraphData): GraphBounds | undefined {
+/**
+ * Bounding box over node positions, or undefined when there are no nodes. A
+ * node with no stored position counts at the origin, which is where the import
+ * puts it too.
+ */
+export function boundsOf(data: MultigraphData): GraphBounds | undefined {
 	if (data.nodes.length === 0) return undefined;
 
 	let minX = Infinity;
