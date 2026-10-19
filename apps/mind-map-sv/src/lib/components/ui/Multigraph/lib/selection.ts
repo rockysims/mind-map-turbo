@@ -8,7 +8,8 @@
  * inventing an endpoint. Everything else a copy carries (tag colours, layout
  * factors, asset metadata, pin stamps) is cut down to what those nodes and
  * edges actually use, so pasting into another document brings no settings the
- * reader never saw on the nodes they copied.
+ * reader never saw on the nodes they copied. The edges that left the chosen
+ * nodes travel beside it, for a paste back into the same document to rebuild.
  */
 
 import { withSeededComponentPins } from '$lib/migrations';
@@ -16,7 +17,7 @@ import type { EdgeData } from '../../types/edge';
 import type { MultigraphData, Point, TagPhysicsConfig } from '../../types/multigraph';
 import type { NodeData } from '../../types/node';
 import { isDerivedEdgeId } from './derivedEdges';
-import { referencedAssetIds } from './graph';
+import { addEdge, referencedAssetIds } from './graph';
 import { boundsOf } from './graphImport';
 import { nodeScreenCircle, type NodeFocusCandidate, type ViewTransform } from './nodeFocus';
 import type { StageRect } from './stageCoordinates';
@@ -155,6 +156,71 @@ export function inducedSubgraph(
 	if (pinSequence !== undefined) subgraph.pinSequence = pinSequence;
 
 	return subgraph;
+}
+
+/**
+ * The edges of `data` that cross the boundary of `nodeIds`: exactly one end in
+ * the set, the other outside it. In `data.edges` order, and the edge objects
+ * themselves, untouched. Derived edges are left out, as `inducedSubgraph`
+ * leaves them out: the maths recomputes them wherever the nodes land.
+ *
+ * What a copy carries beside its induced subgraph, so a paste into the same
+ * document can reconnect the copies to the nodes left behind
+ * (`docs/ui-decisions/2026-10-19--editing--a-paste-into-the-same-document-reconnects-the-copies-to-their-outside-neighbours.md`).
+ */
+export function boundaryEdgesOf(data: MultigraphData, nodeIds: ReadonlySet<string>): EdgeData[] {
+	return data.edges.filter(
+		(edge) =>
+			!isDerivedEdgeId(edge.id) && nodeIds.has(edge.sourceNodeId) !== nodeIds.has(edge.targetNodeId)
+	);
+}
+
+/**
+ * `host` — a graph a paste has just been folded into — with each boundary edge
+ * rebuilt between the pasted copy of its inside end and the original node at
+ * its outside end, plus the ids those new edges were given, in order.
+ *
+ * `nodeIdMap` is the paste's own (copied id → pasted id). An edge is rebuilt
+ * when exactly one end is in that map and the other names a node `host` held
+ * before the paste; otherwise it is skipped, because its outside node is gone
+ * or the edge did not leave this copy. A pasted node is never taken for the
+ * outside end, even when it was minted the id the outside node once had. The
+ * new edge gets a fresh id and keeps the original's direction and tags.
+ *
+ * Only for a paste into the document the copy came from: anywhere else an
+ * outside id names whatever node happens to have it.
+ */
+export function reconnectBoundaryEdges(
+	host: MultigraphData,
+	boundaryEdges: readonly EdgeData[],
+	nodeIdMap: ReadonlyMap<string, string>
+): { next: MultigraphData; edgeIds: string[] } {
+	const pastedIds = new Set(nodeIdMap.values());
+	const hostIds = new Set(host.nodes.map((node) => node.id));
+	let next = host;
+	const edgeIds: string[] = [];
+
+	for (const edge of boundaryEdges) {
+		const pastedSource = nodeIdMap.get(edge.sourceNodeId);
+		const pastedTarget = nodeIdMap.get(edge.targetNodeId);
+		if ((pastedSource === undefined) === (pastedTarget === undefined)) continue;
+		const outsideId = pastedSource === undefined ? edge.sourceNodeId : edge.targetNodeId;
+		if (!hostIds.has(outsideId) || pastedIds.has(outsideId)) continue;
+
+		const reconnected = addEdge(
+			next,
+			pastedSource ?? edge.sourceNodeId,
+			pastedTarget ?? edge.targetNodeId,
+			{ tags: edge.tags, directed: edge.directed }
+		);
+		// Both ends were checked above, so this always adds; the guard keeps a
+		// refusal from reporting someone else's edge as the new one.
+		if (reconnected === next) continue;
+		next = reconnected;
+		edgeIds.push(reconnected.edges[reconnected.edges.length - 1].id);
+	}
+
+	return { next, edgeIds };
 }
 
 /**

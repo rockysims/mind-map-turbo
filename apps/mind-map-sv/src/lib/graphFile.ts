@@ -1,3 +1,4 @@
+import type { EdgeData } from './components/ui/types/edge';
 import type { MultigraphData } from './components/ui/types/multigraph';
 import { sanitizeOverrides, type ConfigOverrides } from './config/configOverrides';
 import {
@@ -5,6 +6,7 @@ import {
 	NEUTRAL_VIEW_STATE,
 	PersistedGraphError,
 	hasConfigOverrides,
+	isEdgeData,
 	unwrapPersistedGraph,
 	type ViewState
 } from './migrations';
@@ -38,6 +40,15 @@ export type GraphFileDocument = {
 	 */
 	appVersion?: string;
 	embeddedAssets?: GraphFileEmbeddedAsset[];
+	/**
+	 * Edges that left a copied subset: one end among the copied nodes, the other
+	 * outside them, kept for a paste into the document the copy came from
+	 * (`documentId`), which reconnects the copies to the outside nodes. Their
+	 * outside ids mean nothing in any other document. Beside `data` rather than
+	 * inside it, so no loader sees an edge to a node the graph lacks; absent
+	 * when there are none, and on anything that is not a copy.
+	 */
+	boundaryEdges?: EdgeData[];
 };
 
 export type GraphFileEmbeddedAsset = {
@@ -62,6 +73,7 @@ type GraphFilePayload = {
 	documentId?: string;
 	exportedAt?: number;
 	appVersion?: string;
+	boundaryEdges?: EdgeData[];
 	htmlDocumentVersion?: number;
 	minReaderVersion?: number;
 };
@@ -257,7 +269,8 @@ function parseGraphFilePayload(
 		settings: readSettings(raw),
 		documentId: readOptionalString(raw, 'documentId'),
 		exportedAt: readOptionalNumber(raw, 'exportedAt'),
-		appVersion: readOptionalString(raw, 'appVersion')
+		appVersion: readOptionalString(raw, 'appVersion'),
+		boundaryEdges: readBoundaryEdges(raw)
 	};
 }
 
@@ -271,7 +284,13 @@ function graphFilePayload(doc: GraphFileDocument): GraphFilePayload {
 		settings: hasConfigOverrides(doc.settings) ? doc.settings : undefined,
 		documentId: doc.documentId,
 		exportedAt: doc.exportedAt,
-		appVersion: doc.appVersion
+		appVersion: doc.appVersion,
+		// Omitted when empty, so a copy with no edges leaving it, and every file a
+		// Download writes, serialize as they did before the field existed.
+		boundaryEdges:
+			doc.boundaryEdges !== undefined && doc.boundaryEdges.length > 0
+				? doc.boundaryEdges
+				: undefined
 	};
 }
 
@@ -472,6 +491,19 @@ function readOptionalString(raw: unknown, key: string): string | undefined {
 	if (!isRecord(raw)) return undefined;
 	const value = raw[key];
 	return typeof value === 'string' ? value : undefined;
+}
+
+/**
+ * A copy's boundary edges, each checked as a graph's own edges are and the bad
+ * ones dropped rather than failing the paste: they only add edges to a paste,
+ * so losing one costs that edge and nothing else. Absent when the field is, or
+ * when nothing in it survives.
+ */
+function readBoundaryEdges(raw: unknown): EdgeData[] | undefined {
+	if (!isRecord(raw) || !Array.isArray(raw.boundaryEdges)) return undefined;
+	// Wrapped, because `filter` would hand `isEdgeData` the index as its options.
+	const edges = raw.boundaryEdges.filter((edge): edge is EdgeData => isEdgeData(edge));
+	return edges.length > 0 ? edges : undefined;
 }
 
 function readOptionalNumber(raw: unknown, key: string): number | undefined {

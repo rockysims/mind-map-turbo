@@ -19,9 +19,10 @@
 		decodeNodeClipboard,
 		embeddedAssetsForGraph,
 		encodeNodeClipboard,
-		memoryClipboard
+		memoryClipboard,
+		type ClipboardPort
 	} from './lib/nodeClipboard';
-	import { inducedSubgraph } from './lib/selection';
+	import { boundaryEdgesOf, inducedSubgraph } from './lib/selection';
 	import { clientPointToGraphPoint } from './lib/stageCoordinates';
 	import { serializeGraphFile } from '$lib/graphFile';
 	import ToolbarClearanceStage from './ToolbarClearanceStage.svelte';
@@ -2775,15 +2776,22 @@
 		}
 	}
 
-	/** The clipboard text a copy of `nodeIds` out of `graph` writes, attachments read from `scope`. */
+	/**
+	 * The clipboard text a copy of `nodeIds` out of `graph` writes in the
+	 * document `scope`, attachments read from `scope`.
+	 */
 	async function copiedText(
 		graph: MultigraphData,
 		nodeIds: readonly string[],
 		store: GraphAssetStore,
 		scope: string
 	): Promise<string> {
-		const subgraph = inducedSubgraph(graph, new Set(nodeIds));
-		return encodeNodeClipboard(subgraph, await embeddedAssetsForGraph(subgraph, store, [scope]));
+		const ids = new Set(nodeIds);
+		const subgraph = inducedSubgraph(graph, ids);
+		return encodeNodeClipboard(subgraph, await embeddedAssetsForGraph(subgraph, store, [scope]), {
+			documentId: scope,
+			boundaryEdges: boundaryEdgesOf(graph, ids)
+		});
 	}
 
 	/** The scope a cross-document paste lands in: another document's, holding nothing yet. */
@@ -2794,6 +2802,9 @@
 	const PASTE_WARN_SETTINGS = { 'clipboard.pasteAttachmentWarnBytes': 4096 } as const;
 	/** A threshold every attachment exceeds, so a paste that never asks proves it added nothing. */
 	const PASTE_ALWAYS_WARN_SETTINGS = { 'clipboard.pasteAttachmentWarnBytes': 1 } as const;
+
+	/** Where a hand-written copy says it came from: no document, and no edges leaving it. */
+	const NO_SOURCE = { documentId: '', boundaryEdges: [] };
 
 	/** Three unpinned nodes in a chain, as a copy of a pinless corner of another graph carries them. */
 	const PINLESS_CHAIN = makeGraph({
@@ -2973,11 +2984,149 @@
 	const SAVED_FILE_CLIPBOARD = memoryClipboard();
 	const NON_GRAPH_CLIPBOARD = memoryClipboard('hello');
 	const BACKGROUND_MENU_CLIPBOARD = memoryClipboard();
+	// Empty, so the menu's Paste carries no count left by another story's copy.
+	const ARMING_CUT_CLIPBOARD = memoryClipboard();
 	/** Every write and commit the cross-document stories make, in order. */
 	const CROSS_DOCUMENT_LOG: string[] = [];
 	const CROSS_DOCUMENT_STORE = loggingAssetStore(CROSS_DOCUMENT_LOG);
 	const LARGE_PASTE_STORE = gatedAssetStore();
 	const SAME_DOCUMENT_STORE = copyImageAssetStore();
+
+	/**
+	 * A clipboard whose system half holds whatever the story says: each read
+	 * waits until `answer` — as Chrome's does while its permission prompt is up —
+	 * while `peek` gives the tab's own last copy, which `mirror` records. Counts
+	 * its reads, so a story can tell a paste that read again from one that used
+	 * the menu's read. All state is closed over rather than held in properties,
+	 * because the canvas receives a copy of the args object, not this one.
+	 */
+	function heldClipboard(): ClipboardPort & {
+		answer(text: string | null): void;
+		readonly reads: number;
+	} {
+		let reads = 0;
+		let lastCopy: string | null = null;
+		let waiting: Array<(text: string | null) => void> = [];
+		return {
+			get reads() {
+				return reads;
+			},
+			answer(text) {
+				for (const resolve of waiting) resolve(text);
+				waiting = [];
+			},
+			async writeText() {
+				return true;
+			},
+			readText() {
+				reads += 1;
+				return new Promise((resolve) => waiting.push(resolve));
+			},
+			peek() {
+				return lastCopy;
+			},
+			mirror(text) {
+				lastCopy = text;
+			}
+		};
+	}
+	const HELD_CLIPBOARD = heldClipboard();
+
+	/** The document the boundary-edge stories copy in and paste back into. */
+	const BOUNDARY_SCOPE = 'boundary-story';
+
+	/**
+	 * A → B → C along the top, the first edge directed and tagged, and D below
+	 * with a tagged edge up into C. Every node pinned, so a paste lands in view
+	 * and no deletion severs anything. A copy of B and C leaves two edges
+	 * behind: A → B and D — C.
+	 */
+	const BOUNDARY_GRAPH = makeGraph({
+		nodes: [
+			{ id: 'n0', title: 'A', description: '', tags: [] },
+			{ id: 'n1', title: 'B', description: '', tags: [] },
+			{ id: 'n2', title: 'C', description: '', tags: [] },
+			{ id: 'n3', title: 'D', description: '', tags: [] }
+		],
+		pinned: ['n0', 'n1', 'n2', 'n3'],
+		edges: [
+			{ id: 'a-b', source: 'n0', target: 'n1', tags: ['supports'], directed: true },
+			{ id: 'b-c', source: 'n1', target: 'n2' },
+			{ id: 'd-c', source: 'n3', target: 'n2', tags: ['blocks'] }
+		],
+		posByNodeId: SELECTION_GRAPH.posByNodeId
+	});
+	/** Slow enough enter fades that a story can see an arriving edge part way in. */
+	const BOUNDARY_FADE_LAYOUT = { relaxIterations: 0, enterExitDurationMs: 600 };
+
+	/** The text a copy of B and C out of `BOUNDARY_GRAPH` writes in `BOUNDARY_SCOPE`. */
+	function boundaryCopyText(): string {
+		const ids = new Set(['n1', 'n2']);
+		return encodeNodeClipboard(inducedSubgraph(BOUNDARY_GRAPH, ids), [], {
+			documentId: BOUNDARY_SCOPE,
+			boundaryEdges: boundaryEdgesOf(BOUNDARY_GRAPH, ids)
+		});
+	}
+
+	/**
+	 * `[source, target, directed, tags]` for each edge of `graph` past the first
+	 * `skip`, which is what a story compares a paste's new edges by.
+	 */
+	function edgesAfter(
+		graph: MultigraphData,
+		skip: number
+	): Array<[string, string, boolean, string[]]> {
+		return graph.edges
+			.slice(skip)
+			.map((edge) => [edge.sourceNodeId, edge.targetNodeId, edge.directed === true, edge.tags]);
+	}
+
+	// One clipboard per story, so no story reads what another copied.
+	const BOUNDARY_COPY_CLIPBOARD = memoryClipboard();
+	const BOUNDARY_DELETED_CLIPBOARD = memoryClipboard();
+	const DERIVED_COPY_CLIPBOARD = memoryClipboard();
+
+	/**
+	 * Three corners of `CUT_GRAPH`'s square with only the top left pinned, and
+	 * the left side and the top joining them, so the line across the sides cuts
+	 * the bottom corner off from the pin and the removal plays the reveal wave.
+	 */
+	const SEVERING_CUT_GRAPH = makeGraph({
+		nodes: CUT_GRAPH.nodes
+			.filter(({ id }) => id !== 'n3')
+			.map(({ id, title }) => ({ id, title, description: '', tags: [] })),
+		pinned: ['n0'],
+		edges: [
+			{ id: 'left', source: 'n0', target: 'n2' },
+			{ id: 'top', source: 'n0', target: 'n1' }
+		],
+		posByNodeId: CUT_GRAPH.posByNodeId
+	});
+	/** Every other removal fades over 600 ms here, three times a cut edge's ceiling. */
+	const SLOW_EXIT_LAYOUT = { relaxIterations: 0, enterExitDurationMs: 600 };
+	/** What a cut edge's exit is capped at, by the owner's ruling. */
+	const CUT_EDGE_EXIT_MAX_MS = 200;
+
+	/** A `matchMedia` that answers yes to reduced motion and no to everything else. */
+	function reducedMotionMatchMedia(query: string): MediaQueryList {
+		return {
+			matches: query.includes('prefers-reduced-motion'),
+			media: query,
+			onchange: null,
+			addListener() {},
+			removeListener() {},
+			addEventListener() {},
+			removeEventListener() {},
+			dispatchEvent() {
+				return false;
+			}
+		};
+	}
+
+	/** The cut edge `edgeId` as the exiting buffer draws it, or `null` when it is not fading. */
+	function exitingEdge(el: HTMLElement, edgeId: string): HTMLElement | null {
+		return el.querySelector(`[data-edge-id="${edgeId}"][data-edge-exiting="true"]`);
+	}
 </script>
 
 <Story
@@ -11725,7 +11874,7 @@
 		const stage = getStage(canvasElement);
 		blurActiveElement();
 		hoverStage(stage, stagePoint(stage, 0.5, 0.75));
-		const paste = dispatchPaste(document.body, encodeNodeClipboard(PINLESS_CHAIN, []));
+		const paste = dispatchPaste(document.body, encodeNodeClipboard(PINLESS_CHAIN, [], NO_SOURCE));
 		expect(paste.defaultPrevented).toBe(true);
 		await waitFor(() => expect(postedNotices(args)).toEqual(['Pasted 3 nodes.']));
 
@@ -11774,10 +11923,11 @@
 		);
 		const transformBefore = getStageTransform(canvasElement);
 
+		// The menu counts the file's two nodes the moment it opens.
 		const point = stagePoint(stage, 0.5, 0.8);
 		dispatchContextMenu(stage, point.x, point.y);
 		await tick();
-		canvas.getByRole('menuitem', { name: 'Paste' }).click();
+		canvas.getByRole('menuitem', { name: 'Paste (2)' }).click();
 		await waitFor(() => expect(postedNotices(args)).toEqual(['Pasted 2 nodes.']));
 
 		const pasted = lastChangedGraph(args);
@@ -12117,7 +12267,7 @@
 		expect(commitCount(args)).toBe(0);
 		expect(canvas.queryByRole('menu')).toBeNull();
 
-		// One selected node still gets no Copy: "Copy N" waits for two.
+		// One selected node still gets no Copy: "Copy (N)" waits for two.
 		await openNodeMenu(canvasElement, 'n0');
 		canvas.getByRole('menuitem', { name: 'Select' }).click();
 		await tick();
@@ -12130,7 +12280,7 @@
 		expect(canvas.queryByRole('menu')).toBeNull();
 
 		// Cmd/Ctrl+A takes the drawn three, not the two past the hop limit, and a
-		// touch hold now offers to copy them, the count in the label.
+		// touch hold now offers to copy them, the count in the label's parentheses.
 		blurActiveElement();
 		dispatchShortcut(document.body, 'a', { metaKey: true });
 		await tick();
@@ -12139,8 +12289,8 @@
 		await sleep(LONG_PRESS_MS + 20);
 		dispatchPointer(stage, 'pointerup', empty.x, empty.y, 1, 'touch');
 		await tick();
-		expect(menuItems()).toEqual(['Paste', 'Copy 3', 'Cut edges']);
-		const copy = canvas.getByRole('menuitem', { name: 'Copy 3' });
+		expect(menuItems()).toEqual(['Paste', 'Copy (3)', 'Cut edges']);
+		const copy = canvas.getByRole('menuitem', { name: 'Copy (3)' });
 		expect(copy).toHaveAttribute('title', 'Copy the selected nodes and the edges between them');
 		copy.click();
 		await waitFor(() => expect(postedNotices(args).at(-1)).toBe('Copied 3 nodes.'));
@@ -12164,11 +12314,13 @@
 		dispatchKeydown(document.activeElement, 'Escape');
 		await tick();
 
-		// Paste puts what "Copy 3" copied at the point pressed.
+		// Paste names what "Copy (3)" copied as soon as the menu opens, and puts
+		// it at the point pressed.
 		const point = stagePoint(stage, 0.5, 0.25);
 		dispatchContextMenu(stage, point.x, point.y);
 		await tick();
-		canvas.getByRole('menuitem', { name: 'Paste' }).click();
+		expect(menuItems()).toEqual(['Paste (3)', 'Copy (3)', 'Cut edges']);
+		canvas.getByRole('menuitem', { name: 'Paste (3)' }).click();
 		await waitFor(() => expect(postedNotices(args).at(-1)).toBe('Pasted 3 nodes.'));
 		const pasted = lastChangedGraph(args);
 		const arrivedIds = arrivedNodes(pasted, ['n0', 'n1', 'n2', 'n3', 'n4']).map((node) => node.id);
@@ -12194,7 +12346,7 @@
 	}}
 	play={async ({ canvasElement, args }: PlayContext) => {
 		await waitForLayout();
-		const text = encodeNodeClipboard(PINLESS_CHAIN, []);
+		const text = encodeNodeClipboard(PINLESS_CHAIN, [], NO_SOURCE);
 		await typeGraphQuery(canvasElement, 'Middle');
 		const input = within(canvasElement).getByLabelText('Graph query');
 		input.focus();
@@ -12670,6 +12822,7 @@
 		defaultPrimaryNodeId: 'n0',
 		initialViewState: SELECTION_VIEW,
 		layoutSettings: SELECTION_LAYOUT,
+		clipboard: ARMING_CUT_CLIPBOARD,
 		onMultigraphChange: fn(),
 		onNotice: fn()
 	}}
@@ -12686,7 +12839,7 @@
 		await tick();
 		expect(canvas.getAllByRole('menuitem').map((item) => item.textContent?.trim())).toEqual([
 			'Paste',
-			'Copy 2',
+			'Copy (2)',
 			'Cut edges'
 		]);
 		canvas.getByRole('menuitem', { name: 'Cut edges' }).click();
@@ -12715,5 +12868,379 @@
 		dispatchKeydown(document.body, 'Escape');
 		await tick();
 		expect(selectedNodeIds(canvasElement)).toEqual([]);
+	}}
+/>
+
+<Story
+	name="TheBackgroundMenusPasteCountsTheTabsCopyAtOnceAndTheSystemClipboardWhenItAnswers"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		clipboard: HELD_CLIPBOARD,
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const canvas = within(canvasElement);
+		const stage = getStage(canvasElement);
+		const menuItems = () =>
+			canvas.getAllByRole('menuitem').map((item) => item.textContent?.trim() ?? '');
+
+		// Nothing this tab copied, and the system has not answered: a bare Paste,
+		// with the read already out.
+		const below = stagePoint(stage, 0.5, 0.8);
+		dispatchContextMenu(stage, below.x, below.y);
+		await tick();
+		expect(menuItems()).toEqual(BACKGROUND_MENU_ITEMS);
+		expect(HELD_CLIPBOARD.reads).toBe(1);
+
+		// It answers with another tab's copy of three nodes, and Paste counts them.
+		HELD_CLIPBOARD.answer(encodeNodeClipboard(PINLESS_CHAIN, [], NO_SOURCE));
+		await waitFor(() => expect(menuItems()).toEqual(['Paste (3)', 'Cut edges']));
+
+		// The paste brings what the label counted, from that one read.
+		canvas.getByRole('menuitem', { name: 'Paste (3)' }).click();
+		await waitFor(() => expect(postedNotices(args)).toEqual(['Pasted 3 nodes.']));
+		expect(HELD_CLIPBOARD.reads).toBe(1);
+
+		// This tab's own copy of two is counted the moment the menu opens, before
+		// the system answers. (The paste selected what it brought; Escape clears
+		// that, so the menu offers no Copy.)
+		blurActiveElement();
+		dispatchKeydown(document.body, 'Escape');
+		await tick();
+		HELD_CLIPBOARD.mirror(
+			encodeNodeClipboard(inducedSubgraph(SELECTION_GRAPH, new Set(['n0', 'n1'])), [], NO_SOURCE)
+		);
+		const left = stagePoint(stage, 0.1, 0.5);
+		dispatchContextMenu(stage, left.x, left.y);
+		await tick();
+		expect(menuItems()).toEqual(['Paste (2)', 'Cut edges']);
+		expect(HELD_CLIPBOARD.reads).toBe(2);
+
+		// ...and when the system turns out to hold a sentence copied since, the
+		// count goes, because a paste would read that sentence.
+		HELD_CLIPBOARD.answer('A sentence copied from somewhere else.');
+		await waitFor(() => expect(menuItems()).toEqual(BACKGROUND_MENU_ITEMS));
+
+		// A bare Paste still acts: the tap reads again, and says why nothing came.
+		canvas.getByRole('menuitem', { name: 'Paste' }).click();
+		expect(HELD_CLIPBOARD.reads).toBe(3);
+		HELD_CLIPBOARD.answer('A sentence copied from somewhere else.');
+		await waitFor(() => expect(postedNotices(args).at(-1)).toBe(NOTHING_TO_PASTE));
+		expect(commitCount(args)).toBe(1);
+	}}
+/>
+
+<Story
+	name="ACopyOfBAndCOutOfAToBToCPastedBackReconnectsTheCopiesToTheNodesLeftBehind"
+	args={{
+		multigraphData: BOUNDARY_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: BOUNDARY_FADE_LAYOUT,
+		assetScope: BOUNDARY_SCOPE,
+		clipboard: BOUNDARY_COPY_CLIPBOARD,
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		await selectByMenu(canvasElement, ['n1', 'n2']);
+		blurActiveElement();
+		const copy = dispatchClipboardEvent(document.body, 'copy');
+		const text = copy.clipboardData?.getData('text/plain') ?? '';
+
+		// The copy names this document and carries the two edges that left it,
+		// beside the one inside it.
+		const copied = decodeNodeClipboard(text);
+		expect(copied?.documentId).toBe(BOUNDARY_SCOPE);
+		expect(copied?.data.edges.map((edge) => edge.id)).toEqual(['b-c']);
+		expect(copied?.boundaryEdges?.map((edge) => edge.id)).toEqual(['a-b', 'd-c']);
+
+		hoverStage(stage, stagePoint(stage, 0.5, 0.75));
+		dispatchPaste(document.body, text);
+		await waitFor(() =>
+			expect(postedNotices(args)).toEqual(['Copied 2 nodes.', 'Pasted 2 nodes.'])
+		);
+
+		const pasted = lastChangedGraph(args);
+		const arrived = arrivedNodes(pasted, ['n0', 'n1', 'n2', 'n3']);
+		const b = idTitled(arrived, 'B');
+		const c = idTitled(arrived, 'C');
+		// A → B → C and D — C stand as they were...
+		expect(pasted.edges.slice(0, BOUNDARY_GRAPH.edges.length)).toEqual(BOUNDARY_GRAPH.edges);
+		// ...and beside them b → c, with the original A pointing at b, its arrow
+		// and tag kept, and the original D joined to c.
+		expect(edgesAfter(pasted, BOUNDARY_GRAPH.edges.length)).toEqual([
+			[b, c, false, []],
+			['n0', b, true, ['supports']],
+			['n3', c, false, ['blocks']]
+		]);
+		const edgeIds = pasted.edges.map((edge) => edge.id);
+		expect(new Set(edgeIds).size).toBe(edgeIds.length);
+		// One edit, named for the nodes it pasted.
+		expect(commitsLabelled(args, 'paste 2 nodes')).toHaveLength(1);
+		expect(commitCount(args)).toBe(1);
+
+		// The reconnections grow in with the edge inside the copy.
+		const arrivedEdgeIds = edgeIds.slice(BOUNDARY_GRAPH.edges.length);
+		const opacityOf = (edgeId: string) =>
+			Number(
+				canvasElement.querySelector(`[data-edge-id="${edgeId}"]`)?.getAttribute('data-edge-opacity')
+			);
+		await tick();
+		for (const edgeId of arrivedEdgeIds) expect(opacityOf(edgeId), edgeId).toBeLessThan(1);
+		await waitFor(() => {
+			for (const edgeId of arrivedEdgeIds) expect(opacityOf(edgeId), edgeId).toBe(1);
+		});
+	}}
+/>
+
+<Story
+	name="TheSamePasteIntoAnotherDocumentDropsTheEdgesThatLeftTheCopy"
+	args={{
+		multigraphData: BOUNDARY_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		assetScope: 'another-document',
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		// The text a copy of B and C writes in the boundary document, whose node
+		// ids this document happens to share.
+		const text = boundaryCopyText();
+		expect(decodeNodeClipboard(text)?.boundaryEdges).toHaveLength(2);
+
+		blurActiveElement();
+		hoverStage(stage, stagePoint(stage, 0.5, 0.75));
+		dispatchPaste(document.body, text);
+		await waitFor(() => expect(postedNotices(args)).toEqual(['Pasted 2 nodes.']));
+
+		// Only the edge inside the copy: the n0 here is not the A the copy left.
+		const pasted = lastChangedGraph(args);
+		const arrived = arrivedNodes(pasted, ['n0', 'n1', 'n2', 'n3']);
+		expect(edgesAfter(pasted, BOUNDARY_GRAPH.edges.length)).toEqual([
+			[idTitled(arrived, 'B'), idTitled(arrived, 'C'), false, []]
+		]);
+	}}
+/>
+
+<Story
+	name="ABoundaryEdgeWhoseOutsideNodeWasDeletedBeforeThePasteIsDropped"
+	args={{
+		multigraphData: BOUNDARY_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		assetScope: BOUNDARY_SCOPE,
+		clipboard: BOUNDARY_DELETED_CLIPBOARD,
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		await selectByMenu(canvasElement, ['n1', 'n2']);
+		blurActiveElement();
+		const copy = dispatchClipboardEvent(document.body, 'copy');
+		const text = copy.clipboardData?.getData('text/plain') ?? '';
+
+		// A goes, and A → B with it.
+		dispatchKeydown(document.body, 'Escape');
+		await tick();
+		await selectByMenu(canvasElement, ['n0']);
+		blurActiveElement();
+		dispatchShortcut(document.body, 'Delete');
+		await waitFor(() =>
+			expect(lastChangedGraph(args).nodes.map((node) => node.id)).toEqual(['n1', 'n2', 'n3'])
+		);
+		const edgesBefore = lastChangedGraph(args).edges.length;
+
+		hoverStage(stage, stagePoint(stage, 0.5, 0.75));
+		dispatchPaste(document.body, text);
+		await waitFor(() => expect(postedNotices(args).at(-1)).toBe('Pasted 2 nodes.'));
+
+		const pasted = lastChangedGraph(args);
+		const arrived = arrivedNodes(pasted, ['n1', 'n2', 'n3']);
+		const b = idTitled(arrived, 'B');
+		const c = idTitled(arrived, 'C');
+		// The paste minted A's old id for the copy of B, and still did not take
+		// that copy for A: b → c, and D's edge into c, and nothing for A.
+		expect(b).toBe('n0');
+		expect(edgesAfter(pasted, edgesBefore)).toEqual([
+			[b, c, false, []],
+			['n3', c, false, ['blocks']]
+		]);
+		expect(pasted.edges.some((edge) => edge.sourceNodeId === edge.targetNodeId)).toBe(false);
+	}}
+/>
+
+<Story
+	name="ADerivedEdgeAtTheBoundaryIsNotCarried"
+	args={{
+		multigraphData: DERIVED_CUT_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		assetScope: BOUNDARY_SCOPE,
+		clipboard: DERIVED_COPY_CLIPBOARD,
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		// The maths joins Gravity to Weight; no author drew that edge.
+		expect(canvasElement.querySelector('[data-edge-id="dataflow:n0->n1"]')).toBeInTheDocument();
+
+		await selectByMenu(canvasElement, ['n1']);
+		blurActiveElement();
+		const copy = dispatchClipboardEvent(document.body, 'copy');
+		const text = copy.clipboardData?.getData('text/plain') ?? '';
+		expect(decodeNodeClipboard(text)?.boundaryEdges).toBeUndefined();
+
+		hoverStage(stage, stagePoint(stage, 0.5, 0.75));
+		dispatchPaste(document.body, text);
+		await waitFor(() => expect(postedNotices(args).at(-1)).toBe('Pasted 1 node.'));
+
+		// No authored edge reaches the copy; the maths draws its own, recomputed.
+		const pasted = lastChangedGraph(args);
+		expect(pasted.edges).toEqual(DERIVED_CUT_GRAPH.edges);
+		const twin = idTitled(arrivedNodes(pasted, ['n0', 'n1', 'n2', 'n3']), 'Weight');
+		await waitFor(() =>
+			expect(
+				canvasElement.querySelector(`[data-edge-id="dataflow:n0->${twin}"]`)
+			).toBeInTheDocument()
+		);
+	}}
+/>
+
+<Story
+	name="ACutEdgeLeavesWithin200MsWhileAnEdgeRemovedAnyOtherWayKeepsItsFade"
+	args={{
+		multigraphData: CUT_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SLOW_EXIT_LAYOUT,
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const line = lineAcrossTheSides(canvasElement);
+
+		await armCutFromMenu(canvasElement, line.from);
+		await clickToCut(stage, line.to);
+		expect(postedNotices(args)).toEqual(['Cut 2 edges.']);
+		expect(commitsLabelled(args, 'delete 2 edges')).toHaveLength(1);
+
+		// The cut edges fade on the cut's own clock, capped well under the 600 ms
+		// the exit fade is set to, and are gone soon after.
+		for (const edgeId of ['left', 'right']) {
+			const exiting = exitingEdge(canvasElement, edgeId);
+			expect(exiting, edgeId).toBeInTheDocument();
+			expect(Number(exiting?.dataset.edgeExitDurationMs), edgeId).toBe(CUT_EDGE_EXIT_MAX_MS);
+		}
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-edge-id="left"]')).toBeNull();
+			expect(canvasElement.querySelector('[data-edge-id="right"]')).toBeNull();
+		});
+
+		// The duplicate-edge dialog's Remove takes the top edge on the full fade.
+		const topLeft = getCircle(canvasElement, 'n0');
+		const from = getCenter(topLeft);
+		const to = getCenter(getCircle(canvasElement, 'n1'));
+		await dispatchDoubleClickDrag(topLeft, from.x, from.y, stage, to.x, to.y);
+		await sleep();
+		within(canvasElement).getByRole('button', { name: 'Remove' }).click();
+		await tick();
+		expect(commitsLabelled(args, 'remove edge')).toHaveLength(1);
+		const removed = exitingEdge(canvasElement, 'top');
+		expect(removed).toBeInTheDocument();
+		expect(Number(removed?.dataset.edgeExitDurationMs)).toBe(SLOW_EXIT_LAYOUT.enterExitDurationMs);
+	}}
+/>
+
+<Story
+	name="UnderReducedMotionACutEdgeLeavesAtOnce"
+	args={{
+		multigraphData: CUT_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SLOW_EXIT_LAYOUT,
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		// Before anything reads the preference: the canvas reads it once, lazily.
+		const originalMatchMedia = window.matchMedia;
+		window.matchMedia = reducedMotionMatchMedia;
+		try {
+			await waitForLayout();
+			const stage = getStage(canvasElement);
+			const line = lineAcrossTheSides(canvasElement);
+
+			await armCutFromMenu(canvasElement, line.from);
+			await clickToCut(stage, line.to);
+
+			// No fade at all: the edges are gone with the click that cut them.
+			expect(lastChangedGraph(args).edges.map((edge) => edge.id)).toEqual(['top']);
+			expect(canvasElement.querySelector('[data-edge-id="left"]')).toBeNull();
+			expect(canvasElement.querySelector('[data-edge-id="right"]')).toBeNull();
+			expect(canvasElement.querySelector('[data-edge-id="top"]')).toBeInTheDocument();
+		} finally {
+			window.matchMedia = originalMatchMedia;
+		}
+	}}
+/>
+
+<Story
+	name="ACutThatSeversAComponentStillTakesItsEdgesOffWithin200Ms"
+	args={{
+		multigraphData: SEVERING_CUT_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: {
+			...SLOW_EXIT_LAYOUT,
+			scaleAnimationDurationMs: 2000,
+			postScaleChangeSettleMaxFrames: 0
+		},
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const graphRoot = canvasElement.querySelector('.graph');
+		if (!(graphRoot instanceof HTMLElement)) throw new Error('Canvas root not found');
+		const line = lineAcrossTheSides(canvasElement);
+
+		await armCutFromMenu(canvasElement, line.from);
+		await clickToCut(stage, line.to);
+		expect(postedNotices(args)).toEqual(['Cut 1 edge.']);
+
+		// The bottom corner lost its way to the pin, so the reveal wave plays —
+		// but the cut edge fades on the cut's clock, not as the wave's leftover.
+		expect(graphRoot.dataset.scaleAnimationActive).toBe('true');
+		expect(canvasElement.querySelectorAll('[data-edge-id="left"]')).toHaveLength(1);
+		const exiting = exitingEdge(canvasElement, 'left');
+		expect(Number(exiting?.dataset.edgeExitDurationMs)).toBe(CUT_EDGE_EXIT_MAX_MS);
+
+		// Well past the cut's fade and well inside the wave's two seconds, nothing
+		// draws it any more.
+		await sleep(500);
+		expect(graphRoot.dataset.scaleAnimationActive).toBe('true');
+		expect(canvasElement.querySelector('[data-edge-id="left"]')).toBeNull();
+		expect(canvasElement.querySelector('[data-edge-id="top"]')).toBeInTheDocument();
 	}}
 />

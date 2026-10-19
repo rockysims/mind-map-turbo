@@ -3,6 +3,7 @@ import { base64ToBlob } from '../../../../assets/assetEncoding';
 import { MemoryGraphAssetStore } from '../../../../assets/assetStore';
 import { serializeGraphFile, type GraphFileEmbeddedAsset } from '../../../../graphFile';
 import { NEUTRAL_VIEW_STATE } from '../../../../migrations';
+import type { EdgeData } from '../../types/edge';
 import type { MultigraphData } from '../../types/multigraph';
 import {
 	decodeNodeClipboard,
@@ -50,6 +51,15 @@ function graphWithAttachments(image: string, file: string): MultigraphData {
 	};
 }
 
+/** Where `SUBGRAPH` was copied from, with nothing leaving it. */
+const SOURCE = { documentId: 'doc-1', boundaryEdges: [] };
+
+/** Edges from `SUBGRAPH`'s nodes to two the copy left behind, one directed and tagged. */
+const BOUNDARY: EdgeData[] = [
+	{ id: 'e7', sourceNodeId: 'outside', targetNodeId: 'n0', tags: ['supports'], directed: true },
+	{ id: 'e8', sourceNodeId: 'n2', targetNodeId: 'elsewhere', tags: [], directed: false }
+];
+
 const IMAGE: GraphFileEmbeddedAsset = {
 	assetId: 'photo',
 	mimeType: 'image/png',
@@ -91,7 +101,7 @@ function decodedBody(asset: GraphFileEmbeddedAsset): Promise<string> {
 
 describe('encodeNodeClipboard / decodeNodeClipboard', () => {
 	it('round-trips a subgraph with no attachments', () => {
-		const decoded = decodeNodeClipboard(encodeNodeClipboard(SUBGRAPH, []));
+		const decoded = decodeNodeClipboard(encodeNodeClipboard(SUBGRAPH, [], SOURCE));
 
 		expect(decoded?.data).toEqual(SUBGRAPH);
 		expect(decoded?.embeddedAssets).toBeUndefined();
@@ -99,23 +109,50 @@ describe('encodeNodeClipboard / decodeNodeClipboard', () => {
 
 	it('round-trips a subgraph and the attachments it carries', () => {
 		const subgraph = graphWithAttachments(IMAGE.assetId, CSV.assetId);
-		const decoded = decodeNodeClipboard(encodeNodeClipboard(subgraph, [IMAGE, CSV]));
+		const decoded = decodeNodeClipboard(encodeNodeClipboard(subgraph, [IMAGE, CSV], SOURCE));
 
 		expect(decoded?.data).toEqual(subgraph);
 		expect(decoded?.embeddedAssets).toEqual([IMAGE, CSV]);
 	});
 
 	it('writes the plain graph-file JSON when there is nothing to embed', () => {
-		const text = encodeNodeClipboard(SUBGRAPH, []);
+		const text = encodeNodeClipboard(SUBGRAPH, [], SOURCE);
 
 		expect(JSON.parse(text)).toMatchObject({ data: SUBGRAPH, viewState: NEUTRAL_VIEW_STATE });
 	});
 
-	it('carries no document id, settings or export stamp, so one copy is one text', () => {
-		const payload: Record<string, unknown> = JSON.parse(encodeNodeClipboard(SUBGRAPH, []));
+	it('round-trips the source document and the edges that left the copy, in either form', () => {
+		const source = { documentId: 'doc-1', boundaryEdges: BOUNDARY };
+		const json = decodeNodeClipboard(encodeNodeClipboard(SUBGRAPH, [], source));
+		const html = decodeNodeClipboard(encodeNodeClipboard(SUBGRAPH, [IMAGE], source));
+
+		for (const decoded of [json, html]) {
+			expect(decoded?.documentId).toBe('doc-1');
+			expect(decoded?.boundaryEdges).toEqual(BOUNDARY);
+			expect(decoded?.data).toEqual(SUBGRAPH);
+		}
+	});
+
+	it('carries the source document but no settings or export stamp, so one copy is one text', () => {
+		const payload: Record<string, unknown> = JSON.parse(encodeNodeClipboard(SUBGRAPH, [], SOURCE));
+
+		expect(Object.keys(payload).sort()).toEqual([
+			'data',
+			'documentId',
+			'schemaVersion',
+			'viewState'
+		]);
+		expect(encodeNodeClipboard(SUBGRAPH, [IMAGE], SOURCE)).toBe(
+			encodeNodeClipboard(SUBGRAPH, [IMAGE], SOURCE)
+		);
+	});
+
+	it('writes no document id for a canvas with none, and no boundary edges when none left', () => {
+		const payload: Record<string, unknown> = JSON.parse(
+			encodeNodeClipboard(SUBGRAPH, [], { documentId: '', boundaryEdges: [] })
+		);
 
 		expect(Object.keys(payload).sort()).toEqual(['data', 'schemaVersion', 'viewState']);
-		expect(encodeNodeClipboard(SUBGRAPH, [IMAGE])).toBe(encodeNodeClipboard(SUBGRAPH, [IMAGE]));
 	});
 
 	it('reads a saved graph file as a paste, view state and all', () => {
@@ -129,6 +166,7 @@ describe('encodeNodeClipboard / decodeNodeClipboard', () => {
 
 		expect(decoded?.data).toEqual(SUBGRAPH);
 		expect(decoded?.documentId).toBe('doc-elsewhere');
+		expect(decoded?.boundaryEdges).toBeUndefined();
 	});
 
 	it('is null for text that is not JSON', () => {
@@ -234,6 +272,16 @@ describe('memoryClipboard', () => {
 		expect(clipboard.text).toBe('copied by the browser');
 		expect(await clipboard.readText()).toBe('copied by the browser');
 	});
+
+	it('peeks at what it holds at once, written or mirrored, and at nothing before that', async () => {
+		const clipboard = memoryClipboard();
+
+		expect(clipboard.peek()).toBeNull();
+		await clipboard.writeText('copied');
+		expect(clipboard.peek()).toBe('copied');
+		clipboard.mirror('copied by the browser');
+		expect(clipboard.peek()).toBe('copied by the browser');
+	});
 });
 
 describe('systemClipboard', () => {
@@ -325,6 +373,31 @@ describe('systemClipboard', () => {
 		expect(mirror.text).toBe('copied by the browser');
 		// A read the system refuses still finds it.
 		expect(await clipboard.readText()).toBe('copied by the browser');
+	});
+
+	it('peeks at the mirror without asking the system', async () => {
+		const read = vi.fn(async () => 'system text');
+		vi.stubGlobal('navigator', { clipboard: { readText: read, writeText: vi.fn(async () => {}) } });
+		const clipboard = systemClipboard(memoryClipboard());
+
+		expect(clipboard.peek()).toBeNull();
+		await clipboard.writeText('copied');
+		expect(clipboard.peek()).toBe('copied');
+		clipboard.mirror('copied by the browser');
+		expect(clipboard.peek()).toBe('copied by the browser');
+		expect(read).not.toHaveBeenCalled();
+	});
+
+	it('keeps peeking at the earlier copy when a write is refused', async () => {
+		stubSystemClipboard(
+			() => Promise.reject(new DOMException('Denied', 'NotAllowedError')),
+			() => Promise.reject(new DOMException('Denied', 'NotAllowedError'))
+		);
+		const clipboard = systemClipboard(memoryClipboard('earlier copy'));
+
+		await clipboard.writeText('copied');
+
+		expect(clipboard.peek()).toBe('earlier copy');
 	});
 
 	it('shares one mirror across ports by default, so a remounted canvas still pastes', async () => {

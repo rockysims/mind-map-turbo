@@ -5,24 +5,26 @@
 	let {
 		position,
 		selectionCount,
-		canPaste,
+		pasteCount,
 		onPaste,
 		onCopy,
 		onCutEdges,
 		onClose,
-		onRetarget,
-		onExplainDisabled
+		onRetarget
 	}: {
 		/** Client coordinates of the hold or right-click on empty canvas. */
 		position: Point;
 		/** How many nodes are selected; above one, the menu offers to copy them. */
 		selectionCount: number;
 		/**
-		 * Whether a paste is known to be available. When it is not, "Paste" still
-		 * shows, so the reader learns the action exists, but says why it cannot
-		 * act instead of acting.
+		 * How many nodes the clipboard holds, which "Paste" names, or `null` when
+		 * the page has found none it can read yet. Then the item reads "Paste" and
+		 * is still offered: the page may be unable to read a clipboard that a tap
+		 * can — a browser that refused the read made as the menu opened, which a
+		 * touch hold gives no activation for — so the tap reads again and the page
+		 * says why when there is still nothing to paste.
 		 */
-		canPaste: boolean;
+		pasteCount: number | null;
 		/** Paste at `position`; called inside the tap, so the clipboard read has its activation. */
 		onPaste: () => void;
 		/** Copy the selection; called inside the tap, so the clipboard write has its activation. */
@@ -36,12 +38,7 @@
 		 * just closes the menu.
 		 */
 		onRetarget?: (point: Point) => void;
-		/** A tap on unavailable "Paste" hands its reason here for the notice line. */
-		onExplainDisabled?: (reason: string) => void;
 	} = $props();
-
-	/** Short enough to sit in the notice line as well as the hover title. */
-	const NOTHING_TO_PASTE = 'Nothing copied yet';
 
 	/**
 	 * Unlike the node menu, every item here is a plain action with nothing left
@@ -55,8 +52,10 @@
 	}
 
 	/**
-	 * "Paste" and "Copy N", per the owner's ruling
-	 * (`docs/ui-decisions/2026-10-19--copy--the-background-menu-offers-paste-and-copy-n-only.md`):
+	 * "Paste (N)" and "Copy (N)", per the owner's rulings
+	 * (`docs/ui-decisions/2026-10-19--copy--the-background-menu-offers-paste-and-copy-n-only.md`,
+	 * with the counts in parentheses by
+	 * `docs/ui-decisions/2026-10-19--copy--the-background-menu-counts-in-parentheses-and-paste-names-its-count.md`):
 	 * selecting all and clearing are left to Cmd/Ctrl+A, a click on empty
 	 * canvas and Escape, and "Paste" needs no "here", since it lands where the
 	 * menu opened. "Cut edges" follows them, by the later ruling that arms the
@@ -71,17 +70,16 @@
 	 */
 	const items = $derived<ActionMenuItem[]>([
 		{
-			label: 'Paste',
+			label: pasteCount === null ? 'Paste' : `Paste (${pasteCount})`,
 			hint: 'Put the copied nodes here',
-			activate: thenClose(onPaste),
-			disabledReason: canPaste ? undefined : NOTHING_TO_PASTE
+			activate: thenClose(onPaste)
 		},
 		// Only above one, as the ruling has it; a single selected node's own menu
 		// has Copy.
 		...(selectionCount > 1
 			? [
 					{
-						label: `Copy ${selectionCount}`,
+						label: `Copy (${selectionCount})`,
 						hint: 'Copy the selected nodes and the edges between them',
 						activate: thenClose(onCopy)
 					}
@@ -95,11 +93,4 @@
 	]);
 </script>
 
-<ActionMenuPill
-	{items}
-	label="Canvas actions"
-	{position}
-	{onClose}
-	{onRetarget}
-	{onExplainDisabled}
-/>
+<ActionMenuPill {items} label="Canvas actions" {position} {onClose} {onRetarget} />

@@ -187,9 +187,12 @@ recommendation put to them, both are recorded in the ui-decisions file named.
   entry" in the first draft of this plan was wrong, and the ruling file was
   corrected on 2026-10-18. Ruling:
   `docs/ui-decisions/2026-10-18--pointer--dragging-a-selected-node-moves-the-whole-selection.md`.
-- **Edges that leave the selection.** **Dropped.** Only edges whose both ends
-  are selected are copied. The induced subgraph is the rule every editor uses,
-  and the one `importGraphData` can fold without inventing endpoints.
+- **Edges that leave the selection.** **Dropped** in the first version; on
+  2026-10-19 the owner ruled that a copy carries them beside the induced
+  subgraph and a paste into the same document rebuilds each one between the
+  pasted copy and the original outside node (see
+  `docs/ui-decisions/2026-10-19--editing--a-paste-into-the-same-document-reconnects-the-copies-to-their-outside-neighbours.md`).
+  A paste elsewhere still drops them, since node ids repeat across documents.
 - **Which nodes are selectable.** **The nodes the canvas is drawing**
   (`visibleNodeIds`, `Multigraph.svelte:1198`). A box cannot pick a node hidden
   by the hop limit or excluded by the query, and Select all selects the same
@@ -748,3 +751,14 @@ T09 all edit `Multigraph.svelte` and are strictly sequential for that reason.
   and a real Undo restoring both. Found and filed as debt: edge exit fades
   ignore reduced motion, a cut boundary half-edge fades out at full length,
   and `closeOverlays()` never disarms a menu-armed creation drag.
+- 2026-10-19 (later): three more rulings landed. The background menu reads
+  "Paste (N)" — N read at once from the tab's last copy and refreshed from the
+  system clipboard when it answers; a bare "Paste" stays offered when nothing
+  is known, because a touch-opened menu has no activation until the tap — and
+  "Copy (N)". A copy now carries the edges that cross its boundary
+  (`GraphFileDocument.boundaryEdges`, beside `data`, never inside it) with the
+  source document's id; a paste into that document rebuilds them between the
+  copy and the original outside node, with a guard against an outside id that
+  was re-minted to a pasted node. A cut edge now leaves within 200 ms (a cap
+  over the exit fade, zero under reduced motion), including on the reveal-wave
+  path a severing cut takes, where the wave no longer draws the cut edges.

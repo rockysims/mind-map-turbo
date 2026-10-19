@@ -18,15 +18,26 @@ import {
 	type GraphFileEmbeddedAsset
 } from '../../../../graphFile';
 import { NEUTRAL_VIEW_STATE } from '../../../../migrations';
+import type { EdgeData } from '../../types/edge';
 import type { MultigraphData } from '../../types/multigraph';
 import { referencedAssetIds } from './graph';
 
 /**
- * The clipboard text for a copied subgraph and the attachment bytes it carries.
+ * The clipboard text for a copied subgraph, the attachment bytes it carries,
+ * and the edges that left it.
  *
- * The view state is neutral and there is no document id, settings or export
- * stamp: a paste discards all of them, and leaving them out makes the same
- * copy produce the same text.
+ * `documentId` names the document the copy came from, and `boundaryEdges` are
+ * its edges with one end among the copied nodes and the other outside them. A
+ * paste back into that document reconnects the copies to those outside nodes;
+ * anywhere else an outside id names nothing, since node ids repeat across
+ * documents, so the paste drops them
+ * (`docs/ui-decisions/2026-10-19--editing--a-paste-into-the-same-document-reconnects-the-copies-to-their-outside-neighbours.md`).
+ * A canvas with no document behind it has no identity to claim, so an empty id
+ * is not written.
+ *
+ * The view state is neutral and there are no settings or export stamp: a
+ * paste discards them, and leaving them out makes the same copy of the same
+ * document produce the same text.
  *
  * The JSON form of a graph file has never carried attachment bytes; only the
  * single-file HTML form embeds them. So a copy with attachments is written in
@@ -35,9 +46,15 @@ import { referencedAssetIds } from './graph';
  */
 export function encodeNodeClipboard(
 	subgraph: MultigraphData,
-	embeddedAssets: GraphFileEmbeddedAsset[]
+	embeddedAssets: GraphFileEmbeddedAsset[],
+	options: { documentId: string; boundaryEdges: EdgeData[] }
 ): string {
-	const doc: GraphFileDocument = { data: subgraph, viewState: { ...NEUTRAL_VIEW_STATE } };
+	const doc: GraphFileDocument = {
+		data: subgraph,
+		viewState: { ...NEUTRAL_VIEW_STATE },
+		...(options.documentId === '' ? {} : { documentId: options.documentId }),
+		boundaryEdges: options.boundaryEdges
+	};
 	if (embeddedAssets.length === 0) return serializeGraphFile(doc);
 	return serializeGraphHtmlFile({ ...doc, embeddedAssets });
 }
@@ -123,6 +140,13 @@ export interface ClipboardPort {
 	/** The clipboard's text, or `null` when there is nothing this port can read. */
 	readText(): Promise<string | null>;
 	/**
+	 * The text this port last recorded — the tab's own last copy — without
+	 * asking the system, so it answers at once and never prompts. `null` when
+	 * nothing has been recorded. What another tab or app copied is only ever
+	 * in `readText`.
+	 */
+	peek(): string | null;
+	/**
 	 * Record `text` as copied without writing it anywhere else. For a copy the
 	 * browser already put on the system clipboard itself — a keyboard copy
 	 * answered through the DOM `copy` event — so that a paste this tab cannot
@@ -145,6 +169,9 @@ export function memoryClipboard(
 			return true;
 		},
 		async readText() {
+			return text;
+		},
+		peek() {
 			return text;
 		},
 		mirror(next) {
@@ -196,6 +223,11 @@ export function systemClipboard(mirror: ClipboardPort = tabMirror): ClipboardPor
 				}
 			}
 			return mirror.readText();
+		},
+		// The mirror only: a system read is async, may prompt, and needs an
+		// activation, none of which a glance at the last copy should.
+		peek() {
+			return mirror.peek();
 		},
 		// The system clipboard already has this text from the event that copied
 		// it, so only the mirror is written: a second write through

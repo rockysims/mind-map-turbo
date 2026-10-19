@@ -106,6 +106,15 @@
 
 	/** Shared, so clearing an already-empty set of cut targets re-renders nothing. */
 	const NO_CUT_TARGETS: ReadonlySet<string> = new Set();
+
+	/**
+	 * The longest a cut edge lingers after the click or lift that ends the cut
+	 * (`docs/ui-decisions/2026-10-19--motion--a-cut-edge-leaves-within-200-ms.md`).
+	 * The line was the animation, so the edges it took leave on a short fade of
+	 * their own: the exit fade every removal uses, capped here, rather than a new
+	 * setting, since the ruling sets a ceiling and not a second speed to tune.
+	 */
+	const CUT_EDGE_EXIT_MAX_MS = 200;
 </script>
 
 <script lang="ts">
@@ -244,9 +253,11 @@
 	import { TransientRevealController } from './lib/transientReveal.svelte.js';
 	import { SelectionController } from './lib/selectionController.svelte.js';
 	import {
+		boundaryEdgesOf,
 		inducedSubgraph,
 		nodeIdsInScreenRect,
 		pastePlacement,
+		reconnectBoundaryEdges,
 		withSeededPinIfPinless
 	} from './lib/selection.js';
 	import {
@@ -363,6 +374,11 @@
 		newBytes: number;
 		store: GraphAssetStore | null;
 		scope: string;
+		/**
+		 * The copy's edges to nodes it left behind, to rebuild against the
+		 * originals. Empty unless the copy came from this very document.
+		 */
+		boundaryEdges: readonly EdgeData[];
 	};
 
 	/**
@@ -734,6 +750,28 @@
 	 * closes the other.
 	 */
 	let backgroundMenu = $state<{ position: Point } | null>(null);
+	/**
+	 * How many nodes the open background menu's Paste would bring, named on it as
+	 * "Paste (N)", or `null` when nothing readable has been found
+	 * (`countClipboardForBackgroundMenu`).
+	 */
+	let backgroundMenuPasteCount = $state<number | null>(null);
+	/**
+	 * The open background menu's own read of the clipboard, once it has answered:
+	 * the graph file it held, or `null` for anything else. Absent while the read
+	 * is out. Plain, not reactive: only the menu's Paste reads it, so the paste
+	 * brings what the label counted without a second read — which, in a browser
+	 * that asks before every read, would be a second question.
+	 */
+	let backgroundMenuClipboard: { doc: GraphFileDocument | null } | null = null;
+	/** Stamps each menu's read, so an answer that lands after a newer menu opened is dropped. */
+	let backgroundMenuClipboardRead = 0;
+	/**
+	 * The last clipboard text decoded and what it held, so the menu's glance at
+	 * the tab's last copy and its read of the same text from the system decode it
+	 * once — an attachment-heavy copy is megabytes of text to parse.
+	 */
+	let lastDecodedClipboard: { text: string; doc: GraphFileDocument | null } | null = null;
 	let creationPreview = $state<CreationPreviewState | null>(null);
 	let creationArmRequest = $state<{
 		id: number;
@@ -1209,6 +1247,16 @@
 	let edgeEnterAnimations = $state<Record<string, EdgeOpacityAnimation>>({});
 	/** Render-only buffer for elements removed by the user that are still animating out. */
 	let internalExitingBuffer = $state<ExitingBuffer>(EMPTY_EXITING_BUFFER);
+	/**
+	 * The edges a cut took while its removal plays the reveal wave, with that
+	 * wave's state. The wave draws the edges a removal took fading for its whole
+	 * length — `scaleAnimationDurationMs`, far past the 200 ms a cut edge has — so
+	 * a cut's edges leave through the exiting buffer on the cut's own fade
+	 * instead, and the wave skips them once that fade is done. Tied to the wave by identity,
+	 * so a later wave drawing an edge that was minted one of these ids again
+	 * draws it as usual.
+	 */
+	let cutAwayEdges = $state.raw<{ wave: object | null; edgeIds: ReadonlySet<string> } | null>(null);
 
 	/**
 	 * Memoizes symbol extraction per node, so it must outlive a render rather
@@ -1641,13 +1689,18 @@
 	/**
 	 * Reveal-wave leftovers minus anything the exiting buffer is already fading:
 	 * a deleted node's edges appear in both, and only the buffer still holds the
-	 * geometry to place them (the live layout dropped the node).
+	 * geometry to place them (the live layout dropped the node). Minus, too, the
+	 * edges a cut took, for the wave that cut started (`cutAwayEdges`).
 	 */
-	const revealWaveOnlyEdgeVisibility = $derived(
-		layoutRuntime.revealWavePreviousOnlyEdgeVisibility.filter(
-			(visibility) => !(visibility.edge.id in effectiveExitingBuffer.edges)
-		)
-	);
+	const revealWaveOnlyEdgeVisibility = $derived.by(() => {
+		const cutAway =
+			cutAwayEdges?.wave === layoutRuntime.scaleChangeRevealState ? cutAwayEdges : null;
+		return layoutRuntime.revealWavePreviousOnlyEdgeVisibility.filter(
+			(visibility) =>
+				!(visibility.edge.id in effectiveExitingBuffer.edges) &&
+				cutAway?.edgeIds.has(visibility.edge.id) !== true
+		);
+	});
 
 	$effect(() => {
 		const generation = externalGraphSyncToken(graphGeneration);
@@ -2412,6 +2465,11 @@
 	 * The clipboard text for a copied subgraph, carrying the attachments `assets`
 	 * holds for it. One not there yet is left out of this copy rather than waited
 	 * for, since the DOM event cannot wait.
+	 *
+	 * The text also names this document and carries the edges from the copied
+	 * nodes to the ones left behind, read from the graph as it is now, so a paste
+	 * back into this document reconnects the copies
+	 * (`docs/ui-decisions/2026-10-19--editing--a-paste-into-the-same-document-reconnects-the-copies-to-their-outside-neighbours.md`).
 	 */
 	function nodeClipboardText(
 		subgraph: MultigraphData,
@@ -2421,7 +2479,11 @@
 			const asset = assets.get(assetId);
 			return asset === undefined ? [] : [asset];
 		});
-		return encodeNodeClipboard(subgraph, embedded);
+		const copiedIds = new Set(subgraph.nodes.map((node) => node.id));
+		return encodeNodeClipboard(subgraph, embedded, {
+			documentId: assetScope,
+			boundaryEdges: boundaryEdgesOf(graph, copiedIds)
+		});
 	}
 
 	/**
@@ -2455,25 +2517,18 @@
 	}
 
 	/**
-	 * Paste the graph file in `text`, centred on `anchorClient` (client
-	 * coordinates). Resolves `false`, having touched nothing, when the text holds
-	 * no nodes to paste; the caller decides whether that deserves a word.
-	 */
-	async function pasteAt(anchorClient: Point, text: string): Promise<boolean> {
-		const doc = decodeNodeClipboard(text);
-		if (doc === null) return false;
-		return await pasteDocumentAt(anchorClient, doc);
-	}
-
-	/**
 	 * Paste an already decoded graph file: the existing import, aimed at a point.
+	 * Resolves `false`, having touched nothing, when it holds no nodes to paste;
+	 * the caller decides whether that deserves a word.
 	 *
-	 * The document's own view state, settings, id and export stamp are dropped,
-	 * as an Import… drops them — this document is still the document. Its graph
-	 * keeps its layout and moves by one translation, so hand-arranged geometry
-	 * survives. Attachments this document already holds add nothing and are kept
-	 * as stored; when the rest add more than the configured bytes, the paste asks
-	 * once, naming the total, before anything is written
+	 * The document's own view state, settings and export stamp are dropped, as
+	 * an Import… drops them — this document is still the document. Its id only
+	 * says whether the copy came from here, which is the one case its boundary
+	 * edges come along. Its graph keeps its layout and moves by one translation,
+	 * so hand-arranged geometry survives. Attachments this document already
+	 * holds add nothing and are kept as stored; when the rest add more than the
+	 * configured bytes, the paste asks once, naming the total, before anything
+	 * is written
 	 * (`docs/ui-decisions/2026-10-18--editing--a-large-paste-asks-once-and-then-brings-every-attachment.md`).
 	 */
 	async function pasteDocumentAt(anchorClient: Point, doc: GraphFileDocument): Promise<boolean> {
@@ -2502,7 +2557,8 @@
 			offset: pastePlacement(incoming, anchor),
 			...attachments,
 			store,
-			scope
+			scope,
+			boundaryEdges: sameDocumentBoundaryEdges(doc, scope)
 		};
 		if (plan.newBytes > cfg.clipboard.pasteAttachmentWarnBytes) {
 			pendingPaste = { plan, pasting: false };
@@ -2510,6 +2566,18 @@
 		}
 		await commitPaste(plan);
 		return true;
+	}
+
+	/**
+	 * The copy's boundary edges when it came from the document `scope` names,
+	 * else none. Node ids repeat across documents, so an outside id is only
+	 * trusted where it was minted
+	 * (`docs/ui-decisions/2026-10-19--editing--a-paste-into-the-same-document-reconnects-the-copies-to-their-outside-neighbours.md`);
+	 * a canvas with no document behind it can vouch for none.
+	 */
+	function sameDocumentBoundaryEdges(doc: GraphFileDocument, scope: string): readonly EdgeData[] {
+		if (scope === '' || doc.documentId !== scope) return [];
+		return doc.boundaryEdges ?? [];
 	}
 
 	/**
@@ -2573,10 +2641,16 @@
 
 		// Folded into the graph as it stands now, not as it stood when the paste
 		// began: the writes and the question can give the reader time to edit, and
-		// the incoming ids are minted against whatever the host holds.
-		const { next, nodeIdMap, edgeIdMap } = importGraphData(graph, plan.incoming, {
-			offset: plan.offset
-		});
+		// the incoming ids are minted against whatever the host holds. For the same
+		// reason a boundary edge whose outside node went meanwhile is dropped here.
+		const folded = importGraphData(graph, plan.incoming, { offset: plan.offset });
+		const { nodeIdMap, edgeIdMap } = folded;
+		const { next, edgeIds: reconnectedEdgeIds } = reconnectBoundaryEdges(
+			folded.next,
+			plan.boundaryEdges,
+			nodeIdMap
+		);
+		// Nodes, not edges: the reconnections are part of pasting these nodes back.
 		const count = nodeIdMap.size;
 		const label = count === 1 ? 'paste node' : `paste ${nodeCountText(count)}`;
 		commitUserGraph(layoutRuntime.relaxAfterMutation(next), editIntent(label));
@@ -2591,7 +2665,7 @@
 				nodeId,
 				targetScale: graphLayout.scaleByNodeId[nodeId] ?? 1
 			})),
-			enteringEdgeIds: [...edgeIdMap.values()],
+			enteringEdgeIds: [...edgeIdMap.values(), ...reconnectedEdgeIds],
 			leavingNodes: [],
 			leavingEdges: []
 		});
@@ -2601,18 +2675,73 @@
 	}
 
 	/**
-	 * Paste from the background menu. The read is the first thing the tap
-	 * does, before anything is awaited, because a browser honours a clipboard
-	 * read only inside the activation that asked for it.
+	 * Paste from the background menu: what the menu's own read found, when it
+	 * found a graph — the nodes its label counted, with no second read. Else the
+	 * tap reads now, as the first thing it does, before anything is awaited,
+	 * because a browser honours a clipboard read only inside the activation that
+	 * asked for it, and a browser that refused the menu's read — a touch hold
+	 * gives it no activation — may well answer the tap's.
 	 *
 	 * An empty read and text that is not a graph both say so: the reader asked
 	 * for a paste by name, and a menu item that silently does nothing reads as
 	 * broken.
 	 */
 	async function pasteFromMenu(point: Point): Promise<void> {
-		const text = await clipboard.readText();
-		const pasted = text !== null && text !== '' && (await pasteAt(point, text));
+		const counted = backgroundMenuClipboard?.doc ?? null;
+		const doc = counted ?? decodedClipboardText(await clipboard.readText());
+		const pasted = doc !== null && (await pasteDocumentAt(point, doc));
 		if (!pasted) onNotice?.(NOTHING_TO_PASTE_NOTICE);
+	}
+
+	/**
+	 * Count what the background menu's Paste would bring, per the owner's ruling
+	 * (`docs/ui-decisions/2026-10-19--copy--the-background-menu-counts-in-parentheses-and-paste-names-its-count.md`):
+	 * at once from the tab's own last copy, then from the system clipboard as soon
+	 * as it answers, which also covers a copy made in another tab or app.
+	 *
+	 * The read is made here, inside the right-click or hold that opened the menu,
+	 * because a browser honours a clipboard read only inside an activation.
+	 * Chrome asks the reader once for permission and is silent after; a refusal
+	 * (Firefox and Safari ask before reading another app's text, and a touch hold
+	 * carries no activation until the finger lifts) leaves the port answering
+	 * with the tab's own copy, so the count stays as the glance found it. An
+	 * answer that is not a graph clears the count, since a paste would read that
+	 * same text.
+	 */
+	function countClipboardForBackgroundMenu() {
+		backgroundMenuPasteCount = pastableNodeCount(decodedClipboardText(clipboard.peek()));
+		backgroundMenuClipboard = null;
+		backgroundMenuClipboardRead += 1;
+		const read = backgroundMenuClipboardRead;
+		void clipboard.readText().then(
+			(text) => {
+				if (read !== backgroundMenuClipboardRead) return;
+				const doc = decodedClipboardText(text);
+				backgroundMenuClipboard = { doc };
+				backgroundMenuPasteCount = pastableNodeCount(doc);
+			},
+			// A port that fails rather than answering `null` leaves the glance's count,
+			// and the tap reads again.
+			() => {}
+		);
+	}
+
+	/** How many nodes a paste of `doc` brings, or `null` when it brings none. */
+	function pastableNodeCount(doc: GraphFileDocument | null): number | null {
+		const count = doc?.data.nodes.length ?? 0;
+		return count > 0 ? count : null;
+	}
+
+	/**
+	 * `text` decoded as a graph file, or `null` when it is not one. The last text
+	 * is remembered with its answer, so one copy looked at twice is parsed once.
+	 */
+	function decodedClipboardText(text: string | null): GraphFileDocument | null {
+		if (text === null || text === '') return null;
+		if (lastDecodedClipboard?.text === text) return lastDecodedClipboard.doc;
+		const doc = decodeNodeClipboard(text);
+		lastDecodedClipboard = { text, doc };
+		return doc;
 	}
 
 	$effect(() => {
@@ -2856,6 +2985,7 @@
 		editNodeId = null;
 		actionMenu = null;
 		backgroundMenu = { position: point };
+		countClipboardForBackgroundMenu();
 	}
 
 	/**
@@ -3069,11 +3199,15 @@
 			onNotice?.(NO_EDGES_UNDER_THE_LINE_NOTICE);
 			return;
 		}
-		const removed = removeEdges(crossed, 'delete');
+		const removed = removeEdges(crossed, 'cut');
 		if (removed > 0) onNotice?.(`Cut ${edgeCountText(removed)}.`);
 	}
 
 	const previewDurationMs = $derived(reduceMotion ? 0 : resolvedLayoutSettings.enterExitDurationMs);
+	/** How long a cut edge fades: the exit fade, capped, and none under reduced motion. */
+	const cutExitDurationMs = $derived(
+		reduceMotion ? 0 : Math.min(resolvedLayoutSettings.enterExitDurationMs, CUT_EDGE_EXIT_MAX_MS)
+	);
 
 	function handleCreationDragUpdate(
 		sourceNode: NodeData,
@@ -3731,8 +3865,13 @@
 	 * wave, which also fades the removed edges out (they have live endpoints, so
 	 * the wave can still place them); any other fades them through the exiting
 	 * buffer.
+	 *
+	 * A `'cut'` is labelled as a delete — "Undo delete 2 edges" is what the
+	 * reader expects to read back — but its edges leave on the cut's own short
+	 * fade (`cutExitDurationMs`) on either path, never on the slower exit fade or
+	 * the wave.
 	 */
-	function removeEdges(edgeIds: readonly string[], verb: 'remove' | 'delete'): number {
+	function removeEdges(edgeIds: readonly string[], verb: 'remove' | 'delete' | 'cut'): number {
 		const requested = new Set(edgeIds);
 		const removedEdges = graph.edges.filter((edge) => requested.has(edge.id));
 		if (removedEdges.length === 0) return 0;
@@ -3749,45 +3888,73 @@
 		// (e.g. after removing one of two parallel edges, which severs nothing).
 		severedBeaconPreference = severed ? endpointIds : [];
 
-		const label = removing.size === 1 ? `${verb} edge` : `${verb} ${edgeCountText(removing.size)}`;
+		const labelVerb = verb === 'cut' ? 'delete' : verb;
+		const label =
+			removing.size === 1 ? `${labelVerb} edge` : `${labelVerb} ${edgeCountText(removing.size)}`;
 		const withoutEnterAnimations = Object.fromEntries(
 			Object.entries(edgeEnterAnimations).filter(([edgeId]) => !removing.has(edgeId))
 		);
+		const durationMs =
+			verb === 'cut' ? cutExitDurationMs : resolvedLayoutSettings.enterExitDurationMs;
 
 		if (severed && survivorNodeId !== null) {
 			// The removal cut a component off from every pinned node. Play the
 			// reveal wave (as unpinning does) so the severed side fades down to its
 			// beacon; the wave also renders the removed edges fading out, so the
 			// exiting-buffer fade below must be skipped to avoid drawing them twice.
-			edgeEnterAnimations = withoutEnterAnimations;
+			// A cut's edges are the exception: they take the short fade, and the
+			// wave is told to skip them.
 			let nextBuffer = internalExitingBuffer;
 			for (const edgeId of removing) nextBuffer = cancelExitingEdge(nextBuffer, edgeId);
-			internalExitingBuffer = nextBuffer;
-			commitUserGraph(layoutRuntime.beginScaleChange(nextGraph, survivorNodeId), editIntent(label));
-			return removing.size;
-		}
-
-		const durationMs = resolvedLayoutSettings.enterExitDurationMs;
-		if (durationMs > 0) {
-			const nowMs = layoutRuntime.now();
-			let nextBuffer = internalExitingBuffer;
-			for (const edge of removedEdges) {
-				const enterAnim = edgeEnterAnimations[edge.id];
-				const fromOpacity = enterAnim ? edgeOpacityAt(enterAnim, nowMs) : 1;
-				nextBuffer = cancelExitingEdge(nextBuffer, edge.id);
-				nextBuffer = addExitingEdge(nextBuffer, edge.id, {
-					edgeData: edge,
-					fromOpacity,
-					startedAtMs: nowMs,
-					durationMs
-				});
+			if (verb === 'cut' && durationMs > 0) {
+				nextBuffer = withEdgesExiting(nextBuffer, removedEdges, layoutRuntime.now(), durationMs);
 			}
 			edgeEnterAnimations = withoutEnterAnimations;
 			internalExitingBuffer = nextBuffer;
+			commitUserGraph(layoutRuntime.beginScaleChange(nextGraph, survivorNodeId), editIntent(label));
+			if (verb === 'cut') {
+				cutAwayEdges = { wave: layoutRuntime.scaleChangeRevealState, edgeIds: removing };
+			}
+			return removing.size;
+		}
+
+		if (durationMs > 0) {
+			internalExitingBuffer = withEdgesExiting(
+				internalExitingBuffer,
+				removedEdges,
+				layoutRuntime.now(),
+				durationMs
+			);
+			edgeEnterAnimations = withoutEnterAnimations;
 			layoutRuntime.start();
 		}
 		commitUserGraph(layoutRuntime.relaxAfterMutation(nextGraph), editIntent(label));
 		return removing.size;
+	}
+
+	/**
+	 * `buffer` with each of `edges` fading out over `durationMs` from `nowMs`,
+	 * starting at the opacity it is drawn at — part way, for one still growing in.
+	 */
+	function withEdgesExiting(
+		buffer: ExitingBuffer,
+		edges: readonly EdgeData[],
+		nowMs: number,
+		durationMs: number
+	): ExitingBuffer {
+		let nextBuffer = buffer;
+		for (const edge of edges) {
+			const enterAnim = edgeEnterAnimations[edge.id];
+			const fromOpacity = enterAnim ? edgeOpacityAt(enterAnim, nowMs) : 1;
+			nextBuffer = cancelExitingEdge(nextBuffer, edge.id);
+			nextBuffer = addExitingEdge(nextBuffer, edge.id, {
+				edgeData: edge,
+				fromOpacity,
+				startedAtMs: nowMs,
+				durationMs
+			});
+		}
+		return nextBuffer;
 	}
 
 	function saveNodeContent(
@@ -4825,6 +4992,7 @@
 						data-source-node-id={entry.edgeData.sourceNodeId}
 						data-target-node-id={entry.edgeData.targetNodeId}
 						data-edge-exiting="true"
+						data-edge-exit-duration-ms={entry.durationMs}
 						data-edge-opacity={edgeOpacity}
 						style={`${edgeStyle(sourcePos, targetPos)} --edge-background: ${edgeColor}; color: ${edgeColor}; --edge-stroke-width: ${strokeWidthPx}px; opacity: ${edgeOpacity}; pointer-events: none;`}
 					></div>
@@ -5007,12 +5175,13 @@
 	{#if backgroundMenu}
 		<!-- Read before the menu closes itself, which every item does once it has run. -->
 		{@const menuPoint = backgroundMenu.position}
-		<!-- Paste is always offered: no port can know what another tab or app put on
-		     the system clipboard, so the tap reads it and says when it held nothing. -->
+		<!-- Paste is always offered, counted when the clipboard could be read: a
+		     clipboard the menu could not read may still answer the tap, which reads
+		     it then and says when it held nothing. -->
 		<BackgroundActionMenu
 			position={menuPoint}
 			selectionCount={selection.size}
-			canPaste={true}
+			pasteCount={backgroundMenuPasteCount}
 			onPaste={() => void pasteFromMenu(menuPoint)}
 			onCopy={() => {
 				// Started here, before the menu closes itself, so the clipboard write is
@@ -5022,7 +5191,6 @@
 			onCutEdges={() => armEdgeCut(menuPoint)}
 			onClose={() => (backgroundMenu = null)}
 			onRetarget={retargetBackgroundMenu}
-			onExplainDisabled={(reason) => onNotice?.(reason)}
 		/>
 	{/if}
 

@@ -4,9 +4,11 @@ import type { AiRun } from '../../types/node';
 import { importGraphData } from './graphImport';
 import type { NodeFocusCandidate, ViewTransform } from './nodeFocus';
 import {
+	boundaryEdgesOf,
 	inducedSubgraph,
 	nodeIdsInScreenRect,
 	pastePlacement,
+	reconnectBoundaryEdges,
 	withSeededPinIfPinless
 } from './selection';
 import type { StageRect } from './stageCoordinates';
@@ -428,6 +430,174 @@ describe('inducedSubgraph', () => {
 			expect(subgraph.posByNodeId).not.toBe(data.posByNodeId);
 			expect(subgraph.tagColorConfig).not.toBe(data.tagColorConfig);
 		});
+	});
+});
+
+/**
+ * A → B → C, the first edge directed and tagged, plus D off to the side with an
+ * edge into C, and a derived edge from A into B.
+ */
+function chainGraph(): MultigraphData {
+	const base = makeGraph({
+		nodes: [
+			{ id: 'a', title: 'A', description: '', tags: [] },
+			{ id: 'b', title: 'B', description: '', tags: [] },
+			{ id: 'c', title: 'C', description: '', tags: [] },
+			{ id: 'd', title: 'D', description: '', tags: [] }
+		],
+		edges: [
+			{ id: 'a-b', source: 'a', target: 'b', tags: ['supports'], directed: true },
+			{ id: 'b-c', source: 'b', target: 'c' },
+			{ id: 'd-c', source: 'd', target: 'c', tags: ['blocks'] }
+		],
+		pinned: ['a']
+	});
+	return {
+		...base,
+		edges: [
+			...base.edges,
+			{ id: 'dataflow:a->b', sourceNodeId: 'a', targetNodeId: 'b', tags: [], directed: true }
+		]
+	};
+}
+
+describe('boundaryEdgesOf', () => {
+	it('takes every edge with exactly one end in the set, in graph order', () => {
+		const data = chainGraph();
+
+		const edges = boundaryEdgesOf(data, new Set(['b', 'c']));
+
+		expect(edges.map((edge) => edge.id)).toEqual(['a-b', 'd-c']);
+	});
+
+	it('takes an edge whichever of its ends is the inside one', () => {
+		const data = chainGraph();
+
+		expect(boundaryEdgesOf(data, new Set(['a'])).map((edge) => edge.id)).toEqual(['a-b']);
+		expect(boundaryEdgesOf(data, new Set(['c'])).map((edge) => edge.id)).toEqual(['b-c', 'd-c']);
+	});
+
+	it('leaves out an edge with both ends inside, and one with neither', () => {
+		const data = chainGraph();
+
+		const edges = boundaryEdgesOf(data, new Set(['b', 'c']));
+
+		expect(edges.some((edge) => edge.id === 'b-c')).toBe(false);
+		expect(boundaryEdgesOf(data, new Set(['a', 'b', 'c', 'd']))).toEqual([]);
+		expect(boundaryEdgesOf(data, new Set())).toEqual([]);
+	});
+
+	it('leaves out a derived edge at the boundary', () => {
+		const edges = boundaryEdgesOf(chainGraph(), new Set(['b']));
+
+		expect(edges.map((edge) => edge.id)).toEqual(['a-b', 'b-c']);
+	});
+
+	it('returns the edge objects themselves and touches nothing', () => {
+		const data = chainGraph();
+		const snapshot = structuredClone(data);
+
+		const edges = boundaryEdgesOf(data, new Set(['b', 'c']));
+
+		expect(edges[0]).toBe(data.edges[0]);
+		expect(edges[1]).toBe(data.edges[2]);
+		expect(data).toEqual(snapshot);
+	});
+});
+
+describe('reconnectBoundaryEdges', () => {
+	/** B and C copied out of `chainGraph` and pasted back into it, with the paste's id map. */
+	function pastedChain() {
+		const data = chainGraph();
+		const copied = new Set(['b', 'c']);
+		const { next, nodeIdMap } = importGraphData(data, inducedSubgraph(data, copied), {
+			offset: { x: 0, y: 500 }
+		});
+		return { data, next, nodeIdMap, boundaryEdges: boundaryEdgesOf(data, copied) };
+	}
+
+	it('rebuilds each edge between the pasted copy and the original outside node', () => {
+		const { next, nodeIdMap, boundaryEdges } = pastedChain();
+		const b = nodeIdMap.get('b');
+		const c = nodeIdMap.get('c');
+
+		const result = reconnectBoundaryEdges(next, boundaryEdges, nodeIdMap);
+
+		const added = result.next.edges.slice(next.edges.length);
+		expect(added.map((edge) => [edge.sourceNodeId, edge.targetNodeId])).toEqual([
+			['a', b],
+			['d', c]
+		]);
+		expect(result.edgeIds).toEqual(added.map((edge) => edge.id));
+	});
+
+	it('keeps direction and tags, and gives every new edge a fresh id', () => {
+		const { next, nodeIdMap, boundaryEdges } = pastedChain();
+
+		const result = reconnectBoundaryEdges(next, boundaryEdges, nodeIdMap);
+
+		const added = result.next.edges.slice(next.edges.length);
+		expect(added.map((edge) => [edge.directed, edge.tags])).toEqual([
+			[true, ['supports']],
+			[false, ['blocks']]
+		]);
+		const existingIds = new Set(next.edges.map((edge) => edge.id));
+		expect(added.every((edge) => !existingIds.has(edge.id))).toBe(true);
+		expect(new Set(result.edgeIds).size).toBe(2);
+	});
+
+	it('skips an edge whose outside node is gone', () => {
+		const { next, nodeIdMap, boundaryEdges } = pastedChain();
+		const withoutD = { ...next, nodes: next.nodes.filter((node) => node.id !== 'd') };
+
+		const result = reconnectBoundaryEdges(withoutD, boundaryEdges, nodeIdMap);
+
+		expect(result.next.edges.slice(next.edges.length).map((edge) => edge.sourceNodeId)).toEqual([
+			'a'
+		]);
+		expect(result.edgeIds).toHaveLength(1);
+	});
+
+	it('never takes a pasted node for the outside one, even with the outside id', () => {
+		const { next, nodeIdMap, boundaryEdges } = pastedChain();
+		const pastedC = nodeIdMap.get('c');
+		// As if `a` had been deleted before the paste, and the paste had then
+		// minted `a` for the copy of `b`: the id is in the graph, but as the copy.
+		const minted = new Map([
+			['b', 'a'],
+			['c', pastedC ?? '']
+		]);
+
+		const result = reconnectBoundaryEdges(next, boundaryEdges, minted);
+
+		// `a-b` would loop the copy onto itself; only `d-c` is rebuilt.
+		expect(result.edgeIds).toHaveLength(1);
+		expect(result.next.edges.at(-1)).toMatchObject({ sourceNodeId: 'd', targetNodeId: pastedC });
+	});
+
+	it('skips an edge with both ends pasted, or neither', () => {
+		const { next, nodeIdMap } = pastedChain();
+		const [aToB, bToC, dToC] = chainGraph().edges;
+
+		// `b-c` has both ends among the pasted; `a-b` has one, so only it is rebuilt.
+		const both = reconnectBoundaryEdges(next, [bToC, aToB], nodeIdMap);
+		// With nothing pasted, no end is inside.
+		const neither = reconnectBoundaryEdges(next, [dToC], new Map());
+
+		expect(both.next.edges.slice(next.edges.length).map((edge) => edge.sourceNodeId)).toEqual([
+			'a'
+		]);
+		expect(neither.next).toBe(next);
+		expect(neither.edgeIds).toEqual([]);
+	});
+
+	it('returns the host itself when there is nothing to rebuild, and never mutates it', () => {
+		const { next, nodeIdMap, boundaryEdges } = pastedChain();
+		const snapshot = structuredClone(next);
+
+		expect(reconnectBoundaryEdges(next, [], nodeIdMap).next).toBe(next);
+		reconnectBoundaryEdges(next, boundaryEdges, nodeIdMap);
+		expect(next).toEqual(snapshot);
 	});
 });
 

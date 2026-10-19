@@ -725,7 +725,12 @@ function isDesignation(value: unknown): value is QuantityDesignation {
 	);
 }
 
-function isEdgeData(
+/**
+ * Whether `value` is an edge a graph can hold. Exported for the graph file's
+ * `boundaryEdges`, which sit beside `data` rather than inside it and so are
+ * checked one by one with the rule `data.edges` is checked with.
+ */
+export function isEdgeData(
 	value: unknown,
 	options: { allowLegacyTags?: boolean; allowLegacyEdgeColor?: boolean } = {}
 ): value is EdgeData {

@@ -14,7 +14,7 @@
 		args: {
 			position: CENTRE,
 			selectionCount: 0,
-			canPaste: true,
+			pasteCount: null,
 			onPaste: fn(),
 			onCopy: fn(),
 			onCutEdges: fn(),
@@ -90,7 +90,7 @@
 		};
 		const instance = mount(BackgroundActionMenu, {
 			target: host,
-			props: { position: CENTRE, selectionCount: 0, canPaste: true, ...spies, ...props }
+			props: { position: CENTRE, selectionCount: 0, pasteCount: null, ...spies, ...props }
 		});
 		flushSync();
 		let open = true;
@@ -112,23 +112,25 @@
 
 <Story
 	name="OpensWithFocusOnTheFirstItem"
-	args={{ selectionCount: 3 }}
+	args={{ selectionCount: 3, pasteCount: 5 }}
 	play={async ({ canvasElement }) => {
 		const menu = within(canvasElement).getByRole('menu', { name: 'Canvas actions' });
 		expect(menu).toBeInTheDocument();
-		expect(itemNames(canvasElement)).toEqual(['Paste', 'Copy 3', 'Cut edges']);
+		expect(itemNames(canvasElement)).toEqual(['Paste (5)', 'Copy (3)', 'Cut edges']);
 
 		// Focus moves in on open, or the menu's own keys would never fire.
-		expect(document.activeElement).toBe(item(canvasElement, 'Paste'));
+		expect(document.activeElement).toBe(item(canvasElement, 'Paste (5)'));
 		// Roving tabindex: only the active item is a tab stop.
-		expect(item(canvasElement, 'Paste')).toHaveAttribute('tabindex', '0');
-		expect(item(canvasElement, 'Copy 3')).toHaveAttribute('tabindex', '-1');
+		expect(item(canvasElement, 'Paste (5)')).toHaveAttribute('tabindex', '0');
+		expect(item(canvasElement, 'Copy (3)')).toHaveAttribute('tabindex', '-1');
 		expect(item(canvasElement, 'Cut edges')).toHaveAttribute('tabindex', '-1');
 
 		// Every item explains itself beyond its label, and the label still names it.
-		expect(item(canvasElement, 'Paste')).toHaveAttribute('title', 'Put the copied nodes here');
-		expect(item(canvasElement, 'Paste')).toHaveAccessibleDescription('Put the copied nodes here');
-		expect(item(canvasElement, 'Copy 3')).toHaveAttribute(
+		expect(item(canvasElement, 'Paste (5)')).toHaveAttribute('title', 'Put the copied nodes here');
+		expect(item(canvasElement, 'Paste (5)')).toHaveAccessibleDescription(
+			'Put the copied nodes here'
+		);
+		expect(item(canvasElement, 'Copy (3)')).toHaveAttribute(
 			'title',
 			'Copy the selected nodes and the edges between them'
 		);
@@ -136,7 +138,7 @@
 		expect(item(canvasElement, 'Cut edges')).toHaveAccessibleDescription(
 			'Drag a line across the edges to delete, then click or lift to cut'
 		);
-		expect(item(canvasElement, 'Paste')).not.toHaveAttribute('aria-disabled');
+		expect(item(canvasElement, 'Paste (5)')).not.toHaveAttribute('aria-disabled');
 	}}
 />
 
@@ -148,11 +150,11 @@
 
 		// Horizontal pill, but the vertical arrows work too, as on the node menu.
 		dispatchKeydown(document.activeElement, 'ArrowRight');
-		expect(activeElementText()).toBe('Copy 2');
+		expect(activeElementText()).toBe('Copy (2)');
 		dispatchKeydown(document.activeElement, 'ArrowUp');
 		expect(activeElementText()).toBe('Paste');
 		dispatchKeydown(document.activeElement, 'ArrowDown');
-		expect(activeElementText()).toBe('Copy 2');
+		expect(activeElementText()).toBe('Copy (2)');
 
 		dispatchKeydown(document.activeElement, 'ArrowRight');
 		expect(activeElementText()).toBe('Cut edges');
@@ -174,7 +176,7 @@
 
 		flushSync();
 		expect(item(canvasElement, 'Paste')).toHaveAttribute('tabindex', '0');
-		expect(item(canvasElement, 'Copy 2')).toHaveAttribute('tabindex', '-1');
+		expect(item(canvasElement, 'Copy (2)')).toHaveAttribute('tabindex', '-1');
 	}}
 />
 
@@ -216,7 +218,7 @@
 		const menu = openMenu(canvasElement, { selectionCount: 2 });
 		try {
 			dispatchKeydown(document.activeElement, 'ArrowRight');
-			expect(activeElementText()).toBe('Copy 2');
+			expect(activeElementText()).toBe('Copy (2)');
 
 			// Roving tabindex would otherwise let the browser tab clean out of the
 			// page with the menu layer still up: Tab must close the menu itself.
@@ -255,12 +257,12 @@
 			}
 		}
 
-		// Two or more: "Copy N", with the count in its name as well as its label,
-		// between Paste and Cut edges.
+		// Two or more: "Copy (N)", with the count in its name as well as its
+		// label, between Paste and Cut edges.
 		for (const selectionCount of [2, 7]) {
 			const menu = openMenu(canvasElement, { selectionCount });
 			try {
-				const name = `Copy ${selectionCount}`;
+				const name = `Copy (${selectionCount})`;
 				expect(itemNames(canvasElement)).toEqual(['Paste', name, 'Cut edges']);
 				const copy = item(canvasElement, name);
 				expect(copy).toHaveAccessibleName(name);
@@ -286,7 +288,7 @@
 		// One fresh menu per item, as the page opens one per hold.
 		const cases = [
 			{ name: 'Paste', spy: 'onPaste' },
-			{ name: 'Copy 2', spy: 'onCopy' },
+			{ name: 'Copy (2)', spy: 'onCopy' },
 			{ name: 'Cut edges', spy: 'onCutEdges' }
 		] as const;
 		for (const { name, spy } of cases) {
@@ -319,35 +321,35 @@
 </Story>
 
 <Story
-	name="UnavailablePasteSaysWhyAndDoesNotPaste"
+	name="PasteNamesTheClipboardsCountAndStaysOfferedWhenThereIsNone"
 	play={async ({ canvasElement }) => {
-		const onExplainDisabled = fn<(reason: string) => void>();
-		const menu = openMenu(canvasElement, { canPaste: false, selectionCount: 2, onExplainDisabled });
+		// A count names what a paste would bring, in its name as well as its label.
+		for (const pasteCount of [1, 3, 24]) {
+			const menu = openMenu(canvasElement, { pasteCount, selectionCount: 2 });
+			try {
+				const name = `Paste (${pasteCount})`;
+				expect(itemNames(canvasElement)).toEqual([name, 'Copy (2)', 'Cut edges']);
+				const paste = item(canvasElement, name);
+				expect(paste).toHaveAccessibleName(name);
+				expect(paste).toHaveAccessibleDescription('Put the copied nodes here');
+				expect(paste).not.toHaveAttribute('aria-disabled');
+			} finally {
+				menu.close();
+			}
+		}
+
+		// No readable count: a bare "Paste", still offered, because a tap can read a
+		// clipboard the page could not — and the tap goes to the page, which says
+		// why when there is still nothing there.
+		const menu = openMenu(canvasElement, { pasteCount: null, selectionCount: 2 });
 		try {
-			const paste = within(canvasElement).getByRole('menuitem', { name: 'Paste' });
-
-			// Still there and still focusable, so the reader learns the action
-			// exists; the reason replaces the hint as its description.
-			expect(paste).toHaveAttribute('aria-disabled', 'true');
-			expect(paste).not.toHaveAttribute('disabled');
-			expect(paste).toHaveAttribute('title', 'Nothing copied yet');
-			expect(paste).toHaveAccessibleDescription('Nothing copied yet');
-			expect(document.activeElement).toBe(paste);
-
-			// A tap still lands — `title` never reaches touch, so the reason goes
-			// to the page for its notice line — but nothing is pasted and the menu
-			// stays up for the other items.
+			expect(itemNames(canvasElement)).toEqual(['Paste', 'Copy (2)', 'Cut edges']);
+			const paste = item(canvasElement, 'Paste');
+			expect(paste).not.toHaveAttribute('aria-disabled');
+			expect(paste).toHaveAttribute('title', 'Put the copied nodes here');
 			paste.click();
-			expect(menu.spies.onPaste).not.toHaveBeenCalled();
-			expect(menu.spies.onClose).not.toHaveBeenCalled();
-			expect(onExplainDisabled).toHaveBeenCalledOnce();
-			expect(onExplainDisabled).toHaveBeenCalledWith('Nothing copied yet');
-
-			// The rest of the menu is unaffected.
-			const copy = within(canvasElement).getByRole('menuitem', { name: 'Copy 2' });
-			expect(copy).not.toHaveAttribute('aria-disabled');
-			copy.click();
-			expect(menu.spies.onCopy).toHaveBeenCalledOnce();
+			expect(menu.spies.onPaste).toHaveBeenCalledOnce();
+			expect(menu.spies.onClose).toHaveBeenCalledOnce();
 		} finally {
 			menu.close();
 		}
@@ -360,7 +362,7 @@
 
 <Story
 	name="EveryItemMeetsTheTouchFloorOnAPhone"
-	args={{ selectionCount: 2, canPaste: false }}
+	args={{ selectionCount: 12, pasteCount: 24 }}
 	play={async ({ canvasElement }) => {
 		// The phone viewport from the meta's parameters, not the runner's default.
 		expect(window.innerWidth).toBe(390);
@@ -369,7 +371,8 @@
 		for (const element of items) {
 			expect(element.getBoundingClientRect().height).toBeGreaterThanOrEqual(TOUCH_TARGET_PX);
 		}
-		// All three on one row, with the pill inside the phone's width.
+		// All three on one row, two-digit counts and all, with the pill inside the
+		// phone's width.
 		const rows = new Set(items.map((element) => Math.round(element.getBoundingClientRect().top)));
 		expect(rows.size).toBe(1);
 		await waitForLayout();

@@ -16,8 +16,15 @@ import {
 	type GraphFileDocument,
 	type GraphFileEmbeddedAsset
 } from './graphFile';
+import type { EdgeData } from './components/ui/types/edge';
 import { resolveConfig, type ConfigOverrides } from './config/configOverrides';
-import { CURRENT_SCHEMA_VERSION, NEUTRAL_VIEW_STATE, PersistedGraphError } from './migrations';
+import {
+	CURRENT_SCHEMA_VERSION,
+	NEUTRAL_VIEW_STATE,
+	PersistedGraphError,
+	parsePersistedGraph,
+	unwrapPersistedGraph
+} from './migrations';
 
 const NEUTRAL = NEUTRAL_VIEW_STATE;
 
@@ -623,6 +630,80 @@ describe('graph file settings', () => {
 	it('reads a wholly unusable settings blob as no settings at all', () => {
 		expect(parseGraphFile(settingsPayload('nope')).settings).toBeUndefined();
 		expect(parseGraphFile(settingsPayload({ 'not.a.real.setting': 3 })).settings).toBeUndefined();
+	});
+});
+
+describe('graph file boundary edges', () => {
+	/** An edge into `n0` from a node the copy left behind, and one out of `n1` to another. */
+	const BOUNDARY: EdgeData[] = [
+		{ id: 'e5', sourceNodeId: 'outside', targetNodeId: 'n0', tags: ['supports'], directed: true },
+		{ id: 'e6', sourceNodeId: 'n1', targetNodeId: 'elsewhere', tags: [] }
+	];
+
+	/** A current graph file whose `boundaryEdges` field holds `boundaryEdges` verbatim. */
+	function boundaryPayload(boundaryEdges: unknown): string {
+		return JSON.stringify({
+			schemaVersion: CURRENT_SCHEMA_VERSION,
+			data: makeDoc().data,
+			viewState: NEUTRAL,
+			boundaryEdges
+		});
+	}
+
+	it('round-trips boundary edges through JSON and HTML', () => {
+		const doc = makeDoc({ documentId: 'doc-1', boundaryEdges: BOUNDARY });
+
+		expect(parseGraphFile(serializeGraphFile(doc)).boundaryEdges).toEqual(BOUNDARY);
+		expect(parseGraphFileText(serializeGraphHtmlFile(doc)).boundaryEdges).toEqual(BOUNDARY);
+		expect(parseGraphFileText(serializeGraphHtmlFile(doc)).documentId).toBe('doc-1');
+	});
+
+	it('writes no key when there are none, so the file reads as it did before the field', () => {
+		const before = serializeGraphFile(makeDoc());
+
+		expect(before).not.toContain('boundaryEdges');
+		expect(serializeGraphFile(makeDoc({ boundaryEdges: [] }))).toBe(before);
+	});
+
+	it('drops an invalid entry and keeps the valid ones in order', () => {
+		const parsed = parseGraphFile(
+			boundaryPayload([
+				BOUNDARY[0],
+				{ id: 'e7', sourceNodeId: 'n0' },
+				'not an edge',
+				null,
+				{ ...BOUNDARY[1], tags: 'supports' },
+				{ ...BOUNDARY[1], directed: 'yes' },
+				BOUNDARY[1]
+			])
+		);
+
+		expect(parsed.boundaryEdges).toEqual(BOUNDARY);
+		expect(parsed.data).toEqual(makeDoc().data);
+	});
+
+	it('reads a field that is not an array, or holds nothing valid, as absent', () => {
+		for (const field of [{ e5: BOUNDARY[0] }, 'e5', null, [], [{ id: 'e7' }]]) {
+			expect(parseGraphFile(boundaryPayload(field)).boundaryEdges, String(field)).toBeUndefined();
+		}
+	});
+
+	it('parses a file written before the field existed exactly as before', () => {
+		const doc = makeDoc({ documentId: 'doc-1' });
+		const parsed = parseGraphFile(serializeGraphFile(doc));
+
+		expect(parsed.boundaryEdges).toBeUndefined();
+		expect(parsed.data).toEqual(doc.data);
+		expect(parsed.documentId).toBe('doc-1');
+	});
+
+	it('leaves the graph data to the loaders, which never see an edge to a missing node', () => {
+		const doc = makeDoc({ boundaryEdges: BOUNDARY });
+		const json = serializeGraphFile(doc);
+
+		expect(unwrapPersistedGraph(JSON.parse(json))).toEqual(doc.data);
+		expect(parsePersistedGraph(json)).toEqual(doc.data);
+		expect(parseGraphFile(json).data.edges).toEqual(doc.data.edges);
 	});
 });
 
