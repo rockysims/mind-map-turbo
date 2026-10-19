@@ -26,6 +26,7 @@ import {
 	setTagPhysicsFactor,
 	setTaskDone,
 	togglePinned,
+	translateNodes,
 	updateEdge,
 	updateNodeContent,
 	updateNodeFileContent,
@@ -1569,6 +1570,68 @@ describe('graph mutations', () => {
 			const graph = makeGraph({ nodeCount: 1 });
 
 			expect(moveNode(graph, 'missing', { x: 10, y: 20 })).toBe(graph);
+		});
+	});
+
+	describe('translateNodes', () => {
+		const graph = makeGraph({
+			nodeCount: 4,
+			posByNodeId: {
+				n0: { x: 0, y: 0 },
+				n1: { x: 100, y: -50 },
+				n2: { x: -40, y: 30 },
+				n3: { x: 7, y: 7 }
+			}
+		});
+
+		it('moves exactly the named nodes by the delta and keeps their relative layout', () => {
+			const next = translateNodes(graph, new Set(['n0', 'n1', 'n2']), { x: 25, y: -10 });
+
+			expect(next.posByNodeId).toEqual({
+				n0: { x: 25, y: -10 },
+				n1: { x: 125, y: -60 },
+				n2: { x: -15, y: 20 },
+				n3: { x: 7, y: 7 }
+			});
+			// Only positions moved: the document's own collections come through by
+			// reference, which is what keeps a drag out of the undo history.
+			expect(next.nodes).toBe(graph.nodes);
+			expect(next.edges).toBe(graph.edges);
+			expect(next.posByNodeId.n3).toBe(graph.posByNodeId.n3);
+		});
+
+		it('leaves its inputs untouched', () => {
+			const nodeIds = new Set(['n1']);
+			const delta = { x: 1, y: 2 };
+
+			const next = translateNodes(graph, nodeIds, delta);
+
+			expect(next).not.toBe(graph);
+			expect(next.posByNodeId).not.toBe(graph.posByNodeId);
+			expect(graph.posByNodeId.n1).toEqual({ x: 100, y: -50 });
+			expect([...nodeIds]).toEqual(['n1']);
+			expect(delta).toEqual({ x: 1, y: 2 });
+		});
+
+		it('ignores an id that names no node, and plants no position for it', () => {
+			const next = translateNodes(graph, new Set(['n1', 'missing']), { x: 5, y: 5 });
+
+			expect(next.posByNodeId.n1).toEqual({ x: 105, y: -45 });
+			expect(next.posByNodeId).not.toHaveProperty('missing');
+		});
+
+		it('returns the same graph when the set names no node, is empty, or the delta is zero', () => {
+			expect(translateNodes(graph, new Set(), { x: 5, y: 5 })).toBe(graph);
+			expect(translateNodes(graph, new Set(['missing']), { x: 5, y: 5 })).toBe(graph);
+			expect(translateNodes(graph, new Set(['n0', 'n1']), { x: 0, y: 0 })).toBe(graph);
+		});
+
+		it('starts a named node with no position yet from the origin', () => {
+			const unplaced = { ...graph, posByNodeId: { n0: { x: 0, y: 0 } } };
+
+			const next = translateNodes(unplaced, new Set(['n1']), { x: 3, y: 4 });
+
+			expect(next.posByNodeId.n1).toEqual({ x: 3, y: 4 });
 		});
 	});
 

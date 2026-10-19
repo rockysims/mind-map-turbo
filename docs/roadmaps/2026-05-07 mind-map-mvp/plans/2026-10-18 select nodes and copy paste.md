@@ -181,7 +181,10 @@ recommendation put to them, both are recorded in the ui-decisions file named.
   then that delete, and neither asks first: both are inside undo's reach,
   which the destructive ruling makes the deciding test. Dragging a selected
   node moves the whole selection by one delta as one undo entry; dragging an
-  unselected node moves only it. Ruling:
+  unselected node moves only it. A drag lands in history as a single drag
+  does today — milestone 12 keeps positions out of undo — so "one undo
+  entry" in the first draft of this plan was wrong, and the ruling file was
+  corrected on 2026-10-18. Ruling:
   `docs/ui-decisions/2026-10-18--pointer--dragging-a-selected-node-moves-the-whole-selection.md`.
 - **Edges that leave the selection.** **Dropped.** Only edges whose both ends
   are selected are copied. The induced subgraph is the rule every editor uses,
@@ -570,7 +573,8 @@ behaviour identical to the node menu.
   `delta = point − draggedStart` and commits `translateNodes` from the
   recorded starts (so rounding never accumulates), through the same relax
   the single-node drag uses, with the same `'layout'` intent so the run lands
-  as one history entry; `handleNodeDragEnd` settles as today, applying the
+  in history exactly as a single drag does (which, per milestone 12, is not at
+  all); `handleNodeDragEnd` settles as today, applying the
   pinned-node branch to every pinned node in the set. A drag that starts on
   an unselected node behaves exactly as before and leaves the selection as it
   was.
@@ -582,7 +586,8 @@ behaviour identical to the node menu.
 - Spec: `translateNodes` moves exactly the named nodes by the delta and
   returns the same object for an empty set.
 - Stories: "dragging one of three selected nodes moves all three by the same
-  delta, keeping their relative layout, and one undo restores all three";
+  delta, keeping their relative layout, and lands in history as a single drag
+  does";
   "dragging an unselected node moves only it and the selection is unchanged";
   "dragging a selected pinned node keeps it pinned".
 

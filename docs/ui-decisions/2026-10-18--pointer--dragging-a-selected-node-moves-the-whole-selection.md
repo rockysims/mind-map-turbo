@@ -2,7 +2,7 @@
 
 - Situation: a node selection on a canvas where a single-click-drag already moves one node.
 - Proposed: ship selection with copy, cut, paste and delete, and defer moving a selection as a group to a later plan.
-- Chosen: group drag is in scope. Dragging a node that is in the selection moves every selected node by the same delta, keeping their relative layout, as one undo entry; dragging a node outside the selection moves only that node and leaves the selection as it was.
+- Chosen: group drag is in scope. Dragging a node that is in the selection moves every selected node by the same delta, keeping their relative layout, and lands in history exactly as a single drag does (milestone 12 keeps every drag out of undo: positions are layout, not document); dragging a node outside the selection moves only that node and leaves the selection as it was.
 - Why: no reason given ("include group drag").
 - Pattern: editing--match-undo-granularity-to-what-the-hand-did
 - Status: ruling

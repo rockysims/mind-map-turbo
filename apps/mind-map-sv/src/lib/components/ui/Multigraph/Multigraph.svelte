@@ -186,6 +186,7 @@
 		setTagPhysicsFactor,
 		setTaskDone,
 		togglePinned,
+		translateNodes,
 		updateEdge,
 		updateNodeFileContent,
 		updateNodeImageContent,
@@ -690,6 +691,24 @@
 	const borderInputs = $derived<BorderInputs>({ degrees: degreeByNodeId, assets: graphAssets });
 	let primaryNodeId = $state('');
 	let activeDragNodeId = $state<string | null>(null);
+	type GroupDrag = {
+		draggedNodeId: string;
+		draggedStart: Point;
+		starts: Readonly<Record<string, Point>>;
+		nodeIds: ReadonlySet<string>;
+		delta: Point;
+	};
+	/**
+	 * A drag that took hold of a selected node while others were selected with it,
+	 * so the whole selection moves: where each selected node stood when the drag
+	 * began, and how far the hand has carried the one it holds. Every frame puts
+	 * the group back at `start + delta` from these, rather than nudging it along
+	 * move by move, so a long drag cannot drift by accumulated rounding.
+	 *
+	 * Plain, not reactive: nothing renders from it, and it lives exactly as long
+	 * as `activeDragNodeId` is set by the same drag.
+	 */
+	let groupDrag: GroupDrag | null = null;
 	let editNodeId = $state<string | null>(null);
 	let actionMenu = $state<{ nodeId: string; position: Point } | null>(null);
 	/**
@@ -1202,8 +1221,11 @@
 		getLayoutSettings: () => layoutSettingsFromConfig,
 		getActiveDragNodeId: () => activeDragNodeId,
 		getPreferredBeaconNodeIds: () => severedBeaconPreference,
+		// A physics frame holds still only the dragged node and the pins, so during
+		// a group drag it would loosen the rest of the selection between two
+		// pointer moves; holding the group here keeps its shape under the hand.
 		applyGraph: (nextGraph) => {
-			graph = nextGraph;
+			graph = withGroupDragHeld(nextGraph);
 		},
 		getHasActiveTransitions: (): boolean => {
 			const now: number = layoutRuntime.animationNowMs;
@@ -2574,20 +2596,80 @@
 	}
 
 	function handleNodeMoved(node: NodeData, point: Point) {
+		if (groupDrag?.draggedNodeId === node.id) {
+			const { draggedStart } = groupDrag;
+			groupDrag = {
+				...groupDrag,
+				delta: { x: point.x - draggedStart.x, y: point.y - draggedStart.y }
+			};
+			// Held before the relax, so the neighbours answer to where the group now
+			// is, and again after it, because the relax holds only the dragged node
+			// and the pins. Same relax and same intent as a single node's move, so
+			// the history treats the two drags alike.
+			const relaxed = layoutRuntime.relaxAfterMutation(withGroupDragHeld(graph), node.id, 1);
+			commitUserGraph(withGroupDragHeld(relaxed), editIntent('layout'));
+			return;
+		}
 		const movedGraph = moveNode(graph, node.id, point);
 		commitUserGraph(layoutRuntime.relaxAfterMutation(movedGraph, node.id, 1), editIntent('layout'));
 	}
 
 	function handleNodeDragStart(node: NodeData) {
 		activeDragNodeId = node.id;
+		groupDrag = groupDragFrom(node);
 		layoutRuntime.beginDrag();
+	}
+
+	/**
+	 * The group drag a drag of `node` starts, or `null` for a drag of one node:
+	 * the node is not selected, or is the only one selected. Either way the
+	 * selection stays as it was — dragging is not selecting.
+	 */
+	function groupDragFrom(node: NodeData): GroupDrag | null {
+		if (!selection.has(node.id) || selection.size < 2) return null;
+		const draggedStart = graph.posByNodeId[node.id];
+		if (draggedStart === undefined) return null;
+		const starts: Record<string, Point> = {};
+		for (const nodeId of selection.ids) {
+			const start = graph.posByNodeId[nodeId];
+			if (start !== undefined) starts[nodeId] = start;
+		}
+		return {
+			draggedNodeId: node.id,
+			draggedStart,
+			starts,
+			nodeIds: new Set(Object.keys(starts)),
+			delta: { x: 0, y: 0 }
+		};
+	}
+
+	/**
+	 * `next` with every node of the group drag at its start plus the drag's
+	 * delta, or `next` itself when no group drag is under way. A pinned node in
+	 * the group moves with the rest: a pin holds a node against physics, not
+	 * against the hand.
+	 */
+	function withGroupDragHeld(next: MultigraphData): MultigraphData {
+		if (groupDrag === null) return next;
+		const atStart = { ...next, posByNodeId: { ...next.posByNodeId, ...groupDrag.starts } };
+		return translateNodes(atStart, groupDrag.nodeIds, groupDrag.delta);
 	}
 
 	function handleNodeDragEnd(node: NodeData) {
 		activeDragNodeId = null;
+		const carried = groupDrag?.nodeIds ?? null;
+		groupDrag = null;
 
-		if (node.pinned) {
-			commitUserGraph(layoutRuntime.beginScaleChange(graph, node.id), editIntent('layout'));
+		// A moved pin re-anchors the layout from every pin. That holds when the
+		// hand was on the pin, and just as much when the pin rode along in a group
+		// under an unpinned node: the relayout starts from the first pinned member
+		// either way, since it runs from every pin regardless of which is named.
+		const movedPin = node.pinned
+			? node.id
+			: (graph.nodes.find((candidate) => candidate.pinned && carried?.has(candidate.id))?.id ??
+				null);
+		if (movedPin !== null) {
+			commitUserGraph(layoutRuntime.beginScaleChange(graph, movedPin), editIntent('layout'));
 			return;
 		}
 

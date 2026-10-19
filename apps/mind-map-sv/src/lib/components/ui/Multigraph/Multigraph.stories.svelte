@@ -2416,6 +2416,96 @@
 		}
 	});
 
+	/**
+	 * Three unpinned nodes in a row, each sprung to the pinned anchor below them,
+	 * placed like `DELETE_UNDO_GRAPH` for the persisted harness's camera. Unpinned
+	 * and tied to a node the drag leaves behind, so every physics frame pulls the
+	 * row back towards the anchor: a row that keeps its shape under the hand is
+	 * being held there, not merely left alone.
+	 */
+	const GROUP_DRAG_GRAPH = makeGraph({
+		nodes: [
+			{ id: 'n0', title: 'Anchor', description: '', tags: [] },
+			{ id: 'n1', title: 'Left', description: '', tags: [] },
+			{ id: 'n2', title: 'Middle', description: '', tags: [] },
+			{ id: 'n3', title: 'Right', description: '', tags: [] }
+		],
+		pinned: ['n0'],
+		edges: [
+			[0, 1],
+			[0, 2],
+			[0, 3]
+		],
+		posByNodeId: {
+			n0: { x: 0, y: 150 },
+			n1: { x: -120, y: -150 },
+			n2: { x: 0, y: -150 },
+			n3: { x: 120, y: -150 }
+		}
+	});
+
+	/**
+	 * `SELECTION_GRAPH`'s layout with the middle of the top row unpinned and
+	 * sprung to both ends, so a selection of the row mixes pins with a node
+	 * physics is free to move.
+	 */
+	const PINNED_GROUP_DRAG_GRAPH = makeGraph({
+		nodes: [
+			{ id: 'n0', title: 'Left', description: '', tags: [] },
+			{ id: 'n1', title: 'Middle', description: '', tags: [] },
+			{ id: 'n2', title: 'Right', description: '', tags: [] },
+			{ id: 'n3', title: 'Below', description: '', tags: [] }
+		],
+		pinned: ['n0', 'n2', 'n3'],
+		edges: [
+			[0, 1],
+			[1, 2]
+		],
+		posByNodeId: SELECTION_GRAPH.posByNodeId
+	});
+
+	/**
+	 * Press `nodeId` at its centre and carry it `offset` client pixels, then let
+	 * `frames` frames of physics run with the pointer still down. Returns where
+	 * the pointer is, for the release.
+	 */
+	async function dragNodeAndHold(
+		el: HTMLElement,
+		nodeId: string,
+		offset: Point,
+		frames = 10
+	): Promise<Point> {
+		const circle = getCircle(el, nodeId);
+		const from = getCenter(circle);
+		const to = { x: from.x + offset.x, y: from.y + offset.y };
+		dispatchPointer(circle, 'pointerdown', from.x, from.y);
+		dispatchPointer(getStage(el), 'pointermove', to.x, to.y);
+		await waitForFrames(frames);
+		return to;
+	}
+
+	/** Each node's move from `before` to `after`, in graph units. */
+	function displacements(
+		before: Record<string, Point>,
+		after: Record<string, Point>
+	): Record<string, Point> {
+		return Object.fromEntries(
+			Object.keys(before).map((nodeId) => [
+				nodeId,
+				{ x: after[nodeId].x - before[nodeId].x, y: after[nodeId].y - before[nodeId].y }
+			])
+		);
+	}
+
+	/** Pick each node from the menu's Select, the route a touch reader has. */
+	async function selectByMenu(el: HTMLElement, nodeIds: readonly string[]): Promise<void> {
+		for (const nodeId of nodeIds) {
+			await openNodeMenu(el, nodeId);
+			within(el).getByRole('menuitem', { name: 'Select' }).click();
+			await tick();
+		}
+	}
+
 	const COPY_ASSET_SCOPE = 'copy-story';
 	/** The bytes behind the image on `n0` and the one on `n3`, as the store holds them. */
 	const COPY_IMAGE_BYTES = { 'left-photo': 'left photo bytes', 'below-photo': 'below photo bytes' };
@@ -11810,5 +11900,153 @@
 		await enterFocusOn(canvasElement, 'n1');
 		blurActiveElement();
 		expect(cancelled()).toEqual([false, false, false]);
+	}}
+/>
+
+<!--
+	The undo half of this one is parity, not an entry: a drag is a layout change,
+	and layout changes are deliberately never history (milestone 12, "The layout
+	boundary"). So the group drag commits exactly what a one-node drag commits,
+	and the undo control reads the same after either.
+-->
+<Story
+	name="DraggingOneOfThreeSelectedNodesMovesAllThreeByOneDeltaAndLandsInHistoryAsASingleDragDoes"
+	play={async ({ canvasElement }: HarnessPlayContext) => {
+		const harness = canvasElement.querySelector('.harness');
+		if (!(harness instanceof HTMLElement)) throw new Error('Persisted harness not found');
+		await waitFor(() => expect(harness.dataset.loadedGraphId).toBe('group-drag'));
+		await waitForLayout();
+		const canvas = within(canvasElement);
+		const stage = getStage(canvasElement);
+		const viewScale = Number(harness.dataset.viewScale);
+		const undoControl = () => canvas.getByRole('button', { name: /^Undo/ });
+		expect(undoControl()).toHaveAccessibleName('Undo');
+		expect(undoControl()).toHaveAttribute('aria-disabled', 'true');
+
+		// One node, nothing selected: the drag the reader already knows.
+		const single = await dragNodeAndHold(canvasElement, 'n1', { x: -30, y: 0 }, 2);
+		dispatchPointer(stage, 'pointerup', single.x, single.y);
+		await tick();
+		expect(undoControl()).toHaveAccessibleName('Undo');
+		expect(undoControl()).toHaveAttribute('aria-disabled', 'true');
+
+		const row = ['n1', 'n2', 'n3'];
+		await selectByMenu(canvasElement, row);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('3 selected');
+
+		const before = nodePositions(canvasElement, ['n0', ...row]);
+		const to = await dragNodeAndHold(canvasElement, 'n2', { x: 60, y: 40 });
+		const moved = displacements(before, nodePositions(canvasElement, ['n0', ...row]));
+
+		// The held node went where the hand took it...
+		expect(moved.n2.x).toBeCloseTo(60 / viewScale, 0);
+		expect(moved.n2.y).toBeCloseTo(40 / viewScale, 0);
+		// ...and the other two by the same delta, ten frames of springs to the
+		// anchor notwithstanding, so the row keeps its shape.
+		for (const nodeId of ['n1', 'n3']) {
+			expect(moved[nodeId].x, nodeId).toBeCloseTo(moved.n2.x, 3);
+			expect(moved[nodeId].y, nodeId).toBeCloseTo(moved.n2.y, 3);
+		}
+		// The anchor was not selected, and stays.
+		expect(moved.n0).toEqual({ x: 0, y: 0 });
+
+		dispatchPointer(stage, 'pointerup', to.x, to.y);
+		await tick();
+		// Dragging is not selecting: the three are still the selection.
+		expect(selectedNodeIds(canvasElement)).toEqual(row);
+		expect(undoControl()).toHaveAccessibleName('Undo');
+		expect(undoControl()).toHaveAttribute('aria-disabled', 'true');
+	}}
+>
+	{#snippet template()}
+		<PersistedGraphHarness
+			initialGraphId="group-drag"
+			graphs={{ 'group-drag': GROUP_DRAG_GRAPH }}
+			layoutSettings={{ ...SELECTION_LAYOUT, baseRadius: 40 }}
+		/>
+	{/snippet}
+</Story>
+
+<Story
+	name="DraggingAnUnselectedNodeMovesOnlyItAndTheSelectionIsUnchanged"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		await selectTopRow(canvasElement);
+		const nodeIds = ['n0', 'n1', 'n2', 'n3'];
+
+		const before = nodePositions(canvasElement, nodeIds);
+		const to = await dragNodeAndHold(canvasElement, 'n3', { x: 40, y: -30 }, 4);
+		dispatchPointer(stage, 'pointerup', to.x, to.y);
+		await waitForLayout();
+		const moved = displacements(before, nodePositions(canvasElement, nodeIds));
+
+		expect(moved.n3.x).toBeCloseTo(40 / SELECTION_VIEW.scale, 0);
+		expect(moved.n3.y).toBeCloseTo(-30 / SELECTION_VIEW.scale, 0);
+		for (const nodeId of ['n0', 'n1', 'n2']) {
+			expect(moved[nodeId], nodeId).toEqual({ x: 0, y: 0 });
+		}
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2']);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('3 selected');
+	}}
+/>
+
+<Story
+	name="DraggingASelectedPinnedNodeKeepsItPinnedAndMovesTheRestWithIt"
+	args={{
+		multigraphData: PINNED_GROUP_DRAG_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const row = ['n0', 'n1', 'n2'];
+		const nodeIds = [...row, 'n3'];
+		await selectByMenu(canvasElement, row);
+		expect(selectedNodeIds(canvasElement)).toEqual(row);
+
+		const before = nodePositions(canvasElement, nodeIds);
+		const to = await dragNodeAndHold(canvasElement, 'n0', { x: 40, y: 30 });
+		const held = displacements(before, nodePositions(canvasElement, nodeIds));
+		expect(held.n0.x).toBeCloseTo(40 / SELECTION_VIEW.scale, 0);
+		expect(held.n0.y).toBeCloseTo(30 / SELECTION_VIEW.scale, 0);
+		// The unpinned middle and the pinned right end move with the held pin.
+		for (const nodeId of ['n1', 'n2']) {
+			expect(held[nodeId].x, nodeId).toBeCloseTo(held.n0.x, 3);
+			expect(held[nodeId].y, nodeId).toBeCloseTo(held.n0.y, 3);
+		}
+		expect(held.n3).toEqual({ x: 0, y: 0 });
+
+		dispatchPointer(stage, 'pointerup', to.x, to.y);
+		await waitForFrames(10);
+
+		// Still pinned, and so is the other pin it carried along: both hold where
+		// the group put them through the relayout a moved pin starts.
+		expect(canvasElement.querySelector('[data-node-id="n0"] .node')).toHaveAttribute(
+			'data-pinned',
+			'true'
+		);
+		const pinnedById = new Map(lastChangedGraph(args).nodes.map((node) => [node.id, node.pinned]));
+		expect([pinnedById.get('n0'), pinnedById.get('n1'), pinnedById.get('n2')]).toEqual([
+			true,
+			undefined,
+			true
+		]);
+		const settled = displacements(before, nodePositions(canvasElement, nodeIds));
+		for (const nodeId of ['n0', 'n2']) {
+			expect(settled[nodeId].x, nodeId).toBeCloseTo(held.n0.x, 3);
+			expect(settled[nodeId].y, nodeId).toBeCloseTo(held.n0.y, 3);
+		}
+		expect(selectedNodeIds(canvasElement)).toEqual(row);
 	}}
 />

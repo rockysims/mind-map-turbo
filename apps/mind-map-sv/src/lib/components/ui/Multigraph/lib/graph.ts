@@ -808,6 +808,34 @@ export function moveNode(data: MultigraphData, nodeId: string, point: Point): Mu
 	};
 }
 
+/**
+ * Move every named node by one delta, so a group keeps its shape — what a drag
+ * of one selected node does to the rest of the selection.
+ *
+ * One pass over `data.nodes` and one copy of the position map, however many
+ * nodes move. An id that names no node is skipped, as `moveNode` skips one, so
+ * a stale id never plants a position for a node that is not there; a named
+ * node with no position yet starts from the origin, where layout would put it.
+ * Returns `data` itself when nothing would move.
+ */
+export function translateNodes(
+	data: MultigraphData,
+	nodeIds: ReadonlySet<string>,
+	delta: Point
+): MultigraphData {
+	if (nodeIds.size === 0 || (delta.x === 0 && delta.y === 0)) return data;
+
+	let posByNodeId: Record<string, Point> | null = null;
+	for (const node of data.nodes) {
+		if (!nodeIds.has(node.id)) continue;
+		const position = data.posByNodeId[node.id] ?? DEFAULT_NODE_POSITION;
+		posByNodeId ??= { ...data.posByNodeId };
+		posByNodeId[node.id] = { x: position.x + delta.x, y: position.y + delta.y };
+	}
+
+	return posByNodeId === null ? data : { ...data, posByNodeId };
+}
+
 export function neighborsOf(data: MultigraphData, nodeId: string): NodeData[] {
 	const neighborIds = new Set<string>();
 
