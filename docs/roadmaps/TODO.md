@@ -182,3 +182,9 @@ TODO: show first image as node background (high value, low lift probably)
 TODO: global AI chat that can edit the graph for the user (and, ideally, scrap data from a url or uploaded file)
 TODO: try to figure out how to make deep zoom properly sticky so I don't accidently keep overshooting one way or the other
 TODO: make sure AI output nodes / promoted nodes in general have meaningful names
+
+from the 2026-10-18 selection and clipboard plan (`2026-05-07 mind-map-mvp/plans/2026-10-18 select nodes and copy paste.md`):
+
+- Paste plain text as a new node: a non-graph clipboard is ignored today; "paste a sentence" could create a node titled with it at the anchor.
+- A richer clipboard flavour: the copy is the graph-file JSON (or the HTML form when attachments ride along) as `text/plain`, so pasting into a text editor dumps that; a titles-only `text/plain` beside a custom type would read better outside the app.
+- Marquee selection of edges, and dragging a selection into another window, were both left out on purpose.
