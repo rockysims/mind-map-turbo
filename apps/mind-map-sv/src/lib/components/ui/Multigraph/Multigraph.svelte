@@ -199,6 +199,8 @@
 	} from './lib/quantityLabels.js';
 	import { LayoutRuntime } from './lib/layoutRuntime.svelte.js';
 	import { TransientRevealController } from './lib/transientReveal.svelte.js';
+	import { SelectionController } from './lib/selectionController.svelte.js';
+	import { nodeIdsInScreenRect } from './lib/selection.js';
 	import { navBreadcrumbs } from './lib/navStack.js';
 	import { externalGraphSyncToken } from './lib/graphSync.js';
 	import type { EntryGestureDirection } from './lib/entryGestureGate.js';
@@ -755,6 +757,38 @@
 	 * there. Session-only: it never reaches `graph`, so no jump is a graph edit.
 	 */
 	const transientReveal = new TransientRevealController();
+
+	/**
+	 * The nodes the reader has marked: by a box on empty canvas, by the node
+	 * menu's Select, or by Cmd/Ctrl+A. Session-only like the nav stack — never in
+	 * `graph`, never in an undo entry — and pruned to the live nodes on every
+	 * graph change (see the effect beside `graphNodes`).
+	 */
+	const selection = new SelectionController();
+	/**
+	 * True from a box's first update until it ends or is cancelled. Plain, not
+	 * reactive: only the window Escape handler reads it, and it has to, because
+	 * the Stage's own Escape listener (which cancels the box) is added after that
+	 * handler and so hears the press second.
+	 */
+	let selectionBoxOpen = false;
+
+	/**
+	 * The node list, held on its own for the prune below: a relax frame
+	 * reassigns `graph` but carries `nodes` across by reference, so the prune
+	 * runs when a node can actually have gone — a commit, an undo, an adopted
+	 * import — and not on every frame of a settle.
+	 */
+	const graphNodes = $derived(graph.nodes);
+
+	// One place for every way a node can leave — a delete, a merge that absorbs
+	// it, an undo or redo that takes it away — rather than a prune at each of
+	// their commits. Untracked, so a change to the selection itself does not
+	// re-run the prune.
+	$effect(() => {
+		void graphNodes;
+		untrack(() => selection.prune(graph));
+	});
 
 	/**
 	 * The node whose details the reader is in, for the trail's last crumb.
@@ -1856,11 +1890,48 @@
 		focus.closeFocus();
 	}
 
+	/**
+	 * Whether an Escape that reached the window is the selection's to spend.
+	 *
+	 * The selection is the last level Escape walks out of: the focus overlay is
+	 * handled before this is asked, and then a menu, a sheet or dialog, a panel, a
+	 * box or a creation drag in flight each take the press instead. The menu and
+	 * the sheets close themselves on the way up, so their state already reads
+	 * closed here; they are found from the press's own target instead, and a
+	 * press any surface marked handled is left alone. The box and the drag belong
+	 * to the Stage, whose listeners hear the press after this one — hence
+	 * `selectionBoxOpen` rather than asking the Stage.
+	 */
+	function escapeClearsSelection(event: KeyboardEvent): boolean {
+		if (event.defaultPrevented || selectionBoxOpen) return false;
+		if (creationPreview !== null && !creationPreview.ending) return false;
+		// A field's Escape is the field's, as it is for the focus overlay above.
+		if (keyboardIsInTextEntry()) return false;
+		const target = event.target;
+		if (target instanceof Element && target.closest('[role="dialog"], [role="menu"]') !== null) {
+			return false;
+		}
+		return (
+			actionMenu === null &&
+			editNodeId === null &&
+			titleEditContext === null &&
+			duplicateEdgeConfirm === null &&
+			pendingNodeMerge === null &&
+			!tagColorLegendOpen &&
+			!graphQueryPanelOpen &&
+			!settingsPanelOpen
+		);
+	}
+
 	$effect(() => {
 		if (typeof window === 'undefined') return;
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (event.key === 'Escape' && focus.isFocused) {
 				leaveFocusOnEscape();
+				return;
+			}
+			if (event.key === 'Escape') {
+				if (escapeClearsSelection(event)) selection.clear();
 				return;
 			}
 			if (event.metaKey || event.ctrlKey || event.altKey) {
@@ -1876,6 +1947,17 @@
 					// hands expect. Key repeat is fine: each step is a pointer swap plus
 					// a relax, and the guard refuses the states where a repeat could hurt.
 					stepHistory(key === 'y' || event.shiftKey ? 'redo' : 'undo');
+					return;
+				}
+				// Select all takes what the canvas draws, not the whole graph: a node
+				// hidden by the hop limit or excluded by the query is one the reader
+				// cannot see, and selecting it would copy things they did not mean to.
+				// Outside text entry only, so a field's own select-all still works, and
+				// not in the details view, which is text to select rather than nodes.
+				if (key === 'a' && !event.shiftKey && !event.altKey) {
+					if (keyboardIsInTextEntry() || focus.isFocused) return;
+					event.preventDefault();
+					selection.replace(visibleNodeIds);
 					return;
 				}
 				if (key !== 'k') return;
@@ -2082,6 +2164,54 @@
 			return;
 		}
 		openNodeActionMenu(node, point);
+	}
+
+	/**
+	 * One on-screen pixel, in the units of a node wrapper drawn at `nodeScale`.
+	 *
+	 * The selection ring is a box-shadow inside the wrapper, so the node's scale
+	 * and the camera's both shrink it: a 4px band on a beacon in a zoomed-out
+	 * phone view drew under a pixel wide. Sized in these units it stays the same
+	 * width on screen at every zoom. Floored so a node growing in from scale 0
+	 * never divides by zero.
+	 */
+	function screenPixelIn(nodeScale: number): number {
+		return 1 / Math.max(nodeScale * stageScale, 0.01);
+	}
+
+	function handleSelectionBoxUpdate() {
+		selectionBoxOpen = true;
+	}
+
+	/**
+	 * A released box takes every drawn node its on-screen circle overlaps, by the
+	 * same projection hit testing uses, so what the box covers on screen is what
+	 * it takes. No modifier replaces the selection; Shift held at release adds.
+	 */
+	function handleSelectionBoxEnd(rect: StageRect, options: { additive: boolean }) {
+		selectionBoxOpen = false;
+		const stage = stageRect;
+		if (!stage) return;
+		const ids = nodeIdsInScreenRect(focusCandidates(), rect, stage, stageViewState);
+		if (options.additive) {
+			selection.add(ids);
+			return;
+		}
+		selection.replace(ids);
+	}
+
+	function handleSelectionBoxCancel() {
+		selectionBoxOpen = false;
+	}
+
+	/**
+	 * A plain click on empty canvas clears; a Shift-click keeps the selection, so
+	 * the first half of a Shift+double-click-drag does not throw away what the
+	 * box is about to add to. The first click of a plain double clears too, which
+	 * the box that follows would have replaced anyway.
+	 */
+	function handleBackgroundClick(_point: Point, options: { shiftKey: boolean }) {
+		if (!options.shiftKey) selection.clear();
 	}
 
 	const previewDurationMs = $derived(reduceMotion ? 0 : resolvedLayoutSettings.enterExitDurationMs);
@@ -2494,7 +2624,11 @@
 	 */
 	function nodeAccessibleName(node: NodeData): string {
 		const title = mathPlainText(node.title);
-		return node.pinned === true ? `${title}, pinned` : title;
+		const pinned = node.pinned === true ? ', pinned' : '';
+		// The ring is drawn, so the name says it too: a selection a screen reader
+		// cannot hear about is one its user could copy or delete unawares.
+		const selected = selection.has(node.id) ? ', selected' : '';
+		return `${title}${pinned}${selected}`;
 	}
 
 	/**
@@ -3418,6 +3552,20 @@
 		</button>
 	{/if}
 
+	<!--
+		The live region stays mounted while the count inside it comes and goes: a
+		region inserted together with its first words is one most screen readers
+		never announce, so the first selection would pass in silence. State, not an
+		outcome, so it is drawn on the canvas rather than in the toolbar's notice.
+	-->
+	<div class="selection-count-region" aria-live="polite" aria-atomic="true">
+		{#if selection.size > 0}
+			<p class="selection-count" data-selection-count={selection.size}>
+				{selection.size} selected
+			</p>
+		{/if}
+	</div>
+
 	<Stage
 		{...stageTunables}
 		{getNodeAt}
@@ -3440,6 +3588,10 @@
 		onCreationDragUpdate={handleCreationDragUpdate}
 		onCreationCancel={handleCreationCancel}
 		onNodeMergeDropOntoNode={handleNodeMergeDropOntoNode}
+		onSelectionBoxUpdate={handleSelectionBoxUpdate}
+		onSelectionBoxEnd={handleSelectionBoxEnd}
+		onSelectionBoxCancel={handleSelectionBoxCancel}
+		onBackgroundClick={handleBackgroundClick}
 		onViewStateLiveChange={(state) => {
 			stageViewState = state;
 		}}
@@ -3698,6 +3850,7 @@
 				baseNodeOpacity *
 				(revealWaveNodeOpacityByNodeId[node.id] ?? 1) *
 				queryOpacity(queryNodeState)}
+			{@const nodeSelected = selection.has(node.id)}
 			{@const nodeChips = shouldShowQuantityChips(nodeDiameterPx, nodeScale, stageScale, {
 				minOnScreenDiameterPx: dataflowCfg.chipMinOnScreenDiameterPx
 			})
@@ -3717,11 +3870,13 @@
 				class:primary={primaryNodeId === node.id}
 				class:focus-owned={focus.focusedNodeId === node.id}
 				class:merge-target={mergeTargetNodeId === node.id}
+				class:selected={nodeSelected}
 				role="button"
 				tabindex="0"
 				aria-label={nodeAccessibleName(node)}
 				data-node-id={node.id}
 				data-merge-target={mergeTargetNodeId === node.id ? 'true' : undefined}
+				data-selected={nodeSelected ? 'true' : undefined}
 				data-query-role={queryNodeState?.role}
 				data-scale={nodeScale}
 				data-node-opacity={nodeOpacity}
@@ -3729,7 +3884,7 @@
 				data-y={nodePos.y}
 				onkeydown={(event) => handleNodeKeyDown(event, node)}
 				onclick={() => focus.openFocus(node)}
-				style={`left: calc(50% + ${nodePos.x}px); top: calc(50% + ${nodePos.y}px); transform: translate(-50%, -50%) scale(${nodeScale}); opacity: ${nodeOpacity};`}
+				style={`left: calc(50% + ${nodePos.x}px); top: calc(50% + ${nodePos.y}px); transform: translate(-50%, -50%) scale(${nodeScale}); opacity: ${nodeOpacity};${nodeSelected ? ` --screen-px: ${screenPixelIn(nodeScale)}px;` : ''}`}
 			>
 				<Node
 					{...nodeChromeFor(node)}
@@ -3809,9 +3964,14 @@
 	{#if actionMenu && actionMenuNode}
 		<NodeActionMenu
 			node={actionMenuNode}
+			selected={selection.has(actionMenuNode.id)}
 			position={actionMenu.position}
 			onAddNodeEdge={() => armCreationGesture(actionMenuNode)}
 			onMergeNode={() => armCreationGesture(actionMenuNode, 'merge')}
+			onToggleSelected={() => {
+				selection.toggle(actionMenuNode.id);
+				closeOverlays();
+			}}
 			onTogglePinned={() => {
 				toggleNodePinned(actionMenuNode.id);
 				closeOverlays();
@@ -4196,6 +4356,41 @@
 		visibility: hidden;
 	}
 
+	/*
+	 * A selected node, ringed in teal: neither the merge amber below nor the blue
+	 * focus outline, so "selected", "about to absorb" and "has keyboard focus"
+	 * never read alike. The crisp band is solid so it clears 3:1 against both the
+	 * canvas and the node fill; the soft glow is only emphasis. Widths are in
+	 * `--screen-px` (see `screenPixelIn`), so the band is 3px on screen at any
+	 * zoom rather than shrinking with the node.
+	 *
+	 * NodeChrome draws its own halo on a pinned or spotlit circle, in a rule this
+	 * one outranks (the `:not()` adds a class's weight), so the band is never
+	 * swallowed by stylesheet order. Outranking replaces those halos, so the two
+	 * variants put back what each meant — the pinned white gap, the spotlight's
+	 * colour as the outer glow — around the band. A merge aimed at a selected
+	 * node shows the merge ring instead: it is the gesture in flight.
+	 */
+	.node-wrapper.selected:not(.merge-target) :global(.circle) {
+		box-shadow:
+			0 0 0 calc(3 * var(--screen-px, 1px)) #0f766e,
+			0 0 calc(10 * var(--screen-px, 1px)) color-mix(in srgb, #0f766e 45%, transparent);
+	}
+
+	.node-wrapper.selected:not(.merge-target) :global(.circle[data-pinned='true']) {
+		box-shadow:
+			0 0 0 calc(2 * var(--screen-px, 1px)) #ffffff,
+			0 0 0 calc(5 * var(--screen-px, 1px)) #0f766e,
+			0 0 calc(12 * var(--screen-px, 1px)) color-mix(in srgb, #0f766e 45%, transparent);
+	}
+
+	.node-wrapper.selected:not(.merge-target) :global(.circle[data-spotlight='true']) {
+		box-shadow:
+			0 0 0 calc(3 * var(--screen-px, 1px)) #0f766e,
+			0 0 calc(14 * var(--screen-px, 1px))
+				color-mix(in srgb, var(--node-spotlight-color) 62%, transparent);
+	}
+
 	/* The node a merge is poised to absorb into, ringed in the merge colour
 	   (kept in sync with MERGE_PREVIEW_COLOR above). */
 	.node-wrapper.merge-target :global(.circle) {
@@ -4305,6 +4500,40 @@
 		font: inherit;
 		cursor: pointer;
 		pointer-events: auto;
+	}
+
+	/*
+	 * Top right, just under the toolbar's measured clearance: the one canvas
+	 * corner nothing else claims at either width. Find / Filter and Tags hold the
+	 * bottom corners; the Find / Filter and settings panels open top-left on a
+	 * desktop and rise from the bottom on a phone, as the Tags dialog does; and
+	 * the toolbar spans the whole top edge on a phone, which the clearance steps
+	 * below. Under every overlay, the action menu's layer (20) included, so a
+	 * pill or a sheet tall enough to reach this corner covers the count rather
+	 * than colliding with it. No pointer: it reports state and is not a control,
+	 * so a press on it is a press on the canvas.
+	 */
+	.selection-count-region {
+		position: absolute;
+		z-index: 15;
+		top: var(--graph-toolbar-clearance, 0.75rem);
+		right: 0.75rem;
+		pointer-events: none;
+	}
+
+	/* The teal inset is the ring's colour, so the count reads as the ring's key. */
+	.selection-count {
+		margin: 0;
+		border-radius: 999px;
+		padding: 0.375rem 0.75rem;
+		background: #f8fafc;
+		color: #0f172a;
+		font-size: 0.875rem;
+		line-height: 1.25;
+		white-space: nowrap;
+		box-shadow:
+			inset 0 0 0 2px #0f766e,
+			0 8px 24px rgb(15 23 42 / 18%);
 	}
 
 	/* Centred in the empty canvas it is explaining, because there is nothing else

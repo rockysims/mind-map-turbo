@@ -6,9 +6,11 @@
 
 	let {
 		node,
+		selected,
 		position,
 		onAddNodeEdge,
 		onMergeNode,
+		onToggleSelected,
 		onTogglePinned,
 		onFocus,
 		onEdit,
@@ -17,10 +19,14 @@
 		onRetarget
 	}: {
 		node: NodeData;
+		/** Whether `node` is in the canvas selection, which decides Select or Deselect. */
+		selected: boolean;
 		position: Point;
 		onAddNodeEdge: () => void;
 		/** Arm the merge gesture: drag this node onto the one that should survive. */
 		onMergeNode: () => void;
+		/** Add this node to the selection, or take it out. */
+		onToggleSelected: () => void;
 		onTogglePinned: () => void;
 		onFocus: () => void;
 		onEdit: () => void;
@@ -54,6 +60,17 @@
 			label: 'Merge',
 			hint: 'Drag onto the node this one should merge into; the other node survives',
 			activate: onMergeNode
+		},
+		// The only way to add one node at a time, and the only way at all on touch
+		// short of a box: a plain tap on a node is the first half of a double-click,
+		// so it cannot also select. The hint names the box, which is the faster
+		// route for several and is otherwise drawn nowhere.
+		{
+			label: selected ? 'Deselect' : 'Select',
+			hint: selected
+				? 'Remove this node from the selection'
+				: 'Add this node to the selection; double-click-drag on empty canvas to box several',
+			activate: onToggleSelected
 		},
 		{
 			label: node.pinned ? 'Unpin' : 'Pin',

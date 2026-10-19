@@ -253,7 +253,7 @@
 		class="action-menu"
 		role="menu"
 		aria-label={label}
-		style={`--menu-x: ${position.x}px; --menu-y: ${position.y}px; --menu-gap: ${ANCHOR_GAP_PX}px; --menu-nudge-x: ${nudge.x}px; --menu-nudge-y: ${nudge.y}px;`}
+		style={`--menu-x: ${position.x}px; --menu-y: ${position.y}px; --menu-gap: ${ANCHOR_GAP_PX}px; --menu-margin: ${VIEWPORT_MARGIN_PX}px; --menu-nudge-x: ${nudge.x}px; --menu-nudge-y: ${nudge.y}px;`}
 		tabindex="-1"
 		onkeydown={handleKeydown}
 	>
@@ -294,16 +294,28 @@
 	 * width the browser lays the pill out at never depends on where it opened:
 	 * with `left` set to the press point, a press near the right edge left too
 	 * little room and squeezed every label onto two lines.
+	 *
+	 * A pill with more items than one row of the viewport holds wraps them onto
+	 * further rows, centred, rather than running off both sides: the node menu
+	 * measured 457px on a 390px phone at six items. The cap is the viewport less
+	 * the margin the nudge keeps on each side, so a wrapped pill is exactly as
+	 * wide as the nudge can still fit. The corner radius is half a one-row pill's
+	 * height (a 44px item, the padding, the border), so one row is the same
+	 * stadium it always was and two rows read as a rounded panel, not a lozenge.
 	 */
 	.action-menu {
 		position: fixed;
 		left: 0;
 		top: 0;
 		display: flex;
+		flex-wrap: wrap;
+		justify-content: center;
 		gap: 0.375rem;
+		box-sizing: border-box;
+		max-width: calc(100vw - 2 * var(--menu-margin));
 		padding: 0.5rem;
 		border: 1px solid #d4d4d4;
-		border-radius: 999px;
+		border-radius: calc(2.75rem / 2 + 0.5rem + 1px);
 		background: #ffffff;
 		box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
 		transform: translate(

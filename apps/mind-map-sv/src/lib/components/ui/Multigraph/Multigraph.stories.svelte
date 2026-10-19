@@ -2,6 +2,7 @@
 	import { defineMeta } from '@storybook/addon-svelte-csf';
 	import Multigraph from '$lib/components/ui/Multigraph/Multigraph.svelte';
 	import MultigraphSettingsHarness from './MultigraphSettingsHarness.svelte';
+	import PersistedGraphHarness from '$lib/components/ui/GraphPersistence/PersistedGraphHarness.svelte';
 	import { expect, fn, waitFor, within } from 'storybook/test';
 	import { tick } from 'svelte';
 	import { APP_CONFIG } from '$lib/appConfig';
@@ -2140,6 +2141,150 @@
 		within(canvasElement).getByRole('menuitem', { name: 'Delete' }).click();
 		await sleep();
 	}
+
+	/**
+	 * Four pinned nodes at quarter scale — 50px circles on the phone — three in a
+	 * row across the top and one alone below, so a box can take the row and
+	 * leave the fourth. Pinned so each is a full-size beacon of its own and none
+	 * hides another; the middle one carries a tag colour, so its ring is drawn
+	 * around a tag border as well as a pinned one.
+	 */
+	const SELECTION_GRAPH = makeGraph({
+		nodes: [
+			{ id: 'n0', title: 'Left', description: '', tags: [] },
+			{ id: 'n1', title: 'Middle', description: '', tags: ['topic'] },
+			{ id: 'n2', title: 'Right', description: '', tags: [] },
+			{ id: 'n3', title: 'Below', description: '', tags: [] }
+		],
+		pinned: ['n0', 'n1', 'n2', 'n3'],
+		posByNodeId: {
+			n0: { x: -480, y: -600 },
+			n1: { x: 0, y: -600 },
+			n2: { x: 480, y: -600 },
+			n3: { x: 0, y: 600 }
+		},
+		tagColorConfig: { nodeTags: { topic: '#7c3aed' }, edgeTags: {} }
+	});
+	const SELECTION_VIEW: ViewState = { panX: 0, panY: 0, scale: 0.25 };
+	/** Nothing moves and nothing fades, so a removed node is gone at once. */
+	const SELECTION_LAYOUT = { relaxIterations: 0, enterExitDurationMs: 0 };
+	/** The selection ring's solid band (#0f766e) as computed styles spell it. */
+	const SELECTION_RING_RGB = 'rgb(15, 118, 110)';
+	/** The node menu on an unselected pinned node, in order, with Select after Merge. */
+	const NODE_MENU_ITEMS = ['Add node/edge', 'Merge', 'Select', 'Unpin', 'Focus', 'Edit', 'Delete'];
+
+	/** Live wrappers marked selected, in canvas order. */
+	function selectedNodeIds(el: HTMLElement): string[] {
+		return Array.from(el.querySelectorAll('.node-wrapper[data-selected="true"]')).map(
+			(wrapper) => wrapper.getAttribute('data-node-id') ?? ''
+		);
+	}
+
+	function selectionCountLabel(el: HTMLElement): HTMLElement | null {
+		return el.querySelector('[data-selection-count]');
+	}
+
+	/** The client rect around the named nodes' circles, `marginPx` out on every side. */
+	function boxAround(
+		el: HTMLElement,
+		nodeIds: readonly string[],
+		marginPx = 10
+	): { from: Point; to: Point } {
+		const rects = nodeIds.map((nodeId) => getCircle(el, nodeId).getBoundingClientRect());
+		return {
+			from: {
+				x: Math.min(...rects.map((rect) => rect.left)) - marginPx,
+				y: Math.min(...rects.map((rect) => rect.top)) - marginPx
+			},
+			to: {
+				x: Math.max(...rects.map((rect) => rect.right)) + marginPx,
+				y: Math.max(...rects.map((rect) => rect.bottom)) + marginPx
+			}
+		};
+	}
+
+	/** `dispatchPointer` with Shift as the reader holds it. */
+	function dispatchShiftablePointer(
+		target: HTMLElement,
+		type: 'pointerdown' | 'pointermove' | 'pointerup',
+		point: Point,
+		shiftKey: boolean
+	) {
+		target.dispatchEvent(
+			new PointerEvent(type, {
+				clientX: point.x,
+				clientY: point.y,
+				pointerId: 1,
+				shiftKey,
+				bubbles: true,
+				cancelable: true
+			})
+		);
+	}
+
+	/**
+	 * The box gesture: a click on empty canvas, then a second press at the same
+	 * spot dragged to `to` and released. Shift rides on every event, as it does
+	 * when the reader holds it through the whole motion — which is what keeps the
+	 * first click from clearing the selection the box is about to add to. With
+	 * `release: false` the box is left open, pointer still down.
+	 */
+	async function dispatchSelectionBox(
+		stage: HTMLElement,
+		from: Point,
+		to: Point,
+		options: { shiftKey?: boolean; release?: boolean } = {}
+	): Promise<void> {
+		const shiftKey = options.shiftKey ?? false;
+		dispatchShiftablePointer(stage, 'pointerdown', from, shiftKey);
+		dispatchShiftablePointer(stage, 'pointerup', from, shiftKey);
+		await sleep(DBL_CLICK_MS * 0.2);
+		dispatchShiftablePointer(stage, 'pointerdown', from, shiftKey);
+		dispatchShiftablePointer(stage, 'pointermove', to, shiftKey);
+		await sleep();
+		if (options.release === false) return;
+		dispatchShiftablePointer(stage, 'pointerup', to, shiftKey);
+		await tick();
+	}
+
+	function dispatchShortcut(
+		target: EventTarget,
+		key: string,
+		modifiers: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean } = {}
+	): KeyboardEvent {
+		const event = new KeyboardEvent('keydown', {
+			key,
+			...modifiers,
+			bubbles: true,
+			cancelable: true
+		});
+		target.dispatchEvent(event);
+		return event;
+	}
+
+	/** Right-click a node at its centre and wait for the menu to take focus. */
+	async function openNodeMenu(el: HTMLElement, nodeId: string): Promise<void> {
+		const circle = getCircle(el, nodeId);
+		const center = getCenter(circle);
+		dispatchContextMenu(circle, center.x, center.y);
+		await tick();
+	}
+
+	function rectsOverlap(a: DOMRect, b: DOMRect): boolean {
+		return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+	}
+
+	/**
+	 * A pinned node and its one neighbour, drawn at a 60px radius so the
+	 * persisted harness's neutral camera shows both on a phone, below its
+	 * toolbar.
+	 */
+	const SELECTION_UNDO_GRAPH = makeGraph({
+		nodeCount: 2,
+		pinned: [0],
+		edges: [[0, 1]],
+		posByNodeId: { n0: { x: 0, y: -150 }, n1: { x: 0, y: 150 } }
+	});
 </script>
 
 <Story
@@ -3563,7 +3708,7 @@
 		dispatchKeydown(document.activeElement, 'ArrowRight');
 		expect(activeElementText()).toBe('Merge');
 		dispatchKeydown(document.activeElement, 'ArrowDown');
-		expect(activeElementText()).toBe('Pin');
+		expect(activeElementText()).toBe('Select');
 		dispatchKeydown(document.activeElement, 'ArrowLeft');
 		expect(activeElementText()).toBe('Merge');
 		dispatchKeydown(document.activeElement, 'ArrowUp');
@@ -9655,3 +9800,458 @@
 		expect(derivedEdgeBetween(canvasElement, 'ai', 'consumer')).toBeInTheDocument();
 	}}
 />
+
+<Story
+	name="UserDoubleClickDragsABoxOverThreeNodesAndTheyAreSelected"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		expect(selectionCountLabel(canvasElement)).toBeNull();
+
+		const row = boxAround(canvasElement, ['n0', 'n1', 'n2']);
+		await dispatchSelectionBox(stage, row.from, row.to);
+
+		expect(stage.querySelector('.selection-box')).toBeNull();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2']);
+
+		// The count says it, and says it to a screen reader: the live region is
+		// the label's container, mounted before the first selection.
+		const count = selectionCountLabel(canvasElement);
+		expect(count).toHaveTextContent('3 selected');
+		expect(count).toHaveAttribute('data-selection-count', '3');
+		expect(count?.closest('[aria-live="polite"]')).not.toBeNull();
+
+		// The name says it after "pinned", and only on the nodes the box took.
+		expect(getNodeWrapper(canvasElement, 'n0')).toHaveAccessibleName('Left, pinned, selected');
+		expect(getNodeWrapper(canvasElement, 'n2')).toHaveAccessibleName('Right, pinned, selected');
+		expect(getNodeWrapper(canvasElement, 'n3')).toHaveAccessibleName('Below, pinned');
+
+		// The ring is drawn on every selected circle — pinned ones included, and
+		// the middle one over its tag border — and nowhere else.
+		expect(getCircle(canvasElement, 'n1')).toHaveAttribute('data-tag-border', 'true');
+		for (const nodeId of ['n0', 'n1', 'n2']) {
+			expect(getComputedStyle(getCircle(canvasElement, nodeId)).boxShadow, nodeId).toContain(
+				SELECTION_RING_RGB
+			);
+		}
+		expect(getComputedStyle(getCircle(canvasElement, 'n3')).boxShadow).not.toContain(
+			SELECTION_RING_RGB
+		);
+
+		// The ring is sized in screen pixels, so the node's scale and the camera's
+		// cancel out: one `--screen-px` is one pixel on screen at any zoom.
+		const wrapper = getNodeWrapper(canvasElement, 'n0');
+		const screenPx = parseFloat(wrapper.style.getPropertyValue('--screen-px'));
+		expect(screenPx * Number(wrapper.dataset.scale) * SELECTION_VIEW.scale).toBeCloseTo(1);
+	}}
+/>
+
+<Story
+	name="ABoxWithShiftAddsToTheSelection"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+
+		const left = boxAround(canvasElement, ['n0']);
+		await dispatchSelectionBox(stage, left.from, left.to);
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0']);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('1 selected');
+
+		const right = boxAround(canvasElement, ['n2']);
+		await dispatchSelectionBox(stage, right.from, right.to, { shiftKey: true });
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n2']);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('2 selected');
+
+		// Without Shift a box replaces, whatever was there before.
+		const below = boxAround(canvasElement, ['n3']);
+		await dispatchSelectionBox(stage, below.from, below.to);
+		expect(selectedNodeIds(canvasElement)).toEqual(['n3']);
+	}}
+/>
+
+<Story
+	name="AClickOnEmptyCanvasClearsTheSelection"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const row = boxAround(canvasElement, ['n0', 'n1', 'n2']);
+		await dispatchSelectionBox(stage, row.from, row.to);
+		expect(selectedNodeIds(canvasElement)).toHaveLength(3);
+
+		// Between the row and the node below: nowhere near a circle.
+		const empty = { x: row.from.x, y: row.to.y + 60 };
+
+		// A Shift-click keeps it, so a Shift+double-click-drag can add to it.
+		await sleep(DBL_CLICK_MS + 50);
+		dispatchShiftablePointer(stage, 'pointerdown', empty, true);
+		dispatchShiftablePointer(stage, 'pointerup', empty, true);
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toHaveLength(3);
+
+		// Apart from the Shift-click, so this press is not its second half.
+		await sleep(DBL_CLICK_MS + 50);
+		dispatchPointer(stage, 'pointerdown', empty.x, empty.y);
+		dispatchPointer(stage, 'pointerup', empty.x, empty.y);
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual([]);
+		expect(selectionCountLabel(canvasElement)).toBeNull();
+		expect(getNodeWrapper(canvasElement, 'n0')).toHaveAccessibleName('Left, pinned');
+	}}
+/>
+
+<Story
+	name="EscapeClearsTheSelectionButOnlyCancelsAnOpenBox"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const row = boxAround(canvasElement, ['n0', 'n1', 'n2']);
+		await dispatchSelectionBox(stage, row.from, row.to);
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2']);
+
+		// A box in flight is the level above the selection: Escape cancels the
+		// box and leaves the selection standing. Shift is held so the double's
+		// first click does not clear it either.
+		const below = boxAround(canvasElement, ['n3']);
+		await dispatchSelectionBox(stage, below.from, below.to, { shiftKey: true, release: false });
+		expect(stage.querySelector('.selection-box')).not.toBeNull();
+		dispatchShortcut(window, 'Escape');
+		await tick();
+		expect(stage.querySelector('.selection-box')).toBeNull();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2']);
+		// The abandoned box's release adds nothing.
+		dispatchShiftablePointer(stage, 'pointerup', below.to, true);
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2']);
+
+		// So is an open menu, which marks the press handled as it closes.
+		await openNodeMenu(canvasElement, 'n3');
+		dispatchKeydown(document.activeElement, 'Escape');
+		await tick();
+		expect(within(canvasElement).queryByRole('menu')).not.toBeInTheDocument();
+		expect(selectedNodeIds(canvasElement)).toHaveLength(3);
+
+		// And the edit sheet, which is shut by the time the press reaches the
+		// window. The field is left first, so it is the dialog that answers.
+		await openNodeMenu(canvasElement, 'n3');
+		within(canvasElement).getByRole('menuitem', { name: 'Edit' }).click();
+		await sleep();
+		const sheet = within(canvasElement).getByRole('dialog');
+		if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+		dispatchKeydown(sheet, 'Escape');
+		await tick();
+		expect(within(canvasElement).queryByRole('dialog')).not.toBeInTheDocument();
+		expect(selectedNodeIds(canvasElement)).toHaveLength(3);
+
+		// With nothing above it, Escape clears.
+		if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+		dispatchShortcut(window, 'Escape');
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual([]);
+		expect(selectionCountLabel(canvasElement)).toBeNull();
+	}}
+/>
+
+<Story
+	name="CmdOrCtrlASelectsEveryDrawnNodeAndNotAHiddenOne"
+	args={{
+		multigraphData: makeGraph({
+			nodeCount: 5,
+			pinned: [0],
+			edges: chainEdges(5),
+			posByNodeId: {
+				n0: { x: -480, y: 0 },
+				n1: { x: -240, y: 0 },
+				n2: { x: 0, y: 0 },
+				n3: { x: 240, y: 0 },
+				n4: { x: 480, y: 0 }
+			}
+		}),
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		// Two layers out from the pin: n3 and n4 are past the hop limit.
+		layoutSettings: { ...SELECTION_LAYOUT, displayedLayers: 2 }
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		expect(nodeIsDrawn(canvasElement, 'n3')).toBe(false);
+		expect(nodeIsDrawn(canvasElement, 'n4')).toBe(false);
+
+		const meta = dispatchShortcut(document.body, 'a', { metaKey: true });
+		await tick();
+		expect(meta.defaultPrevented).toBe(true);
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2']);
+		// Three, not five: the hidden two were never taken.
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('3 selected');
+
+		dispatchShortcut(window, 'Escape');
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual([]);
+
+		// Ctrl is the same shortcut for the hands that reach for it.
+		const ctrl = dispatchShortcut(document.body, 'a', { ctrlKey: true });
+		await tick();
+		expect(ctrl.defaultPrevented).toBe(true);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('3 selected');
+	}}
+/>
+
+<Story
+	name="TheNodeMenusSelectTogglesOneNode"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const canvas = within(canvasElement);
+
+		await openNodeMenu(canvasElement, 'n0');
+		expect(canvas.getAllByRole('menuitem').map((item) => item.textContent?.trim() ?? '')).toEqual(
+			NODE_MENU_ITEMS
+		);
+		const select = canvas.getByRole('menuitem', { name: 'Select' });
+		expect(select.getAttribute('title')).toMatch(/^Add this node to the selection/);
+		select.click();
+		await tick();
+
+		expect(canvas.queryByRole('menu')).not.toBeInTheDocument();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0']);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('1 selected');
+		expect(getNodeWrapper(canvasElement, 'n0')).toHaveAccessibleName('Left, pinned, selected');
+
+		// The same item, reopened on a selected node, says it goes the other way.
+		await openNodeMenu(canvasElement, 'n0');
+		expect(canvas.queryByRole('menuitem', { name: 'Select' })).not.toBeInTheDocument();
+		const deselect = canvas.getByRole('menuitem', { name: 'Deselect' });
+		expect(deselect).toHaveAttribute('title', 'Remove this node from the selection');
+		deselect.click();
+		await tick();
+
+		expect(canvas.queryByRole('menu')).not.toBeInTheDocument();
+		expect(selectedNodeIds(canvasElement)).toEqual([]);
+		expect(selectionCountLabel(canvasElement)).toBeNull();
+	}}
+/>
+
+<Story
+	name="DeletingASelectedNodeLeavesNoDanglingId"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		dispatchShortcut(document.body, 'a', { metaKey: true });
+		await tick();
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('4 selected');
+
+		await openNodeMenu(canvasElement, 'n1');
+		within(canvasElement).getByRole('menuitem', { name: 'Delete' }).click();
+		await sleep();
+
+		expect(lastChangedGraph(args).nodes.map((node) => node.id)).toEqual(['n0', 'n2', 'n3']);
+		expect(nodeIsDrawn(canvasElement, 'n1')).toBe(false);
+		// The count follows the graph, not what was once selected.
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('3 selected');
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n2', 'n3']);
+	}}
+/>
+
+<Story
+	name="CmdOrCtrlAInATextFieldStillSelectsText"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		within(canvasElement).getByRole('button', { name: 'Find / Filter' }).click();
+		await sleep();
+		const input = within(canvasElement).getByLabelText('Graph query');
+		input.focus();
+
+		const typed = dispatchShortcut(input, 'a', { metaKey: true });
+		await tick();
+		// The browser's own select-all is left to happen, and nothing is selected.
+		expect(typed.defaultPrevented).toBe(false);
+		expect(selectedNodeIds(canvasElement)).toEqual([]);
+		expect(selectionCountLabel(canvasElement)).toBeNull();
+
+		// Out of the field, the same keys select the canvas.
+		input.blur();
+		const outside = dispatchShortcut(document.body, 'a', { metaKey: true });
+		await tick();
+		expect(outside.defaultPrevented).toBe(true);
+		expect(selectionCountLabel(canvasElement)).not.toBeNull();
+	}}
+/>
+
+<Story
+	name="TheSevenItemNodeMenuFitsInsideAPhoneViewport"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		// The phone viewport from the meta's parameters, not the runner's default.
+		expect(window.innerWidth).toBe(390);
+		const canvas = within(canvasElement);
+
+		// The middle node and both near the edges, where the pill has to be nudged.
+		for (const nodeId of ['n1', 'n0', 'n2']) {
+			await openNodeMenu(canvasElement, nodeId);
+			await waitForLayout();
+			const items = canvas.getAllByRole('menuitem');
+			expect(items.map((item) => item.textContent?.trim() ?? '')).toEqual(NODE_MENU_ITEMS);
+
+			const pill = canvas.getByRole('menu').getBoundingClientRect();
+			expect(pill.left, nodeId).toBeGreaterThanOrEqual(0);
+			expect(pill.right, nodeId).toBeLessThanOrEqual(window.innerWidth);
+			for (const item of items) {
+				const rect = item.getBoundingClientRect();
+				const label = `${nodeId}: ${item.textContent}`;
+				expect(rect.left, label).toBeGreaterThanOrEqual(0);
+				expect(rect.right, label).toBeLessThanOrEqual(window.innerWidth);
+				expect(rect.top, label).toBeGreaterThanOrEqual(0);
+				expect(rect.bottom, label).toBeLessThanOrEqual(window.innerHeight);
+				expect(rect.height, label).toBeGreaterThanOrEqual(44);
+				// Reachable, not merely inside: nothing else is on top of it.
+				expect(
+					document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2),
+					label
+				).toBe(item);
+			}
+
+			dispatchKeydown(document.activeElement, 'Escape');
+			await tick();
+		}
+	}}
+/>
+
+<Story
+	name="TheSelectionCountClearsTheCanvasControlsOnAPhone"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		expect(window.innerWidth).toBe(390);
+		const canvas = within(canvasElement);
+		dispatchShortcut(document.body, 'a', { metaKey: true });
+		await tick();
+		const count = selectionCountLabel(canvasElement);
+		if (!count) throw new Error('Selection count not shown');
+		const countRect = count.getBoundingClientRect();
+
+		// Top right: inside the canvas, and clear of both bottom-corner buttons.
+		expect(countRect.right).toBeLessThanOrEqual(window.innerWidth);
+		expect(countRect.top).toBeGreaterThanOrEqual(0);
+		for (const name of ['Find / Filter', 'Tags']) {
+			const button = canvas.getByRole('button', { name }).getBoundingClientRect();
+			expect(rectsOverlap(countRect, button), name).toBe(false);
+		}
+
+		// The Tags dialog rises from the bottom and stops short of it.
+		canvas.getByRole('button', { name: 'Tags' }).click();
+		await waitForLayout();
+		const legend = canvasElement.querySelector('.tag-color-legend');
+		if (!(legend instanceof HTMLElement)) throw new Error('Tags dialog not open');
+		expect(rectsOverlap(countRect, legend.getBoundingClientRect())).toBe(false);
+
+		// So does Find / Filter, a bottom sheet at this width. Opening either one
+		// closes the other overlays — and the selection is not an overlay.
+		canvas.getByRole('button', { name: 'Find / Filter' }).click();
+		await waitForLayout();
+		const panel = canvasElement.querySelector('.graph-query-panel');
+		if (!(panel instanceof HTMLElement)) throw new Error('Find / Filter not open');
+		expect(rectsOverlap(countRect, panel.getBoundingClientRect())).toBe(false);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('4 selected');
+	}}
+/>
+
+<Story
+	name="AnUndoOrRedoThatRemovesASelectedNodeLeavesNoDanglingId"
+	play={async ({ canvasElement }: HarnessPlayContext) => {
+		const harness = canvasElement.querySelector('.harness');
+		if (!(harness instanceof HTMLElement)) throw new Error('Persisted harness not found');
+		await waitFor(() => expect(harness.dataset.loadedGraphId).toBe('selection-undo'));
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+
+		// Delete n1, then undo: it is back, and nothing was selected to restore.
+		await openNodeMenu(canvasElement, 'n1');
+		within(canvasElement).getByRole('menuitem', { name: 'Delete' }).click();
+		await waitFor(() => expect(harness.dataset.nodeCount).toBe('1'));
+		dispatchShortcut(stage, 'z', { metaKey: true });
+		await waitFor(() => expect(nodeIsDrawn(canvasElement, 'n1')).toBe(true));
+		await waitForLayout();
+
+		await openNodeMenu(canvasElement, 'n1');
+		within(canvasElement).getByRole('menuitem', { name: 'Select' }).click();
+		await tick();
+		const count = selectionCountLabel(canvasElement);
+		expect(count).toHaveTextContent('1 selected');
+		// Under the toolbar, which spans the top of a phone.
+		const toolbar = canvasElement.querySelector('.toolbar-row');
+		if (!(toolbar instanceof HTMLElement) || !count) throw new Error('Toolbar or count missing');
+		expect(count.getBoundingClientRect().top).toBeGreaterThanOrEqual(
+			toolbar.getBoundingClientRect().bottom
+		);
+
+		// Redo takes the selected node away again, and its id goes with it.
+		dispatchShortcut(stage, 'z', { metaKey: true, shiftKey: true });
+		await waitFor(() => expect(harness.dataset.nodeCount).toBe('1'));
+		await waitFor(() => expect(selectionCountLabel(canvasElement)).toBeNull());
+
+		// Undo brings the node back unselected: selection is never history.
+		dispatchShortcut(stage, 'z', { metaKey: true });
+		await waitFor(() => expect(nodeIsDrawn(canvasElement, 'n1')).toBe(true));
+		expect(getNodeWrapper(canvasElement, 'n1')).not.toHaveAttribute('data-selected');
+		expect(selectionCountLabel(canvasElement)).toBeNull();
+	}}
+>
+	{#snippet template()}
+		<PersistedGraphHarness
+			initialGraphId="selection-undo"
+			graphs={{ 'selection-undo': SELECTION_UNDO_GRAPH }}
+			layoutSettings={{ ...SELECTION_LAYOUT, baseRadius: 60 }}
+		/>
+	{/snippet}
+</Story>
