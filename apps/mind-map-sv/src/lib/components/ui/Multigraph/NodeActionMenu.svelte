@@ -7,10 +7,12 @@
 	let {
 		node,
 		selected,
+		groupSize = 1,
 		position,
 		onAddNodeEdge,
 		onMergeNode,
 		onToggleSelected,
+		onCopy,
 		onTogglePinned,
 		onFocus,
 		onEdit,
@@ -21,15 +23,23 @@
 		node: NodeData;
 		/** Whether `node` is in the canvas selection, which decides Select or Deselect. */
 		selected: boolean;
+		/**
+		 * How many nodes Copy and Delete act on: the selection's size when `node`
+		 * is in it, else 1 for `node` alone.
+		 */
+		groupSize?: number;
 		position: Point;
 		onAddNodeEdge: () => void;
 		/** Arm the merge gesture: drag this node onto the one that should survive. */
 		onMergeNode: () => void;
 		/** Add this node to the selection, or take it out. */
 		onToggleSelected: () => void;
+		/** Copy the `groupSize` nodes this menu acts on. */
+		onCopy: () => void;
 		onTogglePinned: () => void;
 		onFocus: () => void;
 		onEdit: () => void;
+		/** Delete the `groupSize` nodes this menu acts on. */
 		onDelete: () => void;
 		onClose: () => void;
 		/** Re-open the menu on the node under `point`, or close if there is none. */
@@ -72,6 +82,17 @@
 				: 'Add this node to the selection; double-click-drag on empty canvas to box several',
 			activate: onToggleSelected
 		},
+		// Beside Select because it acts on what Select builds. The label stays
+		// one word, since a copy changes nothing on the canvas; the hint says
+		// whether it takes the selection or this node alone.
+		{
+			label: 'Copy',
+			hint:
+				groupSize > 1
+					? 'Copy the selected nodes and the edges between them'
+					: 'Copy this node to paste elsewhere',
+			activate: onCopy
+		},
 		{
 			label: node.pinned ? 'Unpin' : 'Pin',
 			hint: node.pinned
@@ -81,11 +102,20 @@
 		},
 		{ label: 'Focus', hint: 'Zoom in to this node and read its details', activate: onFocus },
 		{ label: 'Edit', hint: 'Change the title, description, tags, etc.', activate: onEdit },
-		{
-			label: 'Delete',
-			hint: 'Remove this node and every edge attached to it',
-			activate: onDelete
-		}
+		// The count is in the label, not only the hint, because a delete that
+		// takes more than the node under the finger has to say so where a touch
+		// reader can see it (the hint is hover-only).
+		groupSize > 1
+			? {
+					label: `Delete ${groupSize} nodes`,
+					hint: 'Remove every selected node and every edge attached to them',
+					activate: onDelete
+				}
+			: {
+					label: 'Delete',
+					hint: 'Remove this node and every edge attached to it',
+					activate: onDelete
+				}
 	]);
 </script>
 

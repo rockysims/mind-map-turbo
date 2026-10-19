@@ -117,11 +117,18 @@ export function newAttachmentBytes(
  * Where a copy is written and a paste is read from. Injected so stories run on
  * a memory clipboard instead of the system one.
  */
-interface ClipboardPort {
+export interface ClipboardPort {
 	/** Resolves `false` when the write was refused, so a copy can say it failed. */
 	writeText(text: string): Promise<boolean>;
 	/** The clipboard's text, or `null` when there is nothing this port can read. */
 	readText(): Promise<string | null>;
+	/**
+	 * Record `text` as copied without writing it anywhere else. For a copy the
+	 * browser already put on the system clipboard itself — a keyboard copy
+	 * answered through the DOM `copy` event — so that a paste this tab cannot
+	 * read back from the system still finds it, and nothing is written twice.
+	 */
+	mirror(text: string): void;
 }
 
 /** A clipboard that lives in memory, with what it holds open for a story to read. */
@@ -139,6 +146,9 @@ export function memoryClipboard(
 		},
 		async readText() {
 			return text;
+		},
+		mirror(next) {
+			text = next;
 		}
 	};
 }
@@ -186,6 +196,12 @@ export function systemClipboard(mirror: ClipboardPort = tabMirror): ClipboardPor
 				}
 			}
 			return mirror.readText();
+		},
+		// The system clipboard already has this text from the event that copied
+		// it, so only the mirror is written: a second write through
+		// `navigator.clipboard` would race the event's own and could land last.
+		mirror(text) {
+			mirror.mirror(text);
 		}
 	};
 }

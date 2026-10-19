@@ -225,6 +225,15 @@ describe('memoryClipboard', () => {
 		expect(await clipboard.readText()).toBe('copied');
 		expect(clipboard.text).toBe('copied');
 	});
+
+	it('records a mirrored copy as what it holds', async () => {
+		const clipboard = memoryClipboard('earlier copy');
+
+		clipboard.mirror('copied by the browser');
+
+		expect(clipboard.text).toBe('copied by the browser');
+		expect(await clipboard.readText()).toBe('copied by the browser');
+	});
 });
 
 describe('systemClipboard', () => {
@@ -301,6 +310,21 @@ describe('systemClipboard', () => {
 
 		expect(await clipboard.writeText('copied')).toBe(true);
 		expect(await clipboard.readText()).toBe('copied');
+	});
+
+	it('mirrors a copy the browser already made without writing the system clipboard again', async () => {
+		const { writeText } = stubSystemClipboard(() =>
+			Promise.reject(new DOMException('Denied', 'NotAllowedError'))
+		);
+		const mirror = memoryClipboard();
+		const clipboard = systemClipboard(mirror);
+
+		clipboard.mirror('copied by the browser');
+
+		expect(writeText).not.toHaveBeenCalled();
+		expect(mirror.text).toBe('copied by the browser');
+		// A read the system refuses still finds it.
+		expect(await clipboard.readText()).toBe('copied by the browser');
 	});
 
 	it('shares one mirror across ports by default, so a remounted canvas still pastes', async () => {

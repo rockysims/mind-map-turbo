@@ -15,6 +15,7 @@
 		NODE_RADIUS
 	} from '$lib/constants';
 	import { wheelDeltaForZoomFactor } from './lib/graphMath';
+	import { decodeNodeClipboard, memoryClipboard } from './lib/nodeClipboard';
 	import {
 		designations,
 		makeClusteredRandomEdges,
@@ -76,6 +77,7 @@
 				intent: GraphCommitIntent
 			) => void;
 			onViewStateChange?: (state: ViewState) => void;
+			onNotice?: (message: string) => void;
 		};
 	};
 
@@ -2170,8 +2172,17 @@
 	const SELECTION_LAYOUT = { relaxIterations: 0, enterExitDurationMs: 0 };
 	/** The selection ring's solid band (#0f766e) as computed styles spell it. */
 	const SELECTION_RING_RGB = 'rgb(15, 118, 110)';
-	/** The node menu on an unselected pinned node, in order, with Select after Merge. */
-	const NODE_MENU_ITEMS = ['Add node/edge', 'Merge', 'Select', 'Unpin', 'Focus', 'Edit', 'Delete'];
+	/** The node menu on an unselected pinned node, in order: Select after Merge, Copy after Select. */
+	const NODE_MENU_ITEMS = [
+		'Add node/edge',
+		'Merge',
+		'Select',
+		'Copy',
+		'Unpin',
+		'Focus',
+		'Edit',
+		'Delete'
+	];
 
 	/** Live wrappers marked selected, in canvas order. */
 	function selectedNodeIds(el: HTMLElement): string[] {
@@ -2285,6 +2296,175 @@
 		edges: [[0, 1]],
 		posByNodeId: { n0: { x: 0, y: -150 }, n1: { x: 0, y: 150 } }
 	});
+
+	/**
+	 * `SELECTION_GRAPH` with three edges: two along the top row, which a copy of
+	 * the row keeps, and one from the middle down to the node below, which it
+	 * drops. Every node has a description, so the details view has text to
+	 * select.
+	 */
+	const COPY_GRAPH: MultigraphData = {
+		...SELECTION_GRAPH,
+		nodes: SELECTION_GRAPH.nodes.map((node) => ({
+			...node,
+			description: `The ${node.title.toLowerCase()} node.`
+		})),
+		edges: [
+			{ id: 'left-middle', sourceNodeId: 'n0', targetNodeId: 'n1', tags: [] },
+			{ id: 'middle-right', sourceNodeId: 'n1', targetNodeId: 'n2', tags: [], directed: true },
+			{ id: 'middle-below', sourceNodeId: 'n1', targetNodeId: 'n3', tags: [] }
+		]
+	};
+
+	/**
+	 * A copy or cut as Cmd/Ctrl+C or +X fires it, with a clipboard of its own the
+	 * story can read. A synthetic key press carries no default action, so the
+	 * stories fire the event the key would have.
+	 */
+	function dispatchClipboardEvent(target: EventTarget, type: 'copy' | 'cut'): ClipboardEvent {
+		const event = new ClipboardEvent(type, {
+			clipboardData: new DataTransfer(),
+			bubbles: true,
+			cancelable: true
+		});
+		target.dispatchEvent(event);
+		return event;
+	}
+
+	/** What a node copy wrote, read back the way a paste reads it. */
+	function decodedCopy(text: string | null | undefined): MultigraphData {
+		const doc = decodeNodeClipboard(text ?? '');
+		if (!doc) throw new Error(`Not a graph file: ${String(text).slice(0, 40)}`);
+		return doc.data;
+	}
+
+	/** `[id, title]` for each node a copy carried, in graph order. */
+	function copiedNodes(data: MultigraphData): Array<[string, string]> {
+		return data.nodes.map((node) => [node.id, node.title]);
+	}
+
+	type NoticeSpy = { mock: { calls: Array<[string]> } };
+
+	/** How many commits the canvas has made, of any kind. */
+	function commitCount(args: PlayContext['args']): number {
+		const spy = args.onMultigraphChange as ChangeSpy | undefined;
+		return spy?.mock.calls.length ?? 0;
+	}
+
+	/** Every notice the canvas posted, oldest first. */
+	function postedNotices(args: PlayContext['args']): string[] {
+		// The arg is typed as the prop's signature; the story passed an `fn()` spy.
+		const spy = args.onNotice as NoticeSpy | undefined;
+		return spy?.mock.calls.map(([message]) => message) ?? [];
+	}
+
+	/** Box the top row of `SELECTION_GRAPH`'s layout, and check it took exactly that. */
+	async function selectTopRow(canvasElement: HTMLElement): Promise<void> {
+		const row = boxAround(canvasElement, ['n0', 'n1', 'n2']);
+		await dispatchSelectionBox(getStage(canvasElement), row.from, row.to);
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2']);
+	}
+
+	/** Leave whatever field or button last held focus, so a key press lands on the page. */
+	function blurActiveElement(): void {
+		if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+	}
+
+	/** Highlight `element`'s text, as a drag across it would. */
+	function selectTextOf(element: Element): void {
+		const range = document.createRange();
+		range.selectNodeContents(element);
+		const textSelection = window.getSelection();
+		textSelection?.removeAllRanges();
+		textSelection?.addRange(range);
+	}
+
+	/**
+	 * Four pinned nodes at a 40px radius — three in a row, one below — placed for
+	 * the persisted harness's neutral camera, so all four sit on a phone below
+	 * its toolbar.
+	 */
+	const DELETE_UNDO_GRAPH = makeGraph({
+		nodes: [
+			{ id: 'n0', title: 'Left', description: '', tags: [] },
+			{ id: 'n1', title: 'Middle', description: '', tags: [] },
+			{ id: 'n2', title: 'Right', description: '', tags: [] },
+			{ id: 'n3', title: 'Below', description: '', tags: [] }
+		],
+		pinned: ['n0', 'n1', 'n2', 'n3'],
+		edges: [
+			[0, 1],
+			[1, 2],
+			[1, 3]
+		],
+		posByNodeId: {
+			n0: { x: -120, y: -150 },
+			n1: { x: 0, y: -150 },
+			n2: { x: 120, y: -150 },
+			n3: { x: 0, y: 150 }
+		}
+	});
+
+	const COPY_ASSET_SCOPE = 'copy-story';
+	/** The bytes behind the image on `n0` and the one on `n3`, as the store holds them. */
+	const COPY_IMAGE_BYTES = { 'left-photo': 'left photo bytes', 'below-photo': 'below photo bytes' };
+
+	/** `COPY_GRAPH` with an image on the left node and another on the node below. */
+	const COPY_IMAGE_GRAPH: MultigraphData = {
+		...COPY_GRAPH,
+		nodes: COPY_GRAPH.nodes.map((node) => {
+			if (node.id === 'n0') {
+				return { ...node, content: [{ type: 'image', assetId: 'left-photo', alt: 'Left photo' }] };
+			}
+			if (node.id === 'n3') {
+				return {
+					...node,
+					content: [{ type: 'image', assetId: 'below-photo', alt: 'Below photo' }]
+				};
+			}
+			return node;
+		}),
+		assets: Object.fromEntries(
+			Object.entries(COPY_IMAGE_BYTES).map(([assetId, body]) => [
+				assetId,
+				{
+					id: assetId,
+					kind: 'image',
+					mimeType: 'image/png',
+					name: `${assetId}.png`,
+					size: body.length,
+					createdAt: 0
+				}
+			])
+		)
+	};
+
+	/** A store holding both images' bytes under the story's scope. */
+	function copyImageAssetStore(): GraphAssetStore {
+		const store = new MemoryGraphAssetStore();
+		for (const [assetId, body] of Object.entries(COPY_IMAGE_BYTES)) {
+			void store.put({
+				scope: COPY_ASSET_SCOPE,
+				assetId,
+				blob: new Blob([body], { type: 'image/png' }),
+				mimeType: 'image/png',
+				name: `${assetId}.png`,
+				size: body.length,
+				updatedAt: 0
+			});
+		}
+		return store;
+	}
+
+	// One clipboard per story, so no story reads what another copied.
+	const KEYBOARD_COPY_CLIPBOARD = memoryClipboard();
+	const MENU_COPY_CLIPBOARD = memoryClipboard();
+	const CUT_CLIPBOARD = memoryClipboard();
+	const DETAILS_TEXT_CLIPBOARD = memoryClipboard();
+	const TEXT_FIELD_CLIPBOARD = memoryClipboard();
+	const IMAGE_COPY_CLIPBOARD = memoryClipboard();
+	/** What a clipboard holds before a story copies anything into it. */
+	const UNTOUCHED_CLIPBOARD = 'nothing copied yet';
 </script>
 
 <Story
@@ -10074,8 +10254,14 @@
 		await tick();
 		expect(selectionCountLabel(canvasElement)).toHaveTextContent('4 selected');
 
+		// Through the edit sheet, whose Delete takes its own node alone: the menu's
+		// would take the whole selection from a selected node.
 		await openNodeMenu(canvasElement, 'n1');
-		within(canvasElement).getByRole('menuitem', { name: 'Delete' }).click();
+		within(canvasElement).getByRole('menuitem', { name: 'Edit' }).click();
+		await sleep();
+		within(within(canvasElement).getByRole('dialog'))
+			.getByRole('button', { name: 'Delete' })
+			.click();
 		await sleep();
 
 		expect(lastChangedGraph(args).nodes.map((node) => node.id)).toEqual(['n0', 'n2', 'n3']);
@@ -10118,7 +10304,7 @@
 />
 
 <Story
-	name="TheSevenItemNodeMenuFitsInsideAPhoneViewport"
+	name="TheNodeMenuFitsInsideAPhoneViewport"
 	args={{
 		multigraphData: SELECTION_GRAPH,
 		defaultPrimaryNodeId: 'n0',
@@ -10255,3 +10441,457 @@
 		/>
 	{/snippet}
 </Story>
+
+<Story
+	name="CmdOrCtrlCWithThreeSelectedWritesAGraphFileHoldingExactlyThoseNodesAndTheEdgesBetweenThem"
+	args={{
+		multigraphData: COPY_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		clipboard: KEYBOARD_COPY_CLIPBOARD,
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		KEYBOARD_COPY_CLIPBOARD.mirror(UNTOUCHED_CLIPBOARD);
+		blurActiveElement();
+
+		// With nothing selected the copy is the browser's to make.
+		const idle = dispatchClipboardEvent(document.body, 'copy');
+		expect(idle.defaultPrevented).toBe(false);
+		expect(KEYBOARD_COPY_CLIPBOARD.text).toBe(UNTOUCHED_CLIPBOARD);
+
+		await selectTopRow(canvasElement);
+		const commitsBefore = commitCount(args);
+		const copy = dispatchClipboardEvent(document.body, 'copy');
+
+		expect(copy.defaultPrevented).toBe(true);
+		const written = copy.clipboardData?.getData('text/plain') ?? '';
+		// What the browser put on the system clipboard is what the tab mirrors.
+		expect(KEYBOARD_COPY_CLIPBOARD.text).toBe(written);
+		const copied = decodedCopy(written);
+		expect(copiedNodes(copied)).toEqual([
+			['n0', 'Left'],
+			['n1', 'Middle'],
+			['n2', 'Right']
+		]);
+		// The two edges inside the row, and not the one down to the node below.
+		expect(copied.edges.map((edge) => edge.id)).toEqual(['left-middle', 'middle-right']);
+		expect(Object.keys(copied.posByNodeId).sort()).toEqual(['n0', 'n1', 'n2']);
+		expect(copied.tagColorConfig.nodeTags).toEqual({ topic: '#7c3aed' });
+		expect(postedNotices(args)).toEqual(['Copied 3 nodes.']);
+		// A copy is not an edit, and leaves the selection standing.
+		expect(commitCount(args)).toBe(commitsBefore);
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2']);
+
+		// The graph is read at the copy, not at the selection: a title changed
+		// after selecting goes out as it now reads.
+		const canvas = within(canvasElement);
+		await openNodeMenu(canvasElement, 'n1');
+		canvas.getByRole('menuitem', { name: 'Edit' }).click();
+		await sleep();
+		const titleInput = canvas.getByLabelText('Title');
+		if (!(titleInput instanceof HTMLInputElement)) throw new Error('Title is not an input');
+		titleInput.value = 'Renamed';
+		titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+		canvas.getByRole('button', { name: 'Save' }).click();
+		await sleep();
+		blurActiveElement();
+
+		const again = dispatchClipboardEvent(document.body, 'copy');
+		expect(again.defaultPrevented).toBe(true);
+		expect(copiedNodes(decodedCopy(KEYBOARD_COPY_CLIPBOARD.text))).toEqual([
+			['n0', 'Left'],
+			['n1', 'Renamed'],
+			['n2', 'Right']
+		]);
+	}}
+/>
+
+<Story
+	name="CopyFromTheMenuOnASelectedNodeCopiesTheSelectionAndOnAnUnselectedNodeOnlyThatNode"
+	args={{
+		multigraphData: COPY_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		clipboard: MENU_COPY_CLIPBOARD,
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		MENU_COPY_CLIPBOARD.mirror(UNTOUCHED_CLIPBOARD);
+		const canvas = within(canvasElement);
+		await selectTopRow(canvasElement);
+
+		// On a selected node, Copy speaks for the selection.
+		await openNodeMenu(canvasElement, 'n1');
+		const copySelection = canvas.getByRole('menuitem', { name: 'Copy' });
+		expect(copySelection).toHaveAttribute(
+			'title',
+			'Copy the selected nodes and the edges between them'
+		);
+		copySelection.click();
+		await waitFor(() => expect(postedNotices(args)).toEqual(['Copied 3 nodes.']));
+		expect(canvas.queryByRole('menu')).not.toBeInTheDocument();
+		const fromSelected = decodedCopy(MENU_COPY_CLIPBOARD.text);
+		expect(copiedNodes(fromSelected).map(([id]) => id)).toEqual(['n0', 'n1', 'n2']);
+		expect(fromSelected.edges.map((edge) => edge.id)).toEqual(['left-middle', 'middle-right']);
+
+		// On a node outside it, Copy takes that node alone and leaves the
+		// selection as it was.
+		await openNodeMenu(canvasElement, 'n3');
+		const copyOne = canvas.getByRole('menuitem', { name: 'Copy' });
+		expect(copyOne).toHaveAttribute('title', 'Copy this node to paste elsewhere');
+		copyOne.click();
+		await waitFor(() => expect(postedNotices(args)).toEqual(['Copied 3 nodes.', 'Copied 1 node.']));
+		const fromUnselected = decodedCopy(MENU_COPY_CLIPBOARD.text);
+		expect(copiedNodes(fromUnselected)).toEqual([['n3', 'Below']]);
+		expect(fromUnselected.edges).toEqual([]);
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2']);
+	}}
+/>
+
+<Story
+	name="DeleteRemovesTheSelectionAsOneUndoEntryAndOneUndoRestoresAllThree"
+	play={async ({ canvasElement }: HarnessPlayContext) => {
+		const harness = canvasElement.querySelector('.harness');
+		if (!(harness instanceof HTMLElement)) throw new Error('Persisted harness not found');
+		await waitFor(() => expect(harness.dataset.loadedGraphId).toBe('delete-undo'));
+		await waitForLayout();
+		const canvas = within(canvasElement);
+		const stage = getStage(canvasElement);
+
+		// Three by the menu's Select, the route a touch reader has.
+		for (const nodeId of ['n0', 'n1', 'n2']) {
+			await openNodeMenu(canvasElement, nodeId);
+			canvas.getByRole('menuitem', { name: 'Select' }).click();
+			await tick();
+		}
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('3 selected');
+
+		blurActiveElement();
+		const press = dispatchShortcut(document.body, 'Delete');
+		expect(press.defaultPrevented).toBe(true);
+		await waitFor(() => expect(harness.dataset.nodeCount).toBe('1'));
+		for (const nodeId of ['n0', 'n1', 'n2']) expect(nodeIsDrawn(canvasElement, nodeId)).toBe(false);
+		expect(nodeIsDrawn(canvasElement, 'n3')).toBe(true);
+		expect(selectionCountLabel(canvasElement)).toBeNull();
+		// One entry, named for what went.
+		expect(canvas.getByRole('button', { name: 'Undo delete 3 nodes' })).toBeInTheDocument();
+
+		dispatchShortcut(stage, 'z', { metaKey: true });
+		await waitFor(() => expect(harness.dataset.nodeCount).toBe('4'));
+		await waitForLayout();
+		for (const nodeId of ['n0', 'n1', 'n2', 'n3']) {
+			expect(nodeIsDrawn(canvasElement, nodeId), nodeId).toBe(true);
+		}
+		expect(canvasElement.querySelectorAll('[data-edge-id]')).toHaveLength(3);
+		// The one undo took the whole deletion back; redo would put it all back.
+		expect(canvas.getByRole('button', { name: 'Redo delete 3 nodes' })).toBeInTheDocument();
+		// The selection is not history: the nodes return unselected.
+		expect(selectionCountLabel(canvasElement)).toBeNull();
+	}}
+>
+	{#snippet template()}
+		<PersistedGraphHarness
+			initialGraphId="delete-undo"
+			graphs={{ 'delete-undo': DELETE_UNDO_GRAPH }}
+			layoutSettings={{ ...SELECTION_LAYOUT, baseRadius: 40 }}
+		/>
+	{/snippet}
+</Story>
+
+<Story
+	name="BackspaceDeletesTheSelectionTheSameWay"
+	args={{
+		multigraphData: COPY_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const canvas = within(canvasElement);
+		blurActiveElement();
+
+		// Nothing selected: the key is left alone.
+		const idle = dispatchShortcut(document.body, 'Backspace');
+		expect(idle.defaultPrevented).toBe(false);
+		expect(commitCount(args)).toBe(0);
+
+		await selectTopRow(canvasElement);
+
+		// A panel open over the canvas owns the key, even with its field left.
+		canvas.getByRole('button', { name: 'Tags' }).click();
+		await sleep();
+		blurActiveElement();
+		const underPanel = dispatchShortcut(document.body, 'Backspace');
+		expect(underPanel.defaultPrevented).toBe(false);
+		expect(commitCount(args)).toBe(0);
+		canvas.getByRole('button', { name: 'Tags' }).click();
+		await sleep();
+		blurActiveElement();
+
+		const press = dispatchShortcut(document.body, 'Backspace');
+		await sleep();
+
+		expect(press.defaultPrevented).toBe(true);
+		expect(lastChangedGraph(args).nodes.map((node) => node.id)).toEqual(['n3']);
+		expect(lastChangedGraph(args).edges).toEqual([]);
+		// One commit for all three, under the label Undo will name.
+		expect(commitCount(args)).toBe(1);
+		expect(commitsLabelled(args, 'delete 3 nodes')).toHaveLength(1);
+		expect(postedNotices(args)).toEqual(['Deleted 3 nodes.']);
+		expect(selectionCountLabel(canvasElement)).toBeNull();
+
+		// One selected node says so in the singular, as a single delete always has.
+		await openNodeMenu(canvasElement, 'n3');
+		canvas.getByRole('menuitem', { name: 'Select' }).click();
+		await tick();
+		blurActiveElement();
+		dispatchShortcut(document.body, 'Backspace');
+		await sleep();
+		expect(lastChangedGraph(args).nodes).toEqual([]);
+		expect(commitsLabelled(args, 'delete node')).toHaveLength(1);
+		expect(postedNotices(args)).toEqual(['Deleted 3 nodes.', 'Deleted 1 node.']);
+	}}
+/>
+
+<Story
+	name="CmdOrCtrlXCopiesAndDeletesAsOneEdit"
+	args={{
+		multigraphData: COPY_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		clipboard: CUT_CLIPBOARD,
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		CUT_CLIPBOARD.mirror(UNTOUCHED_CLIPBOARD);
+		blurActiveElement();
+
+		const idle = dispatchClipboardEvent(document.body, 'cut');
+		expect(idle.defaultPrevented).toBe(false);
+		expect(CUT_CLIPBOARD.text).toBe(UNTOUCHED_CLIPBOARD);
+
+		await selectTopRow(canvasElement);
+		const cut = dispatchClipboardEvent(document.body, 'cut');
+		await sleep();
+
+		expect(cut.defaultPrevented).toBe(true);
+		const written = cut.clipboardData?.getData('text/plain') ?? '';
+		expect(CUT_CLIPBOARD.text).toBe(written);
+		expect(copiedNodes(decodedCopy(written)).map(([id]) => id)).toEqual(['n0', 'n1', 'n2']);
+		expect(decodedCopy(written).edges.map((edge) => edge.id)).toEqual([
+			'left-middle',
+			'middle-right'
+		]);
+		expect(lastChangedGraph(args).nodes.map((node) => node.id)).toEqual(['n3']);
+		expect(commitCount(args)).toBe(1);
+		expect(commitsLabelled(args, 'cut 3 nodes')).toHaveLength(1);
+		expect(postedNotices(args)).toEqual(['Cut 3 nodes.']);
+		for (const nodeId of ['n0', 'n1', 'n2']) expect(nodeIsDrawn(canvasElement, nodeId)).toBe(false);
+	}}
+/>
+
+<Story
+	name="CmdOrCtrlCWhileTextIsSelectedInTheDetailsViewLeavesTheNodeClipboardAlone"
+	args={{
+		multigraphData: COPY_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		clipboard: DETAILS_TEXT_CLIPBOARD,
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		DETAILS_TEXT_CLIPBOARD.mirror(UNTOUCHED_CLIPBOARD);
+		await selectTopRow(canvasElement);
+
+		const dialog = await enterFocusOn(canvasElement, 'n1');
+		blurActiveElement();
+		// The details view is text, so even with nothing highlighted the copy is
+		// the browser's...
+		const bare = dispatchClipboardEvent(document.body, 'copy');
+		expect(bare.defaultPrevented).toBe(false);
+		// ...and with a sentence highlighted, that sentence is what is copied.
+		const description = within(dialog).getByText('The middle node.');
+		selectTextOf(description);
+		const highlighted = dispatchClipboardEvent(description, 'copy');
+		expect(highlighted.defaultPrevented).toBe(false);
+		expect(DETAILS_TEXT_CLIPBOARD.text).toBe(UNTOUCHED_CLIPBOARD);
+		window.getSelection()?.removeAllRanges();
+
+		// Back on the canvas, highlighted text still wins over the selection.
+		dispatchShortcut(window, 'Escape');
+		await waitFor(() =>
+			expect(canvasElement.querySelector('.focus-surface')).not.toBeInTheDocument()
+		);
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2']);
+		const count = selectionCountLabel(canvasElement);
+		if (!count) throw new Error('Selection count not shown');
+		selectTextOf(count);
+		const overText = dispatchClipboardEvent(document.body, 'copy');
+		expect(overText.defaultPrevented).toBe(false);
+		expect(DETAILS_TEXT_CLIPBOARD.text).toBe(UNTOUCHED_CLIPBOARD);
+		expect(postedNotices(args)).toEqual([]);
+
+		// With nothing highlighted, the copy is the selection's.
+		window.getSelection()?.removeAllRanges();
+		const nodes = dispatchClipboardEvent(document.body, 'copy');
+		expect(nodes.defaultPrevented).toBe(true);
+		expect(copiedNodes(decodedCopy(DETAILS_TEXT_CLIPBOARD.text)).map(([id]) => id)).toEqual([
+			'n0',
+			'n1',
+			'n2'
+		]);
+	}}
+/>
+
+<Story
+	name="CmdOrCtrlCInsideATextFieldLeavesTheNodeClipboardAlone"
+	args={{
+		multigraphData: COPY_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		clipboard: TEXT_FIELD_CLIPBOARD,
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		TEXT_FIELD_CLIPBOARD.mirror(UNTOUCHED_CLIPBOARD);
+		await selectTopRow(canvasElement);
+		await typeGraphQuery(canvasElement, 'Middle');
+		const input = within(canvasElement).getByLabelText('Graph query');
+		input.focus();
+		if (input instanceof HTMLInputElement) input.select();
+
+		// Copy, cut and the delete keys all belong to the field.
+		const copy = dispatchClipboardEvent(input, 'copy');
+		const cut = dispatchClipboardEvent(input, 'cut');
+		const backspace = dispatchShortcut(input, 'Backspace');
+		const del = dispatchShortcut(input, 'Delete');
+		await sleep();
+
+		for (const event of [copy, cut, backspace, del]) {
+			expect(event.defaultPrevented, event.type).toBe(false);
+		}
+		expect(TEXT_FIELD_CLIPBOARD.text).toBe(UNTOUCHED_CLIPBOARD);
+		expect(commitCount(args)).toBe(0);
+		expect(postedNotices(args)).toEqual([]);
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2']);
+	}}
+/>
+
+<Story
+	name="TheNodeMenusDeleteNamesTheCountWhenTheNodeIsSelected"
+	args={{
+		multigraphData: COPY_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const canvas = within(canvasElement);
+		await selectTopRow(canvasElement);
+
+		// Outside the selection, Delete is this node's alone.
+		await openNodeMenu(canvasElement, 'n3');
+		expect(canvas.getByRole('menuitem', { name: 'Delete' })).toHaveAttribute(
+			'title',
+			'Remove this node and every edge attached to it'
+		);
+		dispatchKeydown(document.activeElement, 'Escape');
+		await tick();
+
+		// On a selected node it names the count, and the label still fits the
+		// phone with the rest of the menu.
+		await openNodeMenu(canvasElement, 'n1');
+		await waitForLayout();
+		expect(canvas.queryByRole('menuitem', { name: 'Delete' })).not.toBeInTheDocument();
+		const deleteThree = canvas.getByRole('menuitem', { name: 'Delete 3 nodes' });
+		expect(deleteThree).toHaveAttribute(
+			'title',
+			'Remove every selected node and every edge attached to them'
+		);
+		const rect = deleteThree.getBoundingClientRect();
+		expect(rect.left).toBeGreaterThanOrEqual(0);
+		expect(rect.right).toBeLessThanOrEqual(window.innerWidth);
+		expect(rect.height).toBeGreaterThanOrEqual(44);
+
+		deleteThree.click();
+		await sleep();
+		expect(lastChangedGraph(args).nodes.map((node) => node.id)).toEqual(['n3']);
+		expect(commitsLabelled(args, 'delete 3 nodes')).toHaveLength(1);
+		expect(postedNotices(args)).toEqual(['Deleted 3 nodes.']);
+
+		// A selection of one is just this node: the plain label, and no notice,
+		// as a menu delete has never needed one.
+		await openNodeMenu(canvasElement, 'n3');
+		canvas.getByRole('menuitem', { name: 'Select' }).click();
+		await tick();
+		await openNodeMenu(canvasElement, 'n3');
+		canvas.getByRole('menuitem', { name: 'Delete' }).click();
+		await sleep();
+		expect(lastChangedGraph(args).nodes).toEqual([]);
+		expect(commitsLabelled(args, 'delete node')).toHaveLength(1);
+		expect(postedNotices(args)).toEqual(['Deleted 3 nodes.']);
+	}}
+/>
+
+<Story
+	name="ACopyWithAnImageAttachmentEmbedsTheAsset"
+	args={{
+		multigraphData: COPY_IMAGE_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		assetStore: copyImageAssetStore(),
+		assetScope: COPY_ASSET_SCOPE,
+		clipboard: IMAGE_COPY_CLIPBOARD,
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		IMAGE_COPY_CLIPBOARD.mirror(UNTOUCHED_CLIPBOARD);
+		await selectTopRow(canvasElement);
+		blurActiveElement();
+
+		// The keyboard copy cannot wait for a blob, so the bytes are read when the
+		// selection is made and arrive a moment later.
+		await waitFor(() => {
+			const copy = dispatchClipboardEvent(document.body, 'copy');
+			const doc = decodeNodeClipboard(copy.clipboardData?.getData('text/plain') ?? '');
+			expect(doc?.embeddedAssets?.map((asset) => asset.assetId)).toEqual(['left-photo']);
+		});
+		const doc = decodeNodeClipboard(IMAGE_COPY_CLIPBOARD.text ?? '');
+		const [embedded] = doc?.embeddedAssets ?? [];
+		expect(embedded).toMatchObject({ mimeType: 'image/png', size: 'left photo bytes'.length });
+		expect(atob(embedded?.base64 ?? '')).toBe('left photo bytes');
+		expect(doc?.data.assets).toEqual({ 'left-photo': COPY_IMAGE_GRAPH.assets?.['left-photo'] });
+
+		// From the menu on a node outside the selection, its own image is read on
+		// the spot and carried too.
+		await openNodeMenu(canvasElement, 'n3');
+		within(canvasElement).getByRole('menuitem', { name: 'Copy' }).click();
+		await waitFor(() => expect(postedNotices(args).at(-1)).toBe('Copied 1 node.'));
+		expect(copiedNodes(decodedCopy(IMAGE_COPY_CLIPBOARD.text))).toEqual([['n3', 'Below']]);
+		const menuDoc = decodeNodeClipboard(IMAGE_COPY_CLIPBOARD.text ?? '');
+		expect(menuDoc?.embeddedAssets?.map((asset) => asset.assetId)).toEqual(['below-photo']);
+		expect(atob(menuDoc?.embeddedAssets?.[0]?.base64 ?? '')).toBe('below photo bytes');
+	}}
+/>

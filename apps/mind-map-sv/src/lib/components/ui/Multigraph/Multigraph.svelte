@@ -68,6 +68,18 @@
 	function settleKickFingerprint(config: ResolvedConfig): string {
 		return SETTLE_KICK_PATHS.map((path) => String(readResolvedValue(config, path))).join('|');
 	}
+
+	/**
+	 * What a failed copy says. "Try again" is real advice rather than a shrug: a
+	 * menu copy that lost the tap's activation to an attachment read keeps what it
+	 * read, so the second tap writes at once.
+	 */
+	const COPY_FAILED_NOTICE = 'Copy failed. Try again.';
+
+	/** "1 node", "3 nodes": a count as the notices say it. */
+	function nodeCountText(count: number): string {
+		return count === 1 ? '1 node' : `${count} nodes`;
+	}
 </script>
 
 <script lang="ts">
@@ -97,6 +109,7 @@
 	import type { PyExecutor } from '$lib/ai/pyExecutor';
 	import type { GraphAssetStore } from '$lib/assets/assetStore';
 	import { tombstoneAsset } from '$lib/assets/assetTrash';
+	import type { GraphFileEmbeddedAsset } from '$lib/graphFile';
 	import { prefersReducedMotion } from '$lib/reducedMotion';
 	import { collectAiAncestors } from './lib/aiAncestry';
 	import { collectAiInputs } from './lib/aiInputs';
@@ -200,7 +213,13 @@
 	import { LayoutRuntime } from './lib/layoutRuntime.svelte.js';
 	import { TransientRevealController } from './lib/transientReveal.svelte.js';
 	import { SelectionController } from './lib/selectionController.svelte.js';
-	import { nodeIdsInScreenRect } from './lib/selection.js';
+	import { inducedSubgraph, nodeIdsInScreenRect } from './lib/selection.js';
+	import {
+		embeddedAssetsForGraph,
+		encodeNodeClipboard,
+		systemClipboard,
+		type ClipboardPort
+	} from './lib/nodeClipboard.js';
 	import { navBreadcrumbs } from './lib/navStack.js';
 	import { externalGraphSyncToken } from './lib/graphSync.js';
 	import type { EntryGestureDirection } from './lib/entryGestureGate.js';
@@ -348,6 +367,8 @@
 		exitingBuffer,
 		assetStore = null,
 		assetScope = '',
+		clipboard = systemClipboard(),
+		onNotice,
 		dataflowEnabled = true,
 		aiClient = null,
 		aiExecutor = null,
@@ -409,6 +430,18 @@
 		exitingBuffer?: ExitingBuffer;
 		assetStore?: GraphAssetStore | null;
 		assetScope?: string;
+		/**
+		 * Where a node copy is written. The system clipboard by default, which is
+		 * safe to build during SSR: it touches `navigator` only when written to.
+		 * Stories pass `memoryClipboard()` and read what it holds.
+		 */
+		clipboard?: ClipboardPort;
+		/**
+		 * Say what an action that leaves nothing else to look at just did — "Copied
+		 * 3 nodes." — in the toolbar's notice line, which the page owns. Written as
+		 * short sentences, because the toolbar stacks one per line.
+		 */
+		onNotice?: (message: string) => void;
 		/** Draw dataflow edges inferred from the math in node descriptions. */
 		dataflowEnabled?: boolean;
 		/**
@@ -789,6 +822,74 @@
 		void graphNodes;
 		untrack(() => selection.prune(graph));
 	});
+
+	/**
+	 * The attachment bytes of the selected nodes, read ahead of the copy that
+	 * needs them and keyed by asset id.
+	 *
+	 * A keyboard copy is answered inside the DOM `copy` event, which has to be
+	 * filled before its handler returns, and a blob read is async — so the reads
+	 * happen here, when the selection changes, and the event takes whatever has
+	 * arrived. The graph itself is not cached: the copy reads it at the moment of
+	 * the copy, so a title edited after selecting goes out as it now reads. Plain
+	 * rather than `$state`, since only the clipboard handlers read it.
+	 *
+	 * An asset id names fixed bytes (a replaced attachment gets a new id), so a
+	 * cached entry never goes stale; it is only dropped once no selected node
+	 * references it.
+	 */
+	let copyAssetCache: ReadonlyMap<string, GraphFileEmbeddedAsset> = new Map();
+	/** Stamps each refresh, so a read that lost the race to a newer one is dropped. */
+	let copyAssetCacheRead = 0;
+
+	// On a change of selection, and on a commit that may have given a selected
+	// node an attachment; `graphNodes` keeps its identity across relax frames, so
+	// a settle does not re-run this.
+	$effect(() => {
+		const ids = new Set(selection.ids);
+		void graphNodes;
+		const store = assetStore;
+		const scope = assetScope;
+		untrack(() => void refreshCopyAssetCache(ids, store, scope));
+	});
+
+	async function refreshCopyAssetCache(
+		nodeIds: ReadonlySet<string>,
+		store: GraphAssetStore | null,
+		scope: string
+	): Promise<void> {
+		copyAssetCacheRead += 1;
+		const read = copyAssetCacheRead;
+		if (nodeIds.size === 0 || store === null) {
+			copyAssetCache = new Map();
+			return;
+		}
+		const subgraph = inducedSubgraph(graph, nodeIds);
+		const wanted = referencedAssetIds(subgraph);
+		const kept = new Map([...copyAssetCache].filter(([assetId]) => wanted.has(assetId)));
+		copyAssetCache = kept;
+		if ([...wanted].every((assetId) => kept.has(assetId))) return;
+		let fresh: GraphFileEmbeddedAsset[];
+		try {
+			fresh = await embeddedAssetsForGraph(subgraph, store, [scope]);
+		} catch {
+			// A copy made now leaves the unread attachments out; the next refresh, or
+			// the menu's own read, tries again.
+			return;
+		}
+		if (read !== copyAssetCacheRead) return;
+		copyAssetCache = withEmbeddedAssets(kept, fresh);
+	}
+
+	function withEmbeddedAssets(
+		cache: ReadonlyMap<string, GraphFileEmbeddedAsset>,
+		assets: readonly GraphFileEmbeddedAsset[]
+	): ReadonlyMap<string, GraphFileEmbeddedAsset> {
+		return new Map([
+			...cache,
+			...assets.map((asset): [string, GraphFileEmbeddedAsset] => [asset.assetId, asset])
+		]);
+	}
 
 	/**
 	 * The node whose details the reader is in, for the trail's last crumb.
@@ -1891,7 +1992,8 @@
 	}
 
 	/**
-	 * Whether an Escape that reached the window is the selection's to spend.
+	 * Whether a key press (or the cut it fired) that reached the window is the
+	 * selection's to spend: Escape clearing it, Delete or Cmd/Ctrl+X removing it.
 	 *
 	 * The selection is the last level Escape walks out of: the focus overlay is
 	 * handled before this is asked, and then a menu, a sheet or dialog, a panel, a
@@ -1902,7 +2004,7 @@
 	 * to the Stage, whose listeners hear the press after this one — hence
 	 * `selectionBoxOpen` rather than asking the Stage.
 	 */
-	function escapeClearsSelection(event: KeyboardEvent): boolean {
+	function selectionOwnsKeyPress(event: Event): boolean {
 		if (event.defaultPrevented || selectionBoxOpen) return false;
 		if (creationPreview !== null && !creationPreview.ending) return false;
 		// A field's Escape is the field's, as it is for the focus overlay above.
@@ -1931,7 +2033,7 @@
 				return;
 			}
 			if (event.key === 'Escape') {
-				if (escapeClearsSelection(event)) selection.clear();
+				if (selectionOwnsKeyPress(event)) selection.clear();
 				return;
 			}
 			if (event.metaKey || event.ctrlKey || event.altKey) {
@@ -1966,6 +2068,15 @@
 				graphQueryPanelOpen = true;
 				return;
 			}
+			// Both keys, because a Mac keyboard's delete key sends Backspace. Default
+			// prevented only when the press removed something, so an unselected
+			// canvas leaves the key to whatever else wants it.
+			if (event.key === 'Delete' || event.key === 'Backspace') {
+				if (!selectionCanBeRemoved(event)) return;
+				event.preventDefault();
+				deleteSelection();
+				return;
+			}
 			// Bare `F` brings the graph back — see `fitVisibleGraph`. Guarded on text
 			// entry above all: `f` is a letter people type.
 			if (event.key.toLowerCase() !== 'f' || event.shiftKey) return;
@@ -1976,6 +2087,131 @@
 		window.addEventListener('keydown', onKeyDown);
 		return () => window.removeEventListener('keydown', onKeyDown);
 	});
+
+	/**
+	 * Whether Delete, Backspace or a cut may remove the selection now: there is
+	 * one, the reader is on the canvas rather than in the details view, no node
+	 * is mid-drag under their pointer, and nothing above the selection owns the
+	 * press (`selectionOwnsKeyPress`).
+	 */
+	function selectionCanBeRemoved(event: Event): boolean {
+		if (selection.size === 0 || focus.isFocused || activeDragNodeId !== null) return false;
+		return selectionOwnsKeyPress(event);
+	}
+
+	/**
+	 * The keyboard copy and cut, answered through the DOM events those keys fire.
+	 * They need no clipboard permission in any browser, unlike the async API the
+	 * menu uses, and they are filled synchronously — which is why the attachment
+	 * bytes come from `copyAssetCache`.
+	 *
+	 * A cut also takes the delete's guard, and steps aside whole without it: with
+	 * a menu, sheet or panel open, copying and leaving the nodes where they were
+	 * would be half a cut.
+	 */
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		const onCopy = (event: ClipboardEvent) => {
+			const nodeIds = clipboardEventNodeIds(event);
+			if (nodeIds === null) return;
+			const copiedIds = putNodesOnClipboardEvent(event, nodeIds);
+			if (copiedIds.length > 0) onNotice?.(`Copied ${nodeCountText(copiedIds.length)}.`);
+		};
+		const onCut = (event: ClipboardEvent) => {
+			const nodeIds = clipboardEventNodeIds(event);
+			if (nodeIds === null || !selectionCanBeRemoved(event)) return;
+			const copiedIds = putNodesOnClipboardEvent(event, nodeIds);
+			if (copiedIds.length === 0) return;
+			const removed = removeNodes(copiedIds, 'cut');
+			onNotice?.(`Cut ${nodeCountText(removed)}.`);
+		};
+		window.addEventListener('copy', onCopy);
+		window.addEventListener('cut', onCut);
+		return () => {
+			window.removeEventListener('copy', onCopy);
+			window.removeEventListener('cut', onCut);
+		};
+	});
+
+	/**
+	 * The nodes a keyboard copy or cut takes, or `null` when the event is not the
+	 * canvas's to answer.
+	 *
+	 * Stepping aside means not calling `preventDefault`, so the browser copies as
+	 * it always would. It does that in a text field; with text highlighted
+	 * anywhere on the page, because copying a sentence out of a description has
+	 * to keep working; in the details view, which is text to copy rather than
+	 * nodes; and with nothing selected, when there is nothing of the canvas's to
+	 * copy.
+	 */
+	function clipboardEventNodeIds(event: ClipboardEvent): ReadonlySet<string> | null {
+		if (event.clipboardData === null || selection.size === 0) return null;
+		if (keyboardIsInTextEntry() || focus.isFocused) return null;
+		if ((window.getSelection()?.toString() ?? '') !== '') return null;
+		return new Set(selection.ids);
+	}
+
+	/**
+	 * Fill a copy or cut event with the graph file for `nodeIds`, and mirror it
+	 * into the port so a paste this tab cannot read back from the system still
+	 * finds it. Returns the ids that went out, none when nothing did.
+	 */
+	function putNodesOnClipboardEvent(event: ClipboardEvent, nodeIds: ReadonlySet<string>): string[] {
+		const data = event.clipboardData;
+		const subgraph = inducedSubgraph(graph, nodeIds);
+		if (data === null || subgraph.nodes.length === 0) return [];
+		const text = nodeClipboardText(subgraph, copyAssetCache);
+		data.setData('text/plain', text);
+		event.preventDefault();
+		clipboard.mirror(text);
+		return subgraph.nodes.map((node) => node.id);
+	}
+
+	/**
+	 * The clipboard text for a copied subgraph, carrying the attachments `assets`
+	 * holds for it. One not there yet is left out of this copy rather than waited
+	 * for, since the DOM event cannot wait.
+	 */
+	function nodeClipboardText(
+		subgraph: MultigraphData,
+		assets: ReadonlyMap<string, GraphFileEmbeddedAsset>
+	): string {
+		const embedded = [...referencedAssetIds(subgraph)].flatMap((assetId) => {
+			const asset = assets.get(assetId);
+			return asset === undefined ? [] : [asset];
+		});
+		return encodeNodeClipboard(subgraph, embedded);
+	}
+
+	/**
+	 * Copy from the node menu, through the async clipboard.
+	 *
+	 * The tap is the activation that write needs, and Safari honours it only for
+	 * a write made before anything is awaited. So the bytes come from the
+	 * selection's cache when it holds them all, and a fresh read is made only for
+	 * what it lacks — an unselected node's attachments, or a selection whose read
+	 * has not landed yet. That read is kept in the cache, which is what lets the
+	 * failure notice's "Try again" succeed where the await cost the activation.
+	 */
+	async function copyNodes(nodeIds: ReadonlySet<string>): Promise<void> {
+		const subgraph = inducedSubgraph(graph, nodeIds);
+		if (subgraph.nodes.length === 0) return;
+		const missing = [...referencedAssetIds(subgraph)].some(
+			(assetId) => !copyAssetCache.has(assetId)
+		);
+		if (missing && assetStore !== null) {
+			try {
+				const fresh = await embeddedAssetsForGraph(subgraph, assetStore, [assetScope]);
+				copyAssetCache = withEmbeddedAssets(copyAssetCache, fresh);
+			} catch {
+				// Not "Copied" without the attachments the reader asked for.
+				onNotice?.(COPY_FAILED_NOTICE);
+				return;
+			}
+		}
+		const written = await clipboard.writeText(nodeClipboardText(subgraph, copyAssetCache));
+		onNotice?.(written ? `Copied ${nodeCountText(subgraph.nodes.length)}.` : COPY_FAILED_NOTICE);
+	}
 
 	$effect(() => {
 		return () => {
@@ -2723,19 +2959,63 @@
 	}
 
 	function deleteNode(nodeId: string) {
+		removeNodes([nodeId], 'delete');
+	}
+
+	/**
+	 * Remove every selected node as one edit, with no confirmation first: undo
+	 * brings all of them back in one step, which is the test the destructive
+	 * ruling sets (`docs/ui-decisions/2026-08-30--destructive--ship-new-destructive-actions-without-a-confirm.md`).
+	 */
+	function deleteSelection() {
+		const removed = removeNodes(selection.ids, 'delete');
+		if (removed > 0) onNotice?.(`Deleted ${nodeCountText(removed)}.`);
+	}
+
+	/**
+	 * Remove `nodeIds` and every edge touching them as one commit, labelled for
+	 * the undo control as `verb` names it ("delete node", "cut 3 nodes"), and
+	 * return how many nodes went. Ids that name no node are skipped.
+	 *
+	 * One commit rather than one per node, so a single undo restores the lot; and
+	 * one pass over the neighbours, so a node whose neighbour went too is not
+	 * mistaken for one the deletion orphaned.
+	 */
+	function removeNodes(nodeIds: readonly string[], verb: 'delete' | 'cut'): number {
 		const durationMs = resolvedLayoutSettings.enterExitDurationMs;
 		const nowMs = layoutRuntime.now();
 
+		const requested = new Set(nodeIds);
 		// Capture final-known render data before mutating graph.
-		const nodeToRemove = graph.nodes.find((n) => n.id === nodeId) ?? null;
-		const nodePos = graph.posByNodeId[nodeId] ?? CENTERED_POSITION;
-		const nodeScaleAtDelete = graphLayout.scaleByNodeId[nodeId] ?? 1;
+		const nodesToRemove = graph.nodes.filter((node) => requested.has(node.id));
+		if (nodesToRemove.length === 0) {
+			closeOverlays();
+			return 0;
+		}
+		const removing = new Set(nodesToRemove.map((node) => node.id));
+		// Only the nodes the canvas is drawing fade out: one hidden by the hop limit
+		// has no scale to fade from, and a ghost of it would be the first the reader
+		// ever saw of it.
+		const exitingNodes = nodesToRemove.flatMap((node) => {
+			const fromScale = graphLayout.scaleByNodeId[node.id];
+			if (fromScale === undefined) return [];
+			const position = graph.posByNodeId[node.id] ?? CENTERED_POSITION;
+			return [{ node, x: position.x, y: position.y, fromScale }];
+		});
 		const affectedEdgeData = renderableEdgeVisibility
-			.filter((v) => v.edge.sourceNodeId === nodeId || v.edge.targetNodeId === nodeId)
+			.filter((v) => removing.has(v.edge.sourceNodeId) || removing.has(v.edge.targetNodeId))
 			.map((v) => v.edge);
 
-		const neighborIds = neighborsOf(graph, nodeId).map((neighbor) => neighbor.id);
-		const nextGraph = removeNode(graph, nodeId);
+		// The neighbours that stay, in graph order: those are the ones a deletion
+		// can orphan.
+		const touchingIds = new Set(
+			nodesToRemove.flatMap((node) => neighborsOf(graph, node.id).map((neighbor) => neighbor.id))
+		);
+		const neighborIds = graph.nodes
+			.filter((node) => touchingIds.has(node.id) && !removing.has(node.id))
+			.map((node) => node.id);
+		let nextGraph = graph;
+		for (const nodeId of removing) nextGraph = removeNode(nextGraph, nodeId);
 		const { survivorNodeId, severed } = severedComponentAfterMutation(nextGraph, neighborIds);
 		// A deletion that orphaned any neighbour created a pinless component, so the
 		// election that follows is told where the reader was looking. That includes
@@ -2743,40 +3023,38 @@
 		// so leaves no survivor to play a wave from.
 		severedBeaconPreference = severed ? neighborIds : [];
 
-		// Before the commit, and against `nextGraph`: the fallback must not pick the
+		// Before the commit, and against `nextGraph`: the fallback must not pick a
 		// node being deleted, and the intent has to name the primary this state
 		// ends with rather than the one it started from.
-		if (primaryNodeId === nodeId) primaryNodeId = fallbackPrimaryNodeId(nextGraph);
+		if (removing.has(primaryNodeId)) primaryNodeId = fallbackPrimaryNodeId(nextGraph);
 
+		const label = removing.size === 1 ? `${verb} node` : `${verb} ${nodeCountText(removing.size)}`;
 		if (severed && survivorNodeId !== null) {
 			// The deletion cut a component off from every pinned node. Play the reveal
 			// wave (as a severing edge removal does) so the orphaned side fades down to
-			// its beacon instead of popping. The deleted node and its edges keep using
-			// the exiting-buffer fade below: their live geometry is gone, so only the
-			// buffer can still place them (the wave's leftovers skip them, see
+			// its beacon instead of popping. The deleted nodes and their edges keep
+			// using the exiting-buffer fade below: their live geometry is gone, so only
+			// the buffer can still place them (the wave's leftovers skip them, see
 			// revealWaveOnlyEdgeVisibility).
-			commitUserGraph(
-				layoutRuntime.beginScaleChange(nextGraph, survivorNodeId),
-				editIntent('delete node')
-			);
+			commitUserGraph(layoutRuntime.beginScaleChange(nextGraph, survivorNodeId), editIntent(label));
 		} else {
-			commitUserGraph(layoutRuntime.relaxAfterMutation(nextGraph), editIntent('delete node'));
+			commitUserGraph(layoutRuntime.relaxAfterMutation(nextGraph), editIntent(label));
 		}
 
 		if (durationMs > 0) {
 			let nextBuffer = internalExitingBuffer;
 
-			if (nodeToRemove) {
-				// Cancel any enter animation and start exit.
-				nodeEnterAnimations = Object.fromEntries(
-					Object.entries(nodeEnterAnimations).filter(([k]) => k !== nodeId)
-				);
-				nextBuffer = cancelExitingNode(nextBuffer, nodeId);
-				nextBuffer = addExitingNode(nextBuffer, nodeId, {
-					nodeData: nodeToRemove,
-					x: nodePos.x,
-					y: nodePos.y,
-					fromScale: nodeScaleAtDelete,
+			// Cancel any enter animation and start exit.
+			nodeEnterAnimations = Object.fromEntries(
+				Object.entries(nodeEnterAnimations).filter(([k]) => !removing.has(k))
+			);
+			for (const { node, x, y, fromScale } of exitingNodes) {
+				nextBuffer = cancelExitingNode(nextBuffer, node.id);
+				nextBuffer = addExitingNode(nextBuffer, node.id, {
+					nodeData: node,
+					x,
+					y,
+					fromScale,
 					startedAtMs: nowMs,
 					durationMs
 				});
@@ -2798,16 +3076,15 @@
 			}
 
 			internalExitingBuffer = nextBuffer;
-			if (nodeToRemove || affectedEdgeData.length > 0) {
-				layoutRuntime.start();
-			}
+			layoutRuntime.start();
 		}
 
-		// A back entry naming the deleted node has nowhere to return to, and a seed
+		// A back entry naming a deleted node has nowhere to return to, and a seed
 		// for it would hold a hop open for an id the graph no longer has.
 		transientReveal.pruneMissing(new Set(nextGraph.nodes.map((node) => node.id)));
 
 		closeOverlays();
+		return removing.size;
 	}
 
 	function saveNodeContent(
@@ -3962,14 +4239,25 @@
 	</Stage>
 
 	{#if actionMenu && actionMenuNode}
+		<!-- A node in the selection speaks for all of it, so Copy and Delete take the
+		     whole selection from it; any other node acts on itself alone, and the
+		     selection is left as it was. -->
+		{@const menuNodeSelected = selection.has(actionMenuNode.id)}
 		<NodeActionMenu
 			node={actionMenuNode}
-			selected={selection.has(actionMenuNode.id)}
+			selected={menuNodeSelected}
+			groupSize={menuNodeSelected ? selection.size : 1}
 			position={actionMenu.position}
 			onAddNodeEdge={() => armCreationGesture(actionMenuNode)}
 			onMergeNode={() => armCreationGesture(actionMenuNode, 'merge')}
 			onToggleSelected={() => {
 				selection.toggle(actionMenuNode.id);
+				closeOverlays();
+			}}
+			onCopy={() => {
+				// Started before the menu closes, so the clipboard write is made inside
+				// the tap that asked for it.
+				void copyNodes(new Set(menuNodeSelected ? selection.ids : [actionMenuNode.id]));
 				closeOverlays();
 			}}
 			onTogglePinned={() => {
@@ -3978,7 +4266,8 @@
 			}}
 			onEdit={() => openEditSheet(actionMenuNode.id)}
 			onFocus={() => focus.openFocus(actionMenuNode)}
-			onDelete={() => deleteNode(actionMenuNode.id)}
+			onDelete={() =>
+				menuNodeSelected && selection.size > 1 ? deleteSelection() : deleteNode(actionMenuNode.id)}
 			onClose={() => (actionMenu = null)}
 			onRetarget={retargetNodeActionMenu}
 		/>

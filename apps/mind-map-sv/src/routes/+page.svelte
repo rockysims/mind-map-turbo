@@ -782,6 +782,7 @@
 					direction === 'undo' ? persisted?.undo() : persisted?.redo()}
 				onSettingsChange={(next) => persisted?.notifySettingsChanged(next, { syncView: true })}
 				onSettingsPanelClose={() => (settingsPanelOpen = false)}
+				onNotice={(message) => persisted?.reportBlockedAction(message)}
 			/>
 		{/key}
 	{/if}
