@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	clientPointToGraphPoint,
 	graphPointToClientPoint,
+	rectFromCorners,
 	usableStageRect,
 	hasSize
 } from './stageCoordinates';
@@ -36,6 +37,34 @@ describe('clientPointToGraphPoint', () => {
 
 		expect(clientPointToGraphPoint(clientPoint, rect, pan, scale).x).toBeCloseTo(graphPoint.x);
 		expect(clientPointToGraphPoint(clientPoint, rect, pan, scale).y).toBeCloseTo(graphPoint.y);
+	});
+});
+
+describe('rectFromCorners', () => {
+	const expected = { left: 10, top: 20, width: 30, height: 40 };
+
+	it('spans the two corners when the second is below and to the right', () => {
+		expect(rectFromCorners({ x: 10, y: 20 }, { x: 40, y: 60 })).toEqual(expected);
+	});
+
+	it('gives the same rect whichever diagonal and direction the corners come from', () => {
+		expect(rectFromCorners({ x: 40, y: 60 }, { x: 10, y: 20 })).toEqual(expected);
+		expect(rectFromCorners({ x: 40, y: 20 }, { x: 10, y: 60 })).toEqual(expected);
+		expect(rectFromCorners({ x: 10, y: 60 }, { x: 40, y: 20 })).toEqual(expected);
+	});
+
+	it('never reports a negative size', () => {
+		const rect = rectFromCorners({ x: 5, y: 5 }, { x: -15, y: -25 });
+		expect(rect).toEqual({ left: -15, top: -25, width: 20, height: 30 });
+	});
+
+	it('collapses to a point when both corners coincide', () => {
+		expect(rectFromCorners({ x: 7, y: 9 }, { x: 7, y: 9 })).toEqual({
+			left: 7,
+			top: 9,
+			width: 0,
+			height: 0
+		});
 	});
 });
 

@@ -56,7 +56,8 @@
 		clientY: number,
 		pointerId = 1,
 		pointerType = '',
-		button = 0
+		button = 0,
+		modifiers: { shiftKey?: boolean } = {}
 	) {
 		target.dispatchEvent(
 			new PointerEvent(type, {
@@ -65,6 +66,7 @@
 				pointerId,
 				pointerType,
 				button,
+				shiftKey: modifiers.shiftKey ?? false,
 				bubbles: true,
 				cancelable: true
 			})
@@ -130,6 +132,70 @@
 		return new Promise((r) => {
 			requestAnimationFrame(() => requestAnimationFrame(() => r()));
 		});
+	}
+
+	function getCallbacks(el: HTMLElement): HTMLElement {
+		const wrapper = el.querySelector('[data-testid="stage-callbacks"]');
+		if (!(wrapper instanceof HTMLElement)) throw new Error('Stage harness not found');
+		return wrapper;
+	}
+
+	function getSelectionBox(stage: HTMLElement): HTMLElement | null {
+		const box = stage.querySelector('.selection-box');
+		return box instanceof HTMLElement ? box : null;
+	}
+
+	interface ReportedRect {
+		left: number;
+		top: number;
+		width: number;
+		height: number;
+	}
+
+	/** `left,top,width,height[,flag]` as the harness writes a box callback. */
+	function parseRectCallback(value: string): ReportedRect & { flag: string } {
+		const [left, top, width, height, flag] = value.split(',');
+		return {
+			left: Number(left),
+			top: Number(top),
+			width: Number(width),
+			height: Number(height),
+			flag: flag ?? ''
+		};
+	}
+
+	/** `x,y[,flag]` as the harness writes a background callback. */
+	function parseBackgroundPointCallback(value: string): { x: number; y: number; flag: string } {
+		const [x, y, flag] = value.split(',');
+		return { x: Number(x), y: Number(y), flag: flag ?? '' };
+	}
+
+	function expectRectCloseTo(actual: ReportedRect, expected: ReportedRect) {
+		expect(actual.left).toBeCloseTo(expected.left);
+		expect(actual.top).toBeCloseTo(expected.top);
+		expect(actual.width).toBeCloseTo(expected.width);
+		expect(actual.height).toBeCloseTo(expected.height);
+	}
+
+	/**
+	 * A click on empty canvas, then a second press at the same spot that moves
+	 * to (toX, toY) and is left held: the background twin of
+	 * `dispatchDoubleClickDrag`. The box is open when this returns.
+	 */
+	async function dispatchBackgroundDoubleClickDrag(
+		stage: HTMLElement,
+		fromX: number,
+		fromY: number,
+		toX: number,
+		toY: number,
+		pointerType = ''
+	): Promise<void> {
+		dispatchPointer(stage, 'pointerdown', fromX, fromY, 1, pointerType);
+		dispatchPointer(stage, 'pointerup', fromX, fromY, 1, pointerType);
+		await sleep(50);
+		dispatchPointer(stage, 'pointerdown', fromX, fromY, 1, pointerType);
+		dispatchPointer(stage, 'pointermove', toX, toY, 1, pointerType);
+		await sleep();
 	}
 
 	/** Simulate double-click at (x, y) on target so Stage treats it as make-primary. */
@@ -524,7 +590,8 @@
 		expect(contextMenu.x).toBeCloseTo(nodeCenter.x);
 		expect(contextMenu.y).toBeCloseTo(nodeCenter.y);
 
-		// Background right-click: native menu still suppressed, but no callback.
+		// Background right-click: native menu still suppressed, and no node
+		// callback (the background has its own; see the story below).
 		const priorValue = wrapper.dataset.lastNodeContextMenu;
 		const backgroundEvent = dispatchContextMenu(
 			stage,
@@ -593,6 +660,8 @@
 		expect(backgroundDrop.x).toBeCloseTo(expectedPoint.x);
 		expect(backgroundDrop.y).toBeCloseTo(expectedPoint.y);
 		expect(wrapper.dataset.lastCreationCancel).toBe('');
+		// The armed session swallowed the press: it was not also a background click.
+		expect(wrapper.dataset.lastBackgroundClick).toBe('');
 	}}
 />
 
@@ -916,5 +985,473 @@
 		await sleep();
 
 		expect(wrapper.dataset.lastMakePrimary).toBe('badged');
+	}}
+/>
+
+<Story
+	name="BackgroundDoubleClickDragReportsASelectionBox"
+	args={{ nodes: [], initialPanX: 40, initialPanY: -20, initialScale: 1.5 }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+
+		await waitForLayout();
+
+		const center = getCenter(stage);
+		const transformBefore = getStageTransform(canvasElement);
+
+		// Dragged up and to the left, so the corners arrive in the "wrong" order.
+		await dispatchBackgroundDoubleClickDrag(
+			stage,
+			center.x,
+			center.y,
+			center.x - 60,
+			center.y - 30
+		);
+
+		expectRectCloseTo(parseRectCallback(wrapper.dataset.lastSelectionBoxUpdate ?? ''), {
+			left: center.x - 60,
+			top: center.y - 30,
+			width: 60,
+			height: 30
+		});
+
+		// Drawn by the stage in its own pixels, beside the panned and scaled
+		// content layer, where the reported client rect is exactly where it sits.
+		const box = getSelectionBox(stage);
+		expect(box).not.toBeNull();
+		if (!box) return;
+		expect(box.parentElement).toBe(stage);
+		expect(box.getAttribute('aria-hidden')).toBe('true');
+		expect(window.getComputedStyle(box).pointerEvents).toBe('none');
+		expectRectCloseTo(box.getBoundingClientRect(), {
+			left: center.x - 60,
+			top: center.y - 30,
+			width: 60,
+			height: 30
+		});
+
+		// Every move reports, and nothing pans under the box.
+		dispatchPointer(stage, 'pointermove', center.x + 50, center.y + 40);
+		await sleep();
+		expectRectCloseTo(parseRectCallback(wrapper.dataset.lastSelectionBoxUpdate ?? ''), {
+			left: center.x,
+			top: center.y,
+			width: 50,
+			height: 40
+		});
+		expect(getStageTransform(canvasElement)).toBe(transformBefore);
+
+		dispatchPointer(stage, 'pointerup', center.x + 50, center.y + 40);
+		await sleep();
+		const end = parseRectCallback(wrapper.dataset.lastSelectionBoxEnd ?? '');
+		expectRectCloseTo(end, { left: center.x, top: center.y, width: 50, height: 40 });
+		expect(end.flag).toBe('false');
+		expect(getSelectionBox(stage)).toBeNull();
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('');
+		expect(getStageTransform(canvasElement)).toBe(transformBefore);
+
+		// Only the first press of the double was a click.
+		const click = parseBackgroundPointCallback(wrapper.dataset.lastBackgroundClick ?? '');
+		expect(click.x).toBeCloseTo(center.x);
+		expect(click.y).toBeCloseTo(center.y);
+	}}
+/>
+
+<Story
+	name="SingleBackgroundDragStillPansAndReportsNoBox"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+
+		await waitForLayout();
+
+		const center = getCenter(stage);
+		dispatchPointer(stage, 'pointerdown', center.x, center.y);
+		dispatchPointer(stage, 'pointermove', center.x + 60, center.y + 40);
+		await sleep();
+		expect(getSelectionBox(stage)).toBeNull();
+		dispatchPointer(stage, 'pointerup', center.x + 60, center.y + 40);
+		await sleep();
+		expect(getStageTransform(canvasElement)).toContain('translate(60px, 40px)');
+		expect(wrapper.dataset.lastSelectionBoxUpdate).toBe('');
+		expect(wrapper.dataset.lastSelectionBoxEnd).toBe('');
+		// A drag is not a click.
+		expect(wrapper.dataset.lastBackgroundClick).toBe('');
+
+		// A pan that comes back to where it started is still not a click.
+		dispatchPointer(stage, 'pointerdown', center.x, center.y);
+		dispatchPointer(stage, 'pointermove', center.x + 40, center.y);
+		dispatchPointer(stage, 'pointermove', center.x, center.y);
+		dispatchPointer(stage, 'pointerup', center.x, center.y);
+		await sleep();
+		expect(wrapper.dataset.lastBackgroundClick).toBe('');
+
+		// A click, then a second press after the double-click gap: a plain pan.
+		dispatchPointer(stage, 'pointerdown', center.x, center.y);
+		dispatchPointer(stage, 'pointerup', center.x, center.y);
+		await sleep(DBL_CLICK_MS + 50);
+		dispatchPointer(stage, 'pointerdown', center.x, center.y);
+		dispatchPointer(stage, 'pointermove', center.x + 20, center.y + 10);
+		dispatchPointer(stage, 'pointerup', center.x + 20, center.y + 10);
+		await sleep();
+		expect(getStageTransform(canvasElement)).toContain('translate(80px, 50px)');
+		expect(wrapper.dataset.lastSelectionBoxUpdate).toBe('');
+		const viewState = parseViewStateCallback(wrapper.dataset.lastViewState ?? '');
+		expect(viewState.panX).toBe(80);
+		expect(viewState.panY).toBe(50);
+	}}
+/>
+
+<Story
+	name="ShiftOnReleaseReportsAnAdditiveBox"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+
+		await waitForLayout();
+
+		const center = getCenter(stage);
+		await dispatchBackgroundDoubleClickDrag(
+			stage,
+			center.x,
+			center.y,
+			center.x + 40,
+			center.y + 20
+		);
+		dispatchPointer(stage, 'pointerup', center.x + 40, center.y + 20, 1, '', 0, {
+			shiftKey: true
+		});
+		await sleep();
+		const end = parseRectCallback(wrapper.dataset.lastSelectionBoxEnd ?? '');
+		expectRectCloseTo(end, { left: center.x, top: center.y, width: 40, height: 20 });
+		expect(end.flag).toBe('true');
+	}}
+/>
+
+<Story
+	name="SecondPointerCancelsTheBoxAndPinches"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+
+		await waitForLayout();
+
+		// Chromium refuses to capture a pointer id no device has down, and the
+		// second finger here is synthetic. Capture is not what this story tests,
+		// so a refused capture is swallowed rather than surfacing as an
+		// unhandled error from inside the stage's handler.
+		const capture = stage.setPointerCapture.bind(stage);
+		stage.setPointerCapture = (pointerId: number) => {
+			try {
+				capture(pointerId);
+			} catch {
+				// Synthetic pointer: nothing to capture.
+			}
+		};
+
+		const center = getCenter(stage);
+		// Double-tap-drag on touch opens the box exactly as a mouse does.
+		await dispatchBackgroundDoubleClickDrag(
+			stage,
+			center.x,
+			center.y,
+			center.x - 40,
+			center.y,
+			'touch'
+		);
+		expect(getSelectionBox(stage)).not.toBeNull();
+		const updateBeforePinch = wrapper.dataset.lastSelectionBoxUpdate;
+
+		dispatchPointer(stage, 'pointerdown', center.x + 40, center.y, 2, 'touch');
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('1');
+		expect(getSelectionBox(stage)).toBeNull();
+
+		// The second finger then pinches, as it always has: spreading doubles the
+		// distance between the fingers.
+		dispatchPointer(stage, 'pointermove', center.x + 120, center.y, 2, 'touch');
+		await sleep();
+		expect(parseViewStateCallback(wrapper.dataset.lastLiveViewState ?? '').scale).toBeGreaterThan(
+			1
+		);
+		dispatchPointer(stage, 'pointerup', center.x + 120, center.y, 2, 'touch');
+
+		// The first finger carrying on reopens nothing, and its release ends nothing.
+		dispatchPointer(stage, 'pointermove', center.x - 80, center.y, 1, 'touch');
+		dispatchPointer(stage, 'pointerup', center.x - 80, center.y, 1, 'touch');
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxUpdate).toBe(updateBeforePinch);
+		expect(wrapper.dataset.lastSelectionBoxEnd).toBe('');
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('1');
+		expect(parseViewStateCallback(wrapper.dataset.lastViewState ?? '').scale).toBeGreaterThan(1);
+
+		Reflect.deleteProperty(stage, 'setPointerCapture');
+	}}
+/>
+
+<Story
+	name="EscapeCancelsTheBox"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+
+		await waitForLayout();
+
+		const center = getCenter(stage);
+		const transformBefore = getStageTransform(canvasElement);
+		await dispatchBackgroundDoubleClickDrag(
+			stage,
+			center.x,
+			center.y,
+			center.x + 40,
+			center.y + 20
+		);
+		const clickBeforeEscape = wrapper.dataset.lastBackgroundClick;
+		const updateBeforeEscape = wrapper.dataset.lastSelectionBoxUpdate;
+		expect(getSelectionBox(stage)).not.toBeNull();
+
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('1');
+		expect(getSelectionBox(stage)).toBeNull();
+
+		// The press is spent: moving on neither reopens the box nor pans, and the
+		// release is neither a box end nor a click.
+		dispatchPointer(stage, 'pointermove', center.x + 80, center.y + 40);
+		await sleep();
+		expect(getSelectionBox(stage)).toBeNull();
+		expect(wrapper.dataset.lastSelectionBoxUpdate).toBe(updateBeforeEscape);
+		dispatchPointer(stage, 'pointerup', center.x + 80, center.y + 40);
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxEnd).toBe('');
+		expect(wrapper.dataset.lastBackgroundClick).toBe(clickBeforeEscape);
+		expect(getStageTransform(canvasElement)).toBe(transformBefore);
+
+		// Escape with no box open is not the stage's to take.
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('1');
+	}}
+/>
+
+<Story
+	name="BackgroundClickReportsThePointAndANodeClickDoesNot"
+	args={{ nodes: [NODES[0]] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+		const circle = canvasElement.querySelector('.circle') as HTMLElement;
+
+		await waitForLayout();
+
+		const nodeCenter = getCenter(circle);
+		const bgX = nodeCenter.x + NODE_RADIUS * 3;
+		const bgY = nodeCenter.y;
+
+		dispatchPointer(stage, 'pointerdown', nodeCenter.x, nodeCenter.y);
+		dispatchPointer(stage, 'pointerup', nodeCenter.x, nodeCenter.y);
+		await sleep();
+		expect(wrapper.dataset.lastBackgroundClick).toBe('');
+
+		await sleep(DBL_CLICK_MS + 50);
+		dispatchPointer(stage, 'pointerdown', bgX, bgY);
+		dispatchPointer(stage, 'pointerup', bgX, bgY);
+		await sleep();
+		let click = parseBackgroundPointCallback(wrapper.dataset.lastBackgroundClick ?? '');
+		expect(click.x).toBeCloseTo(bgX);
+		expect(click.y).toBeCloseTo(bgY);
+		expect(click.flag).toBe('false');
+
+		await sleep(DBL_CLICK_MS + 50);
+		dispatchPointer(stage, 'pointerdown', bgX + 20, bgY, 1, '', 0, { shiftKey: true });
+		dispatchPointer(stage, 'pointerup', bgX + 20, bgY, 1, '', 0, { shiftKey: true });
+		await sleep();
+		click = parseBackgroundPointCallback(wrapper.dataset.lastBackgroundClick ?? '');
+		expect(click.x).toBeCloseTo(bgX + 20);
+		expect(click.flag).toBe('true');
+
+		// A node press in between breaks a background double: the press that
+		// follows the background click pans instead of opening a box.
+		await sleep(DBL_CLICK_MS + 50);
+		dispatchPointer(stage, 'pointerdown', bgX, bgY);
+		dispatchPointer(stage, 'pointerup', bgX, bgY);
+		dispatchPointer(stage, 'pointerdown', nodeCenter.x, nodeCenter.y);
+		dispatchPointer(stage, 'pointerup', nodeCenter.x, nodeCenter.y);
+		dispatchPointer(stage, 'pointerdown', bgX, bgY);
+		dispatchPointer(stage, 'pointermove', bgX + 30, bgY + 10);
+		dispatchPointer(stage, 'pointerup', bgX + 30, bgY + 10);
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxUpdate).toBe('');
+		expect(getStageTransform(canvasElement)).toContain('translate(30px, 10px)');
+	}}
+/>
+
+<Story
+	name="BackgroundDoubleClickWithoutDragReportsNothingAndResets"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+
+		await waitForLayout();
+
+		const center = getCenter(stage);
+		const clickAt = async (x: number) => {
+			dispatchPointer(stage, 'pointerdown', x, center.y);
+			dispatchPointer(stage, 'pointerup', x, center.y);
+			await sleep(20);
+		};
+		const lastClickX = () =>
+			parseBackgroundPointCallback(wrapper.dataset.lastBackgroundClick ?? '').x;
+
+		await clickAt(center.x);
+		expect(lastClickX()).toBeCloseTo(center.x);
+
+		// Too far from the first click to pair with it: a click of its own.
+		await clickAt(center.x + 50);
+		expect(lastClickX()).toBeCloseTo(center.x + 50);
+
+		// Close enough and soon enough: the double, which with no drag is nothing.
+		await clickAt(center.x + 53);
+		expect(lastClickX()).toBeCloseTo(center.x + 50);
+		expect(wrapper.dataset.lastSelectionBoxUpdate).toBe('');
+		expect(wrapper.dataset.lastSelectionBoxEnd).toBe('');
+
+		// The double used the first click up, so a third click starts fresh...
+		await clickAt(center.x + 56);
+		expect(lastClickX()).toBeCloseTo(center.x + 56);
+
+		// ...and is itself the first half of the next double.
+		dispatchPointer(stage, 'pointerdown', center.x + 56, center.y);
+		dispatchPointer(stage, 'pointermove', center.x + 96, center.y + 20);
+		dispatchPointer(stage, 'pointerup', center.x + 96, center.y + 20);
+		await sleep();
+		expectRectCloseTo(parseRectCallback(wrapper.dataset.lastSelectionBoxEnd ?? ''), {
+			left: center.x + 56,
+			top: center.y,
+			width: 40,
+			height: 20
+		});
+	}}
+/>
+
+<Story
+	name="TouchHoldOnTheBackgroundFiresTheLongPressAndNoClick"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+
+		await waitForLayout();
+
+		const center = getCenter(stage);
+		dispatchPointer(stage, 'pointerdown', center.x, center.y, 1, 'touch');
+		await sleep(LONG_PRESS_MS + 20);
+		const hold = parseBackgroundPointCallback(wrapper.dataset.lastBackgroundLongPress ?? '');
+		expect(hold.x).toBeCloseTo(center.x);
+		expect(hold.y).toBeCloseTo(center.y);
+		dispatchPointer(stage, 'pointerup', center.x, center.y, 1, 'touch');
+		await sleep();
+		expect(wrapper.dataset.lastBackgroundClick).toBe('');
+
+		// A touch that wanders past the slop is a pan, not a hold.
+		const holdBefore = wrapper.dataset.lastBackgroundLongPress;
+		dispatchPointer(stage, 'pointerdown', center.x + 30, center.y, 1, 'touch');
+		dispatchPointer(stage, 'pointermove', center.x + 60, center.y, 1, 'touch');
+		await sleep(LONG_PRESS_MS + 20);
+		expect(wrapper.dataset.lastBackgroundLongPress).toBe(holdBefore);
+		dispatchPointer(stage, 'pointerup', center.x + 60, center.y, 1, 'touch');
+	}}
+/>
+
+<Story
+	name="MouseHoldOnTheBackgroundDoesNotFireTheLongPress"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+
+		await waitForLayout();
+
+		const center = getCenter(stage);
+		dispatchPointer(stage, 'pointerdown', center.x, center.y, 1, 'mouse');
+		await sleep(LONG_PRESS_MS + 20);
+		expect(wrapper.dataset.lastBackgroundLongPress).toBe('');
+		dispatchPointer(stage, 'pointerup', center.x, center.y, 1, 'mouse');
+		await sleep();
+		// With no hold for a mouse, a slow click is still a click.
+		expect(wrapper.dataset.lastBackgroundClick).not.toBe('');
+	}}
+/>
+
+<Story
+	name="RightClickOnEmptyCanvasFiresTheBackgroundContextMenu"
+	args={{ nodes: [NODES[0]] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+		const circle = canvasElement.querySelector('.circle') as HTMLElement;
+
+		await waitForLayout();
+
+		const nodeCenter = getCenter(circle);
+		const bgX = nodeCenter.x + NODE_RADIUS * 3;
+		const bgY = nodeCenter.y;
+
+		const backgroundEvent = dispatchContextMenu(stage, bgX, bgY);
+		await sleep();
+		expect(backgroundEvent.defaultPrevented).toBe(true);
+		const menu = parseBackgroundPointCallback(wrapper.dataset.lastBackgroundContextMenu ?? '');
+		expect(menu.x).toBeCloseTo(bgX);
+		expect(menu.y).toBeCloseTo(bgY);
+		expect(wrapper.dataset.lastNodeContextMenu).toBe('');
+
+		// A right-click on the node is the node's.
+		const menuBefore = wrapper.dataset.lastBackgroundContextMenu;
+		dispatchContextMenu(stage, nodeCenter.x, nodeCenter.y);
+		await sleep();
+		expect(wrapper.dataset.lastNodeContextMenu?.startsWith(NODES[0].id)).toBe(true);
+		expect(wrapper.dataset.lastBackgroundContextMenu).toBe(menuBefore);
+
+		// The contextmenu a touch hold synthesizes is left to the hold.
+		const touchEvent = new PointerEvent('contextmenu', {
+			clientX: bgX + 10,
+			clientY: bgY,
+			pointerType: 'touch',
+			bubbles: true,
+			cancelable: true
+		});
+		stage.dispatchEvent(touchEvent);
+		await sleep();
+		expect(touchEvent.defaultPrevented).toBe(true);
+		expect(wrapper.dataset.lastBackgroundContextMenu).toBe(menuBefore);
+
+		// macOS ctrl+click: the button-0 press that precedes the contextmenu is
+		// not also a click on release.
+		dispatchPointer(stage, 'pointerdown', bgX + 20, bgY);
+		dispatchContextMenu(stage, bgX + 20, bgY);
+		dispatchPointer(stage, 'pointerup', bgX + 20, bgY);
+		await sleep();
+		expect(
+			parseBackgroundPointCallback(wrapper.dataset.lastBackgroundContextMenu ?? '').x
+		).toBeCloseTo(bgX + 20);
+		expect(wrapper.dataset.lastBackgroundClick).toBe('');
+
+		// A right-click while a box is open abandons the box.
+		await sleep(DBL_CLICK_MS + 50);
+		await dispatchBackgroundDoubleClickDrag(stage, bgX, bgY, bgX + 40, bgY + 20);
+		expect(getSelectionBox(stage)).not.toBeNull();
+		dispatchContextMenu(stage, bgX + 40, bgY + 20);
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('1');
+		expect(getSelectionBox(stage)).toBeNull();
+		dispatchPointer(stage, 'pointerup', bgX + 40, bgY + 20);
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxEnd).toBe('');
 	}}
 />

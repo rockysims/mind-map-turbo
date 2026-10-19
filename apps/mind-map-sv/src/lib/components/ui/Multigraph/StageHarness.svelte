@@ -5,6 +5,7 @@
 	import { effectiveHitRadius, isPointInCircle } from './lib/hitTest.js';
 	import type { NodeData } from '../types/node.js';
 	import type { Point } from '../types/multigraph.js';
+	import type { StageRect } from './lib/stageCoordinates.js';
 
 	let {
 		nodes = [],
@@ -75,6 +76,17 @@
 	let lastViewState = $state<{ panX: number; panY: number; scale: number } | null>(null);
 	let lastLiveViewState = $state<{ panX: number; panY: number; scale: number } | null>(null);
 	let lastBlockedZoom = $state<string>('');
+	let lastSelectionBoxUpdate = $state<StageRect | null>(null);
+	let lastSelectionBoxEnd = $state<{ rect: StageRect; additive: boolean } | null>(null);
+	/** A count rather than a flag, so a story can tell one cancel from two. */
+	let selectionBoxCancelCount = $state(0);
+	let lastBackgroundClick = $state<{ point: Point; shiftKey: boolean } | null>(null);
+	let lastBackgroundLongPress = $state<Point | null>(null);
+	let lastBackgroundContextMenu = $state<Point | null>(null);
+
+	function formatRect(rect: StageRect): string {
+		return `${rect.left},${rect.top},${rect.width},${rect.height}`;
+	}
 </script>
 
 <div
@@ -109,6 +121,22 @@
 		? `${lastLiveViewState.panX},${lastLiveViewState.panY},${lastLiveViewState.scale}`
 		: ''}
 	data-last-blocked-zoom={lastBlockedZoom}
+	data-last-selection-box-update={lastSelectionBoxUpdate ? formatRect(lastSelectionBoxUpdate) : ''}
+	data-last-selection-box-end={lastSelectionBoxEnd
+		? `${formatRect(lastSelectionBoxEnd.rect)},${lastSelectionBoxEnd.additive}`
+		: ''}
+	data-last-selection-box-cancel={selectionBoxCancelCount > 0
+		? String(selectionBoxCancelCount)
+		: ''}
+	data-last-background-click={lastBackgroundClick
+		? `${lastBackgroundClick.point.x},${lastBackgroundClick.point.y},${lastBackgroundClick.shiftKey}`
+		: ''}
+	data-last-background-long-press={lastBackgroundLongPress
+		? `${lastBackgroundLongPress.x},${lastBackgroundLongPress.y}`
+		: ''}
+	data-last-background-context-menu={lastBackgroundContextMenu
+		? `${lastBackgroundContextMenu.x},${lastBackgroundContextMenu.y}`
+		: ''}
 	{...rest}
 >
 	<Stage
@@ -156,6 +184,24 @@
 		}}
 		onBlockedZoom={(input) => {
 			lastBlockedZoom = `${input.direction},${input.focalPoint.x},${input.focalPoint.y}`;
+		}}
+		onSelectionBoxUpdate={(rect) => {
+			lastSelectionBoxUpdate = rect;
+		}}
+		onSelectionBoxEnd={(rect, { additive }) => {
+			lastSelectionBoxEnd = { rect, additive };
+		}}
+		onSelectionBoxCancel={() => {
+			selectionBoxCancelCount += 1;
+		}}
+		onBackgroundClick={(point, { shiftKey }) => {
+			lastBackgroundClick = { point, shiftKey };
+		}}
+		onBackgroundLongPress={(point) => {
+			lastBackgroundLongPress = point;
+		}}
+		onBackgroundContextMenu={(point) => {
+			lastBackgroundContextMenu = point;
 		}}
 	>
 		{#each nodes as node (node.id)}

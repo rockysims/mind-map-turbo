@@ -38,6 +38,24 @@ export function graphPointToClientPoint(
 }
 
 /**
+ * The rectangle two corners span, whichever two they are.
+ *
+ * A drag can run any way from where it started, so the press and the pointer
+ * are opposite corners in no fixed order: dragging up and to the left would
+ * otherwise give a negative width and height, which no consumer measuring
+ * overlap expects. Both points share one coordinate space and so does the
+ * result.
+ */
+export function rectFromCorners(a: Point, b: Point): StageRect {
+	return {
+		left: Math.min(a.x, b.x),
+		top: Math.min(a.y, b.y),
+		width: Math.abs(a.x - b.x),
+		height: Math.abs(a.y - b.y)
+	};
+}
+
+/**
  * The stage rect the focus frame should lay out against.
  *
  * A browser can report a stage of no size for a moment — a window losing its

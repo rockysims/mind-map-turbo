@@ -30,7 +30,11 @@
 		type EntryGestureDirection,
 		type EntryGestureGateState
 	} from './lib/entryGestureGate.js';
-	import { clientPointToGraphPoint, type StageRect } from './lib/stageCoordinates.js';
+	import {
+		clientPointToGraphPoint,
+		rectFromCorners,
+		type StageRect
+	} from './lib/stageCoordinates.js';
 	import { DRAG_THRESHOLD, DBL_CLICK_MS, LONG_PRESS_DIST, LONG_PRESS_MS } from '$lib/constants.js';
 
 	interface ViewStateSnapshot {
@@ -92,11 +96,17 @@
 		initialPanY?: number;
 		/** Pixels of movement below which we treat as click rather than drag. */
 		dragThreshold?: number;
-		/** Gap within which a second press on the same node counts as a double-click. */
+		/**
+		 * Gap within which a second press on the same node, or on the same spot of
+		 * empty canvas, counts as a double-click.
+		 */
 		doubleClickMs?: number;
-		/** How long a touch must rest on a node before it counts as a hold. */
+		/** How long a touch must rest on a node or on empty canvas before it counts as a hold. */
 		longPressMs?: number;
-		/** How far the pointer may wander during a hold before it stops being one. */
+		/**
+		 * How far the pointer may wander during a hold before it stops being one,
+		 * and how close two presses on empty canvas must land to make a double.
+		 */
 		longPressDistancePx?: number;
 		/** Lower zoom clamp for every gesture, the mount seed, and fit. */
 		minScale?: number;
@@ -124,6 +134,27 @@
 		onCreationCancel?: (sourceNode: NodeData) => void;
 		/** Callback when a merge-mode gesture is dropped onto another node: fold `sourceNode` into `targetNode`. */
 		onNodeMergeDropOntoNode?: (sourceNode: NodeData, targetNode: NodeData) => void;
+		/**
+		 * Fired on every pointer move while a selection box is open: a
+		 * double-click-drag (double-tap-drag) that started on empty canvas. The
+		 * rect is in client coordinates, like `onStageRectChange`'s, so a consumer
+		 * can test it against on-screen node geometry without the view transform.
+		 */
+		onSelectionBoxUpdate?: (rect: StageRect) => void;
+		/** Fired when an open box is released; `additive` is Shift held at release. */
+		onSelectionBoxEnd?: (rect: StageRect, options: { additive: boolean }) => void;
+		/** Fired when an open box is abandoned: a second pointer, pointercancel, Escape or a right-click. */
+		onSelectionBoxCancel?: () => void;
+		/**
+		 * Fired when a press on empty canvas is released without crossing
+		 * `dragThreshold`, was not the second press of a double and was not a
+		 * hold. Client coords like onNodeLongPress.
+		 */
+		onBackgroundClick?: (point: Point, options: { shiftKey: boolean }) => void;
+		/** Callback when user holds empty canvas without moving (touch pointers only); client coords. */
+		onBackgroundLongPress?: (point: Point) => void;
+		/** Callback when user right-clicks (or pen-barrel-clicks) empty canvas; client coords. */
+		onBackgroundContextMenu?: (point: Point) => void;
 		/** One-shot request to arm a drag-from-node gesture (menu-initiated, no button pressed). */
 		creationArmRequest?: CreationArmRequest | null;
 		/** Fired whenever the internal pan/zoom state changes, including initial mount. */
@@ -191,6 +222,12 @@
 		onCreationDragUpdate,
 		onCreationCancel,
 		onNodeMergeDropOntoNode,
+		onSelectionBoxUpdate,
+		onSelectionBoxEnd,
+		onSelectionBoxCancel,
+		onBackgroundClick,
+		onBackgroundLongPress,
+		onBackgroundContextMenu,
 		creationArmRequest,
 		onViewStateLiveChange,
 		onStageRectChange,
@@ -327,6 +364,188 @@
 	let longPressStartTime = 0;
 	let longPressFired = false;
 
+	// Background press: the gestures that start on empty canvas. Precedence, in
+	// the order the code below decides it:
+	//
+	// 1. A background press is a double when the previous background click was
+	//    released within `doubleClickMs` (the gap the node's double measures
+	//    too) and landed within `longPressDistancePx` of this press. The
+	//    bookkeeping is the background's own — `lastBackgroundClick`, never
+	//    `lastClickNodeId` — and a node press clears it, so a node click cannot
+	//    complete a background double nor a background click a node one. Any
+	//    background press consumes it, so a third click starts fresh.
+	// 2. Outside a double the press pans from its first pixel, as it always has.
+	//    Inside one it never pans: `panStart` is not set at all (setting it and
+	//    clearing it at the threshold would leave the view nudged by however far
+	//    the pointer crept first), and movement past `dragThreshold` opens the
+	//    selection box instead.
+	// 3. The box is drawn here, in stage space beside `.stage-content` and not
+	//    inside it, because the content layer carries the pan/zoom transform.
+	//    `onSelectionBoxUpdate` fires on every move while it is open.
+	// 4. Release closes an open box with `additive: e.shiftKey`. With no box, a
+	//    press that never crossed `dragThreshold`, was not a double and was not
+	//    held is a click (`onBackgroundClick`). A double that never moved is
+	//    nothing: on a node it toggles the pin, on empty canvas it only arms the
+	//    box. A pan release persists the view exactly as before.
+	// 5. A second pointer, pointercancel and Escape abandon the box
+	//    (`onSelectionBoxCancel`) and with it the press, so nothing that follows
+	//    lands as a click; the second pointer then pinches, as over a node.
+	// 6. A touch hold fires `onBackgroundLongPress` through the node hold's
+	//    timer slot and guards (one pointer, no drag, no double, within the
+	//    slop), and its release is not a click. A right-click fires
+	//    `onBackgroundContextMenu` and abandons whatever the press began, since
+	//    macOS ctrl+click delivers a button-0 press before the contextmenu.
+	// 7. A menu-armed creation session swallows background presses before any
+	//    of this runs (`onPointerDownStage`).
+	//
+	// Plain variables rather than `$state`: nothing renders from the press, and
+	// the hold timer checks it is still the same press by identity.
+	interface BackgroundPress {
+		clientX: number;
+		clientY: number;
+		/** Latest pointer position, for the hold's slop and the box's far corner. */
+		current: Point;
+		isDouble: boolean;
+		/** Crossed `dragThreshold` at some point — a pan that came back is still not a click. */
+		dragged: boolean;
+	}
+	let backgroundPress: BackgroundPress | null = null;
+	let lastBackgroundClick: { clientX: number; clientY: number; time: number } | null = null;
+	/**
+	 * The open box where it is drawn, in stage-local pixels. The callbacks get
+	 * the same rect in client space; the two differ by the stage's own offset.
+	 */
+	let selectionBox = $state<StageRect | null>(null);
+	const selectionBoxOpen = $derived(selectionBox !== null);
+
+	$effect(() => {
+		if (typeof window === 'undefined' || !selectionBoxOpen) return;
+		const onKeyDown = (e: KeyboardEvent) => {
+			if (e.key === 'Escape') cancelBackgroundGesture();
+		};
+		window.addEventListener('keydown', onKeyDown);
+		return () => window.removeEventListener('keydown', onKeyDown);
+	});
+
+	function beginBackgroundPress(e: PointerEvent) {
+		const previous = lastBackgroundClick;
+		lastBackgroundClick = null;
+		const isDouble =
+			previous !== null &&
+			Date.now() - previous.time < doubleClickMs &&
+			pointerDistance(previous.clientX, previous.clientY, e.clientX, e.clientY) <=
+				longPressDistancePx;
+		const press: BackgroundPress = {
+			clientX: e.clientX,
+			clientY: e.clientY,
+			current: { x: e.clientX, y: e.clientY },
+			isDouble,
+			dragged: false
+		};
+		backgroundPress = press;
+		longPressFired = false;
+		if (!isDouble) panStart = { clientX: e.clientX, clientY: e.clientY, panX, panY };
+		if (e.pointerType === 'touch') startBackgroundLongPressTimer(press);
+	}
+
+	function startBackgroundLongPressTimer(press: BackgroundPress) {
+		cancelLongPressTimer();
+		longPressStartTime = Date.now();
+		longPressTimeoutId = setTimeout(() => {
+			longPressTimeoutId = null;
+			if (backgroundPress !== press) return;
+			if (activePointers.size !== 1 || press.dragged || press.isDouble) return;
+			const distance = pointerDistance(
+				press.clientX,
+				press.clientY,
+				press.current.x,
+				press.current.y
+			);
+			if (
+				recognizeLongPress({
+					duration: Date.now() - longPressStartTime,
+					distance,
+					minDuration: longPressMs,
+					maxDistance: longPressDistancePx
+				})
+			) {
+				longPressFired = true;
+				onBackgroundLongPress?.({ x: press.current.x, y: press.current.y });
+			}
+		}, longPressMs);
+	}
+
+	/** Follow the pointer for the hold's slop and the click/drag decision. */
+	function trackBackgroundPress(press: BackgroundPress, e: PointerEvent) {
+		press.current = { x: e.clientX, y: e.clientY };
+		const dist = pointerDistance(press.clientX, press.clientY, e.clientX, e.clientY);
+		if (dist > longPressDistancePx) cancelLongPressTimer();
+		if (dist >= dragThreshold) {
+			cancelLongPressTimer();
+			press.dragged = true;
+		}
+	}
+
+	function updateSelectionBox(press: BackgroundPress) {
+		const rect = rectFromCorners({ x: press.clientX, y: press.clientY }, press.current);
+		const stageBounds = stageRef?.getBoundingClientRect();
+		selectionBox = {
+			left: rect.left - (stageBounds?.left ?? 0),
+			top: rect.top - (stageBounds?.top ?? 0),
+			width: rect.width,
+			height: rect.height
+		};
+		onSelectionBoxUpdate?.(rect);
+	}
+
+	function cancelSelectionBox() {
+		if (!selectionBox) return;
+		selectionBox = null;
+		onSelectionBoxCancel?.();
+	}
+
+	/**
+	 * Abandon whatever a background press began: its release then counts as
+	 * nothing — no click, no box, no half of a double. The pan is left alone:
+	 * the second pointer clears `panStart` itself, and a right-click mid-pan
+	 * lets the pan finish and persist as it always has.
+	 */
+	function cancelBackgroundGesture() {
+		if (backgroundPress) {
+			backgroundPress = null;
+			cancelLongPressTimer();
+			longPressFired = false;
+		}
+		lastBackgroundClick = null;
+		cancelSelectionBox();
+	}
+
+	function endBackgroundPress(press: BackgroundPress, e: PointerEvent) {
+		backgroundPress = null;
+		cancelLongPressTimer();
+		const held = longPressFired;
+		longPressFired = false;
+		if (e.type === 'pointercancel') {
+			cancelSelectionBox();
+			return;
+		}
+		if (selectionBox) {
+			const rect = rectFromCorners(
+				{ x: press.clientX, y: press.clientY },
+				{ x: e.clientX, y: e.clientY }
+			);
+			selectionBox = null;
+			onSelectionBoxEnd?.(rect, { additive: e.shiftKey });
+			return;
+		}
+		const dragged =
+			press.dragged ||
+			pointerDistance(press.clientX, press.clientY, e.clientX, e.clientY) >= dragThreshold;
+		if (held || dragged || press.isDouble) return;
+		lastBackgroundClick = { clientX: press.clientX, clientY: press.clientY, time: Date.now() };
+		onBackgroundClick?.({ x: e.clientX, y: e.clientY }, { shiftKey: e.shiftKey });
+	}
+
 	// Drag-from-node gesture (new node/edge, or a merge): either a double-click
 	// drag or a menu-armed hover session where no button is pressed until the
 	// final click. Only `mode` differs between the two aims; the tracking,
@@ -343,6 +562,7 @@
 		if (!request || request.id === lastCreationArmRequestId) return;
 		lastCreationArmRequestId = request.id;
 		cancelActiveNodeGesture();
+		cancelBackgroundGesture();
 		panStart = null;
 		creationSession = {
 			sourceNode: request.sourceNode,
@@ -411,6 +631,9 @@
 	function onPointerDown(e: PointerEvent) {
 		const node = getNodeAt(e.clientX, e.clientY);
 		if (node) {
+			// A node press breaks a background double in progress (precedence 1).
+			lastBackgroundClick = null;
+			backgroundPress = null;
 			dragNode = node;
 			dragStartPos = { x: e.clientX, y: e.clientY };
 			dragCurrentPos = dragStartPos;
@@ -419,7 +642,7 @@
 				lastClickNodeId === node.id && Date.now() - lastClickTime < doubleClickMs;
 			if (e.pointerType === 'touch') startLongPressTimer(node);
 		} else {
-			panStart = { clientX: e.clientX, clientY: e.clientY, panX, panY };
+			beginBackgroundPress(e);
 			isDoubleClickSession = false;
 		}
 		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -491,6 +714,10 @@
 		if (panStart) {
 			panX = panStart.panX + (e.clientX - panStart.clientX);
 			panY = panStart.panY + (e.clientY - panStart.clientY);
+			if (backgroundPress) trackBackgroundPress(backgroundPress, e);
+		} else if (backgroundPress?.isDouble) {
+			trackBackgroundPress(backgroundPress, e);
+			if (backgroundPress.dragged) updateSelectionBox(backgroundPress);
 		} else if (dragNode && dragStartPos && isDoubleClickSession) {
 			dragCurrentPos = { x: e.clientX, y: e.clientY };
 			const dist = pointerDistance(dragStartPos.x, dragStartPos.y, e.clientX, e.clientY);
@@ -573,6 +800,11 @@
 			stage.releasePointerCapture(e.pointerId);
 			onViewStateChange?.({ panX, panY, scale });
 		}
+		if (backgroundPress) {
+			// A double session holds the capture with no pan to release it.
+			if (stage.hasPointerCapture?.(e.pointerId)) stage.releasePointerCapture(e.pointerId);
+			endBackgroundPress(backgroundPress, e);
+		}
 	}
 
 	function onWheel(e: WheelEvent) {
@@ -651,8 +883,13 @@
 		e.preventDefault();
 		if ((e as PointerEvent).pointerType === 'touch') return;
 		const node = getNodeAt(e.clientX, e.clientY);
-		if (!node) return;
-		// macOS ctrl+click fires a button-0 pointerdown before contextmenu.
+		// macOS ctrl+click fires a button-0 pointerdown before contextmenu, so
+		// whatever that press began must not also land as a click or a box.
+		cancelBackgroundGesture();
+		if (!node) {
+			onBackgroundContextMenu?.({ x: e.clientX, y: e.clientY });
+			return;
+		}
 		cancelActiveNodeGesture();
 		onNodeContextMenu?.(node, { x: e.clientX, y: e.clientY });
 	}
@@ -668,6 +905,7 @@
 		} else if (activePointers.size === 2) {
 			panStart = null;
 			cancelActiveNodeGesture();
+			cancelBackgroundGesture();
 			const dist = getTwoPointerDistance();
 			const centroid = getTwoPointerCentroid();
 			if (dist !== null && centroid !== null) {
@@ -917,6 +1155,7 @@
 	bind:this={stageRef}
 	class="stage"
 	class:panning={panStart !== null}
+	class:boxing={selectionBox !== null}
 	onpointerdown={onPointerDownStage}
 	onpointermove={onPointerMoveStage}
 	onpointerup={onPointerUpStage}
@@ -936,6 +1175,22 @@
 			{@render children()}
 		{/if}
 	</div>
+	{#if selectionBox}
+		<!--
+			Beside the content layer, not in it: that layer is panned and scaled, and
+			the box is drawn in the stage's own pixels from client coordinates. It
+			takes no pointer events, so the press that drew it keeps hitting the
+			stage underneath.
+		-->
+		<div
+			class="selection-box"
+			aria-hidden="true"
+			style:left="{selectionBox.left}px"
+			style:top="{selectionBox.top}px"
+			style:width="{selectionBox.width}px"
+			style:height="{selectionBox.height}px"
+		></div>
+	{/if}
 </div>
 
 <style>
@@ -949,6 +1204,17 @@
 	}
 	.stage.panning {
 		cursor: grabbing;
+	}
+	.stage.boxing {
+		cursor: crosshair;
+	}
+	.selection-box {
+		position: absolute;
+		box-sizing: border-box;
+		pointer-events: none;
+		border: 1px solid color-mix(in oklab, var(--foreground) 55%, transparent);
+		background: color-mix(in oklab, var(--foreground) 8%, transparent);
+		border-radius: 2px;
 	}
 	.stage-content {
 		position: absolute;
