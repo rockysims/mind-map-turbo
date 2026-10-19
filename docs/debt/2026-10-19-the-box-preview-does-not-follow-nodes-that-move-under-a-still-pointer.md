@@ -1,8 +1,8 @@
-# The box preview does not follow nodes that move under a still pointer
+# The box preview and the cut targets do not follow nodes that move under a still pointer
 
 **Created:** 2026-10-19
 **Area:** `apps/mind-map-sv/src/lib/components/ui/Multigraph/Multigraph.svelte`
-(`handleSelectionBoxUpdate`, `boxedSelection`)
+(`handleSelectionBoxUpdate`, `boxedSelection`; `handleEdgeCutUpdate` and the cut-target set)
 **Cost if ignored:** while a selection box is open and the pointer holds still,
 a node that drifts into or out of the box — a layout settle, an enter
 animation, a wheel zoom mid-drag — keeps its old ring until the next pointer
@@ -11,6 +11,8 @@ differ from the last frame the reader saw.
 
 ## What we did
 
+The same holds for the edge cut's would-be targets (added 2026-10-19), which
+are recomputed on a move and not when the layout settles under a still line.
 The preview is recomputed on every pointer move and on every Shift press or
 release, which is what the Stage reports. Nothing recomputes it when only the
 layout or the view changes under a still box.

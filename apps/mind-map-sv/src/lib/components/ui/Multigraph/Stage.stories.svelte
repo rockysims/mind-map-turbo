@@ -3,6 +3,7 @@
 	import { expect, within } from 'storybook/test';
 	import StageHarness from './StageHarness.svelte';
 	import type { NodeData } from '../types/node';
+	import type { Point } from '../types/multigraph';
 	import { DBL_CLICK_MS, DRAG_THRESHOLD, LONG_PRESS_MS, NODE_RADIUS } from '$lib/constants';
 
 	const NODES: NodeData[] = [];
@@ -196,6 +197,43 @@
 		dispatchPointer(stage, 'pointerdown', fromX, fromY, 1, pointerType);
 		dispatchPointer(stage, 'pointermove', toX, toY, 1, pointerType);
 		await sleep();
+	}
+
+	/** Press the harness's "Arm cut" control: a cut anchored at the stage's centre. */
+	function armEdgeCut(el: HTMLElement): void {
+		const button = el.querySelector('[data-testid="arm-edge-cut"]');
+		if (!(button instanceof HTMLElement)) throw new Error('Arm cut control not found');
+		button.click();
+	}
+
+	function getEdgeCutLine(stage: HTMLElement): SVGSVGElement | null {
+		const line = stage.querySelector('.edge-cut-line');
+		return line instanceof SVGSVGElement ? line : null;
+	}
+
+	/** The drawn line's two ends, in the stage-local pixels its attributes carry. */
+	function drawnEdgeCutEnds(svg: SVGSVGElement): { from: Point; to: Point } {
+		const line = svg.querySelector('line');
+		if (!line) throw new Error('Edge cut line has no <line>');
+		const read = (name: string) => Number(line.getAttribute(name));
+		return { from: { x: read('x1'), y: read('y1') }, to: { x: read('x2'), y: read('y2') } };
+	}
+
+	/** `ax,ay,bx,by` as the harness writes a cut callback. */
+	function parseSegmentCallback(value: string): { a: Point; b: Point } {
+		const [ax, ay, bx, by] = value.split(',').map(Number);
+		return { a: { x: ax, y: ay }, b: { x: bx, y: by } };
+	}
+
+	function expectPointCloseTo(actual: Point, expected: Point) {
+		expect(actual.x).toBeCloseTo(expected.x);
+		expect(actual.y).toBeCloseTo(expected.y);
+	}
+
+	function expectSegmentCallback(value: string | undefined, a: Point, b: Point) {
+		const segment = parseSegmentCallback(value ?? '');
+		expectPointCloseTo(segment.a, a);
+		expectPointCloseTo(segment.b, b);
 	}
 
 	/** Simulate double-click at (x, y) on target so Stage treats it as make-primary. */
@@ -1532,5 +1570,419 @@
 		dispatchPointer(stage, 'pointerup', bgX + 40, bgY + 20);
 		await sleep();
 		expect(wrapper.dataset.lastSelectionBoxEnd).toBe('');
+	}}
+/>
+
+<Story
+	name="ArmedEdgeCutDrawsTheLineFromTheAnchorAndHoverUpdatesIt"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+
+		await waitForLayout();
+
+		const anchor = getCenter(stage);
+		const stageBounds = stage.getBoundingClientRect();
+		const local = (point: Point): Point => ({
+			x: point.x - stageBounds.left,
+			y: point.y - stageBounds.top
+		});
+		const transformBefore = getStageTransform(canvasElement);
+		expect(getEdgeCutLine(stage)).toBeNull();
+
+		armEdgeCut(canvasElement);
+		await sleep();
+
+		// Armed, the line is a point at the anchor, and the stage says so at once:
+		// until the pointer comes back over the canvas that is all there is.
+		expectSegmentCallback(wrapper.dataset.lastEdgeCutUpdate, anchor, anchor);
+		const line = getEdgeCutLine(stage);
+		expect(line).not.toBeNull();
+		if (!line) return;
+		let drawn = drawnEdgeCutEnds(line);
+		expectPointCloseTo(drawn.from, local(anchor));
+		expectPointCloseTo(drawn.to, local(anchor));
+
+		// Drawn by the stage in its own pixels, beside the panned and scaled
+		// content layer, and out of the way of every press and of assistive tech.
+		expect(line.parentElement).toBe(stage);
+		expect(getStageContent(canvasElement).parentElement).toBe(stage);
+		expect(line.getAttribute('aria-hidden')).toBe('true');
+		expect(window.getComputedStyle(line).pointerEvents).toBe('none');
+		// Dashed as well as red, so colour is not the only thing that says "cut".
+		const stroke = line.querySelector('line');
+		expect(stroke).not.toBeNull();
+		if (!stroke) return;
+		expect(window.getComputedStyle(stroke).strokeDasharray).not.toBe('none');
+		expect(window.getComputedStyle(stage).cursor).toBe('crosshair');
+
+		// Hover with no button moves the free end, and every move reports.
+		dispatchPointer(stage, 'pointermove', anchor.x + 60, anchor.y - 40);
+		await sleep();
+		const hover = { x: anchor.x + 60, y: anchor.y - 40 };
+		expectSegmentCallback(wrapper.dataset.lastEdgeCutUpdate, anchor, hover);
+		drawn = drawnEdgeCutEnds(line);
+		expectPointCloseTo(drawn.from, local(anchor));
+		expectPointCloseTo(drawn.to, local(hover));
+
+		dispatchPointer(stage, 'pointermove', anchor.x - 90, anchor.y + 70);
+		await sleep();
+		expectSegmentCallback(wrapper.dataset.lastEdgeCutUpdate, anchor, {
+			x: anchor.x - 90,
+			y: anchor.y + 70
+		});
+
+		// Nothing pans under the line, and nothing ends or cancels it yet.
+		expect(getStageTransform(canvasElement)).toBe(transformBefore);
+		expect(wrapper.dataset.lastEdgeCutEnd).toBe('');
+		expect(wrapper.dataset.lastEdgeCutCancel).toBe('');
+	}}
+/>
+
+<Story
+	name="ArmedEdgeCutClickEndsItWithBothPoints"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+
+		await waitForLayout();
+
+		const anchor = getCenter(stage);
+		const transformBefore = getStageTransform(canvasElement);
+		armEdgeCut(canvasElement);
+		await sleep();
+		dispatchPointer(stage, 'pointermove', anchor.x + 80, anchor.y, 1, 'mouse');
+		await sleep();
+
+		// A right-click release neither ends nor cancels it.
+		dispatchPointer(stage, 'pointerdown', anchor.x + 80, anchor.y, 1, 'mouse', SECONDARY_BUTTON);
+		dispatchPointer(stage, 'pointerup', anchor.x + 80, anchor.y, 1, 'mouse', SECONDARY_BUTTON);
+		await sleep();
+		expect(wrapper.dataset.lastEdgeCutEnd).toBe('');
+		expect(wrapper.dataset.lastEdgeCutCancel).toBe('');
+		expect(getEdgeCutLine(stage)).not.toBeNull();
+
+		// The click: its press carries the free end to where it landed, and its
+		// release ends the cut with both points.
+		const end = { x: anchor.x + 84, y: anchor.y + 3 };
+		dispatchPointer(stage, 'pointerdown', end.x, end.y, 1, 'mouse');
+		await sleep();
+		expectSegmentCallback(wrapper.dataset.lastEdgeCutUpdate, anchor, end);
+		expect(wrapper.dataset.lastEdgeCutEnd).toBe('');
+		dispatchPointer(stage, 'pointerup', end.x, end.y, 1, 'mouse');
+		await sleep();
+		expectSegmentCallback(wrapper.dataset.lastEdgeCutEnd, anchor, end);
+		expect(wrapper.dataset.lastEdgeCutCancel).toBe('');
+		expect(getEdgeCutLine(stage)).toBeNull();
+		expect(window.getComputedStyle(stage).cursor).not.toBe('crosshair');
+
+		// The armed cut swallowed the press: it was neither a click nor a pan.
+		expect(wrapper.dataset.lastBackgroundClick).toBe('');
+		expect(getStageTransform(canvasElement)).toBe(transformBefore);
+
+		// The cut is over: the next click is a plain background click, and moving
+		// reports nothing.
+		const updateAfterEnd = wrapper.dataset.lastEdgeCutUpdate;
+		dispatchPointer(stage, 'pointermove', anchor.x - 40, anchor.y, 1, 'mouse');
+		dispatchPointer(stage, 'pointerdown', anchor.x - 40, anchor.y, 1, 'mouse');
+		dispatchPointer(stage, 'pointerup', anchor.x - 40, anchor.y, 1, 'mouse');
+		await sleep();
+		expect(wrapper.dataset.lastEdgeCutUpdate).toBe(updateAfterEnd);
+		expect(parseBackgroundPointCallback(wrapper.dataset.lastBackgroundClick ?? '').x).toBeCloseTo(
+			anchor.x - 40
+		);
+		expectSegmentCallback(wrapper.dataset.lastEdgeCutEnd, anchor, end);
+	}}
+/>
+
+<Story
+	name="ArmedEdgeCutEscapeCancels"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+
+		await waitForLayout();
+
+		const anchor = getCenter(stage);
+		armEdgeCut(canvasElement);
+		await sleep();
+		dispatchPointer(stage, 'pointermove', anchor.x + 50, anchor.y + 30);
+		await sleep();
+
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+		await sleep();
+		expect(wrapper.dataset.lastEdgeCutCancel).toBe('1');
+		expect(getEdgeCutLine(stage)).toBeNull();
+
+		// The cut is over: a later click is a click, not a cut.
+		dispatchPointer(stage, 'pointerdown', anchor.x + 50, anchor.y + 30);
+		dispatchPointer(stage, 'pointerup', anchor.x + 50, anchor.y + 30);
+		await sleep();
+		expect(wrapper.dataset.lastEdgeCutEnd).toBe('');
+		expect(wrapper.dataset.lastBackgroundClick).not.toBe('');
+
+		// Escape with no cut armed is not the cut's to take.
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+		await sleep();
+		expect(wrapper.dataset.lastEdgeCutCancel).toBe('1');
+	}}
+/>
+
+<Story
+	name="ArmedEdgeCutSecondPointerCancelsAndPinches"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+
+		await waitForLayout();
+
+		// As in SecondPointerCancelsTheBoxAndPinches: Chromium will not capture a
+		// synthetic second finger, and capture is not what this story tests.
+		const capture = stage.setPointerCapture.bind(stage);
+		stage.setPointerCapture = (pointerId: number) => {
+			try {
+				capture(pointerId);
+			} catch {
+				// Synthetic pointer: nothing to capture.
+			}
+		};
+
+		const anchor = getCenter(stage);
+		armEdgeCut(canvasElement);
+		await sleep();
+		dispatchPointer(stage, 'pointerdown', anchor.x - 40, anchor.y, 1, 'touch');
+		dispatchPointer(stage, 'pointermove', anchor.x - 60, anchor.y, 1, 'touch');
+		await sleep();
+		const updateBeforePinch = wrapper.dataset.lastEdgeCutUpdate;
+		expectSegmentCallback(updateBeforePinch, anchor, { x: anchor.x - 60, y: anchor.y });
+
+		dispatchPointer(stage, 'pointerdown', anchor.x + 40, anchor.y, 2, 'touch');
+		await sleep();
+		expect(wrapper.dataset.lastEdgeCutCancel).toBe('1');
+		expect(getEdgeCutLine(stage)).toBeNull();
+
+		// The second finger then pinches, as it always has.
+		dispatchPointer(stage, 'pointermove', anchor.x + 140, anchor.y, 2, 'touch');
+		await sleep();
+		expect(parseViewStateCallback(wrapper.dataset.lastLiveViewState ?? '').scale).toBeGreaterThan(
+			1
+		);
+		dispatchPointer(stage, 'pointerup', anchor.x + 140, anchor.y, 2, 'touch');
+
+		// The first finger carrying on and lifting neither reopens nor ends a cut.
+		dispatchPointer(stage, 'pointermove', anchor.x - 80, anchor.y, 1, 'touch');
+		dispatchPointer(stage, 'pointerup', anchor.x - 80, anchor.y, 1, 'touch');
+		await sleep();
+		expect(wrapper.dataset.lastEdgeCutUpdate).toBe(updateBeforePinch);
+		expect(wrapper.dataset.lastEdgeCutEnd).toBe('');
+		expect(wrapper.dataset.lastEdgeCutCancel).toBe('1');
+
+		Reflect.deleteProperty(stage, 'setPointerCapture');
+	}}
+/>
+
+<Story
+	name="ArmedEdgeCutCancelsOnPointerDownOutsideStage"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+		const armButton = canvasElement.querySelector('[data-testid="arm-edge-cut"]');
+		if (!(armButton instanceof HTMLElement)) throw new Error('Arm cut control not found');
+
+		await waitForLayout();
+
+		const anchor = getCenter(stage);
+		const target = { x: anchor.x + 70, y: anchor.y - 20 };
+		armEdgeCut(canvasElement);
+		await sleep();
+		dispatchPointer(stage, 'pointermove', target.x, target.y);
+		await sleep();
+
+		// Pressing app chrome outside the stage disarms the cut.
+		const outside = getCenter(armButton);
+		dispatchPointer(armButton, 'pointerdown', outside.x, outside.y);
+		dispatchPointer(armButton, 'pointerup', outside.x, outside.y);
+		await sleep();
+		expect(wrapper.dataset.lastEdgeCutCancel).toBe('1');
+		expect(getEdgeCutLine(stage)).toBeNull();
+
+		dispatchPointer(stage, 'pointerdown', target.x, target.y);
+		dispatchPointer(stage, 'pointerup', target.x, target.y);
+		await sleep();
+		expect(wrapper.dataset.lastEdgeCutEnd).toBe('');
+
+		// Re-arming after a cancel works.
+		armEdgeCut(canvasElement);
+		await sleep();
+		dispatchPointer(stage, 'pointermove', target.x, target.y);
+		dispatchPointer(stage, 'pointerdown', target.x, target.y);
+		dispatchPointer(stage, 'pointerup', target.x, target.y);
+		await sleep();
+		expectSegmentCallback(wrapper.dataset.lastEdgeCutEnd, anchor, target);
+		expect(wrapper.dataset.lastEdgeCutCancel).toBe('1');
+	}}
+/>
+
+<Story
+	name="ArmedEdgeCutTouchDragEndsOnRelease"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+
+		await waitForLayout();
+
+		const anchor = getCenter(stage);
+		const transformBefore = getStageTransform(canvasElement);
+		armEdgeCut(canvasElement);
+		await sleep();
+
+		// No hover on a phone: the finger lands, and the free end goes there.
+		const landing = { x: anchor.x - 100, y: anchor.y + 60 };
+		dispatchPointer(stage, 'pointerdown', landing.x, landing.y, 1, 'touch');
+		await sleep();
+		expectSegmentCallback(wrapper.dataset.lastEdgeCutUpdate, anchor, landing);
+
+		// A finger resting mid-cut is not a hold: the press was the cut's.
+		await sleep(LONG_PRESS_MS + 20);
+		expect(wrapper.dataset.lastBackgroundLongPress).toBe('');
+
+		const lift = { x: anchor.x + 90, y: anchor.y - 50 };
+		dispatchPointer(stage, 'pointermove', anchor.x, anchor.y, 1, 'touch');
+		dispatchPointer(stage, 'pointermove', lift.x, lift.y, 1, 'touch');
+		await sleep();
+		expectSegmentCallback(wrapper.dataset.lastEdgeCutUpdate, anchor, lift);
+		expect(wrapper.dataset.lastEdgeCutEnd).toBe('');
+
+		dispatchPointer(stage, 'pointerup', lift.x, lift.y, 1, 'touch');
+		await sleep();
+		expectSegmentCallback(wrapper.dataset.lastEdgeCutEnd, anchor, lift);
+		expect(wrapper.dataset.lastEdgeCutCancel).toBe('');
+		expect(getEdgeCutLine(stage)).toBeNull();
+		// The drag was the cut's, not a pan, and its release not a click.
+		expect(getStageTransform(canvasElement)).toBe(transformBefore);
+		expect(wrapper.dataset.lastBackgroundClick).toBe('');
+	}}
+/>
+
+<Story
+	name="ArmingEdgeCutCancelsAnArmedCreationSessionAndViceVersa"
+	args={{ nodes: [NODES[0]] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+		const circle = canvasElement.querySelector('.circle') as HTMLElement;
+		const armCreation = canvasElement.querySelector(
+			`[data-testid="arm-creation-${NODES[0].id}"]`
+		) as HTMLElement;
+
+		await waitForLayout();
+
+		const anchor = getCenter(stage);
+		const nodeCenter = getCenter(circle);
+		const bgPoint = { x: nodeCenter.x + NODE_RADIUS * 3, y: nodeCenter.y };
+
+		// A creation drag armed from the node menu, then a cut armed over it.
+		armCreation.click();
+		await sleep();
+		dispatchPointer(stage, 'pointermove', bgPoint.x, bgPoint.y);
+		await sleep();
+		expect(wrapper.dataset.lastCreationUpdate?.startsWith(NODES[0].id)).toBe(true);
+		armEdgeCut(canvasElement);
+		await sleep();
+		expect(wrapper.dataset.lastCreationCancel).toBe(NODES[0].id);
+		expect(getEdgeCutLine(stage)).not.toBeNull();
+
+		// The click that follows is the cut's: it ends the cut, and creates nothing.
+		const creationUpdateBefore = wrapper.dataset.lastCreationUpdate;
+		dispatchPointer(stage, 'pointermove', bgPoint.x, bgPoint.y);
+		dispatchPointer(stage, 'pointerdown', bgPoint.x, bgPoint.y);
+		dispatchPointer(stage, 'pointerup', bgPoint.x, bgPoint.y);
+		await sleep();
+		expectSegmentCallback(wrapper.dataset.lastEdgeCutEnd, anchor, bgPoint);
+		expect(wrapper.dataset.lastCreationUpdate).toBe(creationUpdateBefore);
+		expect(wrapper.dataset.lastDoubleClickDropBg).toBe('');
+		expect(wrapper.dataset.lastDoubleClickDropNode).toBe('');
+
+		// A second cut armed over a first replaces it.
+		armEdgeCut(canvasElement);
+		await sleep();
+		armEdgeCut(canvasElement);
+		await sleep();
+		expect(wrapper.dataset.lastEdgeCutCancel).toBe('1');
+		expect(getEdgeCutLine(stage)).not.toBeNull();
+		expectSegmentCallback(wrapper.dataset.lastEdgeCutUpdate, anchor, anchor);
+
+		// And a creation drag armed over a cut cancels the cut, and takes the click.
+		const endBefore = wrapper.dataset.lastEdgeCutEnd;
+		armCreation.click();
+		await sleep();
+		expect(wrapper.dataset.lastEdgeCutCancel).toBe('2');
+		expect(getEdgeCutLine(stage)).toBeNull();
+		dispatchPointer(stage, 'pointermove', bgPoint.x, bgPoint.y);
+		dispatchPointer(stage, 'pointerdown', bgPoint.x, bgPoint.y);
+		dispatchPointer(stage, 'pointerup', bgPoint.x, bgPoint.y);
+		await sleep();
+		expect(parsePointCallback(wrapper.dataset.lastDoubleClickDropBg ?? '').nodeId).toBe(
+			NODES[0].id
+		);
+		expect(wrapper.dataset.lastEdgeCutEnd).toBe(endBefore);
+	}}
+/>
+
+<Story
+	name="ArmedEdgeCutIsAbandonedByPointerCancelARightClickOrACancelRequest"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+		const cancelButton = canvasElement.querySelector('[data-testid="cancel-edge-cut"]');
+		if (!(cancelButton instanceof HTMLElement)) throw new Error('Cancel cut control not found');
+
+		await waitForLayout();
+
+		const anchor = getCenter(stage);
+		const point = { x: anchor.x + 60, y: anchor.y + 20 };
+
+		// The browser taking the pointer back.
+		armEdgeCut(canvasElement);
+		await sleep();
+		dispatchPointer(stage, 'pointerdown', point.x, point.y, 1, 'touch');
+		dispatchPointer(stage, 'pointercancel', point.x, point.y, 1, 'touch');
+		await sleep();
+		expect(wrapper.dataset.lastEdgeCutCancel).toBe('1');
+		expect(getEdgeCutLine(stage)).toBeNull();
+
+		// macOS ctrl+click: a button-0 press, the contextmenu, then the release.
+		// The menu opens, and the release is not taken as the cut.
+		armEdgeCut(canvasElement);
+		await sleep();
+		dispatchPointer(stage, 'pointerdown', point.x, point.y);
+		dispatchContextMenu(stage, point.x, point.y);
+		dispatchPointer(stage, 'pointerup', point.x, point.y);
+		await sleep();
+		expect(wrapper.dataset.lastEdgeCutCancel).toBe('2');
+		expect(
+			parseBackgroundPointCallback(wrapper.dataset.lastBackgroundContextMenu ?? '').x
+		).toBeCloseTo(point.x);
+
+		// The consumer's own cancel, with no press at all.
+		armEdgeCut(canvasElement);
+		await sleep();
+		cancelButton.click();
+		await sleep();
+		expect(wrapper.dataset.lastEdgeCutCancel).toBe('3');
+		expect(getEdgeCutLine(stage)).toBeNull();
+
+		// A cancel with nothing armed reports nothing, and nothing ever ended.
+		cancelButton.click();
+		await sleep();
+		expect(wrapper.dataset.lastEdgeCutCancel).toBe('3');
+		expect(wrapper.dataset.lastEdgeCutEnd).toBe('');
 	}}
 />

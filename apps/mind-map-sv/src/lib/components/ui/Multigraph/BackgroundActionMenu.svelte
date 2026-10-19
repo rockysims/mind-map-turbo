@@ -8,6 +8,7 @@
 		canPaste,
 		onPaste,
 		onCopy,
+		onCutEdges,
 		onClose,
 		onRetarget,
 		onExplainDisabled
@@ -26,6 +27,8 @@
 		onPaste: () => void;
 		/** Copy the selection; called inside the tap, so the clipboard write has its activation. */
 		onCopy: () => void;
+		/** Arm the cut: a dashed line from `position` that deletes the edges it is drawn across. */
+		onCutEdges: () => void;
 		onClose: () => void;
 		/**
 		 * Hit-test a right-click that landed on the open menu's layer — onto a
@@ -52,11 +55,15 @@
 	}
 
 	/**
-	 * Two items at most, per the owner's ruling
+	 * "Paste" and "Copy N", per the owner's ruling
 	 * (`docs/ui-decisions/2026-10-19--copy--the-background-menu-offers-paste-and-copy-n-only.md`):
 	 * selecting all and clearing are left to Cmd/Ctrl+A, a click on empty
 	 * canvas and Escape, and "Paste" needs no "here", since it lands where the
-	 * menu opened.
+	 * menu opened. "Cut edges" follows them, by the later ruling that arms the
+	 * cut from this menu and nowhere else
+	 * (`docs/ui-decisions/2026-10-19--pointer--cut-edges-is-armed-from-the-background-menu.md`).
+	 * Like Paste it is always offered: what it would cut depends on where the
+	 * line is drawn, which nothing knows until it is.
 	 *
 	 * Hints follow the node menu's rule: the label names the action, the native
 	 * `title` says what happens, and hover-only is the same debt
@@ -79,7 +86,12 @@
 						activate: thenClose(onCopy)
 					}
 				]
-			: [])
+			: []),
+		{
+			label: 'Cut edges',
+			hint: 'Drag a line across the edges to delete, then click or lift to cut',
+			activate: thenClose(onCutEdges)
+		}
 	]);
 </script>
 

@@ -83,9 +83,32 @@
 	let lastBackgroundClick = $state<{ point: Point; shiftKey: boolean } | null>(null);
 	let lastBackgroundLongPress = $state<Point | null>(null);
 	let lastBackgroundContextMenu = $state<Point | null>(null);
+	let edgeCutArmRequest = $state<{ id: number; anchor: Point } | null>(null);
+	let edgeCutCancelRequest = $state<{ id: number } | null>(null);
+	let edgeCutRequestId = 0;
+	let lastEdgeCutUpdate = $state<{ a: Point; b: Point } | null>(null);
+	let lastEdgeCutEnd = $state<{ a: Point; b: Point } | null>(null);
+	/** A count rather than a flag, as for the box. */
+	let edgeCutCancelCount = $state(0);
 
 	function formatRect(rect: StageRect): string {
 		return `${rect.left},${rect.top},${rect.width},${rect.height}`;
+	}
+
+	function formatSegment(segment: { a: Point; b: Point }): string {
+		return `${segment.a.x},${segment.a.y},${segment.b.x},${segment.b.y}`;
+	}
+
+	/** Arm a cut anchored at the stage's centre, as the background menu arms one at its press. */
+	function armEdgeCut() {
+		const stage = harnessRef?.querySelector('.stage');
+		if (!(stage instanceof HTMLElement)) return;
+		const rect = stage.getBoundingClientRect();
+		edgeCutRequestId += 1;
+		edgeCutArmRequest = {
+			id: edgeCutRequestId,
+			anchor: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+		};
 	}
 </script>
 
@@ -139,6 +162,9 @@
 	data-last-background-context-menu={lastBackgroundContextMenu
 		? `${lastBackgroundContextMenu.x},${lastBackgroundContextMenu.y}`
 		: ''}
+	data-last-edge-cut-update={lastEdgeCutUpdate ? formatSegment(lastEdgeCutUpdate) : ''}
+	data-last-edge-cut-end={lastEdgeCutEnd ? formatSegment(lastEdgeCutEnd) : ''}
+	data-last-edge-cut-cancel={edgeCutCancelCount > 0 ? String(edgeCutCancelCount) : ''}
 	{...rest}
 >
 	<Stage
@@ -205,6 +231,17 @@
 		onBackgroundContextMenu={(point) => {
 			lastBackgroundContextMenu = point;
 		}}
+		{edgeCutArmRequest}
+		{edgeCutCancelRequest}
+		onEdgeCutUpdate={(a, b) => {
+			lastEdgeCutUpdate = { a, b };
+		}}
+		onEdgeCutEnd={(a, b) => {
+			lastEdgeCutEnd = { a, b };
+		}}
+		onEdgeCutCancel={() => {
+			edgeCutCancelCount += 1;
+		}}
 	>
 		{#each nodes as node (node.id)}
 			{@const pos = positions[node.id] ?? { left: '50%', top: '50%' }}
@@ -230,6 +267,17 @@
 				Arm {node.id}
 			</button>
 		{/each}
+		<button type="button" data-testid="arm-edge-cut" onclick={armEdgeCut}>Arm cut</button>
+		<button
+			type="button"
+			data-testid="cancel-edge-cut"
+			onclick={() => {
+				edgeCutRequestId += 1;
+				edgeCutCancelRequest = { id: edgeCutRequestId };
+			}}
+		>
+			Cancel cut
+		</button>
 	</div>
 </div>
 
@@ -242,8 +290,8 @@
 		touch-action: none;
 	}
 
-	/* Test affordance mimicking the action menu's "Add node/edge" click; kept
-	   out of the stage's hit-test area. */
+	/* Test affordances mimicking the action menus' "Add node/edge" and "Cut
+	   edges" clicks; kept out of the stage's hit-test area. */
 	.arm-creation-row {
 		position: absolute;
 		right: 0;

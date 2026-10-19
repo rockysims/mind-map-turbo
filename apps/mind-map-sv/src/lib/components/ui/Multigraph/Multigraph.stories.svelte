@@ -2841,8 +2841,132 @@
 	});
 
 	/** The background menu's items with at most one node selected. */
-	const BACKGROUND_MENU_ITEMS = ['Paste'];
+	const BACKGROUND_MENU_ITEMS = ['Paste', 'Cut edges'];
 	const NOTHING_TO_PASTE = 'Nothing to paste. Copy nodes or try Cmd/Ctrl+V.';
+
+	/**
+	 * Four pinned corners of a square at quarter scale, joined down both sides
+	 * and across the top: a level line through the middle crosses the two sides
+	 * and not the top. Pinned, so no removal ever severs anything and every edge
+	 * leaves through the plain fade.
+	 */
+	const CUT_GRAPH = makeGraph({
+		nodes: [
+			{ id: 'n0', title: 'Top left', description: '', tags: [] },
+			{ id: 'n1', title: 'Top right', description: '', tags: [] },
+			{ id: 'n2', title: 'Bottom left', description: '', tags: [] },
+			{ id: 'n3', title: 'Bottom right', description: '', tags: [] }
+		],
+		pinned: ['n0', 'n1', 'n2', 'n3'],
+		edges: [
+			{ id: 'left', source: 'n0', target: 'n2' },
+			{ id: 'right', source: 'n1', target: 'n3' },
+			{ id: 'top', source: 'n0', target: 'n1' }
+		],
+		posByNodeId: {
+			n0: { x: -480, y: -600 },
+			n1: { x: 480, y: -600 },
+			n2: { x: -480, y: 600 },
+			n3: { x: 480, y: 600 }
+		}
+	});
+
+	/** `CUT_GRAPH`'s square at a 40px radius, placed for the persisted harness's camera. */
+	const CUT_UNDO_GRAPH: MultigraphData = {
+		...CUT_GRAPH,
+		posByNodeId: {
+			n0: { x: -120, y: -150 },
+			n1: { x: 120, y: -150 },
+			n2: { x: -120, y: 150 },
+			n3: { x: 120, y: 150 }
+		}
+	};
+
+	/**
+	 * Two pinned nodes the maths joins with a derived dataflow edge across the
+	 * top, and two more joined by an authored edge across the bottom, so one
+	 * vertical line crosses both.
+	 */
+	const DERIVED_CUT_GRAPH = makeGraph({
+		nodes: [
+			{
+				id: 'n0',
+				title: 'Gravity',
+				description: '$$g = 9.8$$',
+				tags: [],
+				outputs: designations('g')
+			},
+			{
+				id: 'n1',
+				title: 'Weight',
+				description: '$$w = m g$$',
+				tags: [],
+				inputs: designations('g'),
+				outputs: designations('w')
+			},
+			{ id: 'n2', title: 'Left', description: '', tags: [] },
+			{ id: 'n3', title: 'Right', description: '', tags: [] }
+		],
+		pinned: ['n0', 'n1', 'n2', 'n3'],
+		edges: [{ id: 'below', source: 'n2', target: 'n3' }],
+		posByNodeId: CUT_GRAPH.posByNodeId
+	});
+
+	/** What a cut over nothing says. */
+	const NO_EDGES_UNDER_THE_LINE = 'No edges under the line.';
+	/** `EDGE_CUT_COLOR` (#dc2626) as computed styles spell it. */
+	const EDGE_CUT_RGB = 'rgb(220, 38, 38)';
+
+	/** Whole client pixels, as a pointer reports them. */
+	function wholePoint(x: number, y: number): Point {
+		return { x: Math.round(x), y: Math.round(y) };
+	}
+
+	/**
+	 * A level line through the middle of `CUT_GRAPH`'s square, from empty canvas
+	 * left of the left side to empty canvas right of the right side, and the
+	 * point halfway along it, between the two sides.
+	 */
+	function lineAcrossTheSides(el: HTMLElement): { from: Point; between: Point; to: Point } {
+		const topLeft = getCenter(getCircle(el, 'n0'));
+		const bottomLeft = getCenter(getCircle(el, 'n2'));
+		const topRight = getCenter(getCircle(el, 'n1'));
+		const y = (topLeft.y + bottomLeft.y) / 2;
+		return {
+			from: wholePoint(topLeft.x - 50, y),
+			between: wholePoint((topLeft.x + topRight.x) / 2, y),
+			to: wholePoint(topRight.x + 50, y)
+		};
+	}
+
+	/** Open the background menu with a right-click at `anchor` and take "Cut edges". */
+	async function armCutFromMenu(el: HTMLElement, anchor: Point): Promise<void> {
+		dispatchContextMenu(getStage(el), anchor.x, anchor.y);
+		await tick();
+		within(el).getByRole('menuitem', { name: 'Cut edges' }).click();
+		await tick();
+	}
+
+	/** Carry an armed cut's free end to `point` with the mouse, no button held. */
+	async function hoverCutTo(stage: HTMLElement, point: Point): Promise<void> {
+		dispatchPointer(stage, 'pointermove', point.x, point.y);
+		await tick();
+	}
+
+	/** The click that ends an armed cut, at `point`. */
+	async function clickToCut(stage: HTMLElement, point: Point): Promise<void> {
+		dispatchPointer(stage, 'pointermove', point.x, point.y);
+		dispatchPointer(stage, 'pointerdown', point.x, point.y);
+		dispatchPointer(stage, 'pointerup', point.x, point.y);
+		await tick();
+	}
+
+	/** The edges drawn as the armed cut's targets, in render order. */
+	function cutTargetIds(el: HTMLElement): string[] {
+		return Array.from(el.querySelectorAll('[data-cut-target="true"]')).map(
+			(edge) => edge.getAttribute('data-edge-id') ?? ''
+		);
+	}
 
 	// One clipboard per story, so no story reads what another copied.
 	const PASTE_AFTER_COPY_CLIPBOARD = memoryClipboard();
@@ -11975,8 +12099,9 @@
 			canvas.getAllByRole('menuitem').map((item) => item.textContent?.trim() ?? '');
 
 		// Right-click on empty canvas: the background menu, and only it. With
-		// nothing selected it holds Paste alone; selecting all and clearing are
-		// the keyboard's and the background click's, never this menu's.
+		// nothing selected it holds Paste and Cut edges; selecting all and
+		// clearing are the keyboard's and the background click's, never this
+		// menu's.
 		const empty = stagePoint(stage, 0.5, 0.8);
 		const rightClick = dispatchContextMenu(stage, empty.x, empty.y);
 		await tick();
@@ -11992,7 +12117,7 @@
 		expect(commitCount(args)).toBe(0);
 		expect(canvas.queryByRole('menu')).toBeNull();
 
-		// One selected node still gets Paste alone: "Copy N" waits for two.
+		// One selected node still gets no Copy: "Copy N" waits for two.
 		await openNodeMenu(canvasElement, 'n0');
 		canvas.getByRole('menuitem', { name: 'Select' }).click();
 		await tick();
@@ -12014,7 +12139,7 @@
 		await sleep(LONG_PRESS_MS + 20);
 		dispatchPointer(stage, 'pointerup', empty.x, empty.y, 1, 'touch');
 		await tick();
-		expect(menuItems()).toEqual([...BACKGROUND_MENU_ITEMS, 'Copy 3']);
+		expect(menuItems()).toEqual(['Paste', 'Copy 3', 'Cut edges']);
 		const copy = canvas.getByRole('menuitem', { name: 'Copy 3' });
 		expect(copy).toHaveAttribute('title', 'Copy the selected nodes and the edges between them');
 		copy.click();
@@ -12284,5 +12409,311 @@
 			expect(settled[nodeId].y, nodeId).toBeCloseTo(held.n0.y, 3);
 		}
 		expect(selectedNodeIds(canvasElement)).toEqual(row);
+	}}
+/>
+
+<Story
+	name="ALineAcrossTwoOfThreeEdgesCutsExactlyThoseTwoAndOneUndoRestoresBoth"
+	play={async ({ canvasElement }: HarnessPlayContext) => {
+		const harness = canvasElement.querySelector('.harness');
+		if (!(harness instanceof HTMLElement)) throw new Error('Persisted harness not found');
+		await waitFor(() => expect(harness.dataset.loadedGraphId).toBe('cut-undo'));
+		await waitForLayout();
+		const canvas = within(canvasElement);
+		const stage = getStage(canvasElement);
+		const line = lineAcrossTheSides(canvasElement);
+
+		await armCutFromMenu(canvasElement, line.from);
+		await hoverCutTo(stage, line.to);
+		expect(cutTargetIds(canvasElement)).toEqual(['left', 'right']);
+
+		await clickToCut(stage, line.to);
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-edge-id="left"]')).toBeNull();
+			expect(canvasElement.querySelector('[data-edge-id="right"]')).toBeNull();
+		});
+		// The top was never under the line, and no node went with the edges.
+		expect(canvasElement.querySelector('[data-edge-id="top"]')).toBeInTheDocument();
+		expect(harness.dataset.nodeCount).toBe('4');
+		expect(cutTargetIds(canvasElement)).toEqual([]);
+		// One entry, named for what went, and no question asked first.
+		expect(canvas.queryByRole('dialog')).toBeNull();
+		expect(canvas.getByRole('button', { name: 'Undo delete 2 edges' })).toBeInTheDocument();
+
+		dispatchShortcut(stage, 'z', { metaKey: true });
+		await waitFor(() => {
+			expect(canvasElement.querySelector('[data-edge-id="left"]')).toBeInTheDocument();
+			expect(canvasElement.querySelector('[data-edge-id="right"]')).toBeInTheDocument();
+		});
+		expect(canvasElement.querySelectorAll('[data-edge-id]')).toHaveLength(3);
+		expect(canvas.getByRole('button', { name: 'Redo delete 2 edges' })).toBeInTheDocument();
+	}}
+>
+	{#snippet template()}
+		<PersistedGraphHarness
+			initialGraphId="cut-undo"
+			graphs={{ 'cut-undo': CUT_UNDO_GRAPH }}
+			layoutSettings={{ ...SELECTION_LAYOUT, baseRadius: 40 }}
+		/>
+	{/snippet}
+</Story>
+
+<Story
+	name="ADerivedDataflowEdgeUnderTheLineIsUntouched"
+	args={{
+		multigraphData: DERIVED_CUT_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const derivedId = 'dataflow:n0->n1';
+		const derived = canvasElement.querySelector(`[data-edge-id="${derivedId}"]`);
+		expect(derived).toBeInTheDocument();
+
+		// A vertical line down the middle, over the derived edge across the top
+		// and the authored one across the bottom.
+		const top = getCenter(getCircle(canvasElement, 'n0'));
+		const bottom = getCenter(getCircle(canvasElement, 'n2'));
+		const x = (top.x + getCenter(getCircle(canvasElement, 'n1')).x) / 2;
+		const from = wholePoint(x, top.y - 80);
+		const to = wholePoint(x, bottom.y + 80);
+
+		await armCutFromMenu(canvasElement, from);
+		await hoverCutTo(stage, to);
+		// Only the authored edge shows as about to go.
+		expect(cutTargetIds(canvasElement)).toEqual(['below']);
+		expect(derived).not.toHaveAttribute('data-cut-target');
+
+		await clickToCut(stage, to);
+		expect(lastChangedGraph(args).edges).toEqual([]);
+		expect(commitsLabelled(args, 'delete edge')).toHaveLength(1);
+		expect(postedNotices(args)).toEqual(['Cut 1 edge.']);
+		// The maths still joins the two, so the derived edge is still drawn.
+		await waitForLayout();
+		expect(canvasElement.querySelector(`[data-edge-id="${derivedId}"]`)).toBeInTheDocument();
+	}}
+/>
+
+<Story
+	name="ABoundaryHalfEdgeToAHiddenNodeIsCut"
+	args={{
+		multigraphData: HOP_LIMITED_CHAIN,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: { ...SELECTION_LAYOUT, displayedLayers: 2 },
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		// n3 is past the hop limit: the edge to it is drawn as a half-edge out of n2.
+		expect(nodeIsDrawn(canvasElement, 'n3')).toBe(false);
+		const halfEdge = getEdge(canvasElement, 'e2');
+		expect(halfEdge).toHaveAttribute('data-edge-visibility', 'boundary');
+
+		// A short vertical line across the middle of the half-edge.
+		const middle = getCenter(halfEdge);
+		const from = wholePoint(middle.x, middle.y - 60);
+		const to = wholePoint(middle.x, middle.y + 60);
+
+		await armCutFromMenu(canvasElement, from);
+		await hoverCutTo(stage, to);
+		expect(cutTargetIds(canvasElement)).toEqual(['e2']);
+		// The half-edge takes the cut's colour and its dash in place of its own.
+		expect(getComputedStyle(halfEdge).color).toBe(EDGE_CUT_RGB);
+		expect(getComputedStyle(halfEdge, '::before').maskImage).toContain('repeating-linear-gradient');
+
+		await clickToCut(stage, to);
+		expect(lastChangedGraph(args).edges.map((edge) => edge.id)).toEqual(['e0', 'e1', 'e3']);
+		expect(commitsLabelled(args, 'delete edge')).toHaveLength(1);
+		expect(postedNotices(args)).toEqual(['Cut 1 edge.']);
+	}}
+/>
+
+<Story
+	name="TheEdgesTheLineWouldCutShowAsCutTargetsWhileItMovesAndClearOnEscape"
+	args={{
+		multigraphData: CUT_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const line = lineAcrossTheSides(canvasElement);
+
+		await armCutFromMenu(canvasElement, line.from);
+		// Armed, and still a point at the anchor: nothing is under it yet.
+		expect(stage.querySelector('.edge-cut-line')).toBeInTheDocument();
+		expect(cutTargetIds(canvasElement)).toEqual([]);
+
+		await hoverCutTo(stage, line.between);
+		expect(cutTargetIds(canvasElement)).toEqual(['left']);
+		const left = getEdge(canvasElement, 'left');
+		expect(left).toHaveClass('cut-target');
+		expect(getComputedStyle(left).color).toBe(EDGE_CUT_RGB);
+		expect(getComputedStyle(left, '::before').maskImage).toContain('repeating-linear-gradient');
+		// An edge left alone keeps its own colour and stroke.
+		expect(getComputedStyle(getEdge(canvasElement, 'right')).color).not.toBe(EDGE_CUT_RGB);
+
+		await hoverCutTo(stage, line.to);
+		expect(cutTargetIds(canvasElement)).toEqual(['left', 'right']);
+
+		// Drawn back short of the left side, the line takes nothing again.
+		await hoverCutTo(stage, wholePoint(line.from.x + 20, line.from.y));
+		expect(cutTargetIds(canvasElement)).toEqual([]);
+		await hoverCutTo(stage, line.between);
+		expect(cutTargetIds(canvasElement)).toEqual(['left']);
+
+		blurActiveElement();
+		dispatchKeydown(document.body, 'Escape');
+		await tick();
+		expect(cutTargetIds(canvasElement)).toEqual([]);
+		expect(getComputedStyle(left).color).not.toBe(EDGE_CUT_RGB);
+		expect(stage.querySelector('.edge-cut-line')).toBeNull();
+
+		// Abandoned, so the next click cuts nothing and nothing was ever committed.
+		await clickToCut(stage, line.between);
+		expect(commitCount(args)).toBe(0);
+		expect(postedNotices(args)).toEqual([]);
+		expect(canvasElement.querySelectorAll('[data-edge-id]')).toHaveLength(3);
+	}}
+/>
+
+<Story
+	name="TheTouchRouteHoldOnEmptyCanvasTapCutEdgesDragLift"
+	args={{
+		multigraphData: CUT_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const canvas = within(canvasElement);
+		const stage = getStage(canvasElement);
+		const line = lineAcrossTheSides(canvasElement);
+
+		// Hold on empty canvas: the background menu, at the finger.
+		await dispatchLongPress(stage, line.from.x, line.from.y);
+		dispatchPointer(stage, 'pointerup', line.from.x, line.from.y, 1, 'touch');
+		await tick();
+		canvas.getByRole('menuitem', { name: 'Cut edges' }).click();
+		await tick();
+		expect(canvas.queryByRole('menu')).toBeNull();
+
+		// Drag: the finger lands between the sides, the line runs to it from the
+		// hold, and it carries on past the right side.
+		dispatchPointer(stage, 'pointerdown', line.between.x, line.between.y, 1, 'touch');
+		await tick();
+		expect(cutTargetIds(canvasElement)).toEqual(['left']);
+		dispatchPointer(stage, 'pointermove', line.to.x, line.to.y, 1, 'touch');
+		await tick();
+		expect(cutTargetIds(canvasElement)).toEqual(['left', 'right']);
+		expect(commitCount(args)).toBe(0);
+
+		// Lift: the cut lands, as one edit.
+		dispatchPointer(stage, 'pointerup', line.to.x, line.to.y, 1, 'touch');
+		await tick();
+		expect(lastChangedGraph(args).edges.map((edge) => edge.id)).toEqual(['top']);
+		expect(commitCount(args)).toBe(1);
+		expect(commitsLabelled(args, 'delete 2 edges')).toHaveLength(1);
+		expect(postedNotices(args)).toEqual(['Cut 2 edges.']);
+		expect(cutTargetIds(canvasElement)).toEqual([]);
+	}}
+/>
+
+<Story
+	name="ALineOverNothingCommitsNothingAndSaysSo"
+	args={{
+		multigraphData: CUT_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const line = lineAcrossTheSides(canvasElement);
+
+		// From left of the square to further down, still left of it.
+		await armCutFromMenu(canvasElement, line.from);
+		const end = wholePoint(line.from.x + 20, line.from.y + 60);
+		await hoverCutTo(stage, end);
+		expect(cutTargetIds(canvasElement)).toEqual([]);
+		await clickToCut(stage, end);
+
+		expect(commitCount(args)).toBe(0);
+		expect(postedNotices(args)).toEqual([NO_EDGES_UNDER_THE_LINE]);
+		expect(canvasElement.querySelectorAll('[data-edge-id]')).toHaveLength(3);
+		expect(stage.querySelector('.edge-cut-line')).toBeNull();
+	}}
+/>
+
+<Story
+	name="ArmingCutEdgesWhileASelectionExistsLeavesTheSelectionAlone"
+	args={{
+		multigraphData: CUT_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const canvas = within(canvasElement);
+		const stage = getStage(canvasElement);
+		const line = lineAcrossTheSides(canvasElement);
+		await selectByMenu(canvasElement, ['n0', 'n1']);
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1']);
+
+		// With two selected the menu offers to copy them too; Cut edges comes last.
+		dispatchContextMenu(stage, line.from.x, line.from.y);
+		await tick();
+		expect(canvas.getAllByRole('menuitem').map((item) => item.textContent?.trim())).toEqual([
+			'Paste',
+			'Copy 2',
+			'Cut edges'
+		]);
+		canvas.getByRole('menuitem', { name: 'Cut edges' }).click();
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1']);
+
+		// Escape abandons the cut, and only the cut: it is the level above the
+		// selection, as an open box is.
+		await hoverCutTo(stage, line.between);
+		blurActiveElement();
+		dispatchKeydown(document.body, 'Escape');
+		await tick();
+		expect(stage.querySelector('.edge-cut-line')).toBeNull();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1']);
+
+		// The click that ends a cut is the cut's, not a click on empty canvas that
+		// would clear the selection.
+		await armCutFromMenu(canvasElement, line.from);
+		await clickToCut(stage, line.to);
+		expect(lastChangedGraph(args).edges.map((edge) => edge.id)).toEqual(['top']);
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1']);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('2 selected');
+
+		// With the cut over, Escape is the selection's again.
+		blurActiveElement();
+		dispatchKeydown(document.body, 'Escape');
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual([]);
 	}}
 />

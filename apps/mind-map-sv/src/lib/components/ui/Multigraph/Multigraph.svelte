@@ -90,6 +90,22 @@
 	function nodeCountText(count: number): string {
 		return count === 1 ? '1 node' : `${count} nodes`;
 	}
+
+	/** "1 edge", "3 edges": the same, for edges. */
+	function edgeCountText(count: number): string {
+		return count === 1 ? '1 edge' : `${count} edges`;
+	}
+
+	/**
+	 * What a cut drawn across no edge says, in place of committing nothing in
+	 * silence. Measured at the phone viewport in the toolbar's notice face:
+	 * 148px against the 192px desktop column ("Cut 1 edge." is 69px and "Cut 123
+	 * edges." 91px), so neither wraps.
+	 */
+	const NO_EDGES_UNDER_THE_LINE_NOTICE = 'No edges under the line.';
+
+	/** Shared, so clearing an already-empty set of cut targets re-renders nothing. */
+	const NO_CUT_TARGETS: ReadonlySet<string> = new Set();
 </script>
 
 <script lang="ts">
@@ -285,6 +301,7 @@
 		type CreationPreviewState
 	} from './lib/creationPreview.js';
 	import type { NodeGestureMode } from './lib/creationGesture.js';
+	import { EDGE_CUT_COLOR, edgeIdsCrossedBySegment, type EdgeCutCandidate } from './lib/edgeCut.js';
 	import { planNodeMerge, type NodeMergePlan } from './lib/nodeMerge.js';
 	import { computeParallelEdgeOffsets } from './lib/parallelEdges.js';
 	import type { FocusLevel } from './lib/focusRuntime.svelte.js';
@@ -724,6 +741,27 @@
 		mode: NodeGestureMode;
 	} | null>(null);
 	let creationArmRequestId = $state(0);
+	/**
+	 * The edge cut's one-shot requests to the Stage, which owns the session
+	 * itself (`Stage.svelte`, precedence 7); one counter serves both.
+	 */
+	let edgeCutArmRequest = $state<{ id: number; anchor: Point } | null>(null);
+	let edgeCutCancelRequest = $state<{ id: number } | null>(null);
+	let edgeCutRequestId = $state(0);
+	/**
+	 * Whether the Stage holds an armed cut, as its reports say: set by each
+	 * update, which it also sends on arming, and cleared by the end or a cancel.
+	 * Taken from the reports rather than set here on arming, so a cut that
+	 * replaces another — whose cancel the Stage reports after this side has
+	 * already asked for the new one — still reads as armed.
+	 */
+	let edgeCutArmed = $state(false);
+	/**
+	 * The authored edges the armed cut's line crosses now: what releasing would
+	 * delete, drawn as such. Raw, and replaced only when the ids change, so a
+	 * move that takes and drops nothing re-renders no edge.
+	 */
+	let cutTargetEdgeIds = $state.raw<ReadonlySet<string>>(NO_CUT_TARGETS);
 	let duplicateEdgeConfirm = $state<{ edgeId: string } | null>(null);
 	/**
 	 * A merge that has been planned but not committed, waiting on the direction
@@ -2096,12 +2134,13 @@
 	 * box or a creation drag in flight each take the press instead. The menu and
 	 * the sheets close themselves on the way up, so their state already reads
 	 * closed here; they are found from the press's own target instead, and a
-	 * press any surface marked handled is left alone. The box and the drag belong
-	 * to the Stage, whose listeners hear the press after this one — hence
-	 * `selectionPreview` rather than asking the Stage.
+	 * press any surface marked handled is left alone. The box, the drag and an
+	 * armed edge cut belong to the Stage, whose listeners hear the press after
+	 * this one — hence `selectionPreview` and `edgeCutArmed` rather than asking
+	 * the Stage.
 	 */
 	function selectionOwnsKeyPress(event: Event): boolean {
-		if (event.defaultPrevented || selectionPreview !== null) return false;
+		if (event.defaultPrevented || selectionPreview !== null || edgeCutArmed) return false;
 		if (creationPreview !== null && !creationPreview.ending) return false;
 		// A field's Escape is the field's, as it is for the focus overlay above.
 		if (keyboardIsInTextEntry()) return false;
@@ -2924,6 +2963,116 @@
 		if (!options.shiftKey) selection.clear();
 	}
 
+	/**
+	 * "Cut edges" in the background menu: arm the Stage's dashed line at the
+	 * point the menu was opened, per
+	 * `docs/ui-decisions/2026-10-19--pointer--cut-edges-is-armed-from-the-background-menu.md`.
+	 * The menu closes itself once this has run, and the selection is left
+	 * alone: the cut acts on edges, and the press that ends it is the Stage's.
+	 */
+	function armEdgeCut(anchor: Point) {
+		backgroundMenu = null;
+		edgeCutRequestId += 1;
+		edgeCutArmRequest = { id: edgeCutRequestId, anchor };
+	}
+
+	/**
+	 * Abandon an armed cut from this side — `closeOverlays` does, as it drops
+	 * the creation drag's preview. The Stage hears it as a request and reports
+	 * the cancel back, which clears what this sets here too; doing it here as
+	 * well means nothing reads the cut as armed in between.
+	 *
+	 * Untracked, because `closeOverlays` runs inside effects (the settings
+	 * panel's, the initial title edit's) that until now only ever wrote state;
+	 * reading the cut here must not make them re-run on every move of one.
+	 */
+	function cancelEdgeCut() {
+		untrack(() => {
+			if (edgeCutArmed) {
+				edgeCutRequestId += 1;
+				edgeCutCancelRequest = { id: edgeCutRequestId };
+				edgeCutArmed = false;
+			}
+			if (cutTargetEdgeIds.size > 0) cutTargetEdgeIds = NO_CUT_TARGETS;
+		});
+	}
+
+	/**
+	 * Every authored edge the canvas is drawing, along the segment it is drawn
+	 * on: visible edges with their parallel offset and trimmed to the node
+	 * borders, half-edges to a hidden node as far as they reach — the same
+	 * `edgeRenderPoints` call, with the same arguments, the edge loop makes. A
+	 * derived dataflow edge is never a candidate: it is recomputed from the
+	 * maths, so deleting it would mean nothing.
+	 */
+	function edgeCutCandidates(): EdgeCutCandidate[] {
+		const candidates: EdgeCutCandidate[] = [];
+		for (const visibility of renderableEdgeVisibility) {
+			const edgeId = visibility.edge.id;
+			if (isDerivedEdgeId(edgeId)) continue;
+			const parallelOffset =
+				visibility.kind === 'visible' ? visibleEdgeParallelOffsets[edgeId] : undefined;
+			const { source, target } = edgeRenderPoints(
+				visibility,
+				graphLayout,
+				graph.posByNodeId,
+				parallelOffset
+			);
+			candidates.push({ id: edgeId, source, target });
+		}
+		return candidates;
+	}
+
+	/**
+	 * The authored edges the line from `a` to `b` (client points) crosses, in
+	 * render order, tested in graph space against the live layout. The preview
+	 * and the cut both come through here, so what showed as about to go is
+	 * what goes. Empty without a measured stage.
+	 */
+	function edgeIdsUnderCut(a: Point, b: Point): string[] {
+		const rect = stageRect;
+		if (rect === null) return [];
+		const pan = { x: stageViewState.panX, y: stageViewState.panY };
+		return edgeIdsCrossedBySegment(
+			edgeCutCandidates(),
+			clientPointToGraphPoint(a, rect, pan, stageViewState.scale),
+			clientPointToGraphPoint(b, rect, pan, stageViewState.scale)
+		);
+	}
+
+	/** Every move of an armed cut (and its arming): mark what releasing now would delete. */
+	function handleEdgeCutUpdate(a: Point, b: Point) {
+		edgeCutArmed = true;
+		const crossed = edgeIdsUnderCut(a, b);
+		if (holdsExactly(cutTargetEdgeIds, crossed)) return;
+		cutTargetEdgeIds = crossed.length === 0 ? NO_CUT_TARGETS : new Set(crossed);
+	}
+
+	function handleEdgeCutCancel() {
+		edgeCutArmed = false;
+		if (cutTargetEdgeIds.size > 0) cutTargetEdgeIds = NO_CUT_TARGETS;
+	}
+
+	/**
+	 * The click or release that ends the cut: delete what the line crosses now,
+	 * as one edit and with no confirmation — one undo brings every edge back,
+	 * which is the test the destructive ruling sets
+	 * (`docs/ui-decisions/2026-08-30--destructive--ship-new-destructive-actions-without-a-confirm.md`).
+	 * Recomputed from the live layout rather than read from the preview, through
+	 * the preview's own function.
+	 */
+	function handleEdgeCutEnd(a: Point, b: Point) {
+		edgeCutArmed = false;
+		const crossed = edgeIdsUnderCut(a, b);
+		cutTargetEdgeIds = NO_CUT_TARGETS;
+		if (crossed.length === 0) {
+			onNotice?.(NO_EDGES_UNDER_THE_LINE_NOTICE);
+			return;
+		}
+		const removed = removeEdges(crossed, 'delete');
+		if (removed > 0) onNotice?.(`Cut ${edgeCountText(removed)}.`);
+	}
+
 	const previewDurationMs = $derived(reduceMotion ? 0 : resolvedLayoutSettings.enterExitDurationMs);
 
 	function handleCreationDragUpdate(
@@ -3021,6 +3170,7 @@
 		backgroundMenu = null;
 		editNodeId = null;
 		creationPreview = null;
+		cancelEdgeCut();
 		duplicateEdgeConfirm = null;
 		// Dropping the plan is the whole cancel: nothing was mutated to undo. The
 		// same holds for a paste held on its size question; one already storing
@@ -3564,6 +3714,79 @@
 		transientReveal.pruneMissing(new Set(nextGraph.nodes.map((node) => node.id)));
 
 		closeOverlays();
+		return removing.size;
+	}
+
+	/**
+	 * Remove the authored edges `edgeIds` names as one commit, labelled for the
+	 * undo control as `verb` names it ("remove edge", "delete 3 edges"), and
+	 * return how many went. Ids that name no authored edge are skipped, and with
+	 * none left nothing is committed.
+	 *
+	 * The duplicate-edge dialog's single removal, generalised the way
+	 * `removeNodes` generalised a single deletion: one commit, so a single undo
+	 * restores the lot, and one look at every endpoint together, so a removal
+	 * that orphans a component is told apart from one that leaves it reachable
+	 * through another edge in the same cut. A severing removal plays the reveal
+	 * wave, which also fades the removed edges out (they have live endpoints, so
+	 * the wave can still place them); any other fades them through the exiting
+	 * buffer.
+	 */
+	function removeEdges(edgeIds: readonly string[], verb: 'remove' | 'delete'): number {
+		const requested = new Set(edgeIds);
+		const removedEdges = graph.edges.filter((edge) => requested.has(edge.id));
+		if (removedEdges.length === 0) return 0;
+		const removing = new Set(removedEdges.map((edge) => edge.id));
+
+		let nextGraph = graph;
+		for (const edgeId of removing) nextGraph = removeEdge(nextGraph, edgeId);
+		const endpointIds = [
+			...new Set(removedEdges.flatMap((edge) => [edge.sourceNodeId, edge.targetNodeId]))
+		];
+		const { survivorNodeId, severed } = severedComponentAfterMutation(nextGraph, endpointIds);
+		// Only a removal that orphaned an endpoint creates a pinless component to
+		// hint about; keeping a stale hint would steer a later beacon election
+		// (e.g. after removing one of two parallel edges, which severs nothing).
+		severedBeaconPreference = severed ? endpointIds : [];
+
+		const label = removing.size === 1 ? `${verb} edge` : `${verb} ${edgeCountText(removing.size)}`;
+		const withoutEnterAnimations = Object.fromEntries(
+			Object.entries(edgeEnterAnimations).filter(([edgeId]) => !removing.has(edgeId))
+		);
+
+		if (severed && survivorNodeId !== null) {
+			// The removal cut a component off from every pinned node. Play the
+			// reveal wave (as unpinning does) so the severed side fades down to its
+			// beacon; the wave also renders the removed edges fading out, so the
+			// exiting-buffer fade below must be skipped to avoid drawing them twice.
+			edgeEnterAnimations = withoutEnterAnimations;
+			let nextBuffer = internalExitingBuffer;
+			for (const edgeId of removing) nextBuffer = cancelExitingEdge(nextBuffer, edgeId);
+			internalExitingBuffer = nextBuffer;
+			commitUserGraph(layoutRuntime.beginScaleChange(nextGraph, survivorNodeId), editIntent(label));
+			return removing.size;
+		}
+
+		const durationMs = resolvedLayoutSettings.enterExitDurationMs;
+		if (durationMs > 0) {
+			const nowMs = layoutRuntime.now();
+			let nextBuffer = internalExitingBuffer;
+			for (const edge of removedEdges) {
+				const enterAnim = edgeEnterAnimations[edge.id];
+				const fromOpacity = enterAnim ? edgeOpacityAt(enterAnim, nowMs) : 1;
+				nextBuffer = cancelExitingEdge(nextBuffer, edge.id);
+				nextBuffer = addExitingEdge(nextBuffer, edge.id, {
+					edgeData: edge,
+					fromOpacity,
+					startedAtMs: nowMs,
+					durationMs
+				});
+			}
+			edgeEnterAnimations = withoutEnterAnimations;
+			internalExitingBuffer = nextBuffer;
+			layoutRuntime.start();
+		}
+		commitUserGraph(layoutRuntime.relaxAfterMutation(nextGraph), editIntent(label));
 		return removing.size;
 	}
 
@@ -4366,6 +4589,11 @@
 		onBackgroundClick={handleBackgroundClick}
 		onBackgroundLongPress={openBackgroundMenu}
 		onBackgroundContextMenu={openBackgroundMenu}
+		{edgeCutArmRequest}
+		{edgeCutCancelRequest}
+		onEdgeCutUpdate={handleEdgeCutUpdate}
+		onEdgeCutEnd={handleEdgeCutEnd}
+		onEdgeCutCancel={handleEdgeCutCancel}
 		onViewStateLiveChange={(state) => {
 			stageViewState = state;
 		}}
@@ -4430,8 +4658,12 @@
 					graphLayout.scaleByNodeId,
 					strokeReferenceNodeScale
 				)}
-				{@const edgeColor =
-					queryEdgeState?.role === 'spotlight' && queryEdgeState.spotlightColor
+				{@const cutTarget = cutTargetEdgeIds.has(edge.id)}
+				<!-- An edge the armed cut would delete takes the cut's red over its own
+				     colour and a spotlight's, and the cut's dash (see `.cut-target`). -->
+				{@const edgeColor = cutTarget
+					? EDGE_CUT_COLOR
+					: queryEdgeState?.role === 'spotlight' && queryEdgeState.spotlightColor
 						? queryEdgeState.spotlightColor
 						: edgeStrokeColor(edge, graph.tagColorConfig.edgeTags)}
 				{@const edgeEnterAnim = edgeEnterAnimations[edge.id]}
@@ -4456,8 +4688,10 @@
 					class:boundary={visibility.kind === 'boundary'}
 					class:derived={isDerivedEdgeId(edge.id)}
 					class:query-spotlight={queryEdgeState?.role === 'spotlight'}
+					class:cut-target={cutTarget}
 					data-edge-id={edge.id}
 					data-edge-derived={isDerivedEdgeId(edge.id) ? 'true' : undefined}
+					data-cut-target={cutTarget ? 'true' : undefined}
 					data-query-role={queryEdgeState?.role}
 					data-source-node-id={edge.sourceNodeId}
 					data-target-node-id={edge.targetNodeId}
@@ -4785,6 +5019,7 @@
 				// made inside the tap that asked for it.
 				void copyNodes(new Set(selection.ids));
 			}}
+			onCutEdges={() => armEdgeCut(menuPoint)}
 			onClose={() => (backgroundMenu = null)}
 			onRetarget={retargetBackgroundMenu}
 			onExplainDisabled={(reason) => onNotice?.(reason)}
@@ -5026,51 +5261,7 @@
 			edgeIdentifier={duplicateEdgeIdentifier(graph, confirmEdgeId)}
 			onCancel={() => (duplicateEdgeConfirm = null)}
 			onConfirm={() => {
-				const removedEdge = graph.edges.find((e) => e.id === confirmEdgeId) ?? null;
-				const nextGraph = removeEdge(graph, confirmEdgeId);
-				const endpointIds = removedEdge ? [removedEdge.sourceNodeId, removedEdge.targetNodeId] : [];
-				const { survivorNodeId, severed } = severedComponentAfterMutation(nextGraph, endpointIds);
-				// Only a removal that orphaned an endpoint creates a pinless component to
-				// hint about; keeping a stale hint would steer a later beacon election
-				// (e.g. after removing one of two parallel edges, which severs nothing).
-				severedBeaconPreference = severed ? endpointIds : [];
-
-				if (severed && survivorNodeId !== null) {
-					// The removal cut a component off from every pinned node. Play the
-					// reveal wave (as unpinning does) so the severed side fades down to
-					// its beacon; the wave also renders the removed edge fading out, so
-					// the exiting-buffer fade below must be skipped to avoid drawing the
-					// edge twice.
-					edgeEnterAnimations = Object.fromEntries(
-						Object.entries(edgeEnterAnimations).filter(([k]) => k !== confirmEdgeId)
-					);
-					internalExitingBuffer = cancelExitingEdge(internalExitingBuffer, confirmEdgeId);
-					commitUserGraph(
-						layoutRuntime.beginScaleChange(nextGraph, survivorNodeId),
-						editIntent('remove edge')
-					);
-					duplicateEdgeConfirm = null;
-					return;
-				}
-
-				const durationMs = resolvedLayoutSettings.enterExitDurationMs;
-				if (durationMs > 0 && removedEdge) {
-					const nowMs = layoutRuntime.now();
-					const enterAnim = edgeEnterAnimations[confirmEdgeId];
-					const fromOpacity = enterAnim ? edgeOpacityAt(enterAnim, nowMs) : 1;
-					edgeEnterAnimations = Object.fromEntries(
-						Object.entries(edgeEnterAnimations).filter(([k]) => k !== confirmEdgeId)
-					);
-					internalExitingBuffer = cancelExitingEdge(internalExitingBuffer, confirmEdgeId);
-					internalExitingBuffer = addExitingEdge(internalExitingBuffer, confirmEdgeId, {
-						edgeData: removedEdge,
-						fromOpacity,
-						startedAtMs: nowMs,
-						durationMs
-					});
-					layoutRuntime.start();
-				}
-				commitUserGraph(layoutRuntime.relaxAfterMutation(nextGraph), editIntent('remove edge'));
+				removeEdges([confirmEdgeId], 'remove');
 				duplicateEdgeConfirm = null;
 			}}
 		/>
@@ -5532,5 +5723,23 @@
 		box-shadow:
 			0 0 0 4px color-mix(in srgb, var(--edge-spotlight-color) 42%, transparent),
 			0 0 18px color-mix(in srgb, var(--edge-spotlight-color) 58%, transparent);
+	}
+
+	/*
+	 * An edge the armed cut would delete: the cut's red (set inline, from
+	 * `EDGE_CUT_COLOR`) in a dash of its own — longer than the boundary dash
+	 * with a tighter gap, so a half-edge about to go no longer reads as a
+	 * half-edge, and colour is never the only sign. Last among the dashes, so it
+	 * wins over a boundary edge's.
+	 */
+	.edge.cut-target::before {
+		--edge-dash-length: 10px;
+		--edge-dash-gap: 4px;
+
+		mask-image: repeating-linear-gradient(
+			to right,
+			#000 0 var(--edge-dash-length),
+			transparent var(--edge-dash-length) calc(var(--edge-dash-length) + var(--edge-dash-gap))
+		);
 	}
 </style>

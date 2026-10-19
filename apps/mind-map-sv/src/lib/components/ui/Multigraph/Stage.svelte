@@ -35,6 +35,7 @@
 		rectFromCorners,
 		type StageRect
 	} from './lib/stageCoordinates.js';
+	import { EDGE_CUT_COLOR } from './lib/edgeCut.js';
 	import { DRAG_THRESHOLD, DBL_CLICK_MS, LONG_PRESS_DIST, LONG_PRESS_MS } from '$lib/constants.js';
 
 	interface ViewStateSnapshot {
@@ -83,6 +84,16 @@
 		sourceNode: NodeData;
 		/** What the release commits. Omitted means the original create gesture. */
 		mode?: NodeGestureMode;
+	}
+
+	interface EdgeCutArmRequest {
+		id: number;
+		/** Client coordinates of the line's fixed end: where the background menu was opened. */
+		anchor: Point;
+	}
+
+	interface EdgeCutCancelRequest {
+		id: number;
 	}
 
 	interface Props {
@@ -161,6 +172,31 @@
 		onBackgroundContextMenu?: (point: Point) => void;
 		/** One-shot request to arm a drag-from-node gesture (menu-initiated, no button pressed). */
 		creationArmRequest?: CreationArmRequest | null;
+		/**
+		 * One-shot request to arm an edge cut (menu-initiated, no button pressed):
+		 * a dashed line from `anchor` to the pointer, ended by the next click or
+		 * touch release. Arming cancels an armed creation session or an earlier
+		 * cut, as arming a creation session cancels a cut.
+		 */
+		edgeCutArmRequest?: EdgeCutArmRequest | null;
+		/** One-shot request to abandon an armed edge cut, as Escape would; nothing when none is armed. */
+		edgeCutCancelRequest?: EdgeCutCancelRequest | null;
+		/**
+		 * Fired as an edge cut is armed, with the line still a point at the anchor,
+		 * then on every pointer move and press while it is: `a` is the anchor and
+		 * `b` the pointer, both in client coordinates like `onNodeLongPress`. A
+		 * mouse drives it by hovering, a touch by dragging, as with the menu-armed
+		 * creation drag.
+		 */
+		onEdgeCutUpdate?: (a: Point, b: Point) => void;
+		/** Fired by the click or touch release that ends an armed cut: the anchor and where it ended. */
+		onEdgeCutEnd?: (a: Point, b: Point) => void;
+		/**
+		 * Fired when an armed cut is abandoned: Escape, a second pointer,
+		 * pointercancel, a right-click, a press outside the stage, a new arm
+		 * request of either kind, or `edgeCutCancelRequest`.
+		 */
+		onEdgeCutCancel?: () => void;
 		/** Fired whenever the internal pan/zoom state changes, including initial mount. */
 		onViewStateLiveChange?: (state: ViewStateSnapshot) => void;
 		/**
@@ -233,6 +269,11 @@
 		onBackgroundLongPress,
 		onBackgroundContextMenu,
 		creationArmRequest,
+		edgeCutArmRequest,
+		edgeCutCancelRequest,
+		onEdgeCutUpdate,
+		onEdgeCutEnd,
+		onEdgeCutCancel,
 		onViewStateLiveChange,
 		onStageRectChange,
 		focusEntryBoundaryCandidateForPoint,
@@ -402,8 +443,14 @@
 	//    slop), and its release is not a click. A right-click fires
 	//    `onBackgroundContextMenu` and abandons whatever the press began, since
 	//    macOS ctrl+click delivers a button-0 press before the contextmenu.
-	// 7. A menu-armed creation session swallows background presses before any
-	//    of this runs (`onPointerDownStage`).
+	// 7. The two menu-armed sessions — a creation drag (`creationSession.via ===
+	//    'menu'`) and an edge cut (`edgeCutSession`) — swallow background
+	//    presses before any of this runs (`onPointerDownStage`). They never
+	//    coexist: arming either cancels the other, and arming a cut cancels a
+	//    cut already armed. A cut also gives way to a right-click, which a
+	//    creation session does not: macOS ctrl+click delivers a button-0 press
+	//    before the contextmenu, and that press's release must not land as the
+	//    cut.
 	//
 	// Plain variables rather than `$state`: nothing renders from the press, and
 	// the hold timer checks it is still the same press by identity.
@@ -589,6 +636,8 @@
 		lastCreationArmRequestId = request.id;
 		cancelActiveNodeGesture();
 		cancelBackgroundGesture();
+		// Untracked, so this effect does not re-run on every move of a cut.
+		untrack(() => cancelEdgeCut());
 		panStart = null;
 		creationSession = {
 			sourceNode: request.sourceNode,
@@ -652,6 +701,113 @@
 		} else {
 			onCreationCancel?.(sourceNode);
 		}
+	}
+
+	// Edge cut ("Cut edges" in the background menu): a dashed line from where
+	// the menu was opened to the pointer, which the click or touch release that
+	// ends it hands back for the consumer to cut along. Shaped like the
+	// menu-armed creation session: no button is held while it is armed, the
+	// pointer is tracked with or without one, the press that ends it is
+	// swallowed, and Escape, a second pointer, pointercancel and a press outside
+	// the stage abandon it (precedence 7 above).
+	interface EdgeCutSession {
+		/** Client point the line is anchored at, fixed for the session. */
+		anchor: Point;
+		/**
+		 * Both ends where they are drawn, in stage-local pixels. The callbacks
+		 * get client points; the two differ by the stage's own offset, as the
+		 * selection box's rects do.
+		 */
+		drawn: { from: Point; to: Point };
+	}
+	let edgeCutSession = $state<EdgeCutSession | null>(null);
+	/** Its own signal, so the listeners below follow arming and not every move. */
+	const edgeCutArmed = $derived(edgeCutSession !== null);
+	let lastEdgeCutArmRequestId = $state<number | null>(null);
+	let lastEdgeCutCancelRequestId = $state<number | null>(null);
+
+	// Declared before the arm effect, so a cancel and a fresh arm landing in the
+	// same flush run in that order and the fresh cut survives.
+	$effect(() => {
+		const request = edgeCutCancelRequest;
+		if (!request || request.id === lastEdgeCutCancelRequestId) return;
+		lastEdgeCutCancelRequestId = request.id;
+		untrack(() => cancelEdgeCut());
+	});
+
+	$effect(() => {
+		const request = edgeCutArmRequest;
+		if (!request || request.id === lastEdgeCutArmRequestId) return;
+		lastEdgeCutArmRequestId = request.id;
+		// Untracked: the session it writes changes on every move, and nothing here
+		// should run again until the next request.
+		untrack(() => {
+			cancelActiveNodeGesture();
+			cancelBackgroundGesture();
+			cancelEdgeCut();
+			panStart = null;
+			edgeCutSession = edgeCutSessionTo(request.anchor, request.anchor);
+			// Reported at once, before any move: until the pointer comes back over
+			// the stage the line is a point at the anchor, and a consumer learns
+			// from this that a cut is armed.
+			onEdgeCutUpdate?.(request.anchor, request.anchor);
+		});
+	});
+
+	$effect(() => {
+		if (typeof window === 'undefined' || !edgeCutArmed) return;
+		const onKeyDown = (e: KeyboardEvent) => {
+			if (e.key === 'Escape') cancelEdgeCut();
+		};
+		window.addEventListener('keydown', onKeyDown);
+		return () => window.removeEventListener('keydown', onKeyDown);
+	});
+
+	/** As for the menu-armed creation session: a press on app chrome never reaches the stage. */
+	$effect(() => {
+		if (typeof window === 'undefined' || !edgeCutArmed) return;
+		const onWindowPointerDown = (e: PointerEvent) => {
+			const target = e.target;
+			if (stageRef && target instanceof Node && stageRef.contains(target)) return;
+			cancelEdgeCut();
+		};
+		window.addEventListener('pointerdown', onWindowPointerDown, true);
+		return () => window.removeEventListener('pointerdown', onWindowPointerDown, true);
+	});
+
+	/** A session anchored at `anchor` whose free end is at `current`, both client points. */
+	function edgeCutSessionTo(anchor: Point, current: Point): EdgeCutSession {
+		const stageBounds = stageRef?.getBoundingClientRect();
+		const left = stageBounds?.left ?? 0;
+		const top = stageBounds?.top ?? 0;
+		return {
+			anchor,
+			drawn: {
+				from: { x: anchor.x - left, y: anchor.y - top },
+				to: { x: current.x - left, y: current.y - top }
+			}
+		};
+	}
+
+	/** Carry the line's free end to `point` and report it. */
+	function updateEdgeCut(point: Point) {
+		const session = edgeCutSession;
+		if (!session) return;
+		edgeCutSession = edgeCutSessionTo(session.anchor, point);
+		onEdgeCutUpdate?.(session.anchor, point);
+	}
+
+	function endEdgeCut(point: Point) {
+		const session = edgeCutSession;
+		if (!session) return;
+		edgeCutSession = null;
+		onEdgeCutEnd?.(session.anchor, point);
+	}
+
+	function cancelEdgeCut() {
+		if (!edgeCutSession) return;
+		edgeCutSession = null;
+		onEdgeCutCancel?.();
 	}
 
 	function onPointerDown(e: PointerEvent) {
@@ -910,8 +1066,10 @@
 		if ((e as PointerEvent).pointerType === 'touch') return;
 		const node = getNodeAt(e.clientX, e.clientY);
 		// macOS ctrl+click fires a button-0 pointerdown before contextmenu, so
-		// whatever that press began must not also land as a click or a box.
+		// whatever that press began must not also land as a click or a box — nor,
+		// with a cut armed, as the cut (precedence 7).
 		cancelBackgroundGesture();
+		cancelEdgeCut();
 		if (!node) {
 			onBackgroundContextMenu?.({ x: e.clientX, y: e.clientY });
 			return;
@@ -924,14 +1082,17 @@
 		if (e.button !== 0) return;
 		activePointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
 		if (activePointers.size === 1) {
-			// A menu-armed creation session swallows the press: the pointer is
-			// tracked (for pinch detection and pointerup) but must not start a
-			// pan/drag/long-press.
-			if (creationSession?.via !== 'menu') onPointerDown(e);
+			// A menu-armed session swallows the press: the pointer is tracked (for
+			// pinch detection and pointerup) but must not start a
+			// pan/drag/long-press. A cut's free end jumps to the press, so a touch
+			// that lifts without moving cuts along the line it was shown.
+			if (edgeCutSession) updateEdgeCut({ x: e.clientX, y: e.clientY });
+			else if (creationSession?.via !== 'menu') onPointerDown(e);
 		} else if (activePointers.size === 2) {
 			panStart = null;
 			cancelActiveNodeGesture();
 			cancelBackgroundGesture();
+			cancelEdgeCut();
 			const dist = getTwoPointerDistance();
 			const centroid = getTwoPointerCentroid();
 			if (dist !== null && centroid !== null) {
@@ -985,6 +1146,9 @@
 				graphPointForEvent(e),
 				getNodeAt(e.clientX, e.clientY)
 			);
+		} else if (edgeCutSession) {
+			// So does an armed cut.
+			updateEdgeCut({ x: e.clientX, y: e.clientY });
 		} else {
 			onPointerMove(e);
 		}
@@ -1004,6 +1168,16 @@
 				cancelCreationSession();
 			} else {
 				completeCreationSession(creationSession.sourceNode, e);
+			}
+			const stage = e.currentTarget as HTMLElement;
+			if (stage.hasPointerCapture?.(e.pointerId)) stage.releasePointerCapture(e.pointerId);
+			return;
+		}
+		if (edgeCutSession && !pinchWasActive) {
+			if (e.type === 'pointercancel') {
+				cancelEdgeCut();
+			} else {
+				endEdgeCut({ x: e.clientX, y: e.clientY });
 			}
 			const stage = e.currentTarget as HTMLElement;
 			if (stage.hasPointerCapture?.(e.pointerId)) stage.releasePointerCapture(e.pointerId);
@@ -1182,6 +1356,7 @@
 	class="stage"
 	class:panning={panStart !== null}
 	class:boxing={selectionBox !== null}
+	class:cutting={edgeCutSession !== null}
 	onpointerdown={onPointerDownStage}
 	onpointermove={onPointerMoveStage}
 	onpointerup={onPointerUpStage}
@@ -1217,6 +1392,20 @@
 			style:height="{selectionBox.height}px"
 		></div>
 	{/if}
+	{#if edgeCutSession}
+		{@const { from, to } = edgeCutSession.drawn}
+		<!--
+			The armed cut, beside the content layer for the box's reason: drawn in
+			the stage's own pixels from client points, not panned or scaled. It takes
+			no pointer events, so every press still reaches the stage. The dot marks
+			the anchor, which is all there is to see on a phone until the finger
+			lands.
+		-->
+		<svg class="edge-cut-line" aria-hidden="true">
+			<line x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke={EDGE_CUT_COLOR} />
+			<circle cx={from.x} cy={from.y} r="4" fill={EDGE_CUT_COLOR} />
+		</svg>
+	{/if}
 </div>
 
 <style>
@@ -1231,8 +1420,23 @@
 	.stage.panning {
 		cursor: grabbing;
 	}
-	.stage.boxing {
+	.stage.boxing,
+	.stage.cutting {
 		cursor: crosshair;
+	}
+	.edge-cut-line {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		overflow: visible;
+		pointer-events: none;
+	}
+	/* Dashed, so the cut is not told from an edge by its colour alone. */
+	.edge-cut-line line {
+		stroke-width: 2;
+		stroke-dasharray: 8 5;
+		stroke-linecap: round;
 	}
 	.selection-box {
 		position: absolute;

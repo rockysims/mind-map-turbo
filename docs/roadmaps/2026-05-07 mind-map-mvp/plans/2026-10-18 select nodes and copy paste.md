@@ -737,3 +737,14 @@ T09 all edit `Multigraph.svelte` and are strictly sequential for that reason.
   was shown, and the live region announces only the committed count. The
   preview is recomputed on a move or a Shift change, not when the layout
   settles under a still box — filed as debt.
+- 2026-10-19: T10 landed. "Cut edges" in the background menu arms a dashed
+  line from the menu's press that follows the pointer as the menu-armed
+  creation drag does; the edges it would cut show in the cut red while it
+  moves, the click or lift that ends it removes them as one undo entry, and a
+  line over nothing says so. Authored edges only, half-edges included, derived
+  edges never. The single-edge removal behind the duplicate-edge dialog is now
+  the same `removeEdges` path. The agent's real-input smoke test in the dev
+  server saw the line, the red targets, "Cut 2 edges.", "Undo delete 2 edges"
+  and a real Undo restoring both. Found and filed as debt: edge exit fades
+  ignore reduced motion, a cut boundary half-edge fades out at full length,
+  and `closeOverlays()` never disarms a menu-armed creation drag.
