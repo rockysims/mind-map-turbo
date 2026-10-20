@@ -1,0 +1,8 @@
+# A selection holds still, and the edges crossing its boundary go slack
+
+- Situation: a group of nodes pasted or dragged as a selection, with edges reaching the rest of the graph, that the reader has not finished arranging — typically a reconnected paste whose boundary edges they mean to cut.
+- Proposed: a rigid body that keeps its shape but drifts under the net force; or leaving physics as it was, which pulled the copies back toward the originals and mixed them before the reader could cut.
+- Chosen: while nodes are selected, the layout anchors them exactly as it anchors pinned and dragged nodes — physics never moves a selected node — so a pasted or dragged group keeps its position and its relative layout until it is deselected. Every selection holds still, not only one that was pasted or dragged. While a selection is held, every edge with exactly one end in it exerts no spring force, so the originals are not pulled toward the copies either; hop repulsion still applies. Deselecting releases the nodes and re-engages the edges. Cutting edges never deselects; what clears a selection is unchanged (a click on empty canvas, Escape, a replacing box, Delete or Cut of the selection).
+- Why: "when I select a big group, copy and paste it, drag the new group far away, before user can cut the edges … the relative position of the selected nodes changes as forces are applied and so the nodes get mixed together before I can cut." (owner's words); on holding still, "yes, good"; on slack boundary edges, "yes, great idea"; on every selection, "every selection holds still is a good improvement".
+- Pattern: none
+- Status: ruling
