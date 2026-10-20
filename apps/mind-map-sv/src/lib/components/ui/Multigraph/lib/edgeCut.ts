@@ -1,12 +1,12 @@
 import type { Point } from '../../types/multigraph';
 
 /**
- * The cut gesture's colour, for both the dashed line the Stage draws and the
- * edges it would delete — one red, so what the line touches reads as what the
- * line will take. #dc2626 is about 4.8:1 on the white canvas, past the 3:1 a
- * graphic needs, and no tag palette or other gesture on the canvas is this
- * red. Colour is never the only sign: both the line and its targets are also
- * dashed.
+ * The colour of the dashed line the Stage draws for a cut. #dc2626 is about
+ * 4.8:1 on the white canvas, past the 3:1 a graphic needs, and no other
+ * gesture on the canvas is this red. Colour is never the only sign: the line
+ * is also dashed. The edges it would delete do not take it: they keep their
+ * own colour and go dotted
+ * (`docs/ui-decisions/2026-10-19--display--an-edge-the-cut-line-would-take-goes-dotted-and-keeps-its-colour.md`).
  */
 export const EDGE_CUT_COLOR = '#dc2626';
 

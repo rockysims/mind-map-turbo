@@ -2851,8 +2851,8 @@
 		}
 	});
 
-	/** The background menu's items with at most one node selected. */
-	const BACKGROUND_MENU_ITEMS = ['Paste', 'Cut edges'];
+	/** The background menu's items with nothing selected and nothing to paste. */
+	const BACKGROUND_MENU_ITEMS = ['Select', 'Paste', 'Cut edges'];
 	const NOTHING_TO_PASTE = 'Nothing to paste. Copy nodes or try Cmd/Ctrl+V.';
 
 	/**
@@ -2881,6 +2881,21 @@
 			n3: { x: 480, y: 600 }
 		}
 	});
+
+	/** The tag colour `TAGGED_CUT_GRAPH`'s left side is drawn in, as computed styles spell it. */
+	const CUT_TAG_RGB = 'rgb(37, 99, 235)';
+
+	/**
+	 * `CUT_GRAPH` with its left side tagged and pointing down, so a cut target
+	 * can be seen to keep its tag's colour, arrowhead and all.
+	 */
+	const TAGGED_CUT_GRAPH: MultigraphData = {
+		...CUT_GRAPH,
+		edges: CUT_GRAPH.edges.map((edge) =>
+			edge.id === 'left' ? { ...edge, tags: ['main'], directed: true } : edge
+		),
+		tagColorConfig: { nodeTags: {}, edgeTags: { main: '#2563eb' } }
+	};
 
 	/** `CUT_GRAPH`'s square at a 40px radius, placed for the persisted harness's camera. */
 	const CUT_UNDO_GRAPH: MultigraphData = {
@@ -2925,8 +2940,22 @@
 
 	/** What a cut over nothing says. */
 	const NO_EDGES_UNDER_THE_LINE = 'No edges under the line.';
-	/** `EDGE_CUT_COLOR` (#dc2626) as computed styles spell it. */
+	/** `EDGE_CUT_COLOR` (#dc2626) as computed styles spell it: the line's, and never a target's. */
 	const EDGE_CUT_RGB = 'rgb(220, 38, 38)';
+
+	/**
+	 * Whether `edge` is drawn as a cut target: masked to round dots, a circle
+	 * one stroke across in every tile three strokes long — measured in the
+	 * edge's own stroke, so the dots keep their shape at every scale.
+	 */
+	function isDottedAsACutTarget(edge: HTMLElement): boolean {
+		const stroke = parseFloat(edge.style.getPropertyValue('--edge-stroke-width'));
+		const before = getComputedStyle(edge, '::before');
+		return (
+			before.maskImage.startsWith('radial-gradient') &&
+			Math.abs(parseFloat(before.maskSize) - stroke * 3) < 0.01
+		);
+	}
 
 	/** Whole client pixels, as a pointer reports them. */
 	function wholePoint(x: number, y: number): Point {
@@ -2958,6 +2987,27 @@
 		await tick();
 	}
 
+	/**
+	 * Open the background menu with a right-click at `anchor` and take its
+	 * "Select", or "Select more" when something is already selected.
+	 */
+	async function armBoxFromMenu(
+		el: HTMLElement,
+		anchor: Point,
+		name: 'Select' | 'Select more'
+	): Promise<void> {
+		dispatchContextMenu(getStage(el), anchor.x, anchor.y);
+		await tick();
+		within(el).getByRole('menuitem', { name }).click();
+		await tick();
+	}
+
+	/** The box the stage draws, armed or dragged, where it sits on screen; null when none is open. */
+	function drawnSelectionBox(stage: HTMLElement): DOMRect | null {
+		const box = stage.querySelector('.selection-box');
+		return box instanceof HTMLElement ? box.getBoundingClientRect() : null;
+	}
+
 	/** Carry an armed cut's free end to `point` with the mouse, no button held. */
 	async function hoverCutTo(stage: HTMLElement, point: Point): Promise<void> {
 		dispatchPointer(stage, 'pointermove', point.x, point.y);
@@ -2986,6 +3036,8 @@
 	const BACKGROUND_MENU_CLIPBOARD = memoryClipboard();
 	// Empty, so the menu's Paste carries no count left by another story's copy.
 	const ARMING_CUT_CLIPBOARD = memoryClipboard();
+	// Empty and never written, for the stories that arm a box from the same menu.
+	const ARMED_BOX_CLIPBOARD = memoryClipboard();
 	/** Every write and commit the cross-document stories make, in order. */
 	const CROSS_DOCUMENT_LOG: string[] = [];
 	const CROSS_DOCUMENT_STORE = loggingAssetStore(CROSS_DOCUMENT_LOG);
@@ -12249,7 +12301,7 @@
 			canvas.getAllByRole('menuitem').map((item) => item.textContent?.trim() ?? '');
 
 		// Right-click on empty canvas: the background menu, and only it. With
-		// nothing selected it holds Paste and Cut edges; selecting all and
+		// nothing selected it holds Select, Paste and Cut edges; selecting all and
 		// clearing are the keyboard's and the background click's, never this
 		// menu's.
 		const empty = stagePoint(stage, 0.5, 0.8);
@@ -12267,14 +12319,15 @@
 		expect(commitCount(args)).toBe(0);
 		expect(canvas.queryByRole('menu')).toBeNull();
 
-		// One selected node still gets no Copy: "Copy (N)" waits for two.
+		// One selected node still gets no Copy: "Copy (N)" waits for two. Select
+		// reads "Select more" now that there is a selection to add to.
 		await openNodeMenu(canvasElement, 'n0');
 		canvas.getByRole('menuitem', { name: 'Select' }).click();
 		await tick();
 		expect(selectedNodeIds(canvasElement)).toEqual(['n0']);
 		dispatchContextMenu(stage, empty.x, empty.y);
 		await tick();
-		expect(menuItems()).toEqual(BACKGROUND_MENU_ITEMS);
+		expect(menuItems()).toEqual(['Select more', 'Paste', 'Cut edges']);
 		dispatchKeydown(document.activeElement, 'Escape');
 		await tick();
 		expect(canvas.queryByRole('menu')).toBeNull();
@@ -12289,7 +12342,7 @@
 		await sleep(LONG_PRESS_MS + 20);
 		dispatchPointer(stage, 'pointerup', empty.x, empty.y, 1, 'touch');
 		await tick();
-		expect(menuItems()).toEqual(['Paste', 'Copy (3)', 'Cut edges']);
+		expect(menuItems()).toEqual(['Select more', 'Paste', 'Copy (3)', 'Cut edges']);
 		const copy = canvas.getByRole('menuitem', { name: 'Copy (3)' });
 		expect(copy).toHaveAttribute('title', 'Copy the selected nodes and the edges between them');
 		copy.click();
@@ -12319,7 +12372,7 @@
 		const point = stagePoint(stage, 0.5, 0.25);
 		dispatchContextMenu(stage, point.x, point.y);
 		await tick();
-		expect(menuItems()).toEqual(['Paste (3)', 'Copy (3)', 'Cut edges']);
+		expect(menuItems()).toEqual(['Select more', 'Paste (3)', 'Copy (3)', 'Cut edges']);
 		canvas.getByRole('menuitem', { name: 'Paste (3)' }).click();
 		await waitFor(() => expect(postedNotices(args).at(-1)).toBe('Pasted 3 nodes.'));
 		const pasted = lastChangedGraph(args);
@@ -12673,13 +12726,16 @@
 		const middle = getCenter(halfEdge);
 		const from = wholePoint(middle.x, middle.y - 60);
 		const to = wholePoint(middle.x, middle.y + 60);
+		const ownColour = getComputedStyle(halfEdge).color;
+		expect(getComputedStyle(halfEdge, '::before').maskImage).toContain('repeating-linear-gradient');
 
 		await armCutFromMenu(canvasElement, from);
 		await hoverCutTo(stage, to);
 		expect(cutTargetIds(canvasElement)).toEqual(['e2']);
-		// The half-edge takes the cut's colour and its dash in place of its own.
-		expect(getComputedStyle(halfEdge).color).toBe(EDGE_CUT_RGB);
-		expect(getComputedStyle(halfEdge, '::before').maskImage).toContain('repeating-linear-gradient');
+		// The half-edge keeps its colour and takes the cut's dots in place of its dash.
+		expect(getComputedStyle(halfEdge).color).toBe(ownColour);
+		expect(getComputedStyle(halfEdge).color).not.toBe(EDGE_CUT_RGB);
+		expect(isDottedAsACutTarget(halfEdge)).toBe(true);
 
 		await clickToCut(stage, to);
 		expect(lastChangedGraph(args).edges.map((edge) => edge.id)).toEqual(['e0', 'e1', 'e3']);
@@ -12691,7 +12747,7 @@
 <Story
 	name="TheEdgesTheLineWouldCutShowAsCutTargetsWhileItMovesAndClearOnEscape"
 	args={{
-		multigraphData: CUT_GRAPH,
+		multigraphData: TAGGED_CUT_GRAPH,
 		defaultPrimaryNodeId: 'n0',
 		initialViewState: SELECTION_VIEW,
 		layoutSettings: SELECTION_LAYOUT,
@@ -12703,6 +12759,12 @@
 		const stage = getStage(canvasElement);
 		const line = lineAcrossTheSides(canvasElement);
 
+		const left = getEdge(canvasElement, 'left');
+		const right = getEdge(canvasElement, 'right');
+		const rightColour = getComputedStyle(right).color;
+		expect(getComputedStyle(left).color).toBe(CUT_TAG_RGB);
+		expect(isDottedAsACutTarget(left)).toBe(false);
+
 		await armCutFromMenu(canvasElement, line.from);
 		// Armed, and still a point at the anchor: nothing is under it yet.
 		expect(stage.querySelector('.edge-cut-line')).toBeInTheDocument();
@@ -12710,12 +12772,18 @@
 
 		await hoverCutTo(stage, line.between);
 		expect(cutTargetIds(canvasElement)).toEqual(['left']);
-		const left = getEdge(canvasElement, 'left');
 		expect(left).toHaveClass('cut-target');
-		expect(getComputedStyle(left).color).toBe(EDGE_CUT_RGB);
-		expect(getComputedStyle(left, '::before').maskImage).toContain('repeating-linear-gradient');
-		// An edge left alone keeps its own colour and stroke.
-		expect(getComputedStyle(getEdge(canvasElement, 'right')).color).not.toBe(EDGE_CUT_RGB);
+		// A target keeps its tag's colour, arrowhead too, and goes dotted; the
+		// line alone is the cut's red.
+		expect(isDottedAsACutTarget(left)).toBe(true);
+		expect(getComputedStyle(left).color).toBe(CUT_TAG_RGB);
+		expect(getComputedStyle(left, '::after').borderLeftColor).toBe(CUT_TAG_RGB);
+		const cutLine = stage.querySelector('.edge-cut-line line');
+		if (!(cutLine instanceof SVGElement)) throw new Error('Cut line not drawn');
+		expect(getComputedStyle(cutLine).stroke).toBe(EDGE_CUT_RGB);
+		// An edge left alone keeps its own colour and its solid stroke.
+		expect(getComputedStyle(right).color).toBe(rightColour);
+		expect(getComputedStyle(right, '::before').maskImage).toBe('none');
 
 		await hoverCutTo(stage, line.to);
 		expect(cutTargetIds(canvasElement)).toEqual(['left', 'right']);
@@ -12730,7 +12798,9 @@
 		dispatchKeydown(document.body, 'Escape');
 		await tick();
 		expect(cutTargetIds(canvasElement)).toEqual([]);
-		expect(getComputedStyle(left).color).not.toBe(EDGE_CUT_RGB);
+		expect(isDottedAsACutTarget(left)).toBe(false);
+		expect(getComputedStyle(left, '::before').maskImage).toBe('none');
+		expect(getComputedStyle(left).color).toBe(CUT_TAG_RGB);
 		expect(stage.querySelector('.edge-cut-line')).toBeNull();
 
 		// Abandoned, so the next click cuts nothing and nothing was ever committed.
@@ -12838,6 +12908,7 @@
 		dispatchContextMenu(stage, line.from.x, line.from.y);
 		await tick();
 		expect(canvas.getAllByRole('menuitem').map((item) => item.textContent?.trim())).toEqual([
+			'Select more',
 			'Paste',
 			'Copy (2)',
 			'Cut edges'
@@ -12872,6 +12943,301 @@
 />
 
 <Story
+	name="SelectFromTheBackgroundMenuArmsABoxAtTheMenusPointThatPreviewsAndCommitsOnClick"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		clipboard: ARMED_BOX_CLIPBOARD,
+		onMultigraphChange: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const canvas = within(canvasElement);
+		const stage = getStage(canvasElement);
+		const row = boxAround(canvasElement, ['n0', 'n1', 'n2']);
+		const overLeft = { x: gapBetween(canvasElement, 'n0', 'n1'), y: row.to.y };
+		const transformBefore = getStageTransform(canvasElement);
+
+		// Nothing selected: the menu's first item is Select, and it is the menu's
+		// press that anchors the box.
+		dispatchContextMenu(stage, row.from.x, row.from.y);
+		await tick();
+		expect(canvas.getAllByRole('menuitem')[0].textContent?.trim()).toBe('Select');
+		canvas.getByRole('menuitem', { name: 'Select' }).click();
+		await tick();
+		expect(canvas.queryByRole('menu')).toBeNull();
+
+		// Armed, the box is a point at the anchor, and nothing shows selected yet.
+		const armed = drawnSelectionBox(stage);
+		expect(armed).not.toBeNull();
+		expect(armed?.left).toBeCloseTo(row.from.x, 0);
+		expect(armed?.top).toBeCloseTo(row.from.y, 0);
+		expect(selectedNodeIds(canvasElement)).toEqual([]);
+
+		// Hover with no button held draws it from the anchor, and every move
+		// previews what a click there would select, as a dragged box does.
+		hoverStage(stage, overLeft);
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0']);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('1 selected');
+		hoverStage(stage, row.to);
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2']);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('3 selected');
+		const drawn = drawnSelectionBox(stage);
+		expect(drawn?.left).toBeCloseTo(row.from.x, 0);
+		expect(drawn?.top).toBeCloseTo(row.from.y, 0);
+		expect(drawn?.right).toBeCloseTo(row.to.x, 0);
+		expect(drawn?.bottom).toBeCloseTo(row.to.y, 0);
+		// A preview, not a commit: nothing is announced yet.
+		expect(selectionAnnouncement(canvasElement).textContent?.trim()).toBe('');
+
+		// The click commits exactly what was shown. It is the box's, so it is not
+		// the background click that clears, and it pans nothing.
+		dispatchPointer(stage, 'pointerdown', row.to.x, row.to.y);
+		dispatchPointer(stage, 'pointerup', row.to.x, row.to.y);
+		await tick();
+		expect(drawnSelectionBox(stage)).toBeNull();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2']);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('3 selected');
+		expect(selectionAnnouncement(canvasElement)).toHaveTextContent('3 selected');
+		expect(getStageTransform(canvasElement)).toBe(transformBefore);
+		// Selecting is not an edit.
+		expect(commitCount(args)).toBe(0);
+
+		// With a selection standing, the item offers to add to it.
+		dispatchContextMenu(stage, row.from.x, row.from.y);
+		await tick();
+		expect(canvas.getAllByRole('menuitem')[0].textContent?.trim()).toBe('Select more');
+		dispatchKeydown(document.activeElement, 'Escape');
+		await tick();
+	}}
+/>
+
+<Story
+	name="SelectMoreAddsToAnExistingSelectionWithoutShift"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		clipboard: ARMED_BOX_CLIPBOARD
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const left = boxAround(canvasElement, ['n0']);
+		await dispatchSelectionBox(stage, left.from, left.to);
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0']);
+
+		// One selected, so the item reads "Select more", and the box it arms adds:
+		// the committed node stays shown while the box is open.
+		const right = boxAround(canvasElement, ['n2']);
+		await armBoxFromMenu(canvasElement, right.from, 'Select more');
+		expect(drawnSelectionBox(stage)).not.toBeNull();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0']);
+		hoverStage(stage, right.to);
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n2']);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('2 selected');
+
+		// No Shift anywhere, and the click still adds.
+		dispatchShiftablePointer(stage, 'pointerdown', right.to, false);
+		dispatchShiftablePointer(stage, 'pointerup', right.to, false);
+		await tick();
+		expect(drawnSelectionBox(stage)).toBeNull();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n2']);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('2 selected');
+		expect(selectionAnnouncement(canvasElement)).toHaveTextContent('2 selected');
+	}}
+/>
+
+<Story
+	name="TheTouchRouteHoldOnEmptyCanvasTapSelectDragLift"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		clipboard: ARMED_BOX_CLIPBOARD
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const canvas = within(canvasElement);
+		const stage = getStage(canvasElement);
+		const row = boxAround(canvasElement, ['n0', 'n1', 'n2']);
+		const overLeft = { x: gapBetween(canvasElement, 'n0', 'n1'), y: row.to.y };
+		const transformBefore = getStageTransform(canvasElement);
+
+		// Hold on empty canvas: the background menu, at the finger.
+		await dispatchLongPress(stage, row.from.x, row.from.y);
+		dispatchPointer(stage, 'pointerup', row.from.x, row.from.y, 1, 'touch');
+		await tick();
+		canvas.getByRole('menuitem', { name: 'Select' }).click();
+		await tick();
+		expect(canvas.queryByRole('menu')).toBeNull();
+
+		// No hover on a phone: the finger lands, and the box's far corner goes
+		// there.
+		dispatchPointer(stage, 'pointerdown', overLeft.x, overLeft.y, 1, 'touch');
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0']);
+
+		// A finger resting mid-box is not a hold: the press was the box's.
+		await sleep(LONG_PRESS_MS + 20);
+		expect(canvas.queryByRole('menu')).toBeNull();
+
+		// Drag: the preview follows the finger.
+		dispatchPointer(stage, 'pointermove', row.to.x, row.to.y, 1, 'touch');
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2']);
+		expect(selectionAnnouncement(canvasElement).textContent?.trim()).toBe('');
+
+		// Lift: what was shown is the selection, and the drag panned nothing.
+		dispatchPointer(stage, 'pointerup', row.to.x, row.to.y, 1, 'touch');
+		await tick();
+		expect(drawnSelectionBox(stage)).toBeNull();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2']);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('3 selected');
+		expect(selectionAnnouncement(canvasElement)).toHaveTextContent('3 selected');
+		expect(getStageTransform(canvasElement)).toBe(transformBefore);
+	}}
+/>
+
+<Story
+	name="EscapeWhileAnArmedBoxIsOpenCancelsItAndLeavesThePreviousSelection"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		clipboard: ARMED_BOX_CLIPBOARD
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		await selectTopRow(canvasElement);
+
+		const below = boxAround(canvasElement, ['n3']);
+		await armBoxFromMenu(canvasElement, below.from, 'Select more');
+		hoverStage(stage, below.to);
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2', 'n3']);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('4 selected');
+
+		// An armed box is the level above the selection, as a dragged one is:
+		// Escape abandons the box, and the committed selection shows again.
+		blurActiveElement();
+		dispatchShortcut(window, 'Escape');
+		await tick();
+		expect(drawnSelectionBox(stage)).toBeNull();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2']);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('3 selected');
+		expect(getComputedStyle(getCircle(canvasElement, 'n3')).boxShadow).not.toContain(
+			SELECTION_RING_RGB
+		);
+
+		// It is over: moving previews nothing, and the next click is a plain
+		// background click, which clears.
+		hoverStage(stage, below.from);
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2']);
+		await sleep(DBL_CLICK_MS + 50);
+		dispatchPointer(stage, 'pointerdown', below.to.x, below.to.y);
+		dispatchPointer(stage, 'pointerup', below.to.x, below.to.y);
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual([]);
+	}}
+/>
+
+<Story
+	name="AnArmedBoxIsAbandonedWhenAnotherSurfaceOpens"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		clipboard: ARMED_BOX_CLIPBOARD
+	}}
+	play={async ({ canvasElement }: PlayContext) => {
+		await waitForLayout();
+		const canvas = within(canvasElement);
+		const stage = getStage(canvasElement);
+		const row = boxAround(canvasElement, ['n0', 'n1', 'n2']);
+		await armBoxFromMenu(canvasElement, row.from, 'Select');
+		hoverStage(stage, row.to);
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n0', 'n1', 'n2']);
+
+		// Cmd/Ctrl+K opens the graph query, which closes every overlay on the
+		// way: the box goes with them, preview and all.
+		blurActiveElement();
+		dispatchShortcut(document.body, 'k', { metaKey: true });
+		await tick();
+		expect(canvas.getByLabelText('Graph query')).toBeInTheDocument();
+		expect(drawnSelectionBox(stage)).toBeNull();
+		expect(selectedNodeIds(canvasElement)).toEqual([]);
+		expect(selectionCountLabel(canvasElement)).toBeNull();
+
+		// The click that would have ended it selects nothing.
+		dispatchPointer(stage, 'pointerdown', row.to.x, row.to.y);
+		dispatchPointer(stage, 'pointerup', row.to.x, row.to.y);
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual([]);
+	}}
+/>
+
+<!--
+	Over an armed cut the background menu is reached by a right-click, which the
+	cut gives way to first; the Stage's own stories cover an arm request landing
+	on an armed cut directly. What this one pins is the page's half: the cut's
+	targets go, and the click that follows is the box's and cuts nothing.
+-->
+<Story
+	name="ArmingSelectCancelsAnArmedCut"
+	args={{
+		multigraphData: CUT_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		clipboard: ARMED_BOX_CLIPBOARD,
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const line = lineAcrossTheSides(canvasElement);
+		await armCutFromMenu(canvasElement, line.from);
+		await hoverCutTo(stage, line.to);
+		expect(cutTargetIds(canvasElement)).toEqual(['left', 'right']);
+
+		await armBoxFromMenu(canvasElement, line.from, 'Select');
+		expect(stage.querySelector('.edge-cut-line')).toBeNull();
+		expect(cutTargetIds(canvasElement)).toEqual([]);
+		expect(drawnSelectionBox(stage)).not.toBeNull();
+
+		// A box from the anchor past the bottom-left node, across the left side:
+		// the click selects that node and cuts nothing.
+		const bottomLeft = getCircle(canvasElement, 'n2').getBoundingClientRect();
+		const corner = wholePoint(bottomLeft.right + 10, bottomLeft.bottom + 10);
+		hoverStage(stage, corner);
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n2']);
+		expect(cutTargetIds(canvasElement)).toEqual([]);
+		dispatchPointer(stage, 'pointerdown', corner.x, corner.y);
+		dispatchPointer(stage, 'pointerup', corner.x, corner.y);
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual(['n2']);
+		expect(commitCount(args)).toBe(0);
+		expect(postedNotices(args)).toEqual([]);
+		expect(canvasElement.querySelectorAll('[data-edge-id]')).toHaveLength(3);
+	}}
+/>
+
+<Story
 	name="TheBackgroundMenusPasteCountsTheTabsCopyAtOnceAndTheSystemClipboardWhenItAnswers"
 	args={{
 		multigraphData: SELECTION_GRAPH,
@@ -12899,7 +13265,7 @@
 
 		// It answers with another tab's copy of three nodes, and Paste counts them.
 		HELD_CLIPBOARD.answer(encodeNodeClipboard(PINLESS_CHAIN, [], NO_SOURCE));
-		await waitFor(() => expect(menuItems()).toEqual(['Paste (3)', 'Cut edges']));
+		await waitFor(() => expect(menuItems()).toEqual(['Select', 'Paste (3)', 'Cut edges']));
 
 		// The paste brings what the label counted, from that one read.
 		canvas.getByRole('menuitem', { name: 'Paste (3)' }).click();
@@ -12918,7 +13284,7 @@
 		const left = stagePoint(stage, 0.1, 0.5);
 		dispatchContextMenu(stage, left.x, left.y);
 		await tick();
-		expect(menuItems()).toEqual(['Paste (2)', 'Cut edges']);
+		expect(menuItems()).toEqual(['Select', 'Paste (2)', 'Cut edges']);
 		expect(HELD_CLIPBOARD.reads).toBe(2);
 
 		// ...and when the system turns out to hold a sentence copied since, the

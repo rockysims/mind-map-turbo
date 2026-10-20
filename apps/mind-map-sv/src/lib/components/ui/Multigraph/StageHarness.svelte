@@ -90,6 +90,11 @@
 	let lastEdgeCutEnd = $state<{ a: Point; b: Point } | null>(null);
 	/** A count rather than a flag, as for the box. */
 	let edgeCutCancelCount = $state(0);
+	let selectionBoxArmRequest = $state<{ id: number; anchor: Point; additive: boolean } | null>(
+		null
+	);
+	let selectionBoxCancelRequest = $state<{ id: number } | null>(null);
+	let selectionBoxRequestId = 0;
 
 	function formatRect(rect: StageRect): string {
 		return `${rect.left},${rect.top},${rect.width},${rect.height}`;
@@ -99,16 +104,28 @@
 		return `${segment.a.x},${segment.a.y},${segment.b.x},${segment.b.y}`;
 	}
 
+	/** The stage's centre in client coordinates, where the "Arm" controls anchor. */
+	function stageCentre(): Point | null {
+		const stage = harnessRef?.querySelector('.stage');
+		if (!(stage instanceof HTMLElement)) return null;
+		const rect = stage.getBoundingClientRect();
+		return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+	}
+
 	/** Arm a cut anchored at the stage's centre, as the background menu arms one at its press. */
 	function armEdgeCut() {
-		const stage = harnessRef?.querySelector('.stage');
-		if (!(stage instanceof HTMLElement)) return;
-		const rect = stage.getBoundingClientRect();
+		const anchor = stageCentre();
+		if (!anchor) return;
 		edgeCutRequestId += 1;
-		edgeCutArmRequest = {
-			id: edgeCutRequestId,
-			anchor: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
-		};
+		edgeCutArmRequest = { id: edgeCutRequestId, anchor };
+	}
+
+	/** Arm a box anchored at the stage's centre: "Select", or with `additive` "Select more". */
+	function armSelectionBox(additive: boolean) {
+		const anchor = stageCentre();
+		if (!anchor) return;
+		selectionBoxRequestId += 1;
+		selectionBoxArmRequest = { id: selectionBoxRequestId, anchor, additive };
 	}
 </script>
 
@@ -242,6 +259,8 @@
 		onEdgeCutCancel={() => {
 			edgeCutCancelCount += 1;
 		}}
+		{selectionBoxArmRequest}
+		{selectionBoxCancelRequest}
 	>
 		{#each nodes as node (node.id)}
 			{@const pos = positions[node.id] ?? { left: '50%', top: '50%' }}
@@ -278,6 +297,26 @@
 		>
 			Cancel cut
 		</button>
+		<button type="button" data-testid="arm-selection-box" onclick={() => armSelectionBox(false)}>
+			Arm select
+		</button>
+		<button
+			type="button"
+			data-testid="arm-selection-box-additive"
+			onclick={() => armSelectionBox(true)}
+		>
+			Arm select more
+		</button>
+		<button
+			type="button"
+			data-testid="cancel-selection-box"
+			onclick={() => {
+				selectionBoxRequestId += 1;
+				selectionBoxCancelRequest = { id: selectionBoxRequestId };
+			}}
+		>
+			Cancel select
+		</button>
 	</div>
 </div>
 
@@ -290,8 +329,8 @@
 		touch-action: none;
 	}
 
-	/* Test affordances mimicking the action menus' "Add node/edge" and "Cut
-	   edges" clicks; kept out of the stage's hit-test area. */
+	/* Test affordances mimicking the action menus' "Add node/edge", "Cut
+	   edges" and "Select" clicks; kept out of the stage's hit-test area. */
 	.arm-creation-row {
 		position: absolute;
 		right: 0;

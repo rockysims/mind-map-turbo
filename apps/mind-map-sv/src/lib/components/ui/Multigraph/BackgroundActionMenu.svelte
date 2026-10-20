@@ -6,6 +6,7 @@
 		position,
 		selectionCount,
 		pasteCount,
+		onSelect,
 		onPaste,
 		onCopy,
 		onCutEdges,
@@ -14,7 +15,10 @@
 	}: {
 		/** Client coordinates of the hold or right-click on empty canvas. */
 		position: Point;
-		/** How many nodes are selected; above one, the menu offers to copy them. */
+		/**
+		 * How many nodes are selected: with any, "Select" reads "Select more";
+		 * above one, the menu offers to copy them.
+		 */
 		selectionCount: number;
 		/**
 		 * How many nodes the clipboard holds, which "Paste" names, or `null` when
@@ -25,6 +29,11 @@
 		 * says why when there is still nothing to paste.
 		 */
 		pasteCount: number | null;
+		/**
+		 * Arm a selection box anchored at `position`, which replaces the selection
+		 * or, as "Select more", adds to it.
+		 */
+		onSelect: () => void;
 		/** Paste at `position`; called inside the tap, so the clipboard read has its activation. */
 		onPaste: () => void;
 		/** Copy the selection; called inside the tap, so the clipboard write has its activation. */
@@ -64,11 +73,22 @@
 	 * Like Paste it is always offered: what it would cut depends on where the
 	 * line is drawn, which nothing knows until it is.
 	 *
+	 * "Select", or "Select more" while anything is selected, comes first: it is
+	 * the item a touch reader, for whom the double-click-drag box is awkward,
+	 * reaches for first. It arms the same box, anchored where the menu opened
+	 * (`docs/ui-decisions/2026-10-19--pointer--select-from-the-background-menu-arms-a-box.md`),
+	 * and is always offered, for the cut's reason.
+	 *
 	 * Hints follow the node menu's rule: the label names the action, the native
 	 * `title` says what happens, and hover-only is the same debt
 	 * (`docs/debt/2026-08-30-tooltips-are-hover-only.md`).
 	 */
 	const items = $derived<ActionMenuItem[]>([
+		{
+			label: selectionCount > 0 ? 'Select more' : 'Select',
+			hint: 'Drag a box over the nodes to select, then click or lift',
+			activate: thenClose(onSelect)
+		},
 		{
 			label: pasteCount === null ? 'Paste' : `Paste (${pasteCount})`,
 			hint: 'Put the copied nodes here',

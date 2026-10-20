@@ -762,3 +762,13 @@ T09 all edit `Multigraph.svelte` and are strictly sequential for that reason.
   was re-minted to a pasted node. A cut edge now leaves within 200 ms (a cap
   over the exit fade, zero under reduced motion), including on the reveal-wave
   path a severing cut takes, where the wave no longer draws the cut edges.
+- 2026-10-19 (later still): two more rulings. A cut target keeps its own
+  colour and goes dotted (a CSS mask of round dots one stroke wide with a
+  two-stroke gap, scaled in the edge's own stroke width; edges are boxes, not
+  SVG, so no dasharray); the Stage's line stays red and dashed. The
+  background menu's first item is "Select" / "Select more", arming a box at
+  the menu's press that follows the pointer like the cut line, previews, and
+  commits on the click or lift — "Select more" adds without a modifier. Noted
+  by the implementer: a dotted target's 6 px rhythm at reference scale sits
+  close to a derived edge's 2/4 dash, and an armed box is a 2 px speck until
+  the pointer moves.

@@ -96,6 +96,21 @@
 		id: number;
 	}
 
+	interface SelectionBoxArmRequest {
+		id: number;
+		/** Client coordinates of the box's fixed corner: where the background menu was opened. */
+		anchor: Point;
+		/**
+		 * Reported as `additive` on every update and at the end, in place of
+		 * Shift: "Select more" adds to the selection with no modifier held.
+		 */
+		additive: boolean;
+	}
+
+	interface SelectionBoxCancelRequest {
+		id: number;
+	}
+
 	interface Props {
 		/** Resolve node at (clientX, clientY); return null if none. Injected for testability. */
 		getNodeAt: (clientX: number, clientY: number) => NodeData | null;
@@ -147,18 +162,27 @@
 		onNodeMergeDropOntoNode?: (sourceNode: NodeData, targetNode: NodeData) => void;
 		/**
 		 * Fired on every pointer move while a selection box is open: a
-		 * double-click-drag (double-tap-drag) that started on empty canvas. The
-		 * rect is in client coordinates, like `onStageRectChange`'s, so a consumer
-		 * can test it against on-screen node geometry without the view transform.
-		 * `additive` is Shift as held right now — read from each move, and
-		 * reported again when Shift alone goes down or up — so a consumer that
-		 * previews the box's result can follow it mid-drag. Release still decides
-		 * with its own Shift (`onSelectionBoxEnd`).
+		 * double-click-drag (double-tap-drag) that started on empty canvas, or a
+		 * box armed by `selectionBoxArmRequest`. The rect is in client
+		 * coordinates, like `onStageRectChange`'s, so a consumer can test it
+		 * against on-screen node geometry without the view transform. For a
+		 * dragged box `additive` is Shift as held right now — read from each
+		 * move, and reported again when Shift alone goes down or up — so a
+		 * consumer that previews the box's result can follow it mid-drag; release
+		 * still decides with its own Shift (`onSelectionBoxEnd`). For an armed box
+		 * it is the request's `additive` throughout, and Shift is not read.
 		 */
 		onSelectionBoxUpdate?: (rect: StageRect, options: { additive: boolean }) => void;
-		/** Fired when an open box is released; `additive` is Shift held at release. */
+		/**
+		 * Fired when an open box is released; `additive` is Shift held at release,
+		 * or for an armed box the request's own.
+		 */
 		onSelectionBoxEnd?: (rect: StageRect, options: { additive: boolean }) => void;
-		/** Fired when an open box is abandoned: a second pointer, pointercancel, Escape or a right-click. */
+		/**
+		 * Fired when an open box is abandoned: a second pointer, pointercancel,
+		 * Escape or a right-click; an armed box also by a press outside the stage,
+		 * a new arm request of any kind, or `selectionBoxCancelRequest`.
+		 */
 		onSelectionBoxCancel?: () => void;
 		/**
 		 * Fired when a press on empty canvas is released without crossing
@@ -175,8 +199,9 @@
 		/**
 		 * One-shot request to arm an edge cut (menu-initiated, no button pressed):
 		 * a dashed line from `anchor` to the pointer, ended by the next click or
-		 * touch release. Arming cancels an armed creation session or an earlier
-		 * cut, as arming a creation session cancels a cut.
+		 * touch release. Arming cancels an armed creation session, an armed
+		 * selection box or an earlier cut, as arming either of those cancels a
+		 * cut.
 		 */
 		edgeCutArmRequest?: EdgeCutArmRequest | null;
 		/** One-shot request to abandon an armed edge cut, as Escape would; nothing when none is armed. */
@@ -194,9 +219,20 @@
 		/**
 		 * Fired when an armed cut is abandoned: Escape, a second pointer,
 		 * pointercancel, a right-click, a press outside the stage, a new arm
-		 * request of either kind, or `edgeCutCancelRequest`.
+		 * request of any kind, or `edgeCutCancelRequest`.
 		 */
 		onEdgeCutCancel?: () => void;
+		/**
+		 * One-shot request to arm a selection box (menu-initiated, no button
+		 * pressed): the box drawn from `anchor` to the pointer, ended by the next
+		 * click or touch release, and reported through the same
+		 * `onSelectionBoxUpdate` / `onSelectionBoxEnd` / `onSelectionBoxCancel` a
+		 * dragged box uses. Arming cancels an armed creation session, an armed
+		 * cut and any box already open, as arming either of those cancels it.
+		 */
+		selectionBoxArmRequest?: SelectionBoxArmRequest | null;
+		/** One-shot request to abandon an armed box, as Escape would; nothing when none is armed. */
+		selectionBoxCancelRequest?: SelectionBoxCancelRequest | null;
 		/** Fired whenever the internal pan/zoom state changes, including initial mount. */
 		onViewStateLiveChange?: (state: ViewStateSnapshot) => void;
 		/**
@@ -274,6 +310,8 @@
 		onEdgeCutUpdate,
 		onEdgeCutEnd,
 		onEdgeCutCancel,
+		selectionBoxArmRequest,
+		selectionBoxCancelRequest,
 		onViewStateLiveChange,
 		onStageRectChange,
 		focusEntryBoundaryCandidateForPoint,
@@ -443,14 +481,19 @@
 	//    slop), and its release is not a click. A right-click fires
 	//    `onBackgroundContextMenu` and abandons whatever the press began, since
 	//    macOS ctrl+click delivers a button-0 press before the contextmenu.
-	// 7. The two menu-armed sessions — a creation drag (`creationSession.via ===
-	//    'menu'`) and an edge cut (`edgeCutSession`) — swallow background
-	//    presses before any of this runs (`onPointerDownStage`). They never
-	//    coexist: arming either cancels the other, and arming a cut cancels a
-	//    cut already armed. A cut also gives way to a right-click, which a
-	//    creation session does not: macOS ctrl+click delivers a button-0 press
-	//    before the contextmenu, and that press's release must not land as the
-	//    cut.
+	// 7. The three menu-armed sessions — a creation drag (`creationSession.via
+	//    === 'menu'`), an edge cut (`edgeCutSession`) and a selection box
+	//    (`armedSelectionBox`) — swallow background presses before any of this
+	//    runs (`onPointerDownStage`). They never coexist: arming any one cancels
+	//    the other two, and arming a cut or a box cancels one of its own kind
+	//    already armed. The armed box is drawn as `selectionBox`, the dragged
+	//    box's own, from the request's anchor rather than from a press, so
+	//    arming it also cancels a dragged box in flight and the two never
+	//    coexist either; it reports the request's `additive` on every update
+	//    and at the end, where 3 and 4 read Shift. A cut and an armed box also
+	//    give way to a right-click, which a creation session does not: macOS
+	//    ctrl+click delivers a button-0 press before the contextmenu, and that
+	//    press's release must not land as the cut or the box.
 	//
 	// Plain variables rather than `$state`: nothing renders from the press, and
 	// the hold timer checks it is still the same press by identity.
@@ -466,12 +509,15 @@
 	let backgroundPress: BackgroundPress | null = null;
 	let lastBackgroundClick: { clientX: number; clientY: number; time: number } | null = null;
 	/**
-	 * The open box where it is drawn, in stage-local pixels. The callbacks get
-	 * the same rect in client space; the two differ by the stage's own offset.
+	 * The open box where it is drawn, in stage-local pixels — a dragged box or
+	 * an armed one, which share it (precedence 7). The callbacks get the same
+	 * rect in client space; the two differ by the stage's own offset.
 	 */
 	let selectionBox = $state<StageRect | null>(null);
 	const selectionBoxOpen = $derived(selectionBox !== null);
 
+	// One Escape listener for both kinds of box: an armed box sets
+	// `selectionBox` as it is armed, and `cancelBackgroundGesture` ends either.
 	$effect(() => {
 		if (typeof window === 'undefined' || !selectionBoxOpen) return;
 		const onKeyDown = (e: KeyboardEvent) => {
@@ -493,10 +539,13 @@
 	 * Shift pressed or let go while the pointer holds still. Moves alone would
 	 * leave the last update's `additive` stale until the next one, and a
 	 * preview built from it would show one result while release committed the
-	 * other. Key repeat changes nothing, so it reports nothing.
+	 * other. Key repeat changes nothing, so it reports nothing. An armed box
+	 * has no press and takes its `additive` from its request, so Shift is not
+	 * news to it either.
 	 */
 	function followShift(e: KeyboardEvent) {
-		if (e.key !== 'Shift' || e.repeat || !backgroundPress || !selectionBox) return;
+		if (e.key !== 'Shift' || e.repeat || armedSelectionBox) return;
+		if (!backgroundPress || !selectionBox) return;
 		updateSelectionBox(backgroundPress, e.shiftKey);
 	}
 
@@ -559,8 +608,12 @@
 		}
 	}
 
-	function updateSelectionBox(press: BackgroundPress, additive: boolean) {
-		const rect = rectFromCorners({ x: press.clientX, y: press.clientY }, press.current);
+	/**
+	 * Draw the box between two client points, whichever kind it is, and return
+	 * the client rect the callbacks report.
+	 */
+	function drawSelectionBox(from: Point, to: Point): StageRect {
+		const rect = rectFromCorners(from, to);
 		const stageBounds = stageRef?.getBoundingClientRect();
 		selectionBox = {
 			left: rect.left - (stageBounds?.left ?? 0),
@@ -568,10 +621,17 @@
 			width: rect.width,
 			height: rect.height
 		};
+		return rect;
+	}
+
+	function updateSelectionBox(press: BackgroundPress, additive: boolean) {
+		const rect = drawSelectionBox({ x: press.clientX, y: press.clientY }, press.current);
 		onSelectionBoxUpdate?.(rect, { additive });
 	}
 
+	/** Abandon the open box, dragged or armed. */
 	function cancelSelectionBox() {
+		armedSelectionBox = null;
 		if (!selectionBox) return;
 		selectionBox = null;
 		onSelectionBoxCancel?.();
@@ -635,9 +695,12 @@
 		if (!request || request.id === lastCreationArmRequestId) return;
 		lastCreationArmRequestId = request.id;
 		cancelActiveNodeGesture();
-		cancelBackgroundGesture();
-		// Untracked, so this effect does not re-run on every move of a cut.
-		untrack(() => cancelEdgeCut());
+		// Untracked, so this effect does not re-run on every move of a cut or a
+		// box; the first also abandons a box, dragged or armed (precedence 7).
+		untrack(() => {
+			cancelBackgroundGesture();
+			cancelEdgeCut();
+		});
 		panStart = null;
 		creationSession = {
 			sourceNode: request.sourceNode,
@@ -808,6 +871,85 @@
 		if (!edgeCutSession) return;
 		edgeCutSession = null;
 		onEdgeCutCancel?.();
+	}
+
+	// Armed selection box ("Select" / "Select more" in the background menu): the
+	// box from where the menu was opened to the pointer, for a reader to whom a
+	// double-click-drag is awkward — a touch reader above all. Tracked, swallowed
+	// and abandoned exactly as the cut is (precedence 7); drawn and reported as
+	// the dragged box is, through `selectionBox` and the box callbacks, so a
+	// consumer previews and commits both through one path.
+	interface ArmedSelectionBox {
+		/** Client point the box is anchored at, fixed for the session. */
+		anchor: Point;
+		/** The request's own, reported on every update and at the end. */
+		additive: boolean;
+	}
+	let armedSelectionBox = $state<ArmedSelectionBox | null>(null);
+	/** Its own signal, as for the cut, so the listener below follows arming only. */
+	const selectionBoxArmed = $derived(armedSelectionBox !== null);
+	let lastSelectionBoxArmRequestId = $state<number | null>(null);
+	let lastSelectionBoxCancelRequestId = $state<number | null>(null);
+
+	// Declared before the arm effect, for the cut's reason: a cancel and a fresh
+	// arm landing in the same flush run in that order and the fresh box survives.
+	$effect(() => {
+		const request = selectionBoxCancelRequest;
+		if (!request || request.id === lastSelectionBoxCancelRequestId) return;
+		lastSelectionBoxCancelRequestId = request.id;
+		// Only an armed box: a dragged one is under a held pointer, and its
+		// release is the reader's to make.
+		untrack(() => {
+			if (armedSelectionBox) cancelSelectionBox();
+		});
+	});
+
+	$effect(() => {
+		const request = selectionBoxArmRequest;
+		if (!request || request.id === lastSelectionBoxArmRequestId) return;
+		lastSelectionBoxArmRequestId = request.id;
+		// Untracked: the box it draws changes on every move, and nothing here
+		// should run again until the next request.
+		untrack(() => {
+			cancelActiveNodeGesture();
+			// Also abandons a box already open, dragged or armed, with its report.
+			cancelBackgroundGesture();
+			cancelEdgeCut();
+			panStart = null;
+			armedSelectionBox = { anchor: request.anchor, additive: request.additive };
+			// Reported at once, before any move, as the cut is: until the pointer
+			// comes back over the stage the box is a point at the anchor, and a
+			// consumer learns from this that a box is open.
+			updateArmedSelectionBox(request.anchor);
+		});
+	});
+
+	/** As for the cut: a press on app chrome never reaches the stage. */
+	$effect(() => {
+		if (typeof window === 'undefined' || !selectionBoxArmed) return;
+		const onWindowPointerDown = (e: PointerEvent) => {
+			const target = e.target;
+			if (stageRef && target instanceof Node && stageRef.contains(target)) return;
+			cancelSelectionBox();
+		};
+		window.addEventListener('pointerdown', onWindowPointerDown, true);
+		return () => window.removeEventListener('pointerdown', onWindowPointerDown, true);
+	});
+
+	/** Carry the armed box's free corner to `point` and report it. */
+	function updateArmedSelectionBox(point: Point) {
+		const session = armedSelectionBox;
+		if (!session) return;
+		const rect = drawSelectionBox(session.anchor, point);
+		onSelectionBoxUpdate?.(rect, { additive: session.additive });
+	}
+
+	function endArmedSelectionBox(point: Point) {
+		const session = armedSelectionBox;
+		if (!session) return;
+		armedSelectionBox = null;
+		selectionBox = null;
+		onSelectionBoxEnd?.(rectFromCorners(session.anchor, point), { additive: session.additive });
 	}
 
 	function onPointerDown(e: PointerEvent) {
@@ -1067,7 +1209,8 @@
 		const node = getNodeAt(e.clientX, e.clientY);
 		// macOS ctrl+click fires a button-0 pointerdown before contextmenu, so
 		// whatever that press began must not also land as a click or a box — nor,
-		// with a cut armed, as the cut (precedence 7).
+		// with a cut or a box armed, as the cut or the box (precedence 7);
+		// `cancelBackgroundGesture` ends an armed box with a dragged one.
 		cancelBackgroundGesture();
 		cancelEdgeCut();
 		if (!node) {
@@ -1085,12 +1228,15 @@
 			// A menu-armed session swallows the press: the pointer is tracked (for
 			// pinch detection and pointerup) but must not start a
 			// pan/drag/long-press. A cut's free end jumps to the press, so a touch
-			// that lifts without moving cuts along the line it was shown.
+			// that lifts without moving cuts along the line it was shown; an armed
+			// box's free corner does the same.
 			if (edgeCutSession) updateEdgeCut({ x: e.clientX, y: e.clientY });
+			else if (armedSelectionBox) updateArmedSelectionBox({ x: e.clientX, y: e.clientY });
 			else if (creationSession?.via !== 'menu') onPointerDown(e);
 		} else if (activePointers.size === 2) {
 			panStart = null;
 			cancelActiveNodeGesture();
+			// Ends a box, dragged or armed.
 			cancelBackgroundGesture();
 			cancelEdgeCut();
 			const dist = getTwoPointerDistance();
@@ -1149,6 +1295,9 @@
 		} else if (edgeCutSession) {
 			// So does an armed cut.
 			updateEdgeCut({ x: e.clientX, y: e.clientY });
+		} else if (armedSelectionBox) {
+			// And an armed box.
+			updateArmedSelectionBox({ x: e.clientX, y: e.clientY });
 		} else {
 			onPointerMove(e);
 		}
@@ -1178,6 +1327,16 @@
 				cancelEdgeCut();
 			} else {
 				endEdgeCut({ x: e.clientX, y: e.clientY });
+			}
+			const stage = e.currentTarget as HTMLElement;
+			if (stage.hasPointerCapture?.(e.pointerId)) stage.releasePointerCapture(e.pointerId);
+			return;
+		}
+		if (armedSelectionBox && !pinchWasActive) {
+			if (e.type === 'pointercancel') {
+				cancelSelectionBox();
+			} else {
+				endArmedSelectionBox({ x: e.clientX, y: e.clientY });
 			}
 			const stage = e.currentTarget as HTMLElement;
 			if (stage.hasPointerCapture?.(e.pointerId)) stage.releasePointerCapture(e.pointerId);

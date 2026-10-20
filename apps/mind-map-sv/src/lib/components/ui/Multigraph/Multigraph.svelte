@@ -312,7 +312,7 @@
 		type CreationPreviewState
 	} from './lib/creationPreview.js';
 	import type { NodeGestureMode } from './lib/creationGesture.js';
-	import { EDGE_CUT_COLOR, edgeIdsCrossedBySegment, type EdgeCutCandidate } from './lib/edgeCut.js';
+	import { edgeIdsCrossedBySegment, type EdgeCutCandidate } from './lib/edgeCut.js';
 	import { planNodeMerge, type NodeMergePlan } from './lib/nodeMerge.js';
 	import { computeParallelEdgeOffsets } from './lib/parallelEdges.js';
 	import type { FocusLevel } from './lib/focusRuntime.svelte.js';
@@ -800,6 +800,16 @@
 	 * move that takes and drops nothing re-renders no edge.
 	 */
 	let cutTargetEdgeIds = $state.raw<ReadonlySet<string>>(NO_CUT_TARGETS);
+	/**
+	 * The armed selection box's one-shot requests to the Stage ("Select" /
+	 * "Select more" in the background menu), shaped like the cut's; one counter
+	 * serves both. Whether a box is open, of either kind, is `selectionPreview`.
+	 */
+	let selectionBoxArmRequest = $state<{ id: number; anchor: Point; additive: boolean } | null>(
+		null
+	);
+	let selectionBoxCancelRequest = $state<{ id: number } | null>(null);
+	let selectionBoxRequestId = $state(0);
 	let duplicateEdgeConfirm = $state<{ edgeId: string } | null>(null);
 	/**
 	 * A merge that has been planned but not committed, waiting on the direction
@@ -950,7 +960,9 @@
 	const selection = new SelectionController();
 	/**
 	 * What the box in flight would select if it were released now; null when no
-	 * box is open. Set from a box's first update until it ends or is cancelled.
+	 * box is open. Set from a box's first update until it ends or is cancelled:
+	 * a dragged box's first move, or an armed box's arming, which the Stage
+	 * reports at once.
 	 *
 	 * While it is held, everything that says "selected" — the ring,
 	 * `data-selected`, the accessible name and the visible count — reads it in
@@ -2190,7 +2202,9 @@
 	 * press any surface marked handled is left alone. The box, the drag and an
 	 * armed edge cut belong to the Stage, whose listeners hear the press after
 	 * this one — hence `selectionPreview` and `edgeCutArmed` rather than asking
-	 * the Stage.
+	 * the Stage. A box armed from the background menu is covered by the first:
+	 * the Stage reports it as it is armed, before any move, so the preview is
+	 * held from then on.
 	 */
 	function selectionOwnsKeyPress(event: Event): boolean {
 		if (event.defaultPrevented || selectionPreview !== null || edgeCutArmed) return false;
@@ -3033,9 +3047,9 @@
 	 * The selection a box over `rect` would leave. It takes every drawn node its
 	 * on-screen circle overlaps, by the same projection hit testing uses, so what
 	 * the box covers on screen is what it takes: those nodes alone, or with
-	 * `additive` (Shift), the committed selection followed by them. Null without
-	 * a measured stage, when there is nothing to test the box against and the
-	 * selection stands.
+	 * `additive` (Shift on a dragged box, "Select more" on an armed one), the
+	 * committed selection followed by them. Null without a measured stage, when
+	 * there is nothing to test the box against and the selection stands.
 	 *
 	 * The preview and the release both go through here, so the rings a reader
 	 * saw while dragging are the selection the release commits.
@@ -3124,6 +3138,40 @@
 				edgeCutArmed = false;
 			}
 			if (cutTargetEdgeIds.size > 0) cutTargetEdgeIds = NO_CUT_TARGETS;
+		});
+	}
+
+	/**
+	 * "Select" or "Select more" in the background menu: arm the Stage's box at
+	 * the point the menu was opened, per
+	 * `docs/ui-decisions/2026-10-19--pointer--select-from-the-background-menu-arms-a-box.md`.
+	 * "Select more" is the label whenever anything is selected, so `additive`
+	 * is read from the same count the menu was given. The box then reports
+	 * through `handleSelectionBoxUpdate` / `End` / `Cancel`, as a dragged one
+	 * does, so it previews and commits through `boxedSelection` too; the click
+	 * that ends it is the Stage's, never a background click that would clear.
+	 */
+	function armSelectionBox(anchor: Point) {
+		backgroundMenu = null;
+		selectionBoxRequestId += 1;
+		selectionBoxArmRequest = { id: selectionBoxRequestId, anchor, additive: selection.size > 0 };
+	}
+
+	/**
+	 * Abandon an armed box from this side — `closeOverlays` does, as it
+	 * abandons a cut. Asked whenever a box is open by the Stage's reports (the
+	 * preview is held from a box's first one), because those reports do not
+	 * say which kind it is; the Stage answers only for an armed box — a dragged
+	 * one is under a held pointer, and its release is the reader's — and its
+	 * cancel report drops the preview.
+	 *
+	 * Untracked, for `cancelEdgeCut`'s reason.
+	 */
+	function cancelArmedSelectionBox() {
+		untrack(() => {
+			if (selectionPreview === null) return;
+			selectionBoxRequestId += 1;
+			selectionBoxCancelRequest = { id: selectionBoxRequestId };
 		});
 	}
 
@@ -3305,6 +3353,7 @@
 		editNodeId = null;
 		creationPreview = null;
 		cancelEdgeCut();
+		cancelArmedSelectionBox();
 		duplicateEdgeConfirm = null;
 		// Dropping the plan is the whole cancel: nothing was mutated to undo. The
 		// same holds for a paste held on its size question; one already storing
@@ -4761,6 +4810,8 @@
 		onEdgeCutUpdate={handleEdgeCutUpdate}
 		onEdgeCutEnd={handleEdgeCutEnd}
 		onEdgeCutCancel={handleEdgeCutCancel}
+		{selectionBoxArmRequest}
+		{selectionBoxCancelRequest}
 		onViewStateLiveChange={(state) => {
 			stageViewState = state;
 		}}
@@ -4825,12 +4876,11 @@
 					graphLayout.scaleByNodeId,
 					strokeReferenceNodeScale
 				)}
+				<!-- An edge the armed cut would delete keeps its colour, and goes dotted
+				     (see `.cut-target`). -->
 				{@const cutTarget = cutTargetEdgeIds.has(edge.id)}
-				<!-- An edge the armed cut would delete takes the cut's red over its own
-				     colour and a spotlight's, and the cut's dash (see `.cut-target`). -->
-				{@const edgeColor = cutTarget
-					? EDGE_CUT_COLOR
-					: queryEdgeState?.role === 'spotlight' && queryEdgeState.spotlightColor
+				{@const edgeColor =
+					queryEdgeState?.role === 'spotlight' && queryEdgeState.spotlightColor
 						? queryEdgeState.spotlightColor
 						: edgeStrokeColor(edge, graph.tagColorConfig.edgeTags)}
 				{@const edgeEnterAnim = edgeEnterAnimations[edge.id]}
@@ -5182,6 +5232,7 @@
 			position={menuPoint}
 			selectionCount={selection.size}
 			pasteCount={backgroundMenuPasteCount}
+			onSelect={() => armSelectionBox(menuPoint)}
 			onPaste={() => void pasteFromMenu(menuPoint)}
 			onCopy={() => {
 				// Started here, before the menu closes itself, so the clipboard write is
@@ -5894,20 +5945,22 @@
 	}
 
 	/*
-	 * An edge the armed cut would delete: the cut's red (set inline, from
-	 * `EDGE_CUT_COLOR`) in a dash of its own — longer than the boundary dash
-	 * with a tighter gap, so a half-edge about to go no longer reads as a
-	 * half-edge, and colour is never the only sign. Last among the dashes, so it
-	 * wins over a boundary edge's.
+	 * An edge the armed cut would delete keeps its own colour — its tags', a
+	 * spotlight's — and its arrowhead, and goes dotted, per
+	 * `docs/ui-decisions/2026-10-19--display--an-edge-the-cut-line-would-take-goes-dotted-and-keeps-its-colour.md`:
+	 * the breaks say part of the line is already going. Round dots one stroke
+	 * wide, two strokes apart — a tile three strokes long with a circle of the
+	 * stroke's diameter at its centre — so the pattern is measured in the
+	 * stroke the edge already draws, whatever its node scale, and the camera's
+	 * zoom scales dots and stroke alike. A mask rather than a dash array
+	 * because an edge is a box, not an SVG stroke. The soft rim is a quarter
+	 * pixel, not a share of the radius: on a 2px stroke a wider one left the
+	 * dots too faint to read against the solid edges. Last among the dashes,
+	 * so it wins over a boundary edge's.
 	 */
 	.edge.cut-target::before {
-		--edge-dash-length: 10px;
-		--edge-dash-gap: 4px;
-
-		mask-image: repeating-linear-gradient(
-			to right,
-			#000 0 var(--edge-dash-length),
-			transparent var(--edge-dash-length) calc(var(--edge-dash-length) + var(--edge-dash-gap))
-		);
+		mask-image: radial-gradient(circle closest-side, #000 calc(100% - 0.25px), transparent 100%);
+		mask-size: calc(var(--edge-stroke-width) * 3) 100%;
+		mask-repeat: repeat-x;
 	}
 </style>

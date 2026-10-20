@@ -206,6 +206,17 @@
 		button.click();
 	}
 
+	/**
+	 * Press the harness's "Arm select" control — or with `additive` its "Arm
+	 * select more" — a box anchored at the stage's centre.
+	 */
+	function armSelectionBox(el: HTMLElement, additive = false): void {
+		const testId = additive ? 'arm-selection-box-additive' : 'arm-selection-box';
+		const button = el.querySelector(`[data-testid="${testId}"]`);
+		if (!(button instanceof HTMLElement)) throw new Error('Arm select control not found');
+		button.click();
+	}
+
 	function getEdgeCutLine(stage: HTMLElement): SVGSVGElement | null {
 		const line = stage.querySelector('.edge-cut-line');
 		return line instanceof SVGSVGElement ? line : null;
@@ -1984,5 +1995,587 @@
 		await sleep();
 		expect(wrapper.dataset.lastEdgeCutCancel).toBe('3');
 		expect(wrapper.dataset.lastEdgeCutEnd).toBe('');
+	}}
+/>
+
+<Story
+	name="ArmedSelectionBoxDrawsTheBoxFromTheAnchorAndHoverUpdatesIt"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+		const cancelButton = canvasElement.querySelector('[data-testid="cancel-selection-box"]');
+		if (!(cancelButton instanceof HTMLElement)) throw new Error('Cancel select control not found');
+		const lastUpdate = () => parseRectCallback(wrapper.dataset.lastSelectionBoxUpdate ?? '');
+
+		await waitForLayout();
+
+		const anchor = getCenter(stage);
+		const transformBefore = getStageTransform(canvasElement);
+		expect(getSelectionBox(stage)).toBeNull();
+
+		armSelectionBox(canvasElement);
+		await sleep();
+
+		// Armed, the box is a point at the anchor, and the stage says so at once,
+		// as it does for a cut: until the pointer comes back over the canvas that
+		// is all there is. `additive` is the request's.
+		expectRectCloseTo(lastUpdate(), { left: anchor.x, top: anchor.y, width: 0, height: 0 });
+		expect(lastUpdate().flag).toBe('false');
+		const box = getSelectionBox(stage);
+		expect(box).not.toBeNull();
+		if (!box) return;
+		// The dragged box's own element, drawn the same way.
+		expect(box.parentElement).toBe(stage);
+		expect(box.getAttribute('aria-hidden')).toBe('true');
+		expect(window.getComputedStyle(box).pointerEvents).toBe('none');
+		expect(window.getComputedStyle(stage).cursor).toBe('crosshair');
+
+		// Hover with no button grows it from the anchor, whichever way it goes,
+		// and every move reports.
+		dispatchPointer(stage, 'pointermove', anchor.x - 60, anchor.y - 30);
+		await sleep();
+		const upLeft = { left: anchor.x - 60, top: anchor.y - 30, width: 60, height: 30 };
+		expectRectCloseTo(lastUpdate(), upLeft);
+		expect(lastUpdate().flag).toBe('false');
+		expectRectCloseTo(box.getBoundingClientRect(), upLeft);
+
+		dispatchPointer(stage, 'pointermove', anchor.x + 50, anchor.y + 40);
+		await sleep();
+		const downRight = { left: anchor.x, top: anchor.y, width: 50, height: 40 };
+		expectRectCloseTo(lastUpdate(), downRight);
+		expectRectCloseTo(box.getBoundingClientRect(), downRight);
+
+		// Nothing pans under the box, and nothing ends or cancels it yet.
+		expect(getStageTransform(canvasElement)).toBe(transformBefore);
+		expect(wrapper.dataset.lastSelectionBoxEnd).toBe('');
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('');
+
+		// "Select more": the same box, reporting `additive` from its first update.
+		cancelButton.click();
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('1');
+		armSelectionBox(canvasElement, true);
+		await sleep();
+		expectRectCloseTo(lastUpdate(), { left: anchor.x, top: anchor.y, width: 0, height: 0 });
+		expect(lastUpdate().flag).toBe('true');
+		dispatchPointer(stage, 'pointermove', anchor.x + 30, anchor.y - 20);
+		await sleep();
+		expectRectCloseTo(lastUpdate(), { left: anchor.x, top: anchor.y - 20, width: 30, height: 20 });
+		expect(lastUpdate().flag).toBe('true');
+	}}
+/>
+
+<Story
+	name="ArmedSelectionBoxClickEndsItWithTheFinalRect"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+
+		await waitForLayout();
+
+		const anchor = getCenter(stage);
+		const transformBefore = getStageTransform(canvasElement);
+		armSelectionBox(canvasElement);
+		await sleep();
+		dispatchPointer(stage, 'pointermove', anchor.x + 80, anchor.y + 20, 1, 'mouse');
+		await sleep();
+
+		// A right-click release neither ends nor cancels it.
+		dispatchPointer(
+			stage,
+			'pointerdown',
+			anchor.x + 80,
+			anchor.y + 20,
+			1,
+			'mouse',
+			SECONDARY_BUTTON
+		);
+		dispatchPointer(stage, 'pointerup', anchor.x + 80, anchor.y + 20, 1, 'mouse', SECONDARY_BUTTON);
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxEnd).toBe('');
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('');
+		expect(getSelectionBox(stage)).not.toBeNull();
+
+		// The click: its press carries the far corner to where it landed, and its
+		// release ends the box with the final rect.
+		const end = { x: anchor.x + 84, y: anchor.y + 23 };
+		dispatchPointer(stage, 'pointerdown', end.x, end.y, 1, 'mouse');
+		await sleep();
+		const finalRect = { left: anchor.x, top: anchor.y, width: 84, height: 23 };
+		expectRectCloseTo(parseRectCallback(wrapper.dataset.lastSelectionBoxUpdate ?? ''), finalRect);
+		expect(wrapper.dataset.lastSelectionBoxEnd).toBe('');
+		dispatchPointer(stage, 'pointerup', end.x, end.y, 1, 'mouse');
+		await sleep();
+		const ended = parseRectCallback(wrapper.dataset.lastSelectionBoxEnd ?? '');
+		expectRectCloseTo(ended, finalRect);
+		expect(ended.flag).toBe('false');
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('');
+		expect(getSelectionBox(stage)).toBeNull();
+		expect(window.getComputedStyle(stage).cursor).not.toBe('crosshair');
+
+		// The armed box swallowed the press: it was neither a click nor a pan.
+		expect(wrapper.dataset.lastBackgroundClick).toBe('');
+		expect(getStageTransform(canvasElement)).toBe(transformBefore);
+
+		// The box is over: moving reports nothing, and the next click is a plain
+		// background click.
+		const updateAfterEnd = wrapper.dataset.lastSelectionBoxUpdate;
+		dispatchPointer(stage, 'pointermove', anchor.x - 40, anchor.y, 1, 'mouse');
+		dispatchPointer(stage, 'pointerdown', anchor.x - 40, anchor.y, 1, 'mouse');
+		dispatchPointer(stage, 'pointerup', anchor.x - 40, anchor.y, 1, 'mouse');
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxUpdate).toBe(updateAfterEnd);
+		expect(parseBackgroundPointCallback(wrapper.dataset.lastBackgroundClick ?? '').x).toBeCloseTo(
+			anchor.x - 40
+		);
+		expectRectCloseTo(parseRectCallback(wrapper.dataset.lastSelectionBoxEnd ?? ''), finalRect);
+
+		// "Select more" ends the same way, reporting `additive`.
+		armSelectionBox(canvasElement, true);
+		await sleep();
+		dispatchPointer(stage, 'pointerdown', anchor.x - 30, anchor.y - 10, 1, 'mouse');
+		dispatchPointer(stage, 'pointerup', anchor.x - 30, anchor.y - 10, 1, 'mouse');
+		await sleep();
+		const added = parseRectCallback(wrapper.dataset.lastSelectionBoxEnd ?? '');
+		expectRectCloseTo(added, { left: anchor.x - 30, top: anchor.y - 10, width: 30, height: 10 });
+		expect(added.flag).toBe('true');
+	}}
+/>
+
+<Story
+	name="ArmedSelectionBoxTouchDragEndsOnRelease"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+
+		await waitForLayout();
+
+		const anchor = getCenter(stage);
+		const transformBefore = getStageTransform(canvasElement);
+		armSelectionBox(canvasElement);
+		await sleep();
+
+		// No hover on a phone: the finger lands, and the far corner goes there.
+		dispatchPointer(stage, 'pointerdown', anchor.x - 100, anchor.y + 60, 1, 'touch');
+		await sleep();
+		expectRectCloseTo(parseRectCallback(wrapper.dataset.lastSelectionBoxUpdate ?? ''), {
+			left: anchor.x - 100,
+			top: anchor.y,
+			width: 100,
+			height: 60
+		});
+
+		// A finger resting mid-box is not a hold: the press was the box's.
+		await sleep(LONG_PRESS_MS + 20);
+		expect(wrapper.dataset.lastBackgroundLongPress).toBe('');
+
+		dispatchPointer(stage, 'pointermove', anchor.x, anchor.y, 1, 'touch');
+		dispatchPointer(stage, 'pointermove', anchor.x + 90, anchor.y - 50, 1, 'touch');
+		await sleep();
+		const lifted = { left: anchor.x, top: anchor.y - 50, width: 90, height: 50 };
+		expectRectCloseTo(parseRectCallback(wrapper.dataset.lastSelectionBoxUpdate ?? ''), lifted);
+		expect(wrapper.dataset.lastSelectionBoxEnd).toBe('');
+
+		dispatchPointer(stage, 'pointerup', anchor.x + 90, anchor.y - 50, 1, 'touch');
+		await sleep();
+		const ended = parseRectCallback(wrapper.dataset.lastSelectionBoxEnd ?? '');
+		expectRectCloseTo(ended, lifted);
+		expect(ended.flag).toBe('false');
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('');
+		expect(getSelectionBox(stage)).toBeNull();
+		// The drag was the box's, not a pan, and its release not a click.
+		expect(getStageTransform(canvasElement)).toBe(transformBefore);
+		expect(wrapper.dataset.lastBackgroundClick).toBe('');
+	}}
+/>
+
+<Story
+	name="ArmedSelectionBoxEscapeCancels"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+
+		await waitForLayout();
+
+		const anchor = getCenter(stage);
+		armSelectionBox(canvasElement);
+		await sleep();
+		dispatchPointer(stage, 'pointermove', anchor.x + 50, anchor.y + 30);
+		await sleep();
+		const updateBeforeEscape = wrapper.dataset.lastSelectionBoxUpdate;
+
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('1');
+		expect(getSelectionBox(stage)).toBeNull();
+
+		// The box is over: moving reports nothing, and a later click is a click.
+		dispatchPointer(stage, 'pointermove', anchor.x + 70, anchor.y + 40);
+		dispatchPointer(stage, 'pointerdown', anchor.x + 70, anchor.y + 40);
+		dispatchPointer(stage, 'pointerup', anchor.x + 70, anchor.y + 40);
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxUpdate).toBe(updateBeforeEscape);
+		expect(wrapper.dataset.lastSelectionBoxEnd).toBe('');
+		expect(wrapper.dataset.lastBackgroundClick).not.toBe('');
+
+		// Escape with no box open is not the box's to take.
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('1');
+	}}
+/>
+
+<Story
+	name="ArmedSelectionBoxSecondPointerCancelsAndPinches"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+
+		await waitForLayout();
+
+		// As in SecondPointerCancelsTheBoxAndPinches: Chromium will not capture a
+		// synthetic second finger, and capture is not what this story tests.
+		const capture = stage.setPointerCapture.bind(stage);
+		stage.setPointerCapture = (pointerId: number) => {
+			try {
+				capture(pointerId);
+			} catch {
+				// Synthetic pointer: nothing to capture.
+			}
+		};
+
+		const anchor = getCenter(stage);
+		armSelectionBox(canvasElement);
+		await sleep();
+		dispatchPointer(stage, 'pointerdown', anchor.x - 40, anchor.y, 1, 'touch');
+		dispatchPointer(stage, 'pointermove', anchor.x - 60, anchor.y + 10, 1, 'touch');
+		await sleep();
+		const updateBeforePinch = wrapper.dataset.lastSelectionBoxUpdate;
+		expectRectCloseTo(parseRectCallback(updateBeforePinch ?? ''), {
+			left: anchor.x - 60,
+			top: anchor.y,
+			width: 60,
+			height: 10
+		});
+
+		dispatchPointer(stage, 'pointerdown', anchor.x + 40, anchor.y, 2, 'touch');
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('1');
+		expect(getSelectionBox(stage)).toBeNull();
+
+		// The second finger then pinches, as it always has.
+		dispatchPointer(stage, 'pointermove', anchor.x + 140, anchor.y, 2, 'touch');
+		await sleep();
+		expect(parseViewStateCallback(wrapper.dataset.lastLiveViewState ?? '').scale).toBeGreaterThan(
+			1
+		);
+		dispatchPointer(stage, 'pointerup', anchor.x + 140, anchor.y, 2, 'touch');
+
+		// The first finger carrying on and lifting neither reopens nor ends a box.
+		dispatchPointer(stage, 'pointermove', anchor.x - 80, anchor.y, 1, 'touch');
+		dispatchPointer(stage, 'pointerup', anchor.x - 80, anchor.y, 1, 'touch');
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxUpdate).toBe(updateBeforePinch);
+		expect(wrapper.dataset.lastSelectionBoxEnd).toBe('');
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('1');
+
+		Reflect.deleteProperty(stage, 'setPointerCapture');
+	}}
+/>
+
+<Story
+	name="ArmedSelectionBoxCancelsOnPointerDownOutsideStage"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+		const armButton = canvasElement.querySelector('[data-testid="arm-selection-box"]');
+		if (!(armButton instanceof HTMLElement)) throw new Error('Arm select control not found');
+
+		await waitForLayout();
+
+		const anchor = getCenter(stage);
+		const target = { x: anchor.x + 70, y: anchor.y - 20 };
+		armSelectionBox(canvasElement);
+		await sleep();
+		dispatchPointer(stage, 'pointermove', target.x, target.y);
+		await sleep();
+
+		// Pressing app chrome outside the stage disarms the box.
+		const outside = getCenter(armButton);
+		dispatchPointer(armButton, 'pointerdown', outside.x, outside.y);
+		dispatchPointer(armButton, 'pointerup', outside.x, outside.y);
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('1');
+		expect(getSelectionBox(stage)).toBeNull();
+
+		dispatchPointer(stage, 'pointerdown', target.x, target.y);
+		dispatchPointer(stage, 'pointerup', target.x, target.y);
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxEnd).toBe('');
+
+		// Re-arming after a cancel works.
+		await sleep(DBL_CLICK_MS + 50);
+		armSelectionBox(canvasElement);
+		await sleep();
+		dispatchPointer(stage, 'pointermove', target.x, target.y);
+		dispatchPointer(stage, 'pointerdown', target.x, target.y);
+		dispatchPointer(stage, 'pointerup', target.x, target.y);
+		await sleep();
+		expectRectCloseTo(parseRectCallback(wrapper.dataset.lastSelectionBoxEnd ?? ''), {
+			left: anchor.x,
+			top: anchor.y - 20,
+			width: 70,
+			height: 20
+		});
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('1');
+	}}
+/>
+
+<Story
+	name="ArmingASelectionBoxCancelsAnArmedCutOrCreationOrBoxAndViceVersa"
+	args={{ nodes: [NODES[0]] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+		const circle = canvasElement.querySelector('.circle') as HTMLElement;
+		const armCreation = canvasElement.querySelector(
+			`[data-testid="arm-creation-${NODES[0].id}"]`
+		) as HTMLElement;
+		const lastUpdate = () => parseRectCallback(wrapper.dataset.lastSelectionBoxUpdate ?? '');
+
+		await waitForLayout();
+
+		const anchor = getCenter(stage);
+		const nodeCenter = getCenter(circle);
+		const bgPoint = { x: nodeCenter.x + NODE_RADIUS * 3, y: nodeCenter.y };
+
+		// A cut, then a box armed over it: the cut goes, and the click that
+		// follows is the box's.
+		armEdgeCut(canvasElement);
+		await sleep();
+		armSelectionBox(canvasElement);
+		await sleep();
+		expect(wrapper.dataset.lastEdgeCutCancel).toBe('1');
+		expect(getEdgeCutLine(stage)).toBeNull();
+		expect(getSelectionBox(stage)).not.toBeNull();
+		dispatchPointer(stage, 'pointermove', bgPoint.x, bgPoint.y);
+		dispatchPointer(stage, 'pointerdown', bgPoint.x, bgPoint.y);
+		dispatchPointer(stage, 'pointerup', bgPoint.x, bgPoint.y);
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxEnd).not.toBe('');
+		expect(wrapper.dataset.lastEdgeCutEnd).toBe('');
+
+		// A box, then a cut armed over it: the box goes, and the click is the cut's.
+		const boxEndBefore = wrapper.dataset.lastSelectionBoxEnd;
+		armSelectionBox(canvasElement);
+		await sleep();
+		armEdgeCut(canvasElement);
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('1');
+		expect(getSelectionBox(stage)).toBeNull();
+		expect(getEdgeCutLine(stage)).not.toBeNull();
+		dispatchPointer(stage, 'pointermove', bgPoint.x, bgPoint.y);
+		dispatchPointer(stage, 'pointerdown', bgPoint.x, bgPoint.y);
+		dispatchPointer(stage, 'pointerup', bgPoint.x, bgPoint.y);
+		await sleep();
+		expectSegmentCallback(wrapper.dataset.lastEdgeCutEnd, anchor, bgPoint);
+		expect(wrapper.dataset.lastSelectionBoxEnd).toBe(boxEndBefore);
+
+		// A second box armed over a first replaces it.
+		armSelectionBox(canvasElement);
+		await sleep();
+		dispatchPointer(stage, 'pointermove', bgPoint.x, bgPoint.y);
+		await sleep();
+		armSelectionBox(canvasElement, true);
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('2');
+		expect(getSelectionBox(stage)).not.toBeNull();
+		expectRectCloseTo(lastUpdate(), { left: anchor.x, top: anchor.y, width: 0, height: 0 });
+		expect(lastUpdate().flag).toBe('true');
+
+		// A creation drag armed over a box cancels the box, and takes the click.
+		armCreation.click();
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('3');
+		expect(getSelectionBox(stage)).toBeNull();
+		dispatchPointer(stage, 'pointermove', bgPoint.x, bgPoint.y);
+		dispatchPointer(stage, 'pointerdown', bgPoint.x, bgPoint.y);
+		dispatchPointer(stage, 'pointerup', bgPoint.x, bgPoint.y);
+		await sleep();
+		expect(parsePointCallback(wrapper.dataset.lastDoubleClickDropBg ?? '').nodeId).toBe(
+			NODES[0].id
+		);
+		expect(wrapper.dataset.lastSelectionBoxEnd).toBe(boxEndBefore);
+
+		// And a box armed over a creation drag cancels the drag, and takes the click.
+		const dropBefore = wrapper.dataset.lastDoubleClickDropBg;
+		armCreation.click();
+		await sleep();
+		dispatchPointer(stage, 'pointermove', bgPoint.x, bgPoint.y);
+		await sleep();
+		armSelectionBox(canvasElement, true);
+		await sleep();
+		expect(wrapper.dataset.lastCreationCancel).toBe(NODES[0].id);
+		dispatchPointer(stage, 'pointermove', bgPoint.x, bgPoint.y);
+		dispatchPointer(stage, 'pointerdown', bgPoint.x, bgPoint.y);
+		dispatchPointer(stage, 'pointerup', bgPoint.x, bgPoint.y);
+		await sleep();
+		expect(wrapper.dataset.lastDoubleClickDropBg).toBe(dropBefore);
+		expect(parseRectCallback(wrapper.dataset.lastSelectionBoxEnd ?? '').flag).toBe('true');
+
+		// A box armed over a dragged box in flight abandons it, so the two are
+		// never open together.
+		const endBeforeDrag = wrapper.dataset.lastSelectionBoxEnd;
+		await sleep(DBL_CLICK_MS + 50);
+		await dispatchBackgroundDoubleClickDrag(
+			stage,
+			bgPoint.x,
+			bgPoint.y,
+			bgPoint.x + 40,
+			bgPoint.y + 20
+		);
+		expect(getSelectionBox(stage)).not.toBeNull();
+		armSelectionBox(canvasElement);
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('4');
+		expectRectCloseTo(lastUpdate(), { left: anchor.x, top: anchor.y, width: 0, height: 0 });
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('5');
+		// The abandoned drag's release ends nothing.
+		dispatchPointer(stage, 'pointerup', bgPoint.x + 40, bgPoint.y + 20);
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxEnd).toBe(endBeforeDrag);
+		expect(getSelectionBox(stage)).toBeNull();
+	}}
+/>
+
+<Story
+	name="ArmedSelectionBoxIsAbandonedByPointerCancelARightClickOrACancelRequest"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+		const cancelButton = canvasElement.querySelector('[data-testid="cancel-selection-box"]');
+		if (!(cancelButton instanceof HTMLElement)) throw new Error('Cancel select control not found');
+
+		await waitForLayout();
+
+		const anchor = getCenter(stage);
+		const point = { x: anchor.x + 60, y: anchor.y + 20 };
+
+		// The browser taking the pointer back.
+		armSelectionBox(canvasElement);
+		await sleep();
+		dispatchPointer(stage, 'pointerdown', point.x, point.y, 1, 'touch');
+		dispatchPointer(stage, 'pointercancel', point.x, point.y, 1, 'touch');
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('1');
+		expect(getSelectionBox(stage)).toBeNull();
+
+		// macOS ctrl+click: a button-0 press, the contextmenu, then the release.
+		// The menu opens, and the release is not taken as the box's end.
+		armSelectionBox(canvasElement);
+		await sleep();
+		dispatchPointer(stage, 'pointerdown', point.x, point.y);
+		dispatchContextMenu(stage, point.x, point.y);
+		dispatchPointer(stage, 'pointerup', point.x, point.y);
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('2');
+		expect(
+			parseBackgroundPointCallback(wrapper.dataset.lastBackgroundContextMenu ?? '').x
+		).toBeCloseTo(point.x);
+
+		// The consumer's own cancel, with no press at all.
+		armSelectionBox(canvasElement);
+		await sleep();
+		cancelButton.click();
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('3');
+		expect(getSelectionBox(stage)).toBeNull();
+
+		// A cancel with nothing armed reports nothing, and nothing ever ended.
+		cancelButton.click();
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('3');
+		expect(wrapper.dataset.lastSelectionBoxEnd).toBe('');
+
+		// Nor does it touch a dragged box: that one is under a held pointer, and
+		// its release is the reader's.
+		await sleep(DBL_CLICK_MS + 50);
+		await dispatchBackgroundDoubleClickDrag(stage, point.x, point.y, point.x + 40, point.y + 20);
+		cancelButton.click();
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxCancel).toBe('3');
+		expect(getSelectionBox(stage)).not.toBeNull();
+		dispatchPointer(stage, 'pointerup', point.x + 40, point.y + 20);
+		await sleep();
+		expectRectCloseTo(parseRectCallback(wrapper.dataset.lastSelectionBoxEnd ?? ''), {
+			left: point.x,
+			top: point.y,
+			width: 40,
+			height: 20
+		});
+	}}
+/>
+
+<Story
+	name="ArmedSelectionBoxIgnoresShift"
+	args={{ nodes: [] }}
+	play={async ({ canvasElement }) => {
+		const wrapper = getCallbacks(canvasElement);
+		const stage = getStage(canvasElement);
+		const lastUpdate = () => parseRectCallback(wrapper.dataset.lastSelectionBoxUpdate ?? '');
+		const pressShift = (type: 'keydown' | 'keyup') =>
+			window.dispatchEvent(
+				new KeyboardEvent(type, { key: 'Shift', shiftKey: type === 'keydown', bubbles: true })
+			);
+
+		await waitForLayout();
+
+		const anchor = getCenter(stage);
+
+		// "Select" replaces whatever Shift says: on a move, alone, or at the click.
+		armSelectionBox(canvasElement);
+		await sleep();
+		dispatchPointer(stage, 'pointermove', anchor.x + 40, anchor.y + 20, 1, '', 0, {
+			shiftKey: true
+		});
+		await sleep();
+		expect(lastUpdate().flag).toBe('false');
+		const beforeKey = wrapper.dataset.lastSelectionBoxUpdate;
+		pressShift('keydown');
+		await sleep();
+		expect(wrapper.dataset.lastSelectionBoxUpdate).toBe(beforeKey);
+		dispatchPointer(stage, 'pointerdown', anchor.x + 40, anchor.y + 20, 1, '', 0, {
+			shiftKey: true
+		});
+		dispatchPointer(stage, 'pointerup', anchor.x + 40, anchor.y + 20, 1, '', 0, {
+			shiftKey: true
+		});
+		await sleep();
+		pressShift('keyup');
+		expect(parseRectCallback(wrapper.dataset.lastSelectionBoxEnd ?? '').flag).toBe('false');
+
+		// "Select more" adds with no Shift held anywhere.
+		armSelectionBox(canvasElement, true);
+		await sleep();
+		dispatchPointer(stage, 'pointermove', anchor.x - 40, anchor.y + 20);
+		await sleep();
+		expect(lastUpdate().flag).toBe('true');
+		pressShift('keydown');
+		pressShift('keyup');
+		await sleep();
+		expect(lastUpdate().flag).toBe('true');
+		dispatchPointer(stage, 'pointerdown', anchor.x - 40, anchor.y + 20);
+		dispatchPointer(stage, 'pointerup', anchor.x - 40, anchor.y + 20);
+		await sleep();
+		expect(parseRectCallback(wrapper.dataset.lastSelectionBoxEnd ?? '').flag).toBe('true');
 	}}
 />
