@@ -2478,6 +2478,34 @@
 	});
 
 	/**
+	 * A pinned anchor, a free node sprung to it, and a pair beyond the free node
+	 * — the boundary edge from the free node into the pair, and one edge inside
+	 * the pair — placed for the persisted harness's camera. Selecting the pair
+	 * and carrying it off stretches the boundary edge: a free node that stays
+	 * put while it is stretched is being pulled by nothing.
+	 */
+	const SLACK_BOUNDARY_GRAPH = makeGraph({
+		nodes: [
+			{ id: 'n0', title: 'Anchor', description: '', tags: [] },
+			{ id: 'n1', title: 'Free', description: '', tags: [] },
+			{ id: 'n2', title: 'Near', description: '', tags: [] },
+			{ id: 'n3', title: 'Far', description: '', tags: [] }
+		],
+		pinned: ['n0'],
+		edges: [
+			{ id: 'anchor-free', source: 'n0', target: 'n1' },
+			{ id: 'free-near', source: 'n1', target: 'n2' },
+			{ id: 'near-far', source: 'n2', target: 'n3' }
+		],
+		posByNodeId: {
+			n0: { x: -120, y: 150 },
+			n1: { x: -120, y: 0 },
+			n2: { x: 0, y: -60 },
+			n3: { x: 120, y: -60 }
+		}
+	});
+
+	/**
 	 * `SELECTION_GRAPH`'s layout with the middle of the top row unpinned and
 	 * sprung to both ends, so a selection of the row mixes pins with a node
 	 * physics is free to move.
@@ -2820,6 +2848,27 @@
 		posByNodeId: { n0: { x: -240, y: 0 }, n1: { x: 0, y: 0 }, n2: { x: 240, y: 0 } }
 	});
 
+	/**
+	 * A pinless chain spread well past the rest gap of both its edges, as a copy
+	 * of a corner someone had pulled apart carries it. A paste pins its hub (the
+	 * beacon), so once the copy is let go its own springs draw the two ends in:
+	 * a chain that keeps its spread is being held.
+	 */
+	const SPREAD_CHAIN = makeGraph({
+		nodes: [
+			{ id: 'n0', title: 'First', description: '', tags: [] },
+			{ id: 'n1', title: 'Hub', description: '', tags: [] },
+			{ id: 'n2', title: 'Last', description: '', tags: [] }
+		],
+		edges: [
+			[0, 1],
+			[1, 2]
+		],
+		posByNodeId: { n0: { x: -700, y: 0 }, n1: { x: 0, y: 0 }, n2: { x: 700, y: 0 } }
+	});
+	/** No fades, and the default relax, so a commit and every frame after it move what is free. */
+	const HELD_LAYOUT = { enterExitDurationMs: 0 };
+
 	/** An `!ai` node whose figure was promoted to the node beside it. */
 	const AI_BINDING_GRAPH = makeGraph({
 		nodes: [
@@ -2945,15 +2994,16 @@
 
 	/**
 	 * Whether `edge` is drawn as a cut target: masked to round dots, a circle
-	 * one stroke across in every tile three strokes long — measured in the
-	 * edge's own stroke, so the dots keep their shape at every scale.
+	 * one stroke across in every tile two strokes long, so about half line and
+	 * half gap — measured in the edge's own stroke, so the dots keep their shape
+	 * at every scale.
 	 */
 	function isDottedAsACutTarget(edge: HTMLElement): boolean {
 		const stroke = parseFloat(edge.style.getPropertyValue('--edge-stroke-width'));
 		const before = getComputedStyle(edge, '::before');
 		return (
 			before.maskImage.startsWith('radial-gradient') &&
-			Math.abs(parseFloat(before.maskSize) - stroke * 3) < 0.01
+			Math.abs(parseFloat(before.maskSize) - stroke * 2) < 0.01
 		);
 	}
 
@@ -3136,6 +3186,8 @@
 	// One clipboard per story, so no story reads what another copied.
 	const BOUNDARY_COPY_CLIPBOARD = memoryClipboard();
 	const BOUNDARY_DELETED_CLIPBOARD = memoryClipboard();
+	// Empty, so the background menu the cut is armed from counts nothing to paste.
+	const RECONNECTED_CUT_CLIPBOARD = memoryClipboard();
 	const DERIVED_COPY_CLIPBOARD = memoryClipboard();
 
 	/**
@@ -11939,6 +11991,68 @@
 	}}
 />
 
+<!--
+	A selection holds still: the pasted copies are the selection, so neither the
+	relax after the commit nor the frames after it move them, internal springs
+	stretched far past their rest notwithstanding. Letting go of the selection
+	lets them go too.
+-->
+<Story
+	name="APastedGroupKeepsItsRelativeLayoutAndPositionThroughTheRelaxWhileItStaysSelected"
+	args={{
+		multigraphData: SELECTION_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: HELD_LAYOUT,
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		blurActiveElement();
+		const anchor = stagePoint(stage, 0.5, 0.5);
+		hoverStage(stage, anchor);
+		dispatchPaste(document.body, encodeNodeClipboard(SPREAD_CHAIN, [], NO_SOURCE));
+		await waitFor(() => expect(postedNotices(args)).toEqual(['Pasted 3 nodes.']));
+
+		// The relax that followed the commit left the copies as they landed: the
+		// copied shape, centred on the point under the pointer.
+		const pasted = lastChangedGraph(args);
+		const arrived = arrivedNodes(pasted, ['n0', 'n1', 'n2', 'n3']);
+		const twinIds = ['First', 'Hub', 'Last'].map((title) => idTitled(arrived, title));
+		expect(relativeLayout(pasted, twinIds)).toEqual(
+			relativeLayout(SPREAD_CHAIN, ['n0', 'n1', 'n2'])
+		);
+		const centre = boundsCentre(pasted, twinIds);
+		const anchorInGraph = graphPointAt(stage, anchor, SELECTION_VIEW);
+		expect(centre.x).toBeCloseTo(anchorInGraph.x, 3);
+		expect(centre.y).toBeCloseTo(anchorInGraph.y, 3);
+
+		// Thirty frames later they are still exactly there, every pairwise offset
+		// and the centre with them, while they stay selected.
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual(twinIds);
+		const landed = nodePositions(canvasElement, twinIds);
+		await waitForFrames(30);
+		expect(nodePositions(canvasElement, twinIds)).toEqual(landed);
+
+		// Deselected, the chain's own edges draw its ends in toward the pinned hub.
+		dispatchKeydown(document.body, 'Escape');
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual([]);
+		await waitForFrames(30);
+		const released = nodePositions(canvasElement, twinIds);
+		const [first, hub, last] = twinIds;
+		expect(distanceBetween(released[first], released[hub])).toBeLessThan(
+			distanceBetween(landed[first], landed[hub]) - 10
+		);
+		expect(distanceBetween(released[last], released[hub])).toBeLessThan(
+			distanceBetween(landed[last], landed[hub]) - 10
+		);
+	}}
+/>
+
 <Story
 	name="PasteOfASavedGraphFilesTextImportsItAtTheAnchor"
 	args={{
@@ -12596,8 +12710,9 @@
 		dispatchPointer(stage, 'pointerup', to.x, to.y);
 		await waitForFrames(10);
 
-		// Still pinned, and so is the other pin it carried along: both hold where
-		// the group put them through the relayout a moved pin starts.
+		// Still pinned, and so is the other pin it carried along; and the whole
+		// group, the unpinned middle too, holds where it was dropped through the
+		// relayout a moved pin starts, because it is still the selection.
 		expect(canvasElement.querySelector('[data-node-id="n0"] .node')).toHaveAttribute(
 			'data-pinned',
 			'true'
@@ -12609,13 +12724,113 @@
 			true
 		]);
 		const settled = displacements(before, nodePositions(canvasElement, nodeIds));
-		for (const nodeId of ['n0', 'n2']) {
+		for (const nodeId of row) {
 			expect(settled[nodeId].x, nodeId).toBeCloseTo(held.n0.x, 3);
 			expect(settled[nodeId].y, nodeId).toBeCloseTo(held.n0.y, 3);
 		}
 		expect(selectedNodeIds(canvasElement)).toEqual(row);
 	}}
 />
+
+<Story
+	name="ADraggedSelectionStaysWhereItWasDropped"
+	play={async ({ canvasElement }: HarnessPlayContext) => {
+		const harness = canvasElement.querySelector('.harness');
+		if (!(harness instanceof HTMLElement)) throw new Error('Persisted harness not found');
+		await waitFor(() => expect(harness.dataset.loadedGraphId).toBe('dropped-group'));
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const row = ['n1', 'n2', 'n3'];
+		const nodeIds = ['n0', ...row];
+		await selectByMenu(canvasElement, row);
+
+		// Carried away from the anchor every one of them is sprung to, and let go.
+		const to = await dragNodeAndHold(canvasElement, 'n2', { x: 0, y: -100 }, 4);
+		dispatchPointer(stage, 'pointerup', to.x, to.y);
+		await tick();
+		const dropped = nodePositions(canvasElement, nodeIds);
+
+		// The release's relax and thirty frames of settle after it leave the row
+		// exactly where the hand put it, stretched springs and all.
+		await waitForFrames(30);
+		expect(nodePositions(canvasElement, nodeIds)).toEqual(dropped);
+		expect(selectedNodeIds(canvasElement)).toEqual(row);
+
+		// The hold is the selection's: let go of it and the springs draw the
+		// carried node back toward the anchor.
+		blurActiveElement();
+		dispatchKeydown(document.body, 'Escape');
+		await waitForFrames(30);
+		const released = nodePositions(canvasElement, nodeIds);
+		expect(distanceBetween(released.n2, released.n0)).toBeLessThan(
+			distanceBetween(dropped.n2, dropped.n0) - 10
+		);
+	}}
+>
+	{#snippet template()}
+		<PersistedGraphHarness
+			initialGraphId="dropped-group"
+			graphs={{ 'dropped-group': GROUP_DRAG_GRAPH }}
+			layoutSettings={{ ...HELD_LAYOUT, baseRadius: 40 }}
+		/>
+	{/snippet}
+</Story>
+
+<!--
+	The edge from the free node into the selection is stretched by the drag. A
+	held selection's boundary edges pull nothing, so the free node stays where
+	it was; once deselected the edge pulls again, and the two close on each
+	other. Hop repulsion is untouched throughout, and nothing here is close
+	enough for it to push.
+-->
+<Story
+	name="AnEdgeCrossingTheSelectionBoundaryPullsNothingWhileTheSelectionIsHeldAndPullsAgainOnceDeselected"
+	play={async ({ canvasElement }: HarnessPlayContext) => {
+		const harness = canvasElement.querySelector('.harness');
+		if (!(harness instanceof HTMLElement)) throw new Error('Persisted harness not found');
+		await waitFor(() => expect(harness.dataset.loadedGraphId).toBe('slack-boundary'));
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		const pair = ['n2', 'n3'];
+		await selectByMenu(canvasElement, pair);
+		expect(selectedNodeIds(canvasElement)).toEqual(pair);
+
+		// Carry the pair straight away from the free node, stretching the one
+		// edge between them well past its rest.
+		const free = getCenter(getCircle(canvasElement, 'n1'));
+		const near = getCenter(getCircle(canvasElement, 'n2'));
+		const length = distanceBetween(free, near);
+		const away = { x: ((near.x - free.x) / length) * 100, y: ((near.y - free.y) / length) * 100 };
+		const to = await dragNodeAndHold(canvasElement, 'n2', away, 4);
+		dispatchPointer(stage, 'pointerup', to.x, to.y);
+		await tick();
+		const dropped = nodePositions(canvasElement, ['n1', ...pair]);
+		const stretched = distanceBetween(dropped.n1, dropped.n2);
+
+		// Thirty frames: the pair is held, and the free node is not hauled after
+		// it — a pulling edge would close most of that stretch in a few frames.
+		await waitForFrames(30);
+		const held = nodePositions(canvasElement, ['n1', ...pair]);
+		expect(held.n2).toEqual(dropped.n2);
+		expect(held.n3).toEqual(dropped.n3);
+		expect(distanceBetween(held.n1, dropped.n1)).toBeLessThan(2);
+
+		// Deselected, the edge pulls again and the free node and the pair close.
+		blurActiveElement();
+		dispatchKeydown(document.body, 'Escape');
+		await waitForFrames(30);
+		const released = nodePositions(canvasElement, ['n1', ...pair]);
+		expect(distanceBetween(released.n1, released.n2)).toBeLessThan(stretched - 20);
+	}}
+>
+	{#snippet template()}
+		<PersistedGraphHarness
+			initialGraphId="slack-boundary"
+			graphs={{ 'slack-boundary': SLACK_BOUNDARY_GRAPH }}
+			layoutSettings={{ ...HELD_LAYOUT, baseRadius: 40 }}
+		/>
+	{/snippet}
+</Story>
 
 <Story
 	name="ALineAcrossTwoOfThreeEdgesCutsExactlyThoseTwoAndOneUndoRestoresBoth"
@@ -13447,6 +13662,66 @@
 			['n3', c, false, ['blocks']]
 		]);
 		expect(pasted.edges.some((edge) => edge.sourceNodeId === edge.targetNodeId)).toBe(false);
+	}}
+/>
+
+<!--
+	The case a selection holds still for: a paste reconnected to the nodes left
+	behind, whose reconnections the reader means to cut. Cutting one is an edit
+	to edges alone, so the copies stay the selection — and stay held.
+-->
+<Story
+	name="CuttingAnEdgeThatReconnectsAPasteLeavesThePasteSelectedAsItWas"
+	args={{
+		multigraphData: BOUNDARY_GRAPH,
+		defaultPrimaryNodeId: 'n0',
+		initialViewState: SELECTION_VIEW,
+		layoutSettings: SELECTION_LAYOUT,
+		assetScope: BOUNDARY_SCOPE,
+		clipboard: RECONNECTED_CUT_CLIPBOARD,
+		onMultigraphChange: fn(),
+		onNotice: fn()
+	}}
+	play={async ({ canvasElement, args }: PlayContext) => {
+		await waitForLayout();
+		const stage = getStage(canvasElement);
+		blurActiveElement();
+		hoverStage(stage, stagePoint(stage, 0.5, 0.5));
+		dispatchPaste(document.body, boundaryCopyText());
+		await waitFor(() => expect(postedNotices(args)).toEqual(['Pasted 2 nodes.']));
+
+		const pasted = lastChangedGraph(args);
+		const arrived = arrivedNodes(pasted, ['n0', 'n1', 'n2', 'n3']);
+		const b = idTitled(arrived, 'B');
+		const c = idTitled(arrived, 'C');
+		const reconnection = pasted.edges.find(
+			(edge) => edge.sourceNodeId === 'n0' && edge.targetNodeId === b
+		);
+		if (reconnection === undefined) throw new Error('Expected the paste to reconnect A to b');
+		await tick();
+		expect(selectedNodeIds(canvasElement)).toEqual([b, c]);
+		const landed = nodePositions(canvasElement, [b, c]);
+
+		// A short line across the middle of A → b, crossing nothing else.
+		const a = getCenter(getCircle(canvasElement, 'n0'));
+		const bCentre = getCenter(getCircle(canvasElement, b));
+		const length = distanceBetween(a, bCentre);
+		const across = { x: -(bCentre.y - a.y) / length, y: (bCentre.x - a.x) / length };
+		const middle = { x: (a.x + bCentre.x) / 2, y: (a.y + bCentre.y) / 2 };
+		const from = wholePoint(middle.x - across.x * 30, middle.y - across.y * 30);
+		const to = wholePoint(middle.x + across.x * 30, middle.y + across.y * 30);
+		await armCutFromMenu(canvasElement, from);
+		await hoverCutTo(stage, to);
+		expect(cutTargetIds(canvasElement)).toEqual([reconnection.id]);
+
+		await clickToCut(stage, to);
+		expect(lastChangedGraph(args).edges.some((edge) => edge.id === reconnection.id)).toBe(false);
+		expect(postedNotices(args).at(-1)).toBe('Cut 1 edge.');
+		// The copies are still the selection, and still where they landed.
+		expect(selectedNodeIds(canvasElement)).toEqual([b, c]);
+		expect(selectionCountLabel(canvasElement)).toHaveTextContent('2 selected');
+		await waitForFrames(10);
+		expect(nodePositions(canvasElement, [b, c])).toEqual(landed);
 	}}
 />
 

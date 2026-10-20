@@ -328,6 +328,76 @@ describe('graphLayout', () => {
 		expect(layout.posByNodeId.n1.x).not.toBe(80);
 	});
 
+	describe('heldNodeIds', () => {
+		// Two held nodes far apart on a stretched edge, and a free one beside the
+		// first: an unheld pair would close the gap, and the free node is there
+		// to show the relax still runs around them.
+		const graph = makeGraph({
+			nodeCount: 3,
+			edges: [
+				[0, 1],
+				[0, 2]
+			],
+			posByNodeId: {
+				n0: { x: 0, y: 0 },
+				n1: { x: 500, y: 0 },
+				n2: { x: 0, y: 300 }
+			}
+		});
+		const settings = {
+			baseRadius: 20,
+			minScale: 1,
+			edgeGapMinRadiusFactor: 1,
+			edgeGapMaxRadiusFactor: 2.5,
+			edgeSpringStrength: 1
+		};
+
+		it('anchors held nodes while relaxing positions, as it anchors a pin', () => {
+			const layout = deriveGraphLayout(graph, {
+				hopsByNodeId: hopsFromPinned(graph),
+				heldNodeIds: ['n0', 'n1'],
+				settings,
+				relaxIterations: 5
+			});
+
+			expect(layout.nodes.find((node) => node.nodeId === 'n0')?.anchored).toBe(true);
+			expect(layout.nodes.find((node) => node.nodeId === 'n1')?.anchored).toBe(true);
+			expect(layout.nodes.find((node) => node.nodeId === 'n2')?.anchored).toBe(false);
+			expect(layout.posByNodeId.n0).toEqual({ x: 0, y: 0 });
+			expect(layout.posByNodeId.n1).toEqual({ x: 500, y: 0 });
+			// The free node still answers to its edge into the held one.
+			expect(layout.posByNodeId.n2.y).toBeLessThan(300);
+		});
+
+		it('holds them through a frame step, normalization included', () => {
+			const step = relaxGraphPositionsStep(graph, {
+				hopsByNodeId: hopsFromPinned(graph),
+				heldNodeIds: ['n0', 'n1'],
+				settings,
+				relaxIterations: 1
+			});
+
+			expect(step.data.posByNodeId.n0).toEqual({ x: 0, y: 0 });
+			expect(step.data.posByNodeId.n1).toEqual({ x: 500, y: 0 });
+		});
+
+		it('ignores an id with no node behind it', () => {
+			const held = deriveGraphLayout(graph, {
+				hopsByNodeId: hopsFromPinned(graph),
+				heldNodeIds: ['gone'],
+				settings,
+				relaxIterations: 5
+			});
+			const free = deriveGraphLayout(graph, {
+				hopsByNodeId: hopsFromPinned(graph),
+				settings,
+				relaxIterations: 5
+			});
+
+			expect(held.posByNodeId).toEqual(free.posByNodeId);
+		});
+	});
+
 	it('pulls connected nodes toward an active drag node when the edge gap is too large', () => {
 		const graph = makeGraph({
 			nodeCount: 2,

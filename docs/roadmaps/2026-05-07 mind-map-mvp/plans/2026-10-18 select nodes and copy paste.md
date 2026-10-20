@@ -772,3 +772,13 @@ T09 all edit `Multigraph.svelte` and are strictly sequential for that reason.
   by the implementer: a dotted target's 6 px rhythm at reference scale sits
   close to a derived edge's 2/4 dash, and an armed box is a 2 px speck until
   the pointer moves.
+- 2026-10-19 (evening): a selection holds still. Selected nodes join the
+  layout's anchored set beside pins and the dragged node, so a pasted or
+  dragged group keeps its position and shape until deselected; every edge
+  with one end in the selection gets a spring factor of zero in the one
+  weighing step the three layout compositions share, so neither side is
+  pulled; a membership change kicks a settle so a released group relaxes.
+  Cutting edges never deselects (asserted). The dotted cut target is now
+  half line, half gap. Known consequence: selecting a node slackens its
+  edges, so neighbours in a settled graph may shift slightly; Cmd/Ctrl+A
+  holds every drawn node.

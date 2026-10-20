@@ -32,6 +32,14 @@ export interface GraphLayoutOptions {
 	/** Keep these nodes fixed during relaxation while their scale animates (e.g. after unpin). */
 	scaleAnchoredNodeIds?: readonly string[];
 	/**
+	 * Nodes physics must not move, held exactly as pinned nodes and the dragged
+	 * node are — in the app, the reader's selection, which holds still until it
+	 * is deselected
+	 * (`docs/ui-decisions/2026-10-19--layout--a-selection-holds-still-and-its-boundary-edges-go-slack.md`).
+	 * An id with no node in the graph holds nothing.
+	 */
+	heldNodeIds?: readonly string[];
+	/**
 	 * Every node's distance, as the one bounded hop map (`computeBoundedHops`).
 	 * Required, and never recomputed here: `data` is usually the visible subgraph,
 	 * where a beacon or a node an equation revealed has no edges at all and a
@@ -189,6 +197,9 @@ function anchoredNodeIds(data: MultigraphData, options: GraphLayoutOptions): Set
 	const anchoredIds = new Set(data.nodes.filter((node) => node.pinned).map((node) => node.id));
 	if (options.activeDragNodeId) anchoredIds.add(options.activeDragNodeId);
 	for (const nodeId of options.scaleAnchoredNodeIds ?? []) {
+		anchoredIds.add(nodeId);
+	}
+	for (const nodeId of options.heldNodeIds ?? []) {
 		anchoredIds.add(nodeId);
 	}
 	return anchoredIds;

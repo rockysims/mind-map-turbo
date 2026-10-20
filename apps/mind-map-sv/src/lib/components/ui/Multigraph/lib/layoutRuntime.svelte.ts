@@ -68,6 +68,14 @@ interface LayoutRuntimeOptions {
 	getGraph: () => MultigraphData;
 	getLayoutSettings: () => Partial<LayoutSettings>;
 	getActiveDragNodeId: () => string | null;
+	/**
+	 * Nodes every layout this runtime builds options for holds still, as it
+	 * holds the pins and the dragged node — in the app, the committed selection.
+	 * Re-read for each layout, like `getActiveDragNodeId`, so a change takes
+	 * effect on the next frame; `settleAfterHoldChange` buys the frames. Defaults
+	 * to none.
+	 */
+	getHeldNodeIds?: () => readonly string[];
 	/** Session-transient beacon hints (e.g. endpoints of a just-removed edge). */
 	getPreferredBeaconNodeIds: () => readonly string[];
 	applyGraph: (data: MultigraphData) => void;
@@ -251,6 +259,19 @@ export class LayoutRuntime {
 	}
 
 	/**
+	 * Which nodes are held (`getHeldNodeIds`) just changed — in the app, the
+	 * selection did — so nodes that were held are free again, and whatever the
+	 * app weighs by the held set (the edges across its boundary) pulls
+	 * differently. Nothing in the graph changed, so without frames a released
+	 * node would stay wherever the hold left it. Same budget and top-up rule as
+	 * `settleAfterSettingsChange`: a selection toggled a node at a time must not
+	 * stack a full budget per toggle.
+	 */
+	settleAfterHoldChange(): void {
+		this.#topUpSettle();
+	}
+
+	/**
 	 * Tops the settle budget up to `postDragSettleMaxFrames` and makes sure the
 	 * loop is running. `Math.max`, not assignment, so a burst of calls buys one
 	 * budget and a longer settle already in flight is not cut short.
@@ -406,6 +427,7 @@ export class LayoutRuntime {
 			relaxIterations?: number;
 			scaleByNodeId?: Record<string, number>;
 			scaleAnchoredNodeIds?: readonly string[];
+			heldNodeIds?: readonly string[];
 			participatingNodeIds?: ReadonlySet<string>;
 			mobilityByNodeId?: Record<string, number>;
 			repulsionFactorByNodeId?: Record<string, number>;
@@ -419,6 +441,7 @@ export class LayoutRuntime {
 			settings: this.#options.getLayoutSettings(),
 			activeDragNodeId: overrides.activeDragNodeId ?? this.#options.getActiveDragNodeId(),
 			scaleAnchoredNodeIds: overrides.scaleAnchoredNodeIds ?? this.scaleAnchoredNodeIds,
+			heldNodeIds: overrides.heldNodeIds ?? this.#options.getHeldNodeIds?.() ?? [],
 			hopsByNodeId: overrides.hopsByNodeId,
 			relaxIterations: overrides.relaxIterations,
 			scaleByNodeId: overrides.scaleByNodeId ?? this.animatedScaleByNodeId,

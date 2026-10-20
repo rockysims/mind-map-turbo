@@ -258,6 +258,7 @@
 		nodeIdsInScreenRect,
 		pastePlacement,
 		reconnectBoundaryEdges,
+		slackenBoundaryEdges,
 		withSeededPinIfPinless
 	} from './lib/selection.js';
 	import {
@@ -1332,15 +1333,19 @@
 		reduceLayoutSource: layoutSourceFor,
 		computeHops: (data) => hopsFor(data),
 		composeDerivedEdges: (data) => withSpringFactor(layoutDataflowFor(data).edges),
-		weighLayoutGraph: withTagGapFactorsOn,
+		weighLayoutGraph: weighedLayoutGraph,
 		repulsionFactorsFor: repulsionFactorsOn,
 		// A getter, re-read every frame, so a physics slider is live while it moves.
 		getLayoutSettings: () => layoutSettingsFromConfig,
 		getActiveDragNodeId: () => activeDragNodeId,
+		// The committed selection, never a box's preview: a preview is not a
+		// selection yet, and holding it would freeze whatever a box passes over.
+		getHeldNodeIds: () => selection.ids,
 		getPreferredBeaconNodeIds: () => severedBeaconPreference,
-		// A physics frame holds still only the dragged node and the pins, so during
-		// a group drag it would loosen the rest of the selection between two
-		// pointer moves; holding the group here keeps its shape under the hand.
+		// A physics frame holds the selection still, but a group drag carries its
+		// own members (`groupDrag.nodeIds`): Escape can clear the selection under
+		// a hand that is still dragging, and the group must keep its shape until
+		// the hand lets go.
 		applyGraph: (nextGraph) => {
 			graph = withGroupDragHeld(nextGraph);
 		},
@@ -1378,21 +1383,42 @@
 	}
 
 	/**
-	 * Stamps a composed layout graph's edges with the `gapFactor` their tags ask
-	 * for, under the layout graph's own `tagPhysicsConfig` (it rides along through
-	 * every `...data` spread), so a mutation being relaxed is weighed by its own
-	 * config. Hands the graph straight back when no edge factor applies — this
-	 * runs every relax frame.
+	 * Every per-edge factor a composed layout graph lays out under: the
+	 * `gapFactor` its tags ask for, under the layout graph's own
+	 * `tagPhysicsConfig` (it rides along through every `...data` spread), so a
+	 * mutation being relaxed is weighed by its own config; and no pull at all
+	 * along an edge that crosses the boundary of the held selection
+	 * (`slackenBoundaryEdges`), so the copies a reader means to cut loose are not
+	 * hauled back toward the originals, nor the originals toward them. Hands the
+	 * graph straight back when no factor applies — this runs every relax frame.
 	 *
 	 * Applied at every place a layout graph is composed: the runtime's
 	 * `visibleGraphFor` (as `weighLayoutGraph`), `visibleGraph` below, and the
 	 * ingest settle. A composition without it would lay out under different
 	 * forces from the one drawn beside it, and nothing would fail.
 	 */
-	function withTagGapFactorsOn(layoutGraph: MultigraphData): MultigraphData {
-		const edges = withTagGapFactors(layoutGraph.edges, layoutGraph.tagPhysicsConfig);
+	function weighedLayoutGraph(layoutGraph: MultigraphData): MultigraphData {
+		const tagged = withTagGapFactors(layoutGraph.edges, layoutGraph.tagPhysicsConfig);
+		const edges =
+			selection.size === 0 ? tagged : slackenBoundaryEdges(tagged, new Set(selection.ids));
 		return edges === layoutGraph.edges ? layoutGraph : { ...layoutGraph, edges };
 	}
+
+	// What the selection holds changes the forces under a graph that may be
+	// sitting still: a released node is free again, and the edges across the
+	// boundary pull (or stop pulling). Nothing in the graph changed, so without
+	// frames a deselected group would stay wherever the hold left it. Compared by
+	// membership, so a replace with the same nodes buys nothing; untracked, so
+	// the settle's own reads do not re-run this.
+	let lastHeldNodeIds: ReadonlySet<string> = new Set();
+	$effect(() => {
+		const ids = selection.ids;
+		untrack(() => {
+			if (holdsExactly(lastHeldNodeIds, ids)) return;
+			lastHeldNodeIds = new Set(ids);
+			layoutRuntime.settleAfterHoldChange();
+		});
+	});
 
 	/** The hop-repulsion clearance factors a layout graph's node tags ask for. */
 	function repulsionFactorsOn(layoutGraph: MultigraphData): Record<string, number> | undefined {
@@ -1533,7 +1559,7 @@
 	 * derived edges riding along in `.edges`.
 	 */
 	const visibleGraph = $derived(
-		withTagGapFactorsOn(
+		weighedLayoutGraph(
 			composeVisibleLayoutGraph(layoutSourceGraph, visibleNodeIds, layoutDerivedEdges)
 		)
 	);
@@ -1738,7 +1764,7 @@
 		// matches, so the arriving graph settles without those nodes.
 		const ingestSource = untrack(() => layoutSourceFor(incoming));
 		const layoutGraphForIngest = untrack(() =>
-			withTagGapFactorsOn(
+			weighedLayoutGraph(
 				composeVisibleLayoutGraph(
 					ingestSource,
 					new Set(ingestSource.nodes.map((node) => node.id)),
@@ -1752,7 +1778,11 @@
 		const settledLayoutGraph = withSettledGraphPositions(layoutGraphForIngest, {
 			settings: ingestLayoutSettings,
 			hopsByNodeId: hopsByNodeIdForIngest,
-			repulsionFactorByNodeId: repulsionFactorsOn(layoutGraphForIngest)
+			repulsionFactorByNodeId: repulsionFactorsOn(layoutGraphForIngest),
+			// The selection the weighing above slackened for, held as every frame
+			// after this one holds it. Empty wherever the host remounts the canvas
+			// per loaded graph, as the app does.
+			heldNodeIds: untrack(() => selection.ids)
 		});
 		// Positions only: `settledLayoutGraph.edges` carries the derived edges, and
 		// the graph the app mutates and saves must never see one. An excluded node
@@ -2667,12 +2697,18 @@
 		// Nodes, not edges: the reconnections are part of pasting these nodes back.
 		const count = nodeIdMap.size;
 		const label = count === 1 ? 'paste node' : `paste ${nodeCountText(count)}`;
+		const arrivedNodeIds = [...nodeIdMap.values()];
+		// What arrived is what the reader will want to move or undo next. Selected
+		// before the relax, not after it: the selection holds still, so the relax
+		// leaves the copies exactly where they landed and lets go of whatever was
+		// selected before — typically the originals they were copied from. The
+		// prune runs once the commit below has put the arrivals in the graph.
+		selection.replace(arrivedNodeIds);
 		commitUserGraph(layoutRuntime.relaxAfterMutation(next), editIntent(label));
 		// Per-tag factors that came along reshape the host's layout too, which the
 		// relax alone would leave part-way to its new rest — as for an import.
 		if (plan.incoming.tagPhysicsConfig !== undefined) layoutRuntime.settleAfterSettingsChange();
 
-		const arrivedNodeIds = [...nodeIdMap.values()];
 		// `graphLayout` is derived, so the scales read here are the post-commit ones.
 		animateMembershipChange({
 			enteringNodes: arrivedNodeIds.map((nodeId) => ({
@@ -2683,8 +2719,6 @@
 			leavingNodes: [],
 			leavingEdges: []
 		});
-		// What arrived is what the reader will want to move or undo next.
-		selection.replace(arrivedNodeIds);
 		onNotice?.(`Pasted ${nodeCountText(count)}.`);
 	}
 
@@ -2804,9 +2838,10 @@
 				delta: { x: point.x - draggedStart.x, y: point.y - draggedStart.y }
 			};
 			// Held before the relax, so the neighbours answer to where the group now
-			// is, and again after it, because the relax holds only the dragged node
-			// and the pins. Same relax and same intent as a single node's move, so
-			// the history treats the two drags alike.
+			// is, and again after it: the relax holds the selection, but the group
+			// is the drag's own, and Escape can clear the selection mid-drag. Same
+			// relax and same intent as a single node's move, so the history treats
+			// the two drags alike.
 			const relaxed = layoutRuntime.relaxAfterMutation(withGroupDragHeld(graph), node.id, 1);
 			commitUserGraph(withGroupDragHeld(relaxed), editIntent('layout'));
 			return;
@@ -2865,6 +2900,8 @@
 		// hand was on the pin, and just as much when the pin rode along in a group
 		// under an unpinned node: the relayout starts from the first pinned member
 		// either way, since it runs from every pin regardless of which is named.
+		// Neither it nor the plain relax below moves a selected node, so a dragged
+		// selection stays exactly where the hand dropped it.
 		const movedPin = node.pinned
 			? node.id
 			: (graph.nodes.find((candidate) => candidate.pinned && carried?.has(candidate.id))?.id ??
@@ -5949,7 +5986,8 @@
 	 * spotlight's — and its arrowhead, and goes dotted, per
 	 * `docs/ui-decisions/2026-10-19--display--an-edge-the-cut-line-would-take-goes-dotted-and-keeps-its-colour.md`:
 	 * the breaks say part of the line is already going. Round dots one stroke
-	 * wide, two strokes apart — a tile three strokes long with a circle of the
+	 * wide with a one-stroke gap between them, about half line and half gap as
+	 * the ruling's density asks — a tile two strokes long with a circle of the
 	 * stroke's diameter at its centre — so the pattern is measured in the
 	 * stroke the edge already draws, whatever its node scale, and the camera's
 	 * zoom scales dots and stroke alike. A mask rather than a dash array
@@ -5960,7 +5998,7 @@
 	 */
 	.edge.cut-target::before {
 		mask-image: radial-gradient(circle closest-side, #000 calc(100% - 0.25px), transparent 100%);
-		mask-size: calc(var(--edge-stroke-width) * 3) 100%;
+		mask-size: calc(var(--edge-stroke-width) * 2) 100%;
 		mask-repeat: repeat-x;
 	}
 </style>

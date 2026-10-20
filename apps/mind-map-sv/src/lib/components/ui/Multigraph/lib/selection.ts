@@ -1,7 +1,7 @@
 /**
  * The pure half of selecting nodes and moving them through the clipboard:
  * which nodes a box on screen takes, what part of the graph a copy carries,
- * and where a paste lands.
+ * where a paste lands, and which edges a held selection leaves slack.
  *
  * A copy is the induced subgraph — the chosen nodes and only the edges between
  * them — because that is the shape `importGraphData` can fold back in without
@@ -20,6 +20,7 @@ import { isDerivedEdgeId } from './derivedEdges';
 import { addEdge, referencedAssetIds } from './graph';
 import { boundsOf } from './graphImport';
 import { nodeScreenCircle, type NodeFocusCandidate, type ViewTransform } from './nodeFocus';
+import type { EdgeEndpointIds } from './physics';
 import type { StageRect } from './stageCoordinates';
 
 type SelectionContainment = 'intersect' | 'center' | 'enclose';
@@ -173,6 +174,36 @@ export function boundaryEdgesOf(data: MultigraphData, nodeIds: ReadonlySet<strin
 		(edge) =>
 			!isDerivedEdgeId(edge.id) && nodeIds.has(edge.sourceNodeId) !== nodeIds.has(edge.targetNodeId)
 	);
+}
+
+/**
+ * `edges` with every edge that crosses the boundary of `heldNodeIds` — exactly
+ * one end held — set to pull with no force (`springFactor: 0`), so a held
+ * selection neither drags the rest of the graph toward it nor is dragged; the
+ * nodes on both sides still repel by hops, which reads the edges and not their
+ * factors
+ * (`docs/ui-decisions/2026-10-19--layout--a-selection-holds-still-and-its-boundary-edges-go-slack.md`).
+ *
+ * Every kind of edge alike, derived ones included: a layout graph's edges are
+ * all springs, whoever composed them. An edge with both ends held or neither
+ * is the same object; and when none crosses — an empty set included — the
+ * very same array comes back, because this runs on every relax frame and the
+ * caller tells "nothing changed" by identity. Only a layout graph should ever
+ * carry the result: `springFactor` is layout tuning, and persistence drops it.
+ */
+export function slackenBoundaryEdges<Edge extends EdgeEndpointIds>(
+	edges: Edge[],
+	heldNodeIds: ReadonlySet<string>
+): Edge[] {
+	if (heldNodeIds.size === 0) return edges;
+
+	let changed = false;
+	const slackened = edges.map((edge) => {
+		if (heldNodeIds.has(edge.sourceNodeId) === heldNodeIds.has(edge.targetNodeId)) return edge;
+		changed = true;
+		return { ...edge, springFactor: 0 };
+	});
+	return changed ? slackened : edges;
 }
 
 /**

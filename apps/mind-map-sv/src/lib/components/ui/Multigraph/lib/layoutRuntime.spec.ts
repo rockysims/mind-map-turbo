@@ -79,6 +79,7 @@ interface RuntimeFixture {
 	getGraph: () => MultigraphData;
 	setGraph: (nextGraph: MultigraphData) => void;
 	setActiveDragNodeId: (nodeId: string | null) => void;
+	setHeldNodeIds: (nodeIds: readonly string[]) => void;
 }
 
 function createRuntimeFixture(
@@ -94,6 +95,7 @@ function createRuntimeFixture(
 ): RuntimeFixture {
 	let graph = initialGraph;
 	let activeDragNodeId: string | null = null;
+	let heldNodeIds: readonly string[] = [];
 	const scheduler = new TestScheduler();
 	const runtime = new LayoutRuntime({
 		getGraph: () => graph,
@@ -109,6 +111,7 @@ function createRuntimeFixture(
 			...settings
 		}),
 		getActiveDragNodeId: () => activeDragNodeId,
+		getHeldNodeIds: () => heldNodeIds,
 		getPreferredBeaconNodeIds: () => [],
 		applyGraph: (nextGraph) => {
 			graph = nextGraph;
@@ -126,6 +129,9 @@ function createRuntimeFixture(
 		},
 		setActiveDragNodeId: (nodeId) => {
 			activeDragNodeId = nodeId;
+		},
+		setHeldNodeIds: (nodeIds) => {
+			heldNodeIds = nodeIds;
 		}
 	};
 }
@@ -469,6 +475,122 @@ describe('LayoutRuntime', () => {
 			expect(scheduler.requests).toBe(1);
 
 			runtime.settleAfterVisibilityChange();
+
+			expect(runtime.settleFramesRemaining).toBe(0);
+			expect(scheduler.requests).toBe(1);
+		});
+	});
+
+	describe('getHeldNodeIds', () => {
+		// A pin and a chain stretched far past its rest gap, so any node free to
+		// move is pulled along it on the first frame.
+		const stretchedChain = makeGraph({
+			nodeCount: 3,
+			pinned: [0],
+			edges: [
+				[0, 1],
+				[1, 2]
+			],
+			posByNodeId: {
+				n0: { x: 0, y: 0 },
+				n1: { x: 2000, y: 0 },
+				n2: { x: 4000, y: 0 }
+			}
+		});
+
+		it('reaches the layout options, and an override wins over it', () => {
+			const { runtime, getGraph, setHeldNodeIds } = createRuntimeFixture(stretchedChain);
+			const hopsByNodeId = { n0: 0, n1: 1, n2: 2 };
+			expect(runtime.layoutOptions(getGraph(), { hopsByNodeId }).heldNodeIds).toEqual([]);
+
+			setHeldNodeIds(['n1']);
+			expect(runtime.layoutOptions(getGraph(), { hopsByNodeId }).heldNodeIds).toEqual(['n1']);
+			expect(
+				runtime.layoutOptions(getGraph(), { hopsByNodeId, heldNodeIds: ['n2'] }).heldNodeIds
+			).toEqual(['n2']);
+		});
+
+		it('holds them through a frame while the rest relaxes', () => {
+			const { runtime, getGraph, setHeldNodeIds } = createRuntimeFixture(stretchedChain);
+			setHeldNodeIds(['n1']);
+			runtime.settleAfterHoldChange();
+
+			runtime.step(1);
+
+			expect(getGraph().posByNodeId.n1).toEqual({ x: 2000, y: 0 });
+			expect(getGraph().posByNodeId.n2.x).toBeLessThan(4000);
+		});
+
+		it('holds them through the relax after a mutation', () => {
+			const { runtime, getGraph, setHeldNodeIds } = createRuntimeFixture(stretchedChain, {
+				relaxIterations: 5
+			});
+			setHeldNodeIds(['n1', 'n2']);
+
+			const relaxed = runtime.relaxAfterMutation(getGraph());
+
+			expect(relaxed.posByNodeId.n1).toEqual({ x: 2000, y: 0 });
+			expect(relaxed.posByNodeId.n2).toEqual({ x: 4000, y: 0 });
+		});
+
+		it('lets them move again once they are no longer held', () => {
+			const { runtime, getGraph, setHeldNodeIds } = createRuntimeFixture(stretchedChain);
+			setHeldNodeIds(['n1']);
+			runtime.settleAfterHoldChange();
+			runtime.step(1);
+
+			setHeldNodeIds([]);
+			runtime.settleAfterHoldChange();
+			runtime.step(2);
+
+			expect(getGraph().posByNodeId.n1.x).toBeLessThan(2000);
+		});
+	});
+
+	describe('settleAfterHoldChange', () => {
+		// The same three cases as `settleAfterSettingsChange`, whose budget rule it
+		// shares: a selection built a toggle at a time is its slider drag.
+		it('starts the frame loop from idle', () => {
+			// The held set changed under a graph at rest; released nodes only move
+			// if something asks for frames.
+			const { runtime, scheduler } = createRuntimeFixture(undefined, {
+				postDragSettleEpsilonPx: -1,
+				postDragSettleMaxFrames: 2
+			});
+			expect(scheduler.requests).toBe(0);
+
+			runtime.settleAfterHoldChange();
+
+			expect(scheduler.requests).toBe(1);
+			expect(runtime.settleFramesRemaining).toBe(2);
+		});
+
+		it('tops the budget up instead of restarting or shortening it', () => {
+			const { runtime } = createRuntimeFixture(undefined, {
+				postDragSettleEpsilonPx: -1,
+				postDragSettleMaxFrames: 2
+			});
+
+			runtime.settleAfterHoldChange();
+			runtime.settleAfterHoldChange();
+			expect(runtime.settleFramesRemaining).toBe(2);
+
+			runtime.settleFramesRemaining = 5;
+			runtime.settleAfterHoldChange();
+			expect(runtime.settleFramesRemaining).toBe(5);
+		});
+
+		it('leaves the budget at zero while a node drag is active', () => {
+			// Escape can clear the selection mid-drag; the settle waits for the
+			// release, which funds its own.
+			const { runtime, scheduler, setActiveDragNodeId } = createRuntimeFixture(undefined, {
+				postDragSettleEpsilonPx: -1,
+				postDragSettleMaxFrames: 2
+			});
+			setActiveDragNodeId('n0');
+			runtime.beginDrag();
+
+			runtime.settleAfterHoldChange();
 
 			expect(runtime.settleFramesRemaining).toBe(0);
 			expect(scheduler.requests).toBe(1);

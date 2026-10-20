@@ -9,6 +9,7 @@ import {
 	nodeIdsInScreenRect,
 	pastePlacement,
 	reconnectBoundaryEdges,
+	slackenBoundaryEdges,
 	withSeededPinIfPinless
 } from './selection';
 import type { StageRect } from './stageCoordinates';
@@ -501,6 +502,58 @@ describe('boundaryEdgesOf', () => {
 
 		expect(edges[0]).toBe(data.edges[0]);
 		expect(edges[1]).toBe(data.edges[2]);
+		expect(data).toEqual(snapshot);
+	});
+});
+
+describe('slackenBoundaryEdges', () => {
+	it('gives every edge with exactly one end held a spring factor of 0, whichever end it is', () => {
+		const { edges } = chainGraph();
+
+		const slackened = slackenBoundaryEdges(edges, new Set(['b', 'c']));
+
+		expect(slackened.map((edge) => [edge.id, edge.springFactor])).toEqual([
+			['a-b', 0],
+			['b-c', undefined],
+			['d-c', 0],
+			['dataflow:a->b', 0]
+		]);
+	});
+
+	it('leaves an edge with both ends held, or neither, as the same object', () => {
+		const { edges } = chainGraph();
+
+		const slackened = slackenBoundaryEdges(edges, new Set(['b', 'c']));
+
+		// b-c runs inside the selection; nothing else is touched in the rest.
+		expect(slackened[1]).toBe(edges[1]);
+		expect(slackenBoundaryEdges(edges, new Set(['a']))[2]).toBe(edges[2]);
+	});
+
+	it('slackens a derived edge at the boundary by the same rule', () => {
+		const { edges } = chainGraph();
+		const derived = { ...edges[3], springFactor: 1 };
+
+		const [slackened] = slackenBoundaryEdges([derived], new Set(['b']));
+
+		expect(slackened).toEqual({ ...derived, springFactor: 0 });
+		expect(derived.springFactor).toBe(1);
+	});
+
+	it('returns the very same array when nothing is held or nothing crosses', () => {
+		const { edges } = chainGraph();
+
+		expect(slackenBoundaryEdges(edges, new Set())).toBe(edges);
+		expect(slackenBoundaryEdges(edges, new Set(['a', 'b', 'c', 'd']))).toBe(edges);
+		expect(slackenBoundaryEdges(edges, new Set(['elsewhere']))).toBe(edges);
+	});
+
+	it('mutates nothing it was handed', () => {
+		const data = chainGraph();
+		const snapshot = structuredClone(data);
+
+		slackenBoundaryEdges(data.edges, new Set(['b']));
+
 		expect(data).toEqual(snapshot);
 	});
 });
